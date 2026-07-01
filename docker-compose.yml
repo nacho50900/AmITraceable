@@ -2,9 +2,11 @@ services:
   users:
     build: ./users
     container_name: users
-    image: ghcr.io/arquisoft/yovi_en1b-users:latest
+    image: ghcr.io/arquisoft/identity-exposure-tfg-users:latest
     ports:
       - "3000:3000"
+    env_file:
+      - ./users/.env
     networks:
       - monitor-net
 
@@ -14,20 +16,11 @@ services:
       args:
         - VITE_API_URL=http://localhost:3000
     container_name: webapp
-    image: ghcr.io/arquisoft/yovi_en1b-webapp:latest
+    image: ghcr.io/arquisoft/identity-exposure-tfg-webapp:latest
     ports:
       - "80:80"
     depends_on:
       - users
-    networks:
-      - monitor-net
-
-  gamey:
-    build: ./gamey
-    container_name: gamey
-    image: ghcr.io/arquisoft/yovi_en1b-gamey:latest
-    ports:
-      - "4000:4000"
     networks:
       - monitor-net
 

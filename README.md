@@ -1,158 +1,131 @@
-# yovi_en1b - Game Y at UniOvi
+# Herramienta de Análisis de Exposición de Identidad Digital (TFG)
 
-[![Release — Test, Build, Publish, Deploy](https://github.com/arquisoft/yovi_en1b/actions/workflows/release-deploy.yml/badge.svg)](https://github.com/arquisoft/yovi_en1b/actions/workflows/release-deploy.yml)
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=Arquisoft_yovi_en1b&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Arquisoft_yovi_en1b)
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Arquisoft_yovi_en1b&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Arquisoft_yovi_en1b)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=tu-usuario_identity-exposure-tfg&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=tu-usuario_identity-exposure-tfg)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=tu-usuario_identity-exposure-tfg&metric=coverage)](https://sonarcloud.io/summary/new_code?id=tu-usuario_identity-exposure-tfg)
 
-This project is a template with some basic functionality for the ASW labs.
+> Base de este proyecto: plantilla de laboratorio ASW (Uniovi) `yovi_en1b`.
+> Se ha adaptado sustituyendo el dominio (usuarios/juego → análisis de
+> exposición de identidad digital) y sustituyendo el servicio `users` de
+> Node.js por un backend Python/FastAPI (necesario por las librerías de
+> NLP: spaCy, sentence-transformers, scikit-learn). El servicio `gamey`
+> (Rust) se ha eliminado por no aplicar a este TFG.
+
+TFG: análisis defensivo de huella digital propia mediante OSINT e IA.
+**Versión actual limitada a Reddit** como única fuente de datos (ver
+"Alcance" más abajo).
 
 ## Project Structure
 
-The project is divided into three main components, each in its own directory:
+- `webapp/`: frontend React + Vite + **TypeScript**. Pantalla de
+  consentimiento (`Landing`) y dashboard con el informe de exposición
+  (`Dashboard`).
+- `users/`: backend **Python + FastAPI**. A pesar del nombre heredado de la
+  plantilla, aquí vive toda la lógica de OAuth con Reddit, NLP, scoring de
+  privacidad e informe (ver `users/app/`).
+- `docs/`: documentación de arquitectura Arc42 (pendiente de rellenar con
+  contenido específico del TFG — actualmente es la plantilla genérica).
 
-- `webapp/`: A frontend application built with React, Vite, and TypeScript.
-- `users/`: A backend service for managing users, built with Node.js and Express.
-- `gamey/`: A Rust game engine and bot service.
-- `docs/`: Architecture documentation sources following Arc42 template
+## ⚠️ Alcance de esta versión (importante para la memoria del TFG)
 
-Each component has its own `package.json` file with the necessary scripts to run and test the application.
+- Solo Reddit. La correlación *entre plataformas* (módulo 3 de la propuesta)
+  y el componente `identity_consistency_risk` del scoring quedan como
+  **trabajo futuro**, documentados explícitamente en
+  `users/app/scoring/privacy_score.py`.
+- El usuario solo puede analizar **su propia cuenta autenticada**. No existe
+  ningún flujo para analizar cuentas de terceros.
+- No hay base de datos. Todo el estado vive en una cookie de sesión firmada
+  (`SessionMiddleware`) con el access token de Reddit. Cerrar sesión = borrar
+  todo rastro.
+- Las heurísticas de inferencia de atributos
+  (`users/app/nlp/attribute_inference.py`) son deliberadamente simples
+  (listas de subreddits + regex) para mantener el sistema explicable.
 
-## Basic Features
-
-- **User Registration**: The web application provides a simple form to register new users.
-- **User Service**: The user service receives the registration request, simulates some processing, and returns a welcome message.
-- **GameY**: A basic Game engine which only chooses a random piece.
-
-## Components
+## Componentes
 
 ### Webapp
 
-The `webapp` is a single-page application (SPA) created with [Vite](https://vitejs.dev/) and [React](https://reactjs.org/).
+SPA creada con [Vite](https://vitejs.dev/) y [React](https://reactjs.org/) en TypeScript.
 
-- `src/App.tsx`: The main component of the application.
-- `src/RegisterForm.tsx`: The component that renders the user registration form.
-- `package.json`: Contains scripts to run, build, and test the webapp.
-- `vite.config.ts`: Configuration file for Vite.
-- `Dockerfile`: Defines the Docker image for the webapp.
+- `src/pages/Landing.tsx`: pantalla de consentimiento + login OAuth con Reddit.
+- `src/pages/Dashboard.tsx`: informe de exposición (score, atributos inferidos, gráfico horario, recomendaciones).
+- `src/components/`: `ScoreBar`, `HourlyActivityChart`.
+- `src/api.ts` / `src/types.ts`: cliente tipado del backend.
+- `package.json`: scripts para desarrollo, tests (Vitest) y E2E (Playwright + Cucumber).
 
-### Users Service
+### Users (backend Python/FastAPI)
 
-The `users` service is a simple REST API built with [Node.js](https://nodejs.org/) and [Express](https://expressjs.com/).
-
-- `users-service.js`: The main file for the user service. It defines an endpoint `/createuser` to handle user creation.
-- `package.json`: Contains scripts to start the service.
-- `Dockerfile`: Defines the Docker image for the user service.
-
-### Gamey
-
-The `gamey` component is a Rust-based game engine with bot support, built with [Rust](https://www.rust-lang.org/) and [Cargo](https://doc.rust-lang.org/cargo/).
-
-- `src/main.rs`: Entry point for the application.
-- `src/lib.rs`: Library exports for the gamey engine.
-- `src/bot/`: Bot implementation and registry.
-- `src/core/`: Core game logic including actions, coordinates, game state, and player management.
-- `src/notation/`: Game notation support (YEN, YGN).
-- `src/web/`: Web interface components.
-- `Cargo.toml`: Project manifest with dependencies and metadata.
-- `Dockerfile`: Defines the Docker image for the gamey service.
+- `app/auth/reddit_oauth.py` — OAuth 2.0 con Reddit (scopes mínimos: `identity history read`).
+- `app/reddit_client.py` — extracción de posts/comentarios públicos.
+- `app/nlp/fingerprint.py` — fingerprinting de escritura (longitud de frase, vocabulario, emojis, patrón horario, keywords TF-IDF, idioma).
+- `app/nlp/attribute_inference.py` — inferencia explicable de atributos (ubicación, ocupación, rutina) sobre la propia cuenta.
+- `app/scoring/privacy_score.py` — motor de scoring de privacidad (0-100).
+- `app/report/generator.py` — informe final + recomendaciones.
+- `app/main.py` — app FastAPI, con métricas Prometheus en `/metrics`.
+- `tests/` — pytest (unit + endpoints), con cobertura para Sonar.
+- `monitoring/` — configuración de Prometheus/Grafana (heredada de la plantilla, ya apunta a `users:3000`).
 
 ## Running the Project
 
-You can run this project using Docker (recommended) or locally without Docker.
-
 ### With Docker
-
-This is the easiest way to get the project running. You need to have [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/) installed.
-
-1. **Build and run the containers:**
-    From the root directory of the project, run:
 
 ```bash
 docker-compose up --build
 ```
 
-This command will build the Docker images for both the `webapp` and `users` services and start them.
+- Web application: http://localhost
+- Users (backend) API: http://localhost:3000 (docs interactivos en `/docs`)
+- Grafana: http://localhost:9091 · Prometheus: http://localhost:9090
 
-2.**Access the application:**
-- Web application: [http://localhost](http://localhost)
-- User service API: [http://localhost:3000](http://localhost:3000)
-- Gamey API: [http://localhost:4000](http://localhost:4000)
+Antes de levantarlo, crea `users/.env` a partir de `users/.env.example` con
+tus credenciales de la app de Reddit (https://www.reddit.com/prefs/apps).
 
 ### Without Docker
 
-To run the project locally without Docker, you will need to run each component in a separate terminal.
-
-#### Prerequisites
-
-* [Node.js](https://nodejs.org/) and npm installed.
-
-#### 1. Running the User Service
-
-Navigate to the `users` directory:
+#### 1. Backend (`users/`)
 
 ```bash
 cd users
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
+python -m spacy download es_core_news_sm
+cp .env.example .env   # y rellenar credenciales de Reddit
+uvicorn app.main:app --reload --port 3000
 ```
 
-Install dependencies:
-
-```bash
-npm install
-```
-
-Run the service:
-
-```bash
-npm start
-```
-
-The user service will be available at `http://localhost:3000`.
-
-#### 2. Running the Web Application
-
-Navigate to the `webapp` directory:
+#### 2. Webapp
 
 ```bash
 cd webapp
-```
-
-Install dependencies:
-
-```bash
 npm install
-```
-
-Run the application:
-
-```bash
 npm run dev
 ```
 
-The web application will be available at `http://localhost:5173`.
-
-#### 3. Running the GameY application
-
-At this moment the GameY application is not needed but once it is needed you should also start it from the command line.
+La webapp estará en http://localhost:5173
 
 ## Available Scripts
 
-Each component has its own set of scripts defined in its `package.json`. Here are some of the most important ones:
-
 ### Webapp (`webapp/package.json`)
 
-- `npm run dev`: Starts the development server for the webapp.
-- `npm test`: Runs the unit tests.
-- `npm run test:e2e`: Runs the end-to-end tests.
-- `npm run start:all`: A convenience script to start both the `webapp` and the `users` service concurrently.
+- `npm run dev`: servidor de desarrollo.
+- `npm test`: tests unitarios (Vitest).
+- `npm run test:coverage`: tests con cobertura (para Sonar).
+- `npm run test:e2e`: tests E2E (levanta webapp + backend y corre Cucumber).
+- `npm run start:all`: levanta webapp + backend Python a la vez (conveniencia para desarrollo/E2E).
 
-### Users (`users/package.json`)
+### Users (backend Python)
 
-- `npm start`: Starts the user service.
-- `npm test`: Runs the tests for the service.
+- `uvicorn app.main:app --reload --port 3000`: arranca el backend en desarrollo.
+- `pytest`: tests unitarios.
+- `pytest --cov=app --cov-report=xml`: tests con cobertura (genera `coverage.xml` para Sonar).
 
-### Gamey (`gamey/Cargo.toml`)
+## Plan de evaluación pendiente (para la memoria)
 
-- `cargo build`: Builds the gamey application.
-- `cargo test`: Runs the unit tests.
-- `cargo run`: Runs the gamey application.
-- `cargo doc`: Generates documentation for the GameY engine application
+No incluido en el código, pero necesario antes de la defensa:
+
+1. Dataset de prueba con consentimiento (cuentas propias del equipo, alts
+   conocidos) para validar el módulo de inferencia de atributos.
+2. Métricas: precisión de los atributos inferidos vs. verdad conocida, tasa
+   de falsos positivos.
+3. Comparativa de las ponderaciones del scoring (`_WEIGHTS` en
+   `privacy_score.py`) contra percepción subjetiva de usuarios reales.

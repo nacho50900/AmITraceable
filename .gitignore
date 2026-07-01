@@ -1,8 +1,17 @@
 node_modules
 coverage
-gamey/target
 lcov.info
 docs/build
 .env
 webapp/.env
+users/.env
 .vscode/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+coverage.xml
+venv/
+.venv/
