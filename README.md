@@ -1,5 +1,12 @@
 # Herramienta de Análisis de Exposición de Identidad Digital (TFG)
 
+
+<div align="center">
+
+<img src="https://capsule-render.vercel.app/api?type=waving&height=300&color=gradient&text=AmITraceable" width="100%"/>
+
+</div>
+
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=tu-usuario_identity-exposure-tfg&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=tu-usuario_identity-exposure-tfg)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=tu-usuario_identity-exposure-tfg&metric=coverage)](https://sonarcloud.io/summary/new_code?id=tu-usuario_identity-exposure-tfg)
 
@@ -10,7 +17,7 @@
 > NLP: spaCy, sentence-transformers, scikit-learn). El servicio `gamey`
 > (Rust) se ha eliminado por no aplicar a este TFG.
 
-TFG: análisis defensivo de huella digital propia mediante OSINT e IA.
+TFG: Análisis defensivo de huella digital propia mediante OSINT e IA.
 **Versión actual limitada a Reddit** como única fuente de datos (ver
 "Alcance" más abajo).
 
