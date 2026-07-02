@@ -128,6 +128,10 @@ La webapp estará en http://localhost:5173
 - `pytest`: tests unitarios.
 - `pytest --cov=app --cov-report=xml`: tests con cobertura (genera `coverage.xml` para Sonar).
 
+## Respecto a SonarQube
+
+Debido a restricciones para la cuenta gratuita, el token de Sonar debe renovarse cada dos meses.
+
 ## Plan de evaluación pendiente (para la memoria)
 
 No incluido en el código, pero necesario antes de la defensa:
