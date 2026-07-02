@@ -3,7 +3,7 @@
 
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&height=300&color=gradient&text=AmITraceable" width="100%"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&height=301&color=gradient&text=AmITraceable&textBg=false&fontColor=000000&section=header&reversal=false" width="100%"/>
 
 </div>
 
