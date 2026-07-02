@@ -1,6 +1,11 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+filterwarnings = [
+    # Aviso interno de spaCy/click sobre una API que cambiará en Click 9.0.
+    # No afecta a nuestro código; se silencia solo para limpiar la salida.
+    "ignore:Importing 'parser.split_arg_string' is deprecated:DeprecationWarning",
+]
 
 [tool.coverage.run]
 source = ["app"]
