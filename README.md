@@ -7,8 +7,11 @@
 
 </div>
 
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=tu-usuario_identity-exposure-tfg&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=tu-usuario_identity-exposure-tfg)
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=tu-usuario_identity-exposure-tfg&metric=coverage)](https://sonarcloud.io/summary/new_code?id=tu-usuario_identity-exposure-tfg)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=nacho50900_Echo&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=nacho50900_Echo)
+
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=nacho50900_Echo&metric=coverage)](https://sonarcloud.io/summary/new_code?id=nacho50900_Echo)
+
+[![Release](https://github.com/nacho50900/AmITraceable/actions/workflows/release-deploy.yml/badge.svg)](https://github.com/nacho50900/AmITraceable/actions/workflows/release-deploy.yml)
 
 > Base de este proyecto: plantilla de laboratorio ASW (Uniovi) `yovi_en1b`.
 > Se ha adaptado sustituyendo el dominio (usuarios/juego → análisis de
