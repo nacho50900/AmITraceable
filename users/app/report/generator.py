@@ -8,19 +8,21 @@ from app.models.schemas import (
     ExposureReport,
     InferredAttribute,
     PrivacyScore,
-    RedditPost,
+    SocialPost,
     WritingFingerprint,
 )
 
 
 def generate_report(
+    platform: str,
     username: str,
-    posts: list[RedditPost],
+    posts: list[SocialPost],
     fingerprint: WritingFingerprint,
     inferred_attributes: list[InferredAttribute],
     score: PrivacyScore,
 ) -> ExposureReport:
     return ExposureReport(
+        platform=platform,
         username=username,
         generated_at=datetime.now(tz=timezone.utc),
         n_posts_analyzed=len(posts),
@@ -40,13 +42,14 @@ def _build_recommendations(
 
     if score.geolocation_risk > 30:
         recs.append(
-            "Evita participar en subreddits muy específicos de tu ciudad/región con tu "
-            "cuenta principal, o usa una cuenta separada sin vincular para ello."
+            "Evita participar en comunidades o usar etiquetas muy específicas de tu "
+            "ciudad/región con tu cuenta principal, o usa una cuenta separada sin "
+            "vincular para ello."
         )
 
     if score.inferable_data_risk > 40:
         recs.append(
-            "Revisa tu historial de posts/comentarios: hay varios datos personales "
+            "Revisa tu historial de publicaciones: hay varios datos personales "
             "(ubicación, ocupación o rutina) que se pueden inferir combinando varias "
             "publicaciones aparentemente inocuas por separado."
         )
@@ -75,10 +78,9 @@ def _build_recommendations(
 
     if not recs:
         recs.append(
-            "Tu nivel de exposición detectado en esta versión del análisis es bajo. "
-            "Aun así, recuerda que este informe es un MVP centrado solo en Reddit: no "
-            "tiene en cuenta lo que pueda ser inferible al combinar esta cuenta con tu "
-            "actividad en otras plataformas."
+            "Tu nivel de exposición detectado en esta plataforma es bajo. Aun así, "
+            "recuerda que este análisis es por plataforma: no tiene en cuenta lo que "
+            "pueda ser inferible al combinar esta cuenta con tu actividad en otras redes."
         )
 
     return recs

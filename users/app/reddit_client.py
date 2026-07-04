@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import httpx
 
 from app.config import settings
-from app.models.schemas import RedditPost, RedditProfile
+from app.models.schemas import SocialPost, SocialProfile
 
 REDDIT_API_BASE = "https://oauth.reddit.com"
 
@@ -22,17 +22,16 @@ class RedditClient:
             "User-Agent": settings.reddit_user_agent,
         }
 
-    async def fetch_profile(self) -> RedditProfile:
+    async def fetch_profile(self) -> SocialProfile:
         async with httpx.AsyncClient(headers=self._headers, base_url=REDDIT_API_BASE) as client:
             me = await self._get_me(client)
             posts = await self._fetch_submitted(client, limit=settings.max_posts)
             comments = await self._fetch_comments(client, limit=settings.max_comments)
 
-        return RedditProfile(
+        return SocialProfile(
+            platform="reddit",
             username=me["name"],
             account_created_utc=datetime.fromtimestamp(me["created_utc"], tz=timezone.utc),
-            karma_post=me.get("link_karma", 0),
-            karma_comment=me.get("comment_karma", 0),
             bio=me.get("subreddit", {}).get("public_description") or None,
             posts=posts + comments,
         )
@@ -42,7 +41,7 @@ class RedditClient:
         resp.raise_for_status()
         return resp.json()
 
-    async def _fetch_submitted(self, client: httpx.AsyncClient, limit: int) -> list[RedditPost]:
+    async def _fetch_submitted(self, client: httpx.AsyncClient, limit: int) -> list[SocialPost]:
         username = (await self._get_me(client))["name"]
         resp = await client.get(
             f"/user/{username}/submitted",
@@ -52,10 +51,11 @@ class RedditClient:
         items = resp.json()["data"]["children"]
 
         return [
-            RedditPost(
+            SocialPost(
                 id=item["data"]["id"],
+                platform="reddit",
                 type="post",
-                subreddit=item["data"]["subreddit"],
+                group=item["data"]["subreddit"],
                 title=item["data"].get("title"),
                 text=item["data"].get("selftext", "") or item["data"].get("title", ""),
                 created_utc=datetime.fromtimestamp(item["data"]["created_utc"], tz=timezone.utc),
@@ -65,7 +65,7 @@ class RedditClient:
             for item in items
         ]
 
-    async def _fetch_comments(self, client: httpx.AsyncClient, limit: int) -> list[RedditPost]:
+    async def _fetch_comments(self, client: httpx.AsyncClient, limit: int) -> list[SocialPost]:
         username = (await self._get_me(client))["name"]
         resp = await client.get(
             f"/user/{username}/comments",
@@ -75,10 +75,11 @@ class RedditClient:
         items = resp.json()["data"]["children"]
 
         return [
-            RedditPost(
+            SocialPost(
                 id=item["data"]["id"],
+                platform="reddit",
                 type="comment",
-                subreddit=item["data"]["subreddit"],
+                group=item["data"]["subreddit"],
                 title=None,
                 text=item["data"].get("body", ""),
                 created_utc=datetime.fromtimestamp(item["data"]["created_utc"], tz=timezone.utc),

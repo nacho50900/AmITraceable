@@ -1,15 +1,33 @@
 """
 Modelos de datos. Todo esto vive en memoria durante la petición HTTP,
 nunca se escribe a disco ni a una base de datos (diseño RGPD del TFG).
+
+`SocialPost` / `SocialProfile` son el modelo genérico que alimenta el
+pipeline de análisis (fingerprint -> inferencia -> scoring -> informe),
+compartido por todas las plataformas soportadas. Cada cliente de plataforma
+(`reddit_client.py`, `instagram_client.py`) es responsable de normalizar la
+respuesta de su API al este modelo común:
+
+- `group`: el equivalente más parecido a "comunidad/tema" que tenga la
+  plataforma — el subreddit en Reddit, el primer hashtag del caption en
+  Instagram. Se llama igual en ambos casos para que el resto del pipeline
+  (fingerprinting, inferencia de atributos) no necesite saber de qué
+  plataforma vienen los datos.
+- `score`: proxy de "repercusión" del post — karma neto en Reddit,
+  likes + comentarios en Instagram. Mismo razonamiento que `group`.
+
+Si se añade una tercera plataforma en el futuro, solo hace falta escribir
+su cliente devolviendo `SocialProfile`; el resto del pipeline no cambia.
 """
 from datetime import datetime
 from pydantic import BaseModel
 
 
-class RedditPost(BaseModel):
+class SocialPost(BaseModel):
     id: str
-    type: str  # "post" | "comment"
-    subreddit: str
+    platform: str  # "reddit" | "instagram"
+    type: str  # Reddit: "post"/"comment". Instagram: "image"/"video"/"carousel_album"
+    group: str  # subreddit (Reddit) o primer hashtag del caption (Instagram)
     title: str | None = None
     text: str
     created_utc: datetime
@@ -17,13 +35,12 @@ class RedditPost(BaseModel):
     permalink: str
 
 
-class RedditProfile(BaseModel):
+class SocialProfile(BaseModel):
+    platform: str
     username: str
-    account_created_utc: datetime
-    karma_post: int
-    karma_comment: int
+    account_created_utc: datetime | None = None  # Instagram no expone este dato
     bio: str | None = None
-    posts: list[RedditPost]
+    posts: list[SocialPost]
 
 
 class WritingFingerprint(BaseModel):
@@ -31,7 +48,7 @@ class WritingFingerprint(BaseModel):
     vocabulary_richness: float  # type-token ratio
     emoji_usage_rate: float
     avg_posts_per_hour: dict[int, float]  # hora (0-23) -> proporción de actividad
-    top_subreddits: list[tuple[str, int]]
+    top_groups: list[tuple[str, int]]  # subreddits o hashtags más frecuentes
     top_keywords: list[tuple[str, float]]
     detected_language: str
 
@@ -53,6 +70,7 @@ class PrivacyScore(BaseModel):
 
 
 class ExposureReport(BaseModel):
+    platform: str
     username: str
     generated_at: datetime
     n_posts_analyzed: int

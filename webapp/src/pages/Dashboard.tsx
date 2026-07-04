@@ -3,9 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import HourlyActivityChart from '../components/HourlyActivityChart';
 import ScoreBar from '../components/ScoreBar';
-import type { ExposureReport } from '../types';
+import type { ExposureReport, Platform } from '../types';
+
+function readPlatform(): Platform {
+  const value = new URLSearchParams(window.location.search).get('platform');
+  return value === 'instagram' ? 'instagram' : 'reddit';
+}
 
 const Dashboard: React.FC = () => {
+  const [platform] = useState<Platform>(readPlatform);
   const [report, setReport] = useState<ExposureReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -13,28 +19,33 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     api
-      .authStatus()
+      .authStatus(platform)
       .then((status) => {
         if (!status.authenticated) {
           navigate('/');
           return undefined;
         }
-        return api.analyze();
+        return api.analyze(platform);
       })
       .then((data) => data && setReport(data))
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [navigate]);
+  }, [platform, navigate]);
 
   const handleLogout = async () => {
-    await api.logout();
+    await api.logout(platform);
     navigate('/');
   };
+
+  const platformLabel = platform === 'instagram' ? 'Instagram' : 'Reddit';
+  const usernamePrefix = platform === 'instagram' ? '@' : 'u/';
+  const groupingLabel = platform === 'instagram' ? 'Hashtags más frecuentes' : 'Subreddits más frecuentes';
+  const groupingPrefix = platform === 'instagram' ? '#' : 'r/';
 
   if (loading) {
     return (
       <div className="page">
-        <p>Analizando tu actividad pública en Reddit… esto puede tardar unos segundos.</p>
+        <p>Analizando tu actividad pública en {platformLabel}… esto puede tardar unos segundos.</p>
       </div>
     );
   }
@@ -53,7 +64,10 @@ const Dashboard: React.FC = () => {
   return (
     <div className="page dashboard">
       <header className="dashboard-header">
-        <h1>Informe de exposición de u/{report.username}</h1>
+        <h1>
+          Informe de exposición de {usernamePrefix}
+          {report.username} <span className="platform-tag">({platformLabel})</span>
+        </h1>
         <button className="btn-secondary" onClick={handleLogout}>
           Cerrar sesión y borrar datos
         </button>
@@ -108,8 +122,12 @@ const Dashboard: React.FC = () => {
           <li>Uso de emojis: {(report.fingerprint.emoji_usage_rate * 100).toFixed(2)}%</li>
           <li>Idioma detectado: {report.fingerprint.detected_language}</li>
         </ul>
-        <h3>Subreddits más frecuentes</h3>
-        <p>{report.fingerprint.top_subreddits.map(([s, c]) => `r/${s} (${c})`).join(', ')}</p>
+        <h3>{groupingLabel}</h3>
+        <p>
+          {report.fingerprint.top_groups
+            .map(([s, c]) => `${groupingPrefix}${s} (${c})`)
+            .join(', ')}
+        </p>
       </section>
 
       <section className="card recommendations">

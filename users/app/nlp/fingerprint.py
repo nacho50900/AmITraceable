@@ -6,13 +6,14 @@ Calcula un "perfil de estilo" a partir del texto público del usuario:
 - riqueza de vocabulario (type-token ratio)
 - uso de emojis
 - distribución horaria de actividad (posible zona horaria / rutina)
-- subreddits más frecuentes (intereses, a veces geolocalizables)
+- comunidades/etiquetas más frecuentes (intereses, a veces geolocalizables)
 - palabras clave recurrentes (TF-IDF)
 - idioma detectado
 
-Nota de alcance: en esta versión (Reddit-only) este fingerprint se usa
-sobre todo como insumo para el motor de scoring (módulo 4), no para
-correlación entre plataformas (módulo 3), que queda fuera del MVP actual.
+Nota de alcance: este fingerprint alimenta el motor de scoring (módulo 4)
+para cualquier plataforma soportada (Reddit, Instagram); la correlación
+*entre* plataformas (módulo 3, comparar un mismo usuario a través de
+varias redes) sigue quedando fuera de esta versión.
 """
 import re
 from collections import Counter
@@ -21,7 +22,7 @@ import emoji
 import spacy
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-from app.models.schemas import RedditPost, WritingFingerprint
+from app.models.schemas import SocialPost, WritingFingerprint
 
 _nlp_cache: dict[str, "spacy.language.Language"] = {}
 
@@ -45,7 +46,7 @@ def _detect_language(text_sample: str) -> str:
     return "es" if len(tokens & spanish_markers) >= 3 else "en"
 
 
-def build_fingerprint(posts: list[RedditPost]) -> WritingFingerprint:
+def build_fingerprint(posts: list[SocialPost]) -> WritingFingerprint:
     if not posts:
         raise ValueError("No hay posts/comentarios para analizar")
 
@@ -73,8 +74,8 @@ def build_fingerprint(posts: list[RedditPost]) -> WritingFingerprint:
     total = sum(hour_counter.values()) or 1
     avg_posts_per_hour = {h: hour_counter.get(h, 0) / total for h in range(24)}
 
-    subreddit_counter = Counter(p.subreddit for p in posts)
-    top_subreddits = subreddit_counter.most_common(15)
+    group_counter = Counter(p.group for p in posts)
+    top_groups = group_counter.most_common(15)
 
     top_keywords = _extract_keywords(posts, language)
 
@@ -83,13 +84,13 @@ def build_fingerprint(posts: list[RedditPost]) -> WritingFingerprint:
         vocabulary_richness=round(vocabulary_richness, 4),
         emoji_usage_rate=round(emoji_usage_rate, 5),
         avg_posts_per_hour=avg_posts_per_hour,
-        top_subreddits=top_subreddits,
+        top_groups=top_groups,
         top_keywords=top_keywords,
         detected_language=language,
     )
 
 
-def _extract_keywords(posts: list[RedditPost], language: str, top_n: int = 20) -> list[tuple[str, float]]:
+def _extract_keywords(posts: list[SocialPost], language: str, top_n: int = 20) -> list[tuple[str, float]]:
     texts = [p.text for p in posts if p.text and len(p.text) > 20]
     if len(texts) < 3:
         return []

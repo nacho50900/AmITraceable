@@ -14,7 +14,7 @@ correlación multiplataforma (módulo 3 completo).
 """
 from datetime import datetime, timezone
 
-from app.models.schemas import InferredAttribute, PrivacyScore, RedditPost, WritingFingerprint
+from app.models.schemas import InferredAttribute, PrivacyScore, SocialPost, WritingFingerprint
 
 # Pesos del score global (deben sumar 1.0)
 _WEIGHTS = {
@@ -26,7 +26,7 @@ _WEIGHTS = {
 
 
 def compute_score(
-    posts: list[RedditPost],
+    posts: list[SocialPost],
     fingerprint: WritingFingerprint,
     inferred_attributes: list[InferredAttribute],
 ) -> PrivacyScore:
@@ -77,7 +77,7 @@ def _score_inferable_data(attributes: list[InferredAttribute]) -> float:
     return min((weighted / 6) * 100, 100.0)
 
 
-def _score_deanonymization_ease(posts: list[RedditPost], fingerprint: WritingFingerprint) -> float:
+def _score_deanonymization_ease(posts: list[SocialPost], fingerprint: WritingFingerprint) -> float:
     if not posts:
         return 0.0
 

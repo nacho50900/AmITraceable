@@ -8,28 +8,32 @@ vía OAuth, y el resultado se le muestra únicamente a él. El objetivo es que
 vea lo que YA es inferible públicamente sobre su propia cuenta.
 
 Para el MVP se usan heurísticas simples y explicables (regex + listas de
-subreddits geolocalizables) en lugar de modelos de inferencia más agresivos,
-precisamente para mantener el alcance defensivo y evitar sobre-ingeniería.
+comunidades/etiquetas geolocalizables) en lugar de modelos de inferencia
+más agresivos, precisamente para mantener el alcance defensivo y evitar
+sobre-ingeniería. Funciona igual sobre subreddits (Reddit) que sobre
+hashtags (Instagram), ya que ambos llegan normalizados al campo `group` de
+`SocialPost`.
 """
 import re
 from collections import Counter
 
-from app.models.schemas import InferredAttribute, RedditPost
+from app.models.schemas import InferredAttribute, SocialPost
 
-# Subreddits cuyo propio nombre ya delata ciudad/país/profesión (lista corta
-# de ejemplo; en producción se externalizaría a un fichero de datos curado)
-_LOCATION_SUBREDDITS = {
+# Comunidades/etiquetas cuyo propio nombre ya delata ciudad/país/profesión
+# (lista corta de ejemplo; en producción se externalizaría a un fichero de
+# datos curado). Sirve tanto para subreddits como para hashtags de Instagram.
+_LOCATION_GROUPS = {
     "madrid", "barcelona", "spain", "es", "valencia", "sevilla",
     "argentina", "mexico", "askspain", "vzla",
 }
-_OCCUPATION_SUBREDDITS = {
+_OCCUPATION_GROUPS = {
     "programming", "cscareerquestions", "developerspain", "medlabprofessionals",
     "teachers", "nursing", "legaladvice", "accounting",
 }
 _ROUTINE_KEYWORDS = re.compile(r"\b(turno de noche|madrugo|salgo del trabajo|entro a las|termino a las)\b", re.I)
 
 
-def infer_attributes(posts: list[RedditPost]) -> list[InferredAttribute]:
+def infer_attributes(posts: list[SocialPost]) -> list[InferredAttribute]:
     attributes: list[InferredAttribute] = []
     attributes += _infer_location(posts)
     attributes += _infer_occupation(posts)
@@ -37,45 +41,45 @@ def infer_attributes(posts: list[RedditPost]) -> list[InferredAttribute]:
     return attributes
 
 
-def _infer_location(posts: list[RedditPost]) -> list[InferredAttribute]:
-    hits = [p for p in posts if p.subreddit.lower() in _LOCATION_SUBREDDITS]
+def _infer_location(posts: list[SocialPost]) -> list[InferredAttribute]:
+    hits = [p for p in posts if p.group.lower() in _LOCATION_GROUPS]
     if not hits:
         return []
 
-    counter = Counter(p.subreddit.lower() for p in hits)
-    top_sub, count = counter.most_common(1)[0]
+    counter = Counter(p.group.lower() for p in hits)
+    top_group, count = counter.most_common(1)[0]
     confidence = min(0.4 + 0.05 * count, 0.9)
 
     return [
         InferredAttribute(
             category="ubicacion",
-            value=f"Posible vínculo geográfico con: {top_sub}",
+            value=f"Posible vínculo geográfico con: {top_group}",
             confidence=round(confidence, 2),
             evidence=[p.permalink for p in hits[:5]],
         )
     ]
 
 
-def _infer_occupation(posts: list[RedditPost]) -> list[InferredAttribute]:
-    hits = [p for p in posts if p.subreddit.lower() in _OCCUPATION_SUBREDDITS]
+def _infer_occupation(posts: list[SocialPost]) -> list[InferredAttribute]:
+    hits = [p for p in posts if p.group.lower() in _OCCUPATION_GROUPS]
     if not hits:
         return []
 
-    counter = Counter(p.subreddit.lower() for p in hits)
-    top_sub, count = counter.most_common(1)[0]
+    counter = Counter(p.group.lower() for p in hits)
+    top_group, count = counter.most_common(1)[0]
     confidence = min(0.3 + 0.05 * count, 0.8)
 
     return [
         InferredAttribute(
             category="ocupacion",
-            value=f"Posible sector profesional relacionado con: {top_sub}",
+            value=f"Posible sector profesional relacionado con: {top_group}",
             confidence=round(confidence, 2),
             evidence=[p.permalink for p in hits[:5]],
         )
     ]
 
 
-def _infer_routine(posts: list[RedditPost]) -> list[InferredAttribute]:
+def _infer_routine(posts: list[SocialPost]) -> list[InferredAttribute]:
     hits = [p for p in posts if _ROUTINE_KEYWORDS.search(p.text)]
     if not hits:
         return []

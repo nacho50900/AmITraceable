@@ -3,12 +3,14 @@
 // generación automática de tipos en este MVP; queda como mejora futura,
 // por ejemplo con openapi-typescript sobre el /openapi.json de FastAPI).
 
+export type Platform = 'reddit' | 'instagram';
+
 export interface WritingFingerprint {
   avg_sentence_length: number;
   vocabulary_richness: number;
   emoji_usage_rate: number;
   avg_posts_per_hour: Record<string, number>;
-  top_subreddits: [string, number][];
+  top_groups: [string, number][];
   top_keywords: [string, number][];
   detected_language: string;
 }
@@ -30,6 +32,7 @@ export interface PrivacyScore {
 }
 
 export interface ExposureReport {
+  platform: Platform;
   username: string;
   generated_at: string;
   n_posts_analyzed: number;
