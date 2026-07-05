@@ -13,7 +13,7 @@ Then('I should see the consent notice', async function () {
   await page.waitForSelector('.consent-box', { timeout: 5000 })
   const text = await page.textContent('.consent-box')
   assert.ok(
-    text && text.includes('Solo se analiza tu propia cuenta de Reddit'),
+    text && text.includes('Solo se analiza tu propia cuenta'),
     `Expected consent box to mention own-account-only analysis, got: "${text}"`,
   )
 })

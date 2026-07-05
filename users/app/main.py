@@ -3,8 +3,8 @@ Punto de entrada de la aplicación.
 
 Diseño RGPD: no se conecta ninguna base de datos. El único estado entre
 peticiones es la cookie de sesión firmada (SessionMiddleware), que contiene
-el token de acceso de Reddit y nada más. Cerrar sesión / borrar la cookie
-elimina cualquier rastro del usuario en el sistema.
+los tokens de acceso (Reddit y/o Instagram) y nada más. Cerrar sesión /
+borrar la cookie elimina cualquier rastro del usuario en el sistema.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,13 +12,14 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.analysis_router import router as analysis_router
-from app.auth.reddit_oauth import router as auth_router
+from app.auth.instagram_oauth import router as instagram_auth_router
+from app.auth.reddit_oauth import router as reddit_auth_router
 from app.config import settings
 
 app = FastAPI(
     title="Herramienta de Análisis de Exposición de Identidad Digital",
-    description="TFG - Análisis defensivo de huella digital propia mediante OSINT e IA (Reddit MVP)",
-    version="0.1.0",
+    description="TFG - Análisis defensivo de huella digital propia mediante OSINT e IA (Reddit + Instagram)",
+    version="0.2.0",
 )
 
 # Métricas Prometheus en /metrics, equivalente al express-prom-bundle que
@@ -37,7 +38,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth_router)
+app.include_router(reddit_auth_router)
+app.include_router(instagram_auth_router)
 app.include_router(analysis_router)
 
 

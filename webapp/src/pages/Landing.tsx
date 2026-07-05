@@ -9,15 +9,21 @@ const Landing: React.FC = () => {
 
   useEffect(() => {
     if (authError) {
-      // El usuario denegó el consentimiento en Reddit; no hacemos nada más
-      // (el estado inicial de `checking` ya se calculó como `false` arriba).
+      // El usuario denegó el consentimiento (Reddit o Instagram); no
+      // sabemos cuál de las dos sin más contexto, así que solo dejamos de
+      // mostrar el spinner inicial (el estado `checking` ya es `false`).
       return;
     }
 
-    api
-      .authStatus()
-      .then((status) => {
-        if (status.authenticated) navigate('/dashboard');
+    // Comprobamos ambas plataformas; si cualquiera ya está autenticada,
+    // saltamos directamente al dashboard de esa plataforma.
+    Promise.all([api.authStatus('reddit'), api.authStatus('instagram')])
+      .then(([redditStatus, instagramStatus]) => {
+        if (redditStatus.authenticated) {
+          navigate('/dashboard?platform=reddit');
+        } else if (instagramStatus.authenticated) {
+          navigate('/dashboard?platform=instagram');
+        }
       })
       .finally(() => setChecking(false));
   }, [authError, navigate]);
@@ -26,24 +32,32 @@ const Landing: React.FC = () => {
     <div className="page landing">
       <h1>¿Cuánto se puede inferir de tu actividad pública?</h1>
       <p className="subtitle">
-        Herramienta educativa y defensiva de análisis de exposición de identidad digital
-        (TFG — versión MVP centrada en Reddit).
+        Herramienta educativa y defensiva de análisis de exposición de identidad digital (TFG).
       </p>
 
       <div className="consent-box">
         <h2>Antes de continuar</h2>
         <ul>
-          <li>Solo se analiza tu propia cuenta de Reddit, nunca la de terceros.</li>
-          <li>Autorizas el acceso vía OAuth oficial de Reddit, con permisos de solo lectura.</li>
+          <li>Solo se analiza tu propia cuenta, nunca la de terceros.</li>
+          <li>Autorizas el acceso vía OAuth oficial de la plataforma, con permisos de solo lectura.</li>
           <li>No se guarda nada: el análisis ocurre en memoria y desaparece al cerrar sesión.</li>
-          <li>Puedes revocar el acceso en cualquier momento desde tu cuenta de Reddit.</li>
+          <li>Puedes revocar el acceso en cualquier momento desde tu cuenta.</li>
         </ul>
       </div>
 
       {!checking && (
-        <a className="btn-primary" href={api.loginUrl()}>
-          Conectar con Reddit y empezar
-        </a>
+        <div className="platform-choice">
+          <a className="btn-primary" href={api.loginUrl('reddit')}>
+            Conectar con Reddit
+          </a>
+          <a className="btn-primary btn-instagram" href={api.loginUrl('instagram')}>
+            Conectar con Instagram
+          </a>
+          <p className="note">
+            Instagram requiere una cuenta profesional (Business o Creator) y que tu cuenta esté
+            añadida como tester de la app mientras esté en modo desarrollo.
+          </p>
+        </div>
       )}
     </div>
   );

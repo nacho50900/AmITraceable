@@ -8,7 +8,7 @@ import Landing from '../pages/Landing';
 vi.mock('../api', () => ({
   api: {
     authStatus: vi.fn(),
-    loginUrl: () => 'http://localhost:3000/auth/reddit/login',
+    loginUrl: (platform: string) => `http://localhost:3000/auth/${platform}/login`,
   },
 }));
 
@@ -17,21 +17,20 @@ describe('Landing', () => {
     vi.restoreAllMocks();
   });
 
-  test('muestra el aviso de consentimiento antes de conectar con Reddit', async () => {
-    vi.mocked(api.authStatus).mockResolvedValueOnce({ authenticated: false });
+  test('muestra el aviso de consentimiento y ambas opciones de plataforma', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: false });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Landing />
       </MemoryRouter>,
     );
 
-    expect(
-      screen.getByText(/Solo se analiza tu propia cuenta de Reddit/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Solo se analiza tu propia cuenta/i)).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getByText(/Conectar con Reddit y empezar/i)).toBeInTheDocument();
+      expect(screen.getByText(/Conectar con Reddit/i)).toBeInTheDocument();
+      expect(screen.getByText(/Conectar con Instagram/i)).toBeInTheDocument();
     });
   });
 });

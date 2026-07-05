@@ -84,6 +84,24 @@ body {
   box-shadow: 0 8px 24px rgba(91, 108, 240, 0.35);
 }
 
+.platform-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.btn-instagram {
+  background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888);
+}
+
+.platform-tag {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 400;
+}
+
 .btn-secondary {
   background: transparent;
   border: 1px solid var(--border);
