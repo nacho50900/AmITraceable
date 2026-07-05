@@ -1,8 +1,8 @@
 """
-Tests de los endpoints HTTP principales.
-
-Equivalente en pytest+httpx al test original `users-service.test.js`
-(supertest sobre la app de Express), pero adaptado a FastAPI/TestClient.
+Tests de los endpoints HTTP genéricos de la aplicación (no específicos de
+ninguna plataforma). Los tests de autenticación/análisis de cada plataforma
+viven en su propio archivo simétrico: `test_reddit_auth.py` /
+`test_reddit_client.py` y `test_instagram_auth.py` / `test_instagram_client.py`.
 """
 from fastapi.testclient import TestClient
 
@@ -19,26 +19,13 @@ def test_root_returns_service_info():
     assert body["service"] == "identity-exposure-tfg"
 
 
-def test_auth_status_defaults_to_unauthenticated():
-    resp = client.get("/auth/reddit/status")
-    assert resp.status_code == 200
-    assert resp.json() == {"authenticated": False}
-
-
-def test_login_redirects_to_reddit_with_expected_scopes():
-    resp = client.get("/auth/reddit/login", follow_redirects=False)
-    assert resp.status_code == 307
-    location = resp.headers["location"]
-    assert location.startswith("https://www.reddit.com/api/v1/authorize")
-    assert "scope=identity+history+read" in location
-
-
-def test_analyze_requires_authentication():
-    resp = client.post("/api/analyze")
-    assert resp.status_code == 401
-
-
 def test_metrics_endpoint_is_exposed():
     resp = client.get("/metrics")
     assert resp.status_code == 200
     assert b"http_requests" in resp.content or b"# HELP" in resp.content
+
+
+def test_analyze_rejects_unsupported_platform():
+    resp = client.post("/api/analyze/tiktok")
+    assert resp.status_code == 404
+    assert "tiktok" in resp.json()["detail"]

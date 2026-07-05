@@ -33,7 +33,7 @@ SCOPES = "identity history read"
 async def login(request: Request):
     """Redirige al usuario a la pantalla de consentimiento de Reddit."""
     state = secrets.token_urlsafe(24)
-    request.session["oauth_state"] = state
+    request.session["reddit_oauth_state"] = state
 
     params = {
         "client_id": settings.reddit_client_id,
@@ -52,7 +52,7 @@ async def callback(request: Request, code: str | None = None, state: str | None 
         # El usuario denegó el consentimiento explícitamente
         return RedirectResponse(f"{settings.frontend_origin}/?auth_error={error}")
 
-    saved_state = request.session.get("oauth_state")
+    saved_state = request.session.get("reddit_oauth_state")
     if not state or state != saved_state:
         raise HTTPException(status_code=400, detail="Estado OAuth inválido (posible CSRF)")
 
@@ -74,15 +74,17 @@ async def callback(request: Request, code: str | None = None, state: str | None 
     token_data = resp.json()
     # Guardamos SOLO en la sesión firmada del navegador (no hay BD ni fichero)
     request.session["reddit_access_token"] = token_data["access_token"]
-    request.session.pop("oauth_state", None)
+    request.session.pop("reddit_oauth_state", None)
 
     return RedirectResponse(f"{settings.frontend_origin}/dashboard")
 
 
 @router.post("/logout")
 async def logout(request: Request):
-    """Borra el token de la sesión. Como no hay BD, esto elimina todo rastro."""
-    request.session.clear()
+    """Borra solo las claves de Reddit de la sesión (no afecta a Instagram,
+    ya que ambos módulos pueden convivir en la misma sesión de navegador)."""
+    request.session.pop("reddit_access_token", None)
+    request.session.pop("reddit_oauth_state", None)
     return {"status": "ok"}
 
 
