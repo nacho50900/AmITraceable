@@ -26,6 +26,7 @@ describe('Landing', () => {
       </MemoryRouter>,
     );
 
+    expect(screen.getByText('AmITraceable')).toBeInTheDocument();
     expect(screen.getByText(/Solo se analiza tu propia cuenta/i)).toBeInTheDocument();
 
     await waitFor(() => {

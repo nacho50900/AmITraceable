@@ -21,10 +21,10 @@ Then('I should see the consent notice', async function () {
 Then('I should see a link to connect with Reddit', async function () {
   const page = this.page
   if (!page) throw new Error('Page not initialized')
-  const link = await page.waitForSelector('a.btn-primary', { timeout: 5000 })
+  const link = await page.waitForSelector('a.platform-card--reddit', { timeout: 5000 })
   const href = await link.getAttribute('href')
   assert.ok(
     href && href.includes('/auth/reddit/login'),
-    `Expected primary link to point to the Reddit OAuth login route, got: "${href}"`,
+    `Expected the Reddit card to link to the Reddit OAuth login route, got: "${href}"`,
   )
 })

@@ -84,15 +84,128 @@ body {
   box-shadow: 0 8px 24px rgba(91, 108, 240, 0.35);
 }
 
-.platform-choice {
+.brand-title {
+  font-size: clamp(36px, 6vw, 56px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin-bottom: 4px;
+  background: linear-gradient(90deg, #5b6cf0, #a15bf0);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.platform-picker {
+  margin-top: 8px;
+}
+
+.platform-picker-hint {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+/* Carrusel de tarjetas: scroll-snap nativo, así el "deslizar" funciona de
+   serie en móvil (touch) y con rueda/trackpad en escritorio, sin depender
+   de ninguna librería de carrusel. */
+.card-carousel {
+  display: flex;
+  gap: 20px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding: 8px 4px 20px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.card-carousel::-webkit-scrollbar {
+  display: none;
+}
+
+.platform-card {
+  scroll-snap-align: center;
+  flex: 0 0 min(320px, 85vw);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 12px;
+  gap: 10px;
+  padding: 28px 26px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  text-decoration: none;
+  color: var(--text);
+  cursor: grab;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-.btn-instagram {
+.platform-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.platform-card-icon {
+  font-size: 40px;
+  line-height: 1;
+}
+
+.platform-card-name {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.platform-card-description {
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 40px;
+}
+
+.platform-card-cta {
+  margin-top: 8px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.platform-card--reddit {
+  background: linear-gradient(160deg, rgba(255, 69, 0, 0.16), var(--bg-card));
+  border-color: rgba(255, 69, 0, 0.35);
+}
+
+.platform-card--reddit .platform-card-icon {
+  color: #ff4500;
+}
+
+.platform-card--instagram {
+  background: linear-gradient(160deg, rgba(220, 39, 67, 0.16), var(--bg-card));
+  border-color: rgba(220, 39, 67, 0.35);
+}
+
+.platform-card--instagram .platform-card-icon {
   background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.carousel-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.carousel-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: none;
+  background: var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+
+.carousel-dot--active {
+  background: var(--accent);
+  transform: scale(1.3);
 }
 
 .platform-tag {
