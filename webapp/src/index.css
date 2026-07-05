@@ -106,9 +106,41 @@ body {
   margin-bottom: 14px;
 }
 
-/* Carrusel de tarjetas: scroll-snap nativo, así el "deslizar" funciona de
-   serie en móvil (touch) y con rueda/trackpad en escritorio, sin depender
-   de ninguna librería de carrusel. */
+.carousel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.carousel-arrow {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.carousel-arrow:hover:not(:disabled) {
+  border-color: var(--text-dim);
+}
+
+.carousel-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Carrusel de tarjetas: scroll-snap nativo para que el gesto táctil en
+   móvil funcione de serie, más arrastre con puntero (mouse/trackpad) vía
+   JS para escritorio, ya que scroll-snap por sí solo no responde al
+   arrastre con ratón normal. */
 .card-carousel {
   display: flex;
   gap: 20px;
@@ -117,6 +149,13 @@ body {
   padding: 8px 4px 20px;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.card-carousel:active {
+  cursor: grabbing;
 }
 
 .card-carousel::-webkit-scrollbar {
@@ -135,7 +174,6 @@ body {
   border: 1px solid var(--border);
   text-decoration: none;
   color: var(--text);
-  cursor: grab;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -182,14 +220,15 @@ body {
 }
 
 .platform-card--instagram .platform-card-icon {
-  background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  /* Un degradado real de fondo-recortado-a-texto no funciona sobre un
+     SVG (solo sobre texto), así que usamos un color sólido representativo
+     de la marca en vez del hack roto que había antes. */
+  color: #dc2743;
 }
 
 .carousel-dots {
   display: flex;
+  justify-content: center;
   gap: 8px;
 }
 
