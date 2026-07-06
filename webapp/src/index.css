@@ -106,10 +106,11 @@ body {
   margin-bottom: 14px;
 }
 
-.carousel-row {
+.deck-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 16px;
 }
 
 .carousel-arrow {
@@ -128,58 +129,49 @@ body {
   justify-content: center;
 }
 
-.carousel-arrow:hover:not(:disabled) {
+.carousel-arrow:hover {
   border-color: var(--text-dim);
 }
 
-.carousel-arrow:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-
-/* Carrusel de tarjetas: scroll-snap nativo para que el gesto táctil en
-   móvil funcione de serie, más arrastre con puntero (mouse/trackpad) vía
-   JS para escritorio, ya que scroll-snap por sí solo no responde al
-   arrastre con ratón normal. */
-.card-carousel {
-  display: flex;
-  gap: 20px;
-  overflow-x: auto;
-  scroll-snap-type: x mandatory;
-  padding: 8px 4px 20px;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-  cursor: grab;
+/* El mazo: contenedor de altura fija donde cada carta se posiciona de
+   forma absoluta y centrada (left: 50%), y es el `transform` calculado en
+   JS (cardStyle) el que la desplaza/rota/escala según lo lejos que esté de
+   la carta activa. Así es trivial añadir una tercera plataforma en el
+   futuro: solo hay que añadir la entrada en PLATFORM_CARDS. */
+.card-deck {
+  position: relative;
+  width: min(280px, 78vw);
+  height: 230px;
   touch-action: pan-y;
   user-select: none;
 }
 
-.card-carousel:active {
-  cursor: grabbing;
-}
-
-.card-carousel::-webkit-scrollbar {
-  display: none;
-}
-
 .platform-card {
-  scroll-snap-align: center;
-  flex: 0 0 min(320px, 85vw);
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   gap: 10px;
-  padding: 28px 26px;
-  border-radius: 14px;
+  padding: 28px 22px;
+  border-radius: 16px;
   border: 1px solid var(--border);
-  text-decoration: none;
   color: var(--text);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s ease;
 }
 
-.platform-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+.platform-card--active {
+  cursor: default;
+}
+
+.platform-card:not(.platform-card--active) {
+  cursor: pointer;
 }
 
 .platform-card-icon {
@@ -196,13 +188,6 @@ body {
   color: var(--text-dim);
   font-size: 13px;
   line-height: 1.5;
-  min-height: 40px;
-}
-
-.platform-card-cta {
-  margin-top: 8px;
-  font-weight: 600;
-  font-size: 14px;
 }
 
 .platform-card--reddit {
@@ -222,14 +207,50 @@ body {
 .platform-card--instagram .platform-card-icon {
   /* Un degradado real de fondo-recortado-a-texto no funciona sobre un
      SVG (solo sobre texto), así que usamos un color sólido representativo
-     de la marca en vez del hack roto que había antes. */
+     de la marca en vez de un hack roto. */
   color: #dc2743;
+}
+
+.platform-card--x {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.08), var(--bg-card));
+  border-color: var(--border);
+}
+
+.platform-card--x .platform-card-icon {
+  color: var(--text);
+}
+
+.coming-soon-badge {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.deck-cta--disabled {
+  background: var(--bg-card);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  cursor: not-allowed;
+}
+
+.deck-cta--disabled:hover {
+  transform: none;
+  box-shadow: none;
 }
 
 .carousel-dots {
   display: flex;
   justify-content: center;
   gap: 8px;
+  margin-top: 18px;
 }
 
 .carousel-dot {
@@ -245,6 +266,12 @@ body {
 .carousel-dot--active {
   background: var(--accent);
   transform: scale(1.3);
+}
+
+.deck-cta {
+  display: block;
+  width: fit-content;
+  margin: 22px auto 0;
 }
 
 .platform-tag {

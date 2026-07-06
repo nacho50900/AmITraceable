@@ -1,17 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { SiInstagram, SiReddit } from 'react-icons/si';
+import { SiInstagram, SiReddit, SiX } from 'react-icons/si';
 import { api } from '../api';
 import type { Platform } from '../types';
 
 interface PlatformCardData {
-  platform: Platform;
+  // `platform` solo se rellena para plataformas realmente conectadas al
+  // backend. Las tarjetas "Coming Soon" no tienen backend detrás, así que
+  // se dejan sin `platform` y el botón de conexión se deshabilita solo.
+  platform?: Platform;
   name: string;
   description: string;
   icon: React.ReactNode;
   cardClassName: string;
+  comingSoon?: boolean;
 }
 
+// El orden de este array es el orden del mazo. Añadir una plataforma nueva
+// de verdad (cuando X tenga API disponible, por ejemplo) es rellenar su
+// `platform` y quitar `comingSoon`; el resto del componente ya funciona
+// igual para cualquier número de cartas.
 const PLATFORM_CARDS: PlatformCardData[] = [
   {
     platform: 'reddit',
@@ -27,20 +35,54 @@ const PLATFORM_CARDS: PlatformCardData[] = [
     icon: <SiInstagram aria-hidden="true" />,
     cardClassName: 'platform-card--instagram',
   },
+  {
+    name: 'X',
+    description: 'Pendiente de aprobación de acceso a la API. Próximamente.',
+    icon: <SiX aria-hidden="true" />,
+    cardClassName: 'platform-card--x',
+    comingSoon: true,
+  },
 ];
 
-// Umbral de arrastre (px): por debajo de esto, un click en la tarjeta se
-// trata como click de verdad (navega); por encima, se trata como arrastre
-// (no navega). Sin esto, arrastrar con el ratón activaría el enlace sin
-// querer al soltar.
-const DRAG_THRESHOLD_PX = 6;
+/** Distancia con signo más corta entre `index` y `activeIndex`, teniendo en
+ * cuenta el "dar la vuelta" del mazo (para que funcione bien con cualquier
+ * número de cartas). */
+function relativeOffset(index: number, activeIndex: number, length: number): number {
+  let diff = index - activeIndex;
+  if (diff > length / 2) diff -= length;
+  if (diff < -length / 2) diff += length;
+  return diff;
+}
+
+/** Estilo de cada carta según su distancia (offset) a la carta activa.
+ * offset 0 = carta activa (centrada, delante). ±1 = asoma detrás en
+ * diagonal. Más lejos = oculta. */
+function cardStyle(offset: number): React.CSSProperties {
+  const abs = Math.abs(offset);
+
+  if (abs === 0) {
+    return { transform: 'translateX(-50%) rotate(0deg) scale(1)', zIndex: 3, opacity: 1 };
+  }
+
+  if (abs === 1) {
+    const dir = offset > 0 ? 1 : -1;
+    return {
+      transform: `translateX(calc(-50% + ${dir * 46}px)) translateY(10px) rotate(${dir * 9}deg) scale(0.93)`,
+      zIndex: 2,
+      opacity: 0.85,
+    };
+  }
+
+  return { transform: 'translateX(-50%) scale(0.8)', zIndex: 1, opacity: 0, pointerEvents: 'none' };
+}
+
+const SWIPE_THRESHOLD_PX = 40;
 
 const Landing: React.FC = () => {
   const [authError] = useState(() => new URLSearchParams(window.location.search).get('auth_error'));
   const [checking, setChecking] = useState(() => authError === null);
   const [activeIndex, setActiveIndex] = useState(0);
-  const trackRef = useRef<HTMLDivElement>(null);
-  const dragState = useRef({ dragging: false, startX: 0, startScrollLeft: 0, moved: 0 });
+  const dragState = useRef({ startX: 0, dragged: false });
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -64,60 +106,40 @@ const Landing: React.FC = () => {
       .finally(() => setChecking(false));
   }, [authError, navigate]);
 
-  // Detecta qué tarjeta está centrada en el carrusel mientras el usuario
-  // desliza, para resaltar el indicador de puntos correspondiente.
-  useEffect(() => {
-    const track = trackRef.current;
-    if (!track) return;
-
-    const handleScroll = () => {
-      const cardWidth = track.scrollWidth / PLATFORM_CARDS.length;
-      const index = Math.round(track.scrollLeft / cardWidth);
-      setActiveIndex(Math.min(Math.max(index, 0), PLATFORM_CARDS.length - 1));
-    };
-
-    track.addEventListener('scroll', handleScroll, { passive: true });
-    return () => track.removeEventListener('scroll', handleScroll);
-  }, []);
-
-  const scrollToCard = (index: number) => {
-    const track = trackRef.current;
-    if (!track) return;
-    const clamped = Math.min(Math.max(index, 0), PLATFORM_CARDS.length - 1);
-    const cardWidth = track.scrollWidth / PLATFORM_CARDS.length;
-    track.scrollTo({ left: cardWidth * clamped, behavior: 'smooth' });
+  const goTo = (index: number) => {
+    const length = PLATFORM_CARDS.length;
+    setActiveIndex(((index % length) + length) % length);
   };
 
-  // Arrastre con ratón/trackpad para escritorio (el scroll-snap nativo por
-  // sí solo solo responde bien al dedo en móvil o a gestos de dos dedos).
+  // Arrastre (dedo o ratón, Pointer Events cubre ambos) sobre el mazo: si
+  // se supera el umbral, avanza o retrocede una carta. No es un seguimiento
+  // 1:1 del dedo (el efecto de baraja con rotación no se presta bien a
+  // interpolar continuamente); es un gesto de "deslizar para pasar página".
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    const track = trackRef.current;
-    if (!track) return;
-    dragState.current = { dragging: true, startX: event.clientX, startScrollLeft: track.scrollLeft, moved: 0 };
-    track.setPointerCapture(event.pointerId);
+    dragState.current = { startX: event.clientX, dragged: false };
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    const track = trackRef.current;
-    if (!track || !dragState.current.dragging) return;
-    const delta = event.clientX - dragState.current.startX;
-    dragState.current.moved = Math.max(dragState.current.moved, Math.abs(delta));
-    track.scrollLeft = dragState.current.startScrollLeft - delta;
-  };
-
-  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    const track = trackRef.current;
-    if (track) track.releasePointerCapture(event.pointerId);
-    dragState.current.dragging = false;
-  };
-
-  // Si el usuario arrastró más del umbral, cancelamos el click para que no
-  // navegue accidentalmente al soltar el ratón sobre la tarjeta.
-  const handleCardClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (dragState.current.moved > DRAG_THRESHOLD_PX) {
-      event.preventDefault();
+    if (Math.abs(event.clientX - dragState.current.startX) > 5) {
+      dragState.current.dragged = true;
     }
   };
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const delta = event.clientX - dragState.current.startX;
+    if (Math.abs(delta) > SWIPE_THRESHOLD_PX) {
+      goTo(activeIndex + (delta < 0 ? 1 : -1));
+    }
+  };
+
+  const handleCardClick = (index: number) => {
+    // Si el puntero se movió más de unos pocos píxeles fue un arrastre, no
+    // un tap de selección; el arrastre ya se gestionó en handlePointerUp.
+    if (dragState.current.dragged) return;
+    goTo(index);
+  };
+
+  const activeCard = PLATFORM_CARDS[activeIndex];
 
   return (
     <div className="page landing">
@@ -139,50 +161,42 @@ const Landing: React.FC = () => {
 
       {!checking && (
         <div className="platform-picker">
-          <p className="platform-picker-hint">Elige una plataforma</p>
+          <p className="platform-picker-hint">Desliza o elige una plataforma</p>
 
-          <div className="carousel-row">
-            <button
-              type="button"
-              className="carousel-arrow"
-              aria-label="Plataforma anterior"
-              disabled={activeIndex === 0}
-              onClick={() => scrollToCard(activeIndex - 1)}
-            >
+          <div className="deck-row">
+            <button type="button" className="carousel-arrow" aria-label="Plataforma anterior" onClick={() => goTo(activeIndex - 1)}>
               ‹
             </button>
 
             <div
-              className="card-carousel"
-              ref={trackRef}
+              className="card-deck"
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
-              onPointerUp={endDrag}
-              onPointerLeave={endDrag}
+              onPointerUp={handlePointerUp}
             >
-              {PLATFORM_CARDS.map((card) => (
-                <a
-                  key={card.platform}
-                  href={api.loginUrl(card.platform)}
-                  className={`platform-card ${card.cardClassName}`}
-                  onClick={handleCardClick}
-                  draggable={false}
-                >
-                  <span className="platform-card-icon">{card.icon}</span>
-                  <span className="platform-card-name">{card.name}</span>
-                  <span className="platform-card-description">{card.description}</span>
-                  <span className="platform-card-cta">Conectar con {card.name} →</span>
-                </a>
-              ))}
+              {PLATFORM_CARDS.map((card, index) => {
+                const offset = relativeOffset(index, activeIndex, PLATFORM_CARDS.length);
+                const isActive = offset === 0;
+                return (
+                  <div
+                    key={card.name}
+                    className={`platform-card ${card.cardClassName} ${isActive ? 'platform-card--active' : ''}`}
+                    style={cardStyle(offset)}
+                    onClick={() => !isActive && handleCardClick(index)}
+                    role={isActive ? undefined : 'button'}
+                    aria-label={isActive ? undefined : `Seleccionar ${card.name}`}
+                    tabIndex={isActive ? -1 : 0}
+                  >
+                    {card.comingSoon && <span className="coming-soon-badge">Coming Soon</span>}
+                    <span className="platform-card-icon">{card.icon}</span>
+                    <span className="platform-card-name">{card.name}</span>
+                    <span className="platform-card-description">{card.description}</span>
+                  </div>
+                );
+              })}
             </div>
 
-            <button
-              type="button"
-              className="carousel-arrow"
-              aria-label="Siguiente plataforma"
-              disabled={activeIndex === PLATFORM_CARDS.length - 1}
-              onClick={() => scrollToCard(activeIndex + 1)}
-            >
+            <button type="button" className="carousel-arrow" aria-label="Siguiente plataforma" onClick={() => goTo(activeIndex + 1)}>
               ›
             </button>
           </div>
@@ -190,14 +204,24 @@ const Landing: React.FC = () => {
           <div className="carousel-dots">
             {PLATFORM_CARDS.map((card, index) => (
               <button
-                key={card.platform}
+                key={card.name}
                 type="button"
                 aria-label={`Ir a la tarjeta de ${card.name}`}
                 className={`carousel-dot ${index === activeIndex ? 'carousel-dot--active' : ''}`}
-                onClick={() => scrollToCard(index)}
+                onClick={() => goTo(index)}
               />
             ))}
           </div>
+
+          {activeCard.comingSoon || !activeCard.platform ? (
+            <button type="button" className="btn-primary deck-cta deck-cta--disabled" disabled>
+              Próximamente
+            </button>
+          ) : (
+            <a className="btn-primary deck-cta" href={api.loginUrl(activeCard.platform)}>
+              Conectar con {activeCard.name} →
+            </a>
+          )}
         </div>
       )}
     </div>
