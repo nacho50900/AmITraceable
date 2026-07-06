@@ -3,7 +3,7 @@
 We are following the [Arc42](https://github.com/arc42/arc42-template) template.
 
 The documentation is compiled locally and deployed to GitHub pages.
-The deployment url is: [https://arquisoft.github.io/yovi_en1b/](https://arquisoft.github.io/yovi_en1b/).
+The deployment url is: [https://arquisoft.github.io/yovi_en1b/](https://nacho50900.github.io/AmITraceable/).
 
 ## Requirements
 
