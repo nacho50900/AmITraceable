@@ -1,67 +1,107 @@
 ifndef::imagesdir[:imagesdir: ../images]
 
 [[section-runtime-view]]
-== Runtime View
+== Vista de tiempo de ejecución
 
+=== Escenario 1: Autenticación y consentimiento (Reddit)
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-.Contents
-The runtime view describes concrete behavior and interactions of the system’s building blocks in form of scenarios from the following areas:
+Flujo OAuth 2.0 completo desde que el usuario elige "Conectar con
+Reddit" en el mazo de cartas hasta que llega autenticado al dashboard.
 
-* important use cases or features: how do building blocks execute them?
-* interactions at critical external interfaces: how do building blocks cooperate with users and neighboring systems?
-* operation and administration: launch, start-up, stop
-* error and exception scenarios
-
-Remark: The main criterion for the choice of possible scenarios (sequences, workflows) is their *architectural relevance*. It is *not* important to describe a large number of scenarios. You should rather document a representative selection.
-
-.Motivation
-You should understand how (instances of) building blocks of your system perform their job and communicate at runtime.
-You will mainly capture scenarios in your documentation to communicate your architecture to stakeholders that are less willing or able to read and understand the static models (building block view, deployment view).
-
-.Form
-There are many notations for describing scenarios, e.g.
-
-* numbered list of steps (in natural language)
-* activity diagrams or flow charts
-* sequence diagrams
-* BPMN or EPCs (event process chains)
-* state machines
-* ...
-
-
-.Further Information
-
-See https://docs.arc42.org/section-6/[Runtime View] in the arc42 documentation.
-
-****
-endif::arc42help[]
-
-=== <Runtime Scenario 1>
-
-
-* _<insert runtime diagram or textual description of the scenario>_
-* _<insert description of the notable aspects of the interactions between the
-building block instances depicted in this diagram.>_
-
-It is possible to use a sequence diagram:
-
-[plantuml,"Sequence diagram",png]
+[plantuml, "Secuencia OAuth Reddit", png]
 ----
-actor Alice
-actor Bob
-database Pod as "Bob's Pod"
-Alice -> Bob: Authentication Request
-Bob --> Alice: Authentication Response
-Alice  --> Pod: Store route
-Alice -> Bob: Another authentication Request
-Alice <-- Bob: another authentication Response
+actor Usuario
+participant "webapp\n(Landing)" as FE
+participant "users\n(reddit_oauth.py)" as BE
+participant "Reddit\n(authorize + token)" as Reddit
+
+Usuario -> FE: Selecciona carta "Reddit" y pulsa "Conectar"
+FE -> BE: GET /auth/reddit/login
+BE -> BE: genera state (CSRF), lo guarda en sesión
+BE --> Usuario: 307 redirect a Reddit (authorize)
+Usuario -> Reddit: Pantalla de consentimiento
+Reddit --> Usuario: aprueba
+Reddit -> BE: GET /auth/reddit/callback?code=...&state=...
+BE -> BE: valida state
+BE -> Reddit: POST /api/v1/access_token (code -> access_token)
+Reddit --> BE: access_token
+BE -> BE: guarda access_token en cookie de sesión firmada
+BE --> Usuario: 307 redirect a /dashboard?platform=reddit
+Usuario -> FE: GET /dashboard?platform=reddit
 ----
 
-=== <Runtime Scenario 2>
+=== Escenario 2: Autenticación y consentimiento (Instagram)
 
-=== ...
+Mismo patrón que Reddit, con un paso adicional: Instagram exige canjear
+el token corto por uno de larga duración (60 días).
 
-=== <Runtime Scenario n>
+[plantuml, "Secuencia OAuth Instagram", png]
+----
+actor Usuario
+participant "webapp\n(Landing)" as FE
+participant "users\n(instagram_oauth.py)" as BE
+participant "Instagram\n(authorize + token)" as IG
+
+Usuario -> FE: Selecciona carta "Instagram" y pulsa "Conectar"
+FE -> BE: GET /auth/instagram/login
+BE --> Usuario: 307 redirect a Instagram (authorize)
+Usuario -> IG: Pantalla de consentimiento (cuenta Business/Creator)
+IG --> Usuario: aprueba
+IG -> BE: GET /auth/instagram/callback?code=...&state=...
+BE -> IG: POST /oauth/access_token (code -> token corto)
+IG --> BE: access_token corto + user_id
+BE -> IG: GET /access_token?grant_type=ig_exchange_token
+IG --> BE: access_token largo (60 días)
+BE -> BE: guarda access_token + user_id en cookie de sesión
+BE --> Usuario: 307 redirect a /dashboard?platform=instagram
+----
+
+=== Escenario 3: Pipeline de análisis
+
+Ocurre por completo en memoria durante una única petición HTTP; no se
+escribe nada a disco en ningún punto.
+
+[plantuml, "Secuencia de análisis", png]
+----
+participant "webapp\n(Dashboard)" as FE
+participant "analysis_router" as Router
+participant "{platform}_client" as Client
+participant "nlp.fingerprint" as FP
+participant "nlp.attribute_inference" as Attr
+participant "scoring.privacy_score" as Score
+participant "report.generator" as Report
+
+FE -> Router: POST /api/analyze/{platform}
+Router -> Router: busca factory de la plataforma en el diccionario
+Router -> Client: construye cliente con el token de sesión
+Client -> Client: llama a la API externa (perfil + posts/media)
+Client --> Router: SocialProfile (posts normalizados)
+Router -> FP: build_fingerprint(posts)
+FP --> Router: WritingFingerprint
+Router -> Attr: infer_attributes(posts)
+Attr --> Router: [InferredAttribute]
+Router -> Score: compute_score(posts, fingerprint, attrs)
+Score --> Router: PrivacyScore
+Router -> Report: generate_report(platform, ...)
+Report --> Router: ExposureReport
+Router --> FE: 200 OK (JSON ExposureReport)
+----
+
+=== Escenario 4: Integración continua (push a `main`)
+
+[plantuml, "Secuencia de CI", png]
+----
+actor Dev
+participant "GitHub" as GH
+participant "GitHub Actions\n(build.yml)" as CI
+participant "SonarCloud" as Sonar
+
+Dev -> GH: git push (main)
+GH -> CI: dispara workflow build.yml
+CI -> CI: cache npm (webapp) / pip (users), instala si falta
+CI -> CI: npm run test:coverage (webapp) -> lcov.info
+CI -> CI: pytest --cov=app --cov-report=xml (users) -> coverage.xml
+CI -> Sonar: sonar-scanner (fuentes + coberturas)
+Sonar --> CI: resultado del Quality Gate
+CI --> Dev: estado del workflow (verde/rojo) en GitHub
+----

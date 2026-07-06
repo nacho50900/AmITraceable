@@ -1,101 +1,145 @@
 ifndef::imagesdir[:imagesdir: ../images]
 
 [[section-introduction-and-goals]]
-== Introduction and Goals
+== Introducción y objetivos
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-Describes the relevant requirements and the driving forces that software architects and development team must consider. 
-These include
+=== Descripción general
 
-* underlying business goals, 
-* essential features, 
-* essential functional requirements, 
-* quality goals for the architecture and
-* relevant stakeholders and their expectations
-****
-endif::arc42help[]
+AmITraceable es una aplicación web que permite a un usuario autenticarse
+con sus propias cuentas de redes sociales (Reddit e Instagram en la
+versión actual) y obtener un informe de cuánta información personal puede
+inferirse de su actividad pública: patrones de escritura, horarios de
+actividad, temas recurrentes, y datos personales indirectamente
+deducibles (ubicación aproximada, ocupación, rutina).
 
-=== Requirements Overview
+El objetivo es **educativo y defensivo**: que el usuario entienda su nivel
+de exposición real antes de que lo haga alguien con intenciones
+maliciosas (razonamiento OSINT/deanonimización aplicado sobre la propia
+cuenta, con consentimiento explícito).
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-.Contents
-Short description of the functional requirements, driving forces, extract (or abstract)
-of requirements. Link to (hopefully existing) requirements documents
-(with version number and information where to find it).
+=== Origen y evolución del alcance
 
-.Motivation
-From the point of view of the end users a system is created or modified to
-improve support of a business activity and/or improve the quality.
+La propuesta original planteaba una herramienta de correlación de
+identidades entre múltiples plataformas (Instagram, Twitter/X, Reddit)
+con un motor de deanonimización cruzada. Tras la revisión inicial, se
+redujo el alcance por tres motivos:
 
-.Form
-Short textual description, probably in tabular use-case format.
-If requirements documents exist this overview should refer to these documents.
+* **Viabilidad técnica de las APIs**: Twitter/X tiene un acceso de pago
+  restrictivo; la API de Instagram (Graph API / Business Login) solo da
+  acceso a cuentas profesionales (Business o Creator), no a cuentas
+  personales arbitrarias; Reddit exige aprobación previa desde el cambio
+  de política "Responsible Builder Policy" (nov. 2025).
+* **Alcance razonable para un TFG**: un motor de correlación entre
+  plataformas con embeddings, más scoring, más frontend con grafo, más
+  cumplimiento RGPD, equivalía a 2-3 TFGs.
+* **Tensión ética**: correlacionar identidades entre plataformas
+  implicaría comparar contra cuentas de terceros sin su consentimiento,
+  lo cual entra en conflicto con el enfoque defensivo del proyecto.
 
-Keep these excerpts as short as possible. Balance readability of this document with potential redundancy w.r.t to requirements documents.
+El resultado es un **MVP multiplataforma simétrico** (Reddit + Instagram,
+con soporte para X ya preparado en la interfaz mientras se resuelve el
+acceso a su API), en el que cada plataforma analiza *únicamente la cuenta
+autenticada del propio usuario*, y la correlación entre plataformas queda
+explícitamente fuera de alcance como trabajo futuro.
 
+=== Requisitos funcionales principales
 
-.Further Information
+[cols="1,3", options="header"]
+|===
+| Requisito | Descripción
 
-See https://docs.arc42.org/section-1/[Introduction and Goals] in the arc42 documentation.
+| RF-1 Autenticación por plataforma
+| El usuario se autentica vía OAuth 2.0 (Reddit, Instagram) con permisos
+  de solo lectura. Consentimiento explícito y revocable en cualquier
+  momento desde la propia plataforma.
 
-****
-endif::arc42help[]
+| RF-2 Extracción de datos públicos
+| Se extraen posts, comentarios o media, con metadatos públicos
+  (timestamp, comunidad/etiqueta, texto, engagement).
 
-=== Quality Goals
+| RF-3 Fingerprinting de escritura
+| Análisis lingüístico: longitud de frase, riqueza de vocabulario, uso de
+  emojis, patrón horario, idioma, keywords recurrentes (TF-IDF).
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-.Contents
-The top three (max five) quality goals for the architecture whose fulfillment is of highest importance to the major stakeholders. 
-We really mean quality goals for the architecture. Don't confuse them with project goals.
-They are not necessarily identical.
+| RF-4 Inferencia de atributos personales
+| Heurísticas explicables (no modelos de caja negra) para inferir
+  ubicación, ocupación y rutina a partir del contenido.
 
-Consider this overview of potential topics (based upon the ISO 25010 standard):
+| RF-5 Scoring de exposición
+| Puntuación 0-100 ponderando riesgo de geolocalización, datos
+  inferibles y facilidad de deanonimización.
 
-image::01_2_iso-25010-topics-EN.drawio.png["Categories of Quality Requirements"]
+| RF-6 Informe con recomendaciones
+| Informe final con explicación de cada componente del score y
+  recomendaciones concretas y accionables.
+|===
 
-.Motivation
-You should know the quality goals of your most important stakeholders, since they will influence fundamental architectural decisions. 
-Make sure to be very concrete about these qualities, avoid buzzwords.
-If you as an architect do not know how the quality of your work will be judged...
+=== Objetivos de calidad
 
-.Form
-A table with quality goals and concrete scenarios, ordered by priorities
-****
-endif::arc42help[]
+[cols="1,2,3", options="header"]
+|===
+| Prioridad | Objetivo de calidad | Escenario concreto
+
+| 1
+| Privacidad por diseño (RGPD)
+| Ningún dato del usuario se persiste en disco ni base de datos; cerrar
+  sesión elimina cualquier rastro. Alcance de OAuth mínimo por
+  plataforma.
+
+| 2
+| Explicabilidad
+| Cada atributo inferido debe venir acompañado de su nivel de confianza y
+  la evidencia (enlaces a los posts) que lo justifica — nunca una
+  afirmación sin trazabilidad.
+
+| 3
+| Extensibilidad multiplataforma
+| Añadir una plataforma nueva no debe requerir tocar la lógica de las
+  plataformas existentes (modelo `SocialPost`/`SocialProfile` genérico,
+  registro por diccionario de factories en el router de análisis).
+
+| 4
+| Fiabilidad verificable
+| Cobertura de tests significativa en ambos servicios (93%+ en el
+  backend Python en la versión actual), con integraciones externas
+  (Reddit, Instagram) mockeadas, no dependientes de red real.
+
+| 5
+| Usabilidad del consentimiento
+| La pantalla de conexión debe dejar explícito, antes de cualquier
+  acción, qué se analiza, qué no, y que no hay persistencia.
+|===
 
 === Stakeholders
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-.Contents
-Explicit overview of stakeholders of the system, i.e. all person, roles or organizations that
-
-* should know the architecture
-* have to be convinced of the architecture
-* have to work with the architecture or with code
-* need the documentation of the architecture for their work
-* have to come up with decisions about the system or its development
-
-.Motivation
-You should know all parties involved in development of the system or affected by the system.
-Otherwise, you may get nasty surprises later in the development process.
-These stakeholders determine the extent and the level of detail of your work and its results.
-
-.Form
-Table with role names, person names, and their expectations with respect to the architecture and its documentation.
-****
-endif::arc42help[]
-
-[options="header",cols="1,2,2"]
+[cols="1,2,3", options="header"]
 |===
-|Role/Name|Contact|Expectations
-| _<Role-1>_ | _<Contact-1>_ | _<Expectation-1>_
-| _<Role-2>_ | _<Contact-2>_ | _<Expectation-2>_
+| Rol | Quién | Expectativas
+
+| Autor / desarrollador
+| Estudiante de Ingeniería Informática (TFG)
+| Entregar un sistema funcional, defendible técnica y éticamente, dentro
+  del calendario académico.
+
+| Tutor/a del TFG
+| Profesorado supervisor
+| Rigor técnico, trazabilidad de decisiones (ADRs), cumplimiento RGPD
+  real y no solo nominal, calidad de la memoria.
+
+| Tribunal evaluador
+| Comité de evaluación del TFG
+| Poder cuestionar cualquier decisión de diseño y recibir una
+  justificación coherente (alcance, seguridad, límites conocidos).
+
+| Usuarios de prueba
+| Compañeros/amigos con cuenta de Instagram Creator añadidos como
+  testers de la app de Meta
+| Que el análisis sea rápido, que quede claro qué se está leyendo de su
+  cuenta, y que puedan revocar el acceso fácilmente.
+
+| Plataformas externas (Reddit, Meta/Instagram)
+| Reddit Inc., Meta Platforms
+| Cumplimiento de sus políticas de desarrollador (Responsible Builder
+  Policy de Reddit, Platform Terms de Meta) y de los límites de uso de
+  sus APIs.
 |===

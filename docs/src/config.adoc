@@ -7,4 +7,5 @@
 
 // where are images located?
 :imagesdir: ./images
-:arc42help:
+// :arc42help: -- desactivado: esta es la versión rellenada con contenido
+// real del proyecto, no la plantilla de ayuda.

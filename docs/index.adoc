@@ -6,10 +6,10 @@
 // configure EN settings for asciidoc
 include::src/config.adoc[]
 
-= image:arc42-logo.png[arc42] yovi_en1b
-:revnumber: 8.2 EN
-:revdate: January 2023
-:revremark: (based upon AsciiDoc version)
+= image:arc42-logo.png[arc42] AmITraceable
+:revnumber: 1.0
+:revdate: Julio 2026
+:revremark: Documentación de arquitectura del TFG (basada en la plantilla arc42 8.2 EN)
 // toc-title definition MUST follow document title without blank line!
 :toc-title: Table of Contents
 

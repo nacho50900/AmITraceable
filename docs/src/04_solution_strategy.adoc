@@ -1,34 +1,67 @@
 ifndef::imagesdir[:imagesdir: ../images]
 
 [[section-solution-strategy]]
-== Solution Strategy
+== Estrategia de solución
 
+[cols="1,3", options="header"]
+|===
+| Decisión | Motivación
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-.Contents
-A short summary and explanation of the fundamental decisions and solution strategies, that shape system architecture. It includes
+| Consentimiento explícito vía OAuth como único punto de entrada de datos
+| Resuelve de raíz la mayor parte de las objeciones RGPD de la propuesta
+  original (que planteaba analizar cuentas de terceros). Es también el
+  verdadero límite de confianza del sistema: ninguna modificación del
+  código publicado permite obtener un `access_token` sin que el titular
+  real de la cuenta pase por la pantalla de autorización de la
+  plataforma (ver <<section-concepts>>, "Seguridad y límite de
+  confianza").
 
-* technology decisions
-* decisions about the top-level decomposition of the system, e.g. usage of an architectural pattern or design pattern
-* decisions on how to achieve key quality goals
-* relevant organizational decisions, e.g. selecting a development process or delegating certain tasks to third parties.
+| Backend Python (FastAPI) en vez de reutilizar el servicio Node de la
+  plantilla
+| El ecosistema de NLP necesario (spaCy, TF-IDF vía scikit-learn) es
+  nativo de Python. Se mantiene la carpeta `users/` y toda su
+  infraestructura circundante (Docker, Prometheus/Grafana, tests, CI) de
+  la plantilla universitaria, sustituyendo únicamente el contenido.
 
-.Motivation
-These decisions form the cornerstones for your architecture. They are the foundation for many other detailed decisions or implementation rules.
+| Modelo de datos genérico (`SocialPost`/`SocialProfile`) en vez de un
+  modelo específico de una plataforma reutilizado para las demás
+| La primera versión de la integración de Instagram normalizaba su media
+  directamente al modelo `RedditPost` (reutilizando el campo `subreddit`
+  para el hashtag, por ejemplo). Se refactorizó a un modelo neutro
+  (`group`, `score`, `platform`) para que el pipeline de
+  fingerprinting/scoring no tuviera ninguna noción de "la plataforma
+  original era Reddit".
 
-.Form
-Keep the explanations of such key decisions short.
+| Arquitectura simétrica por plataforma
+| Una única ruta `/api/analyze/{platform}` con un diccionario de
+  factories (`_PLATFORM_CLIENT_FACTORIES`) en vez de una ruta principal
+  (Reddit) con las demás plataformas colgando como casos especiales.
+  Añadir una plataforma nueva es añadir una función factory y una
+  entrada en el diccionario, sin tocar el resto.
 
-Motivate what was decided and why it was decided that way,
-based upon problem statement, quality goals and key constraints.
-Refer to details in the following sections.
+| Reducción de alcance a un MVP verificable
+| Se descartó el motor de correlación de identidades entre plataformas
+  (módulo 3 de la propuesta original) por su tensión ética (requeriría
+  comparar contra cuentas de terceros sin consentimiento) y su coste de
+  desarrollo. Queda documentado como trabajo futuro.
 
+| Heurísticas explicables en vez de modelos de inferencia más agresivos
+| La inferencia de atributos personales (ubicación, ocupación, rutina)
+  usa listas curadas + regex, con nivel de confianza y evidencia
+  trazable por cada resultado. Prioriza la explicabilidad sobre la
+  sofisticación, coherente con el objetivo defensivo/educativo del
+  proyecto.
 
-.Further Information
+| Reutilización de infraestructura de la asignatura ASW
+| Docker Compose, Prometheus/Grafana, GitHub Actions y SonarCloud se
+  heredan de la plantilla `yovi_en1b` en vez de construirse desde cero,
+  liberando tiempo de desarrollo para la lógica de dominio propia del
+  TFG.
 
-See https://docs.arc42.org/section-4/[Solution Strategy] in the arc42 documentation.
-
-****
-endif::arc42help[]
+| Rechazo explícito de comprobaciones de integridad del lado del cliente
+| Se valoró (y se descartó) proteger el OAuth con una verificación de
+  hash del código cliente. En software open source esa comprobación es
+  trivialmente evadible por quien controla el entorno de ejecución; el
+  verdadero control de acceso ya lo impone el servidor de autorización
+  de cada plataforma, no el código propio.
+|===

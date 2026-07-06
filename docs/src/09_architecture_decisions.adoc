@@ -1,37 +1,121 @@
 ifndef::imagesdir[:imagesdir: ../images]
 
 [[section-design-decisions]]
-== Architecture Decisions
+== Decisiones de arquitectura
 
+Se documentan como ADR abreviados (contexto / decisión / consecuencias).
+Las decisiones de mayor calado ya se resumieron en
+<<section-solution-strategy>>; aquí se detallan con sus alternativas
+consideradas.
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-.Contents
-Important, expensive, large scale or risky architecture decisions including rationales.
-With "decisions" we mean selecting one alternative based on given criteria.
+=== ADR-1: Reducir el alcance a un MVP multiplataforma simple
 
-Please use your judgement to decide whether an architectural decision should be documented
-here in this central section or whether you better document it locally
-(e.g. within the white box template of one building block).
+*Contexto*: la propuesta original incluía correlación de identidades
+entre Instagram, Twitter/X y Reddit mediante embeddings y clustering.
 
-Avoid redundancy. 
-Refer to section 4, where you already captured the most important decisions of your architecture.
+*Decisión*: MVP centrado en análisis por plataforma individual (Reddit,
+luego Instagram), sin correlación cruzada.
 
-.Motivation
-Stakeholders of your system should be able to comprehend and retrace your decisions.
+*Consecuencias*: (+) alcance viable para un TFG; (+) evita la tensión
+ética de comparar contra cuentas de terceros sin consentimiento;
+(-) el módulo de correlación entre plataformas queda como trabajo
+futuro, sin implementar.
 
-.Form
-Various options:
+=== ADR-2: Backend en Python (FastAPI) sobre el servicio Node heredado
 
-* ADR (https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions[Documenting Architecture Decisions]) for every important decision
-* List or table, ordered by importance and consequences or:
-* more detailed in form of separate sections per decision
+*Contexto*: la plantilla universitaria (`yovi_en1b`) traía un servicio
+`users` en Node/Express.
 
-.Further Information
+*Alternativas consideradas*: mantener Node y llamar a un
+microservicio Python aparte solo para NLP; reescribir todo en Node
+usando bindings de NLP menos maduros.
 
-See https://docs.arc42.org/section-9/[Architecture Decisions] in the arc42 documentation.
-There you will find links and examples about ADR.
+*Decisión*: sustituir el contenido de `users/` por Python/FastAPI
+completo, conservando la carpeta y la infraestructura circundante.
 
-****
-endif::arc42help[]
+*Consecuencias*: (+) acceso directo al ecosistema NLP de Python
+(spaCy, scikit-learn) sin llamadas entre servicios; (-) hubo que
+reescribir el Dockerfile, los tests y adaptar el instrumentador de
+métricas a un paquete distinto (`prometheus-fastapi-instrumentator`
+frente a `express-prom-bundle`).
+
+=== ADR-3: Sin persistencia (procesamiento 100% en memoria)
+
+*Contexto*: cumplimiento RGPD y minimización de datos.
+
+*Decisión*: ninguna base de datos; el único estado entre peticiones es
+una cookie de sesión firmada con el `access_token`.
+
+*Consecuencias*: (+) cerrar sesión elimina cualquier rastro del
+usuario en el sistema; (+) simplifica drásticamente el argumentario
+RGPD de la memoria; (-) no hay histórico de análisis previos ni
+posibilidad de comparar la evolución del score en el tiempo (aceptado
+como limitación conocida).
+
+=== ADR-4: Modelo de datos genérico tras detectar acoplamiento a Reddit
+
+*Contexto*: la primera integración de Instagram normalizaba su media
+directamente al modelo `RedditPost`, reutilizando el campo `subreddit`
+para el hashtag y forzando una arquitectura "Reddit como plataforma
+principal, Instagram adaptándose a su modelo".
+
+*Decisión*: refactor a `SocialPost`/`SocialProfile` con campos neutros
+(`group`, `score`, `platform`), y unificación de la ruta de análisis a
+`/api/analyze/{platform}` con un diccionario de factories.
+
+*Consecuencias*: (+) añadir una plataforma nueva no requiere adaptar
+modelos ajenos; (+) cobertura de tests más simétrica entre plataformas
+(pasó de 84% a 93% al parejar los tests de Reddit con los ya existentes
+de Instagram); (-) coste de refactor no trivial una vez el código ya
+estaba en producción de pruebas.
+
+=== ADR-5: Rechazo de verificación de integridad del lado del cliente
+
+*Contexto*: al ser el código open source, se planteó proteger el flujo
+OAuth con una comprobación de hash del código cliente antes de permitir
+su ejecución.
+
+*Decisión*: no implementar esa protección.
+
+*Justificación*: en software open source, cualquier comprobación que
+viva en el mismo código que se distribuye es evadible por quien
+controla el entorno de ejecución (comentar la comprobación, recalcular
+el hash esperado, ejecutar con depurador). El límite de confianza real
+del sistema es el servidor de autorización OAuth de cada plataforma, no
+el código propio: ninguna modificación del cliente permite obtener un
+`access_token` sin el consentimiento explícito del titular de la cuenta
+en la pantalla de la propia plataforma.
+
+*Consecuencias*: (+) se evita invertir esfuerzo en una protección
+inefectiva y fácilmente cuestionable ante un tribunal técnico; (+) la
+memoria puede argumentar correctamente dónde está el verdadero límite
+de confianza del sistema.
+
+=== ADR-6: Rangos de versión en vez de versiones exactas
+
+*Contexto*: varias roturas de entorno (numpy sin wheel para la versión
+de Python del desarrollador, luego `pydantic_core`/`fastapi` con Python
+3.14, y efectos en cadena sobre `respx` y
+`prometheus-fastapi-instrumentator`).
+
+*Decisión*: `requirements.txt`/`requirements-dev.txt` usan rangos
+(`>=x,<y`) en vez de pines exactos.
+
+*Consecuencias*: (+) resiliencia frente a distintas versiones de Python
+entre máquinas de desarrollo y el runner de CI; (-) build ligeramente
+menos determinista (dos instalaciones en momentos distintos pueden
+resolver versiones exactas distintas dentro del rango).
+
+=== ADR-7: Reutilización del monorepo de la asignatura ASW
+
+*Contexto*: la plantilla `yovi_en1b` (Uniovi) ya traía Docker Compose,
+Prometheus/Grafana, GitHub Actions y SonarCloud configurados.
+
+*Decisión*: partir de ese repositorio, eliminando el servicio `gamey`
+(Rust, ajeno al TFG) y sustituyendo el contenido de `users/` (antes
+Node) por el backend Python.
+
+*Consecuencias*: (+) ahorro significativo de tiempo de configuración de
+infraestructura; (-) necesidad de mantener consistencia de convenciones
+heredadas (nombres de servicios, puertos, estructura de carpetas) aunque
+el dominio del proyecto no tenga relación con el original.

@@ -1,100 +1,91 @@
 ifndef::imagesdir[:imagesdir: ../images]
 
 [[section-deployment-view]]
+== Vista de despliegue
 
+=== Infraestructura nivel 1: entornos
 
-== Deployment View
+[cols="1,2,2", options="header"]
+|===
+| Entorno | Cómo se levanta | Uso
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-.Content
-The deployment view describes:
+| Desarrollo local (sin Docker)
+| `uvicorn app.main:app --reload --port 3000` (backend, dentro de un
+  venv Python) + `npm run dev` (frontend, Vite en puerto 5173)
+| Desarrollo día a día; permite hot-reload en ambos lados.
 
- 1. technical infrastructure used to execute your system, with infrastructure elements like geographical locations, environments, computers, processors, channels and net topologies as well as other infrastructure elements and
+| Local con Docker
+| `docker-compose up --build` desde la raíz del repo
+| Prueba del sistema completo tal como se desplegaría, incluida
+  monitorización.
 
-2. mapping of (software) building blocks to that infrastructure elements.
+| Integración continua (CI)
+| GitHub Actions, runners `ubuntu-latest`
+| Ejecución de tests + análisis SonarCloud en cada push/PR a `main`.
 
-Often systems are executed in different environments, e.g. development environment, test environment, production environment. In such cases you should document all relevant environments.
+| Publicación de imágenes
+| `release-deploy.yml`, disparado al publicar un release en GitHub
+| Build y publicación de imágenes Docker de `users` y `webapp` en GHCR
+  (`ghcr.io`).
+|===
 
-Especially document a deployment view if your software is executed as distributed system with more than one computer, processor, server or container or when you design and construct your own hardware processors and chips.
+=== Infraestructura nivel 1: despliegue con Docker Compose
 
-From a software perspective it is sufficient to capture only those elements of an infrastructure that are needed to show a deployment of your building blocks. Hardware architects can go beyond that and describe an infrastructure to any level of detail they need to capture.
+[source]
+----
++--------------------------------------------------------------------+
+|                         Docker host                                 |
+|                                                                       |
+|  red "monitor-net" (bridge)                                          |
+|                                                                       |
+|  +-----------+   +-----------+   +--------------+   +-------------+ |
+|  |  webapp   |   |   users   |   |  prometheus  |   |   grafana   | |
+|  | (nginx)   |   | (uvicorn) |   |              |   |             | |
+|  | :80       |   | :3000     |   | :9090        |   | :9091->3000 | |
+|  +-----------+   +-----------+   +--------------+   +-------------+ |
+|        |               |                |                  |        |
++--------|---------------|----------------|------------------|--------+
+         |               |                |                  |
+     localhost:80   localhost:3000   localhost:9090     localhost:9091
+----
 
-.Motivation
-Software does not run without hardware.
-This underlying infrastructure can and will influence a system and/or some
-cross-cutting concepts. Therefore, there is a need to know the infrastructure.
+Motivación::
+Cada componente en su propio contenedor, en la misma red interna
+(`monitor-net`) para que Prometheus pueda hacer *scrape* de
+`users:3000/metrics` sin exponerlo públicamente más que a través del
+propio backend.
 
-.Form
+Mapeo de bloques a infraestructura::
+[cols="1,2", options="header"]
+|===
+| Contenedor | Building block(s) que aloja
 
-Maybe a highest level deployment diagram is already contained in section 3.2. as
-technical context with your own infrastructure as ONE black box. In this section one can
-zoom into this black box using additional deployment diagrams:
+| `webapp`
+| SPA de React compilada (`vite build`), servida como estáticos por
+  Nginx. Recibe `VITE_API_URL` como build arg apuntando al backend.
 
-* UML offers deployment diagrams to express that view. Use it, probably with nested diagrams,
-when your infrastructure is more complex.
-* When your (hardware) stakeholders prefer other kinds of diagrams rather than a deployment diagram, let them use any kind that is able to show nodes and channels of the infrastructure.
+| `users`
+| Backend FastAPI completo (todos los módulos descritos en
+  <<section-building-block-view>>).
 
+| `prometheus`
+| Recolección de métricas expuestas en `users:3000/metrics`
+  (`prometheus-fastapi-instrumentator`).
 
-.Further Information
+| `grafana`
+| Dashboards sobre las métricas anteriores.
+|===
 
-See https://docs.arc42.org/section-7/[Deployment View] in the arc42 documentation.
+=== Infraestructura nivel 2: runner de CI (GitHub Actions)
 
-****
-endif::arc42help[]
+Motivación::
+Reproducir el entorno de tests sin depender de credenciales reales de
+Reddit/Instagram: las llamadas a las APIs externas se mockean con
+`respx` en los tests, así que el runner no necesita salir a red externa
+más que para instalar dependencias y hablar con SonarCloud.
 
-=== Infrastructure Level 1
-
-ifdef::arc42help[]
-[role="arc42help"]
-****
-Describe (usually in a combination of diagrams, tables, and text):
-
-* distribution of a system to multiple locations, environments, computers, processors, .., as well as physical connections between them
-* important justifications or motivations for this deployment structure
-* quality and/or performance features of this infrastructure
-* mapping of software artifacts to elements of this infrastructure
-
-For multiple environments or alternative deployments please copy and adapt this section of arc42 for all relevant environments.
-****
-endif::arc42help[]
-
-_**<Overview Diagram>**_
-
-Motivation::
-
-_<explanation in text form>_
-
-Quality and/or Performance Features::
-
-_<explanation in text form>_
-
-Mapping of Building Blocks to Infrastructure::
-_<description of the mapping>_
-
-
-=== Infrastructure Level 2
-
-ifdef::arc42help[]
-[role="arc42help"]
-****
-Here you can include the internal structure of (some) infrastructure elements from level 1.
-
-Please copy the structure from level 1 for each selected element.
-****
-endif::arc42help[]
-
-==== _<Infrastructure Element 1>_
-
-_<diagram + explanation>_
-
-==== _<Infrastructure Element 2>_
-
-_<diagram + explanation>_
-
-...
-
-==== _<Infrastructure Element n>_
-
-_<diagram + explanation>_
+Caché::
+`actions/setup-node` y `actions/setup-python` cachean `node_modules`
+(vía `package-lock.json`) y la caché HTTP de `pip` (vía
+`requirements.txt`/`requirements-dev.txt` como clave), evitando
+descargar de cero en cada ejecución si esos ficheros no cambian.

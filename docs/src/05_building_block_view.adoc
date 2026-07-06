@@ -1,225 +1,206 @@
 ifndef::imagesdir[:imagesdir: ../images]
 
 [[section-building-block-view]]
+== Vista de bloques de construcción
 
+=== Caja blanca: sistema completo
 
-== Building Block View
+[source]
+----
++-------------------------------------------------------------+
+|                        AmITraceable                         |
+|                                                               |
+|  +------------------+        +---------------------------+  |
+|  |     webapp       | <----> |          users            |  |
+|  |  React + TS SPA  |  HTTPS |  FastAPI (Python)          |  |
+|  +------------------+        +---------------------------+  |
+|                                     |          |             |
+|                              Prometheus     Reddit /         |
+|                              (/metrics)     Instagram APIs   |
++-------------------------------------------------------------+
+----
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-.Content
-The building block view shows the static decomposition of the system into building blocks (modules, components, subsystems, classes, interfaces, packages, libraries, frameworks, layers, partitions, tiers, functions, macros, operations, data structures, ...) as well as their dependencies (relationships, associations, ...)
+Motivación::
+Separación clásica frontend/backend. El backend es agnóstico de
+plataforma de despliegue (se ejecuta igual en local, en Docker o en el
+runner de CI); el frontend es una SPA estática servida por Nginx en
+producción.
 
-This view is mandatory for every architecture documentation.
-In analogy to a house this is the _floor plan_.
-
-.Motivation
-Maintain an overview of your source code by making its structure understandable through
-abstraction.
-
-This allows you to communicate with your stakeholder on an abstract level without disclosing implementation details.
-
-.Form
-The building block view is a hierarchical collection of black boxes and white boxes
-(see figure below) and their descriptions.
-
-image::05_building_blocks-EN.png["Hierarchy of building blocks"]
-
-*Level 1* is the white box description of the overall system together with black
-box descriptions of all contained building blocks.
-
-*Level 2* zooms into some building blocks of level 1.
-Thus it contains the white box description of selected building blocks of level 1, together with black box descriptions of their internal building blocks.
-
-*Level 3* zooms into selected building blocks of level 2, and so on.
-
-
-.Further Information
-
-See https://docs.arc42.org/section-5/[Building Block View] in the arc42 documentation.
-
-****
-endif::arc42help[]
-
-=== Whitebox Overall System
-
-ifdef::arc42help[]
-[role="arc42help"]
-****
-Here you describe the decomposition of the overall system using the following white box template. It contains
-
- * an overview diagram
- * a motivation for the decomposition
- * black box descriptions of the contained building blocks. For these we offer you alternatives:
-
-   ** use _one_ table for a short and pragmatic overview of all contained building blocks and their interfaces
-   ** use a list of black box descriptions of the building blocks according to the black box template (see below).
-   Depending on your choice of tool this list could be sub-chapters (in text files), sub-pages (in a Wiki) or nested elements (in a modeling tool).
-
-
- * (optional:) important interfaces, that are not explained in the black box templates of a building block, but are very important for understanding the white box.
-Since there are so many ways to specify interfaces why do not provide a specific template for them.
- In the worst case you have to specify and describe syntax, semantics, protocols, error handling,
- restrictions, versions, qualities, necessary compatibilities and many things more.
-In the best case you will get away with examples or simple signatures.
-
-****
-endif::arc42help[]
-
-_**<Overview Diagram>**_
-
-Motivation::
-
-_<text explanation>_
-
-
-Contained Building Blocks::
-_<Description of contained building block (black boxes)>_
-
-Important Interfaces::
-_<Description of important interfaces>_
-
-ifdef::arc42help[]
-[role="arc42help"]
-****
-Insert your explanations of black boxes from level 1:
-
-If you use tabular form you will only describe your black boxes with name and
-responsibility according to the following schema:
-
-[cols="1,2" options="header"]
+Bloques contenidos::
+[cols="1,2", options="header"]
 |===
-| **Name** | **Responsibility**
-| _<black box 1>_ | _<Text>_
-| _<black box 2>_ | _<Text>_
+| Bloque | Responsabilidad
+
+| `webapp`
+| Interfaz de usuario: pantalla de consentimiento/selección de
+  plataforma y dashboard del informe de exposición.
+
+| `users`
+| Lógica de dominio completa: OAuth por plataforma, extracción de datos,
+  fingerprinting, inferencia de atributos, scoring, generación del
+  informe.
+
+| Prometheus / Grafana
+| Observabilidad: métricas HTTP del backend y dashboards.
 |===
 
+Interfaces importantes::
+* `webapp` -> `users`: API REST/JSON documentada automáticamente por
+  FastAPI en `/docs` (OpenAPI).
+* `users` -> Reddit/Instagram: APIs OAuth 2.0 oficiales de cada
+  plataforma (ver <<section-context-and-scope>>).
 
+=== Nivel 2: caja blanca de `users`
 
-If you use a list of black box descriptions then you fill in a separate black box template for every important building block .
-Its headline is the name of the black box.
-****
-endif::arc42help[]
+[source]
+----
+users/app/
+├── main.py                    - Punto de entrada FastAPI, wiring de routers
+├── config.py                  - Configuración (pydantic-settings) desde .env
+├── analysis_router.py         - Endpoint único /api/analyze/{platform}
+├── auth/
+│   ├── reddit_oauth.py        - OAuth Reddit (login/callback/logout/status)
+│   └── instagram_oauth.py     - OAuth Instagram (login/callback/logout/status)
+├── reddit_client.py           - Extracción + normalización a SocialProfile
+├── instagram_client.py        - Extracción + normalización a SocialProfile
+├── models/
+│   └── schemas.py             - SocialPost, SocialProfile, WritingFingerprint,
+│                                 InferredAttribute, PrivacyScore, ExposureReport
+├── nlp/
+│   ├── fingerprint.py          - Módulo 2: fingerprinting de escritura
+│   └── attribute_inference.py  - Inferencia de atributos personales
+├── scoring/
+│   └── privacy_score.py        - Módulo 4: motor de scoring
+└── report/
+    └── generator.py             - Módulo 5: informe + recomendaciones
+----
 
-==== <Name black box 1>
+==== `auth/{platform}_oauth.py`
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-Here you describe <black box 1>
-according the the following black box template:
+Propósito/Responsabilidad::
+Flujo OAuth 2.0 completo de una plataforma: redirección a autorización,
+canje de `code` por `access_token` (con paso intermedio de canje a token
+de larga duración en el caso de Instagram), almacenamiento en cookie de
+sesión firmada, y endpoints de `logout`/`status`.
 
-* Purpose/Responsibility
-* Interface(s), when they are not extracted as separate paragraphs. This interfaces may include qualities and performance characteristics.
-* (Optional) Quality-/Performance characteristics of the black box, e.g.availability, run time behavior, ....
-* (Optional) directory/file location
-* (Optional) Fulfilled requirements (if you need traceability to requirements).
-* (Optional) Open issues/problems/risks
+Interfaces::
+`GET /auth/{platform}/login`, `GET /auth/{platform}/callback`,
+`POST /auth/{platform}/logout`, `GET /auth/{platform}/status`.
 
-****
-endif::arc42help[]
+Características de calidad::
+Sin persistencia; validación de `state` contra CSRF; claves de sesión
+con prefijo de plataforma (`reddit_oauth_state`, `instagram_oauth_state`)
+para que ambas puedan coexistir sin colisión.
 
-_<Purpose/Responsibility>_
+Ubicación::
+`users/app/auth/reddit_oauth.py`, `users/app/auth/instagram_oauth.py`.
 
-_<Interface(s)>_
+==== `{platform}_client.py`
 
-_<(Optional) Quality/Performance Characteristics>_
+Propósito/Responsabilidad::
+Extraer los datos públicos de la cuenta autenticada y normalizarlos al
+modelo genérico `SocialProfile`/`SocialPost`. Aplica el principio de
+minimización de datos: solo se piden los campos necesarios para el
+análisis.
 
-_<(Optional) Directory/File Location>_
+Interfaces::
+Clase `RedditClient`/`InstagramClient` con método asíncrono
+`fetch_profile() -> SocialProfile`.
 
-_<(Optional) Fulfilled Requirements>_
+Ubicación::
+`users/app/reddit_client.py`, `users/app/instagram_client.py`.
 
-_<(optional) Open Issues/Problems/Risks>_
+==== `analysis_router.py`
 
+Propósito/Responsabilidad::
+Orquesta el pipeline común (fingerprint -> inferencia -> scoring ->
+informe) para cualquier plataforma registrada. Resuelve el cliente
+correspondiente a partir de la sesión mediante un diccionario de
+factories (`_PLATFORM_CLIENT_FACTORIES`), sin lógica condicional
+especial por plataforma en el cuerpo del endpoint.
 
+Interfaces::
+`POST /api/analyze/{platform}` -> `ExposureReport`.
 
+Ubicación::
+`users/app/analysis_router.py`.
 
-==== <Name black box 2>
+==== `nlp/fingerprint.py`
 
-_<black box template>_
+Propósito/Responsabilidad::
+Calcula longitud media de frase, riqueza de vocabulario (type-token
+ratio), tasa de uso de emojis, distribución horaria de actividad,
+comunidades/etiquetas más frecuentes (`top_groups`), keywords (TF-IDF) e
+idioma detectado.
 
-==== <Name black box n>
+Ubicación::
+`users/app/nlp/fingerprint.py`.
 
-_<black box template>_
+==== `nlp/attribute_inference.py`
 
+Propósito/Responsabilidad::
+Heurísticas explicables (listas curadas + regex) para inferir
+ubicación, ocupación y rutina, cada una con nivel de confianza y
+evidencia (permalinks).
 
-==== <Name interface 1>
+Ubicación::
+`users/app/nlp/attribute_inference.py`.
 
-...
+==== `scoring/privacy_score.py`
 
-==== <Name interface m>
+Propósito/Responsabilidad::
+Motor de scoring ponderado (0-100): riesgo de geolocalización, datos
+inferibles, facilidad de deanonimización. El componente de
+"consistencia de identidad entre plataformas" está a 0, documentado
+explícitamente como fuera de alcance (no hay correlación entre
+plataformas en esta versión).
 
+Ubicación::
+`users/app/scoring/privacy_score.py`.
 
+==== `report/generator.py`
 
-=== Level 2
+Propósito/Responsabilidad::
+Ensambla el `ExposureReport` final y genera recomendaciones concretas a
+partir de los umbrales del score.
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-Here you can specify the inner structure of (some) building blocks from level 1 as white boxes.
+Ubicación::
+`users/app/report/generator.py`.
 
-You have to decide which building blocks of your system are important enough to justify such a detailed description.
-Please prefer relevance over completeness. Specify important, surprising, risky, complex or volatile building blocks.
-Leave out normal, simple, boring or standardized parts of your system
-****
-endif::arc42help[]
+=== Nivel 2: caja blanca de `webapp`
 
-==== White Box _<building block 1>_
+[source]
+----
+webapp/src/
+├── main.tsx                 - Entrada, enrutado (React Router)
+├── api.ts                   - Cliente HTTP tipado, un método por endpoint
+├── types.ts                 - Tipos TS espejo de los esquemas Pydantic
+├── pages/
+│   ├── Landing.tsx           - Consentimiento + selector de plataforma
+│   └── Dashboard.tsx         - Informe de exposición
+└── components/
+    ├── ScoreBar.tsx           - Barra de riesgo (0-100) con color semántico
+    └── HourlyActivityChart.tsx - Gráfico de actividad horaria (recharts)
+----
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-...describes the internal structure of _building block 1_.
-****
-endif::arc42help[]
+==== `Landing.tsx`
 
-_<white box template>_
+Propósito/Responsabilidad::
+Pantalla de consentimiento explícito y selector de plataforma en forma
+de mazo de cartas deslizable (Reddit, Instagram, X como "Coming Soon"),
+con navegación por arrastre (Pointer Events), flechas y puntos
+indicadores.
 
-==== White Box _<building block 2>_
+Ubicación::
+`webapp/src/pages/Landing.tsx`.
 
+==== `Dashboard.tsx`
 
-_<white box template>_
+Propósito/Responsabilidad::
+Dispara el análisis (`POST /api/analyze/{platform}`) y renderiza el
+informe: score global, atributos inferidos con evidencia, gráfico de
+actividad horaria, perfil de escritura y recomendaciones. Determina la
+plataforma activa por query param (`?platform=reddit|instagram`).
 
-...
-
-==== White Box _<building block m>_
-
-
-_<white box template>_
-
-
-
-=== Level 3
-
-ifdef::arc42help[]
-[role="arc42help"]
-****
-Here you can specify the inner structure of (some) building blocks from level 2 as white boxes.
-
-When you need more detailed levels of your architecture please copy this
-part of arc42 for additional levels.
-****
-endif::arc42help[]
-
-==== White Box <_building block x.1_>
-
-ifdef::arc42help[]
-[role="arc42help"]
-****
-Specifies the internal structure of _building block x.1_.
-****
-endif::arc42help[]
-
-_<white box template>_
-
-
-==== White Box <_building block x.2_>
-
-_<white box template>_
-
-
-
-==== White Box <_building block y.1_>
-
-_<white box template>_
+Ubicación::
+`webapp/src/pages/Dashboard.tsx`.

@@ -1,29 +1,101 @@
 ifndef::imagesdir[:imagesdir: ../images]
 
 [[section-architecture-constraints]]
-== Architecture Constraints
+== Restricciones de arquitectura
 
+=== Restricciones técnicas
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-.Contents
-Any requirement that constraints software architects in their freedom of design and implementation decisions or decision about the development process. These constraints sometimes go beyond individual systems and are valid for whole organizations and companies.
+[cols="1,3", options="header"]
+|===
+| Restricción | Explicación
 
-.Motivation
-Architects should know exactly where they are free in their design decisions and where they must adhere to constraints.
-Constraints must always be dealt with; they may be negotiable, though.
+| Backend en Python
+| Impuesta por el ecosistema de NLP necesario para el fingerprinting de
+  escritura (spaCy, scikit-learn/TF-IDF). Se valoró Rust por rendimiento,
+  pero se descartó: las librerías de NLP que necesitábamos son nativas de
+  Python y no tienen equivalente maduro en Rust.
 
-.Form
-Simple tables of constraints with explanations.
-If needed you can subdivide them into
-technical constraints, organizational and political constraints and
-conventions (e.g. programming or versioning guidelines, documentation or naming conventions)
+| Solo OAuth, nunca scraping
+| Cada plataforma exige autenticación explícita del titular de la
+  cuenta vía su flujo OAuth oficial. No existe ningún camino en el código
+  para leer datos de una cuenta sin que su titular haya pasado por la
+  pantalla de consentimiento de la propia plataforma (Reddit/Instagram).
 
+| Límites de las APIs de terceros
+| Instagram (Business Login) solo da acceso a cuentas profesionales
+  (Business/Creator) vinculadas o no a una Página, nunca a cuentas
+  personales. Reddit exige aprobación previa de acceso a su Data API
+  desde la "Responsible Builder Policy" (nov. 2025) — en desarrollo,
+  solicitado a través del programa Reddit for Researchers. X/Twitter
+  queda fuera del MVP por coste y restricciones de acceso; su tarjeta en
+  el frontend está marcada como "Coming Soon".
 
-.Further Information
+| Sin persistencia
+| No hay base de datos. Restricción de diseño, no solo técnica: es la
+  pieza central del cumplimiento RGPD del proyecto (ver <<section-concepts>>).
 
-See https://docs.arc42.org/section-2/[Architecture Constraints] in the arc42 documentation.
+| Reutilización de plantilla universitaria
+| El proyecto parte del monorepo de prácticas de Arquitectura del
+  Software (`yovi_en1b`, Uniovi), del que se conservan Docker Compose,
+  monitorización Prometheus/Grafana, CI en GitHub Actions y análisis de
+  calidad con SonarCloud. Se eliminó el servicio `gamey` (Rust, ajeno al
+  TFG) y se sustituyó el contenido Node.js de `users/` por el backend
+  Python, manteniendo el nombre de carpeta y toda la infraestructura
+  circundante.
+|===
 
-****
-endif::arc42help[]
+=== Restricciones organizativas
+
+[cols="1,3", options="header"]
+|===
+| Restricción | Explicación
+
+| TFG individual
+| Un único desarrollador, con tutor/a de la titulación. Condiciona el
+  volumen de funcionalidad viable (ver reducción de alcance en
+  <<section-introduction-and-goals>>).
+
+| Calendario académico
+| El acceso a la Data API de Reddit está pendiente de aprobación externa
+  (Reddit for Researchers), fuera del control del proyecto. Mitigado
+  desarrollando y probando el pipeline de análisis con datos sintéticos
+  mientras se resuelve.
+
+| Posible revisión ética
+| El sistema puede inferir categorías especiales de datos (ubicación,
+  ocupación) incluso sobre la propia cuenta del usuario. Pendiente
+  valorar con la universidad si esto requiere paso por comité de ética
+  antes de recoger datos de prueba de terceros (aunque sea con
+  consentimiento).
+|===
+
+=== Convenciones adoptadas
+
+[cols="1,3", options="header"]
+|===
+| Convención | Explicación
+
+| Simetría entre plataformas
+| Ninguna plataforma se trata como "la principal" con las demás
+  colgando de ella como casos especiales. Mismo patrón de rutas
+  (`/auth/{platform}/...`, `/api/analyze/{platform}`), mismo patrón de
+  claves de sesión (`{platform}_oauth_state`, etc.), mismos nombres de
+  archivos de test (`test_reddit_auth.py` / `test_instagram_auth.py`,
+  `test_reddit_client.py` / `test_instagram_client.py`).
+
+| Modelo de datos genérico
+| `SocialPost` / `SocialProfile` (en vez de un modelo específico de
+  Reddit reutilizado para Instagram) para que el pipeline de
+  fingerprinting/scoring/informe sea agnóstico a la plataforma de origen.
+
+| Rangos de versión, no versiones exactas
+| `requirements.txt` usa rangos (`>=x,<y`) en vez de pines exactos
+  (`==x.y.z`), tras sufrir varias roturas por incompatibilidad entre
+  versión de Python y versiones de paquete ancladas a fechas antiguas
+  (ver <<section-technical-risks>>).
+
+| Explicabilidad ante sofisticación
+| Las heurísticas de inferencia de atributos son deliberadamente simples
+  (listas curadas + regex) en vez de modelos de machine learning, para
+  que cualquier resultado se pueda justificar con evidencia trazable.
+|===

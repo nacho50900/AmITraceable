@@ -1,44 +1,111 @@
 ifndef::imagesdir[:imagesdir: ../images]
 
 [[section-glossary]]
-== Glossary
+== Glosario
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-.Contents
-The most important domain and technical terms that your stakeholders use when discussing the system.
-
-You can also see the glossary as source for translations if you work in multi-language teams.
-
-.Motivation
-You should clearly define your terms, so that all stakeholders
-
-* have an identical understanding of these terms
-* do not use synonyms and homonyms
-
-
-.Form
-
-A table with columns <Term> and <Definition>.
-
-Potentially more columns in case you need translations.
-
-
-.Further Information
-
-See https://docs.arc42.org/section-12/[Glossary] in the arc42 documentation.
-
-****
-endif::arc42help[]
-
-[cols="e,2e" options="header"]
+[cols="1,3", options="header"]
 |===
-|Term |Definition
+| Término | Definición
 
-|<Term-1>
-|<definition-1>
+| OSINT
+| Open Source Intelligence. Disciplina de recopilar y analizar
+  información disponible públicamente (redes sociales, registros
+  públicos, etc.) para obtener conclusiones sobre una persona o
+  entidad.
 
-|<Term-2>
-|<definition-2>
+| Deanonimización
+| Proceso de identificar a una persona concreta a partir de datos
+  aparentemente anónimos o dispersos, correlacionando patrones (estilo
+  de escritura, horarios, metadatos).
+
+| RGPD
+| Reglamento General de Protección de Datos (UE 2016/679). Marco legal
+  europeo que regula el tratamiento de datos personales; motiva las
+  decisiones de "sin persistencia" y "consentimiento explícito" de este
+  proyecto.
+
+| OAuth 2.0
+| Protocolo estándar de autorización que permite a un usuario conceder
+  acceso limitado a sus datos en una plataforma (Reddit, Instagram) a
+  una aplicación de terceros, sin compartir su contraseña.
+
+| `access_token`
+| Credencial temporal emitida por el servidor OAuth de una plataforma
+  tras el consentimiento del usuario, usada para autenticar peticiones
+  a su API en nombre de ese usuario.
+
+| `state` (parámetro OAuth)
+| Valor aleatorio generado antes de redirigir al usuario a la
+  plataforma de autorización, verificado al recibir el `callback`, para
+  prevenir ataques CSRF sobre el flujo OAuth.
+
+| Fingerprinting de escritura / Stylometry
+| Análisis del estilo lingüístico de un texto (longitud de frase,
+  vocabulario, puntuación, uso de emojis) con el objetivo de
+  caracterizar o identificar a su autor.
+
+| TF-IDF
+| Term Frequency - Inverse Document Frequency. Técnica estadística para
+  extraer las palabras/expresiones más distintivas de un conjunto de
+  textos, usada en este proyecto para las `top_keywords` del
+  fingerprint.
+
+| Type-Token Ratio
+| Métrica de riqueza de vocabulario: proporción entre palabras únicas
+  (types) y palabras totales (tokens) en un texto.
+
+| PII (Personally Identifiable Information)
+| Información que permite identificar directa o indirectamente a una
+  persona (ubicación, ocupación, rutina, en el contexto de este
+  proyecto).
+
+| Cuenta Business / Creator (Instagram)
+| Tipos de cuenta profesional de Instagram, requisito de la Instagram
+  Platform API — las cuentas personales normales no tienen acceso vía
+  API.
+
+| Reddit for Researchers (RFR)
+| Programa oficial de Reddit para conceder acceso a su Data API con
+  fines de investigación académica, vía solicitud y aprobación previas.
+
+| Responsible Builder Policy
+| Política de Reddit (nov. 2025) que exige aprobación previa para
+  cualquier acceso a su Data API, sustituyendo la creación de apps en
+  modo autoservicio.
+
+| SonarCloud / Quality Gate
+| Servicio de análisis estático de código en la nube; el "Quality Gate"
+  es el conjunto de condiciones (cobertura, duplicación, code smells)
+  que un análisis debe cumplir para considerarse aprobado.
+
+| ADR (Architecture Decision Record)
+| Formato breve para documentar una decisión de arquitectura: contexto,
+  decisión tomada, y consecuencias.
+
+| arc42
+| Plantilla estándar (12 secciones) para documentar la arquitectura de
+  software, usada como estructura de este documento.
+
+| MVP (Minimum Viable Product)
+| Versión mínima de un producto con la funcionalidad justa para ser
+  útil y evaluable, usada aquí para justificar la reducción de alcance
+  respecto a la propuesta original.
+
+| `SocialPost` / `SocialProfile`
+| Modelo de datos propio de este proyecto (no un término estándar de la
+  industria): representación neutra de un post/perfil de cualquier
+  plataforma soportada, con los campos `group` y `score` reinterpretados
+  según el origen (ver <<section-concepts>>).
+
+| CI/CD
+| Continuous Integration / Continuous Deployment. Automatización de
+  tests, análisis de calidad y despliegue en cada cambio de código,
+  implementado en este proyecto con GitHub Actions.
+
+| Prometheus / Grafana
+| Prometheus: sistema de recolección de métricas por *scraping*.
+  Grafana: herramienta de visualización de esas métricas en dashboards.
+
+| TFG
+| Trabajo de Fin de Grado.
 |===

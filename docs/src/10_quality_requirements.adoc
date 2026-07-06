@@ -1,79 +1,98 @@
 ifndef::imagesdir[:imagesdir: ../images]
 
 [[section-quality-scenarios]]
-== Quality Requirements
+== Requisitos de calidad
 
+=== Árbol de calidad
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
+Basado en las categorías de ISO 25010, con la relevancia observada en
+este proyecto:
 
-.Content
-This section contains all quality requirements as quality tree with scenarios. The most important ones have already been described in section 1.2. (quality goals)
+image::01_2_iso-25010-topics-EN.drawio.png["Categorías de requisitos de calidad (ISO 25010)"]
 
-Here you can also capture quality requirements with lesser priority,
-which will not create high risks when they are not fully achieved.
+[cols="1,3", options="header"]
+|===
+| Categoría (ISO 25010) | Relevancia en AmITraceable
 
-.Motivation
-Since quality requirements will have a lot of influence on architectural
-decisions you should know for every stakeholder what is really important to them,
-concrete and measurable.
+| Seguridad / Privacidad
+| **Crítica**. Es el objetivo central del proyecto: consentimiento
+  explícito, sin persistencia, minimización de datos.
 
+| Adecuación funcional
+| **Alta**. El scoring y las inferencias deben ser explicables y
+  trazables (evidencia por atributo).
 
-.Further Information
+| Mantenibilidad
+| **Alta**. Arquitectura simétrica multiplataforma pensada
+  explícitamente para poder añadir plataformas nuevas sin tocar las
+  existentes.
 
-See https://docs.arc42.org/section-10/[Quality Requirements] in the arc42 documentation.
+| Fiabilidad
+| **Alta**. Cobertura de tests significativa (93%+ en el backend),
+  quality gate de SonarCloud en cada push.
 
-****
-endif::arc42help[]
+| Usabilidad
+| **Media-alta**. El consentimiento debe quedar claro antes de
+  cualquier acción; la selección de plataforma debe ser intuitiva
+  (mazo de cartas con arrastre, flechas y puntos, como formas
+  redundantes de interacción).
 
-=== Quality Tree
+| Portabilidad
+| **Media**. Docker Compose para reproducibilidad; documentado el
+  manejo de entornos Windows con Python (venvs fuera de carpetas
+  sincronizadas por Dropbox, gestión de múltiples versiones de Python).
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-.Content
-The quality tree (as defined in ATAM – Architecture Tradeoff Analysis Method) with quality/evaluation scenarios as leafs.
+| Eficiencia de desempeño
+| **Baja-media**. No es un sistema de alto volumen (uso académico); los
+  límites de extracción (`max_posts`, `max_comments`, `max_media`)
+  existen más por minimización de datos que por rendimiento.
+|===
 
-.Motivation
-The tree structure with priorities provides an overview for a sometimes large number of quality requirements.
+=== Escenarios de calidad
 
-.Form
-The quality tree is a high-level overview of the quality goals and requirements:
+[cols="1,3,3", options="header"]
+|===
+| # | Escenario | Resultado esperado / medido
 
-* tree-like refinement of the term "quality". Use "quality" or "usefulness" as a root
-* a mind map with quality categories as main branches
+| QS-1
+| Un usuario cierra sesión tras analizar su cuenta.
+| No queda ningún rastro de sus datos en el sistema (verificado: no hay
+  base de datos; `logout` borra las claves de sesión de esa
+  plataforma).
 
-In any case the tree should include links to the scenarios of the following section.
+| QS-2
+| Se añade una plataforma nueva (ej. X, cuando tenga API disponible).
+| Solo requiere: nuevo cliente que devuelva `SocialProfile`, una
+  entrada en `_PLATFORM_CLIENT_FACTORIES`, y una entrada en
+  `PLATFORM_CARDS` del frontend. No se modifica lógica de otras
+  plataformas.
 
+| QS-3
+| Falla la API externa de una plataforma (ej. Reddit da 5xx).
+| El pipeline lo propaga como error HTTP explícito al frontend
+  (`HTTPException`), sin afectar al análisis de otras plataformas ya en
+  curso.
 
-****
-endif::arc42help[]
+| QS-4
+| Se ejecuta la suite de tests sin red disponible ni credenciales
+  reales.
+| Pasa igualmente: todas las integraciones externas están mockeadas
+  (`respx`); verificado en CI (runners sin credenciales de
+  Reddit/Instagram).
 
-=== Quality Scenarios
+| QS-5
+| Un desarrollador nuevo clona el repo en una máquina con una versión
+  de Python distinta a la usada en desarrollo.
+| Las dependencias resuelven igualmente gracias a los rangos de versión
+  en `requirements.txt` (incidente real documentado: Python 3.14 vs
+  3.11, ver <<section-technical-risks>>).
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-.Contents
-Concretization of (sometimes vague or implicit) quality requirements using (quality) scenarios.
-
-These scenarios describe what should happen when a stimulus arrives at the system.
-
-For architects, two kinds of scenarios are important:
-
-* Usage scenarios (also called application scenarios or use case scenarios) describe the system’s runtime reaction to a certain stimulus. This also includes scenarios that describe the system’s efficiency or performance. Example: The system reacts to a user’s request within one second.
-* Change scenarios describe a modification of the system or of its immediate environment. Example: Additional functionality is implemented or requirements for a quality attribute change.
-
-.Motivation
-Scenarios make quality requirements concrete and allow to
-more easily measure or decide whether they are fulfilled.
-
-Especially when you want to assess your architecture using methods like
-ATAM you need to describe your quality goals (from section 1.2)
-more precisely down to a level of scenarios that can be discussed and evaluated.
-
-.Form
-Tabular or free form text.
-****
-endif::arc42help[]
+| QS-6
+| Un atacante descarga el repositorio, modifica el código para quitar
+  el aviso de consentimiento, y lo despliega con sus propias
+  credenciales.
+| No puede acceder a cuentas ajenas: sigue necesitando que el titular
+  real de cada cuenta pase por la pantalla de autorización de
+  Reddit/Instagram, control fuera del alcance del código modificado
+  (ver ADR-5).
+|===

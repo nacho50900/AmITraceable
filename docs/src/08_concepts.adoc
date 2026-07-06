@@ -1,74 +1,146 @@
 ifndef::imagesdir[:imagesdir: ../images]
 
 [[section-concepts]]
-== Cross-cutting Concepts
+== Conceptos transversales
 
+=== Privacidad por diseño (RGPD)
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-.Content
-This section describes overall, principal regulations and solution ideas that are relevant in multiple parts (= cross-cutting) of your system.
-Such concepts are often related to multiple building blocks.
-They can include many different topics, such as
+* **Sin persistencia**: no existe base de datos en el sistema. Todo el
+  procesamiento (extracción, fingerprinting, scoring, informe) ocurre en
+  memoria durante una única petición HTTP y se descarta al terminar.
+* **Consentimiento explícito y granular**: el usuario autoriza cada
+  plataforma por separado, con scopes mínimos de solo lectura
+  (`identity history read` en Reddit, `instagram_business_basic` en
+  Instagram).
+* **Revocación real**: cerrar sesión (`POST /auth/{platform}/logout`)
+  borra las claves de esa plataforma de la cookie de sesión; el usuario
+  también puede revocar el acceso directamente desde Reddit/Instagram en
+  cualquier momento, fuera del control de AmITraceable.
+* **Minimización de datos**: cada cliente de plataforma pide solo los
+  campos estrictamente necesarios para el análisis (texto, timestamp,
+  comunidad/etiqueta, engagement, permalink) — nunca imágenes, IPs,
+  emails, ni nada que la plataforma no exponga como público.
 
-* models, especially domain models
-* architecture or design patterns
-* rules for using specific technology
-* principal, often technical decisions of an overarching (= cross-cutting) nature
-* implementation rules
+=== Explicabilidad de las inferencias
 
+Toda inferencia de un atributo personal (`InferredAttribute`) incluye:
 
-.Motivation
-Concepts form the basis for _conceptual integrity_ (consistency, homogeneity) of the architecture. 
-Thus, they are an important contribution to achieve inner qualities of your system.
+* `confidence`: nivel de confianza 0-1, calculado de forma determinista
+  a partir de señales contables (número de coincidencias), no de un
+  modelo entrenado opaco.
+* `evidence`: enlaces concretos (permalinks) a los posts que sustentan
+  la inferencia, para que el propio usuario pueda verificarla.
 
-Some of these concepts cannot be assigned to individual building blocks, e.g. security or safety. 
+Esta decisión es deliberada: un sistema que infiere datos personales
+sensibles sobre una persona (incluso sobre sí misma) debe poder
+justificar *por qué* llega a esa conclusión. Se prefirió esta
+explicabilidad frente a usar modelos de ML más sofisticados pero menos
+trazables.
 
+=== Modelo de dominio multiplataforma
 
-.Form
-The form can be varied:
+`SocialPost` / `SocialProfile` (`users/app/models/schemas.py`) son el
+modelo común que alimenta todo el pipeline, independientemente de la
+plataforma de origen:
 
-* concept papers with any kind of structure
-* cross-cutting model excerpts or scenarios using notations of the architecture views
-* sample implementations, especially for technical concepts
-* reference to typical usage of standard frameworks (e.g. using Hibernate for object/relational mapping)
+[cols="1,3", options="header"]
+|===
+| Campo | Significado por plataforma
 
-.Structure
-A potential (but not mandatory) structure for this section could be:
+| `group`
+| El equivalente más parecido a "comunidad/tema" que tiene cada
+  plataforma: el subreddit en Reddit, el primer hashtag del caption en
+  Instagram.
 
-* Domain concepts
-* User Experience concepts (UX)
-* Safety and security concepts
-* Architecture and design patterns
-* "Under-the-hood"
-* development concepts
-* operational concepts
+| `score`
+| Proxy de repercusión: karma neto en Reddit, `likes + comentarios` en
+  Instagram.
 
-Note: it might be difficult to assign individual concepts to one specific topic
-on this list.
+| `platform`
+| Identificador de origen (`"reddit"` / `"instagram"`), usado para
+  adaptar textos y ponderaciones sin ramificar la lógica del pipeline.
+|===
 
-image::08-concepts-EN.drawio.png["Possible topics for crosscutting concepts"]
+Cada cliente de plataforma (`reddit_client.py`, `instagram_client.py`)
+es responsable de normalizar la respuesta de su API a este modelo. El
+resto del pipeline (fingerprint, inferencia, scoring, informe) no tiene
+ninguna noción de "esto vino de Reddit o de Instagram".
 
+=== Arquitectura simétrica por plataforma
 
-.Further Information
+Ninguna plataforma tiene un estatus especial en el código:
 
-See https://docs.arc42.org/section-8/[Concepts] in the arc42 documentation.
-****
-endif::arc42help[]
+* Ruta única `/api/analyze/{platform}`, resuelta mediante un
+  diccionario de *factories* (`_PLATFORM_CLIENT_FACTORIES`) en vez de
+  una ruta "principal" con las demás colgando de ella.
+* Mismas convenciones de nombres de claves de sesión
+  (`{platform}_oauth_state`, `{platform}_access_token`).
+* Mismos nombres de archivos de test por plataforma
+  (`test_reddit_auth.py`/`test_instagram_auth.py`,
+  `test_reddit_client.py`/`test_instagram_client.py`), con la misma
+  estructura y el mismo estilo de *mocking* (`respx`).
 
-=== _<Concept 1>_
+Añadir una plataforma nueva (por ejemplo, cuando X tenga API
+disponible) implica añadir una entrada nueva en cada uno de estos
+puntos, sin modificar el comportamiento de las plataformas existentes.
 
-_<explanation>_
+=== Seguridad y límite de confianza
 
+El sistema es software open source, lo cual se valoró explícitamente
+desde el punto de vista de seguridad: **cualquier comprobación de
+integridad del lado del cliente (por ejemplo, verificar un hash del
+código antes de ejecutarlo) es evadible por quien controla el entorno de
+ejecución**, y quien descarga y ejecuta el código lo controla por
+completo. Por ese motivo se descartó implementar ese tipo de protección.
 
+El verdadero límite de confianza del sistema no está en el código de
+AmITraceable, sino en el **servidor de autorización OAuth de cada
+plataforma** (Reddit, Instagram): ninguna modificación del código
+publicado permite obtener un `access_token` válido sin que el titular
+real de la cuenta pase por la pantalla de consentimiento de la propia
+plataforma. El código cliente puede modificarse libremente (por ejemplo,
+para quitar los avisos de consentimiento), pero eso no permite acceder a
+cuentas ajenas: el guardián real es Reddit/Instagram, no AmITraceable.
 
-=== _<Concept 2>_
+Medidas de seguridad efectivas adoptadas:
 
-_<explanation>_
+* Credenciales (`REDDIT_CLIENT_SECRET`, `INSTAGRAM_APP_SECRET`,
+  `SESSION_SECRET_KEY`) fuera del control de versiones (`.gitignore`),
+  nunca hardcodeadas.
+* Cookies de sesión firmadas (`SessionMiddleware`), no persistidas en
+  servidor.
+* Validación de `state` en el callback OAuth de ambas plataformas, para
+  prevenir CSRF.
+* Scopes de solo lectura, mínimos necesarios para el análisis.
 
-...
+=== Concepto de testing
 
-=== _<Concept n>_
+* **Mocking de integraciones externas**: todas las llamadas a las APIs
+  de Reddit/Instagram se sustituyen en los tests por respuestas
+  simuladas (`respx` sobre `httpx`), de forma que la suite no depende de
+  red ni de credenciales reales, y es determinista.
+* **Simetría en los tests**: cada plataforma tiene su propio par de
+  archivos de test (auth + client), evitando que una tenga cobertura
+  dedicada y la otra dependa solo de tests genéricos.
+* **Pipeline testeado con datos sintéticos**: el pipeline de
+  fingerprinting/scoring/informe se prueba con `SocialPost` generados en
+  memoria, no con llamadas reales — permite desarrollarlo y verificarlo
+  incluso mientras el acceso real a la Data API de Reddit está pendiente
+  de aprobación (Reddit for Researchers).
 
-_<explanation>_
+=== Concepto de observabilidad
+
+Métricas HTTP del backend expuestas en `/metrics`
+(`prometheus-fastapi-instrumentator`), recogidas por Prometheus y
+visualizadas en Grafana — heredado de la plantilla universitaria sin
+modificaciones estructurales, solo adaptando el backend instrumentado de
+Node a Python.
+
+=== Concepto de gestión de dependencias
+
+Tras sufrir varias roturas de entorno por versiones de paquete ancladas
+a fechas antiguas (incompatibles con versiones más recientes de Python
+o de otras dependencias — ver <<section-technical-risks>>),
+`requirements.txt`/`requirements-dev.txt` usan rangos de versión
+(`>=x,<y`) en vez de pines exactos, dejando que `pip` resuelva la
+combinación compatible disponible en cada entorno.

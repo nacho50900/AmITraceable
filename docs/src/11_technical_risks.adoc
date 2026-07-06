@@ -1,27 +1,79 @@
 ifndef::imagesdir[:imagesdir: ../images]
 
 [[section-technical-risks]]
-== Risks and Technical Debts
+== Riesgos y deuda técnica
 
+Ordenados de mayor a menor impacto sobre el calendario/alcance del TFG.
 
-ifdef::arc42help[]
-[role="arc42help"]
-****
-.Contents
-A list of identified technical risks or technical debts, ordered by priority
+[cols="3,1,1,3", options="header"]
+|===
+| Riesgo | Probabilidad | Impacto | Mitigación
 
-.Motivation
-“Risk management is project management for grown-ups” (Tim Lister, Atlantic Systems Guild.) 
+| Acceso a la Data API de Reddit pendiente de aprobación
+  (Responsible Builder Policy, solicitado vía Reddit for Researchers)
+| Media
+| Alto
+| Desarrollo y tests del pipeline con datos sintéticos
+  (`SocialPost` generados en memoria), sin depender de la aprobación
+  para avanzar. Solicitud ya enviada; se documenta como riesgo externo
+  al proyecto, no como fallo de diseño.
 
-This should be your motto for systematic detection and evaluation of risks and technical debts in the architecture, which will be needed by management stakeholders (e.g. project managers, product owners) as part of the overall risk analysis and measurement planning.
+| Instagram Platform API limitada a cuentas Business/Creator
+| Alta (ya materializado)
+| Medio
+| Documentado como limitación de plataforma verificada empíricamente,
+  no como laguna. Se usa Standard Access (modo desarrollo) con
+  usuarios de prueba añadidos como testers, evitando el proceso de App
+  Review de Meta (innecesario para el alcance de un TFG).
 
-.Form
-List of risks and/or technical debts, probably including suggested measures to minimize, mitigate or avoid risks or reduce technical debts.
+| X/Twitter sin integrar (coste/restricciones de API)
+| Alta (decisión ya tomada)
+| Bajo
+| Tarjeta "Coming Soon" en la interfaz; arquitectura ya preparada para
+  añadirla (basta con una entrada nueva en el diccionario de factories
+  y en `PLATFORM_CARDS`) en cuanto el acceso sea viable.
 
+| Deriva de versiones de dependencias entre entornos
+  (numpy sin wheel para la versión de Python; luego `pydantic_core`
+  roto con Python 3.14; efecto en cadena sobre `respx` y
+  `prometheus-fastapi-instrumentator`)
+| Alta (ya materializado dos veces)
+| Medio
+| `requirements.txt`/`requirements-dev.txt` migrados a rangos de
+  versión; recomendación de fijar la versión de Python del entorno de
+  desarrollo (3.11/3.12) documentada en el README.
 
-.Further Information
+| Entornos de desarrollo Windows con particularidades
+  (venv dentro de una carpeta sincronizada por Dropbox corrompiendo la
+  instalación; múltiples versiones de Python resolviendo de forma
+  distinta según el `PATH` de cada terminal)
+| Media
+| Bajo
+| Documentado en el README: crear el venv fuera de carpetas
+  sincronizadas; comprobar `python --version` al abrir cada terminal
+  nueva.
 
-See https://docs.arc42.org/section-11/[Risks and Technical Debt] in the arc42 documentation.
+| Conflicto entre Automatic Analysis y CI-based Analysis en SonarCloud
+| Baja (ya resuelto)
+| Bajo
+| Resuelto desactivando "Automatic Analysis" en la configuración del
+  proyecto en SonarCloud, dejando solo el análisis disparado por el
+  pipeline de CI (necesario para que se tenga en cuenta la cobertura
+  real de los tests).
 
-****
-endif::arc42help[]
+| Necesidad de revisión por comité de ética
+| Media
+| Medio
+| Pendiente de valorar con la universidad antes de recoger datos de
+  prueba de terceros (aunque sea con consentimiento), dado que el
+  sistema puede inferir categorías especiales de datos.
+
+| Falta de plan de evaluación formal del motor de inferencia/scoring
+| Alta (pendiente)
+| Medio
+| Pendiente: dataset de prueba con consentimiento (cuentas propias del
+  equipo, alts conocidos) para medir precisión/falsos positivos de los
+  atributos inferidos, y contrastar las ponderaciones del scoring
+  (`_WEIGHTS` en `privacy_score.py`) contra percepción subjetiva de
+  usuarios reales.
+|===
