@@ -15,7 +15,12 @@
 
 body {
   margin: 0;
-  background: var(--bg);
+  background:
+    radial-gradient(circle at 15% 0%, rgba(91, 108, 240, 0.16), transparent 45%),
+    radial-gradient(circle at 85% 15%, rgba(220, 39, 67, 0.14), transparent 40%),
+    radial-gradient(circle at 50% 100%, rgba(255, 69, 0, 0.08), transparent 45%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--sans);
   line-height: 1.5;
@@ -191,33 +196,42 @@ body {
 }
 
 .platform-card--reddit {
-  background: linear-gradient(160deg, rgba(255, 69, 0, 0.16), var(--bg-card));
-  border-color: rgba(255, 69, 0, 0.35);
+  background: linear-gradient(155deg, #ff4500 0%, #b23300 55%, #2a1206 100%);
+  border-color: #ff4500;
 }
 
 .platform-card--reddit .platform-card-icon {
-  color: #ff4500;
+  color: #ffffff;
+}
+
+.platform-card--reddit .platform-card-description {
+  color: rgba(255, 255, 255, 0.75);
 }
 
 .platform-card--instagram {
-  background: linear-gradient(160deg, rgba(220, 39, 67, 0.16), var(--bg-card));
-  border-color: rgba(220, 39, 67, 0.35);
+  background: linear-gradient(155deg, #f09433 0%, #dc2743 45%, #8a2ba8 75%, #4a1a6e 100%);
+  border-color: #dc2743;
 }
 
 .platform-card--instagram .platform-card-icon {
-  /* Un degradado real de fondo-recortado-a-texto no funciona sobre un
-     SVG (solo sobre texto), así que usamos un color sólido representativo
-     de la marca en vez de un hack roto. */
-  color: #dc2743;
+  color: #ffffff;
+}
+
+.platform-card--instagram .platform-card-description {
+  color: rgba(255, 255, 255, 0.8);
 }
 
 .platform-card--x {
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.08), var(--bg-card));
-  border-color: var(--border);
+  background: linear-gradient(155deg, #5b6cf0 0%, #3a2f8f 55%, #150f2e 100%);
+  border-color: #5b6cf0;
 }
 
 .platform-card--x .platform-card-icon {
-  color: var(--text);
+  color: #ffffff;
+}
+
+.platform-card--x .platform-card-description {
+  color: rgba(255, 255, 255, 0.75);
 }
 
 .coming-soon-badge {

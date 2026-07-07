@@ -67,9 +67,9 @@ function cardStyle(offset: number): React.CSSProperties {
   if (abs === 1) {
     const dir = offset > 0 ? 1 : -1;
     return {
-      transform: `translateX(calc(-50% + ${dir * 46}px)) translateY(10px) rotate(${dir * 9}deg) scale(0.93)`,
+      transform: `translateX(calc(-50% + ${dir * 90}px)) translateY(14px) rotate(${dir * 11}deg) scale(0.9)`,
       zIndex: 2,
-      opacity: 0.85,
+      opacity: 1,
     };
   }
 
@@ -139,6 +139,13 @@ const Landing: React.FC = () => {
     goTo(index);
   };
 
+  const handleCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>, index: number) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleCardClick(index);
+    }
+  };
+
   const activeCard = PLATFORM_CARDS[activeIndex];
 
   return (
@@ -183,6 +190,7 @@ const Landing: React.FC = () => {
                     className={`platform-card ${card.cardClassName} ${isActive ? 'platform-card--active' : ''}`}
                     style={cardStyle(offset)}
                     onClick={() => !isActive && handleCardClick(index)}
+                    onKeyDown={(event) => !isActive && handleCardKeyDown(event, index)}
                     role={isActive ? undefined : 'button'}
                     aria-label={isActive ? undefined : `Seleccionar ${card.name}`}
                     tabIndex={isActive ? -1 : 0}
