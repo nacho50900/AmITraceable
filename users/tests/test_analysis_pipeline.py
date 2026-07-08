@@ -70,13 +70,17 @@ def test_compute_score_is_bounded_and_explained(patch_spacy_model):
     assert "identity_consistency" in score.breakdown_explanation
 
 
-def test_generate_report_includes_recommendations(patch_spacy_model):
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_generate_report_includes_recommendations(patch_spacy_model):
     posts = _make_posts()
     fp = fingerprint_module.build_fingerprint(posts)
     attrs = infer_attributes(posts)
     score = compute_score(posts, fp, attrs)
 
-    report = generate_report("reddit", "test_user", posts, fp, attrs, score)
+    report = await generate_report("reddit", "test_user", posts, fp, attrs, score)
 
     assert report.platform == "reddit"
     assert report.username == "test_user"

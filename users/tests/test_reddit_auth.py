@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-client = TestClient(app)
+client = TestClient(app, base_url="https://testserver")
 
 
 def test_reddit_status_defaults_to_unauthenticated():
@@ -51,7 +51,7 @@ def test_reddit_callback_redirects_on_user_denied_consent():
 @respx.mock
 def test_reddit_callback_exchanges_token_and_sets_session():
     # 1. Forzamos un estado válido en la sesión simulando el paso de /login
-    session_client = TestClient(app)
+    session_client = TestClient(app, base_url="https://testserver")
     login_resp = session_client.get("/auth/reddit/login", follow_redirects=False)
     state = login_resp.headers["location"].split("state=")[1].split("&")[0]
 
@@ -74,7 +74,7 @@ def test_reddit_callback_exchanges_token_and_sets_session():
 
 
 def test_reddit_logout_clears_only_reddit_session_keys():
-    session_client = TestClient(app)
+    session_client = TestClient(app, base_url="https://testserver")
     with session_client as c:
         c.get("/auth/reddit/login")  # crea la cookie de sesión inicial
         resp = c.post("/auth/reddit/logout")

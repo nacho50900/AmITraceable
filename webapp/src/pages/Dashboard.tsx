@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import HourlyActivityChart from '../components/HourlyActivityChart';
+import DownloadReportButton from '../components/DownloadReportButton';
 import LocationMap from '../components/LocationMap';
 import PopulationNarrowingTable from '../components/PopulationNarrowingTable';
 import ScoreBar from '../components/ScoreBar';
@@ -70,9 +71,12 @@ const Dashboard: React.FC = () => {
           Informe de exposición de {usernamePrefix}
           {report.username} <span className="platform-tag">({platformLabel})</span>
         </h1>
-        <button className="btn-secondary" onClick={handleLogout}>
-          Cerrar sesión y borrar datos
-        </button>
+        <div className="dashboard-header-actions">
+          <DownloadReportButton report={report} />
+          <button className="btn-secondary" onClick={handleLogout}>
+            Cerrar sesión y borrar datos
+          </button>
+        </div>
       </header>
 
       <p className="meta">
