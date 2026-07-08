@@ -46,6 +46,45 @@ def embed_image(image: Image.Image, processor, model, device: str) -> np.ndarray
     return embedding.astype("float32")
 
 
+def _normalize_columns(metadata: pd.DataFrame) -> pd.DataFrame:
+    """El CSV real de OSV-5M puede nombrar las columnas de forma distinta a
+    lo que asumimos originalmente (p.ej. 'latitude'/'longitude' en vez de
+    'lat'/'lon'). Aquí se detectan y renombran a nombres canónicos
+    ('id', 'lat', 'lon', 'region') para que el resto del pipeline
+    (geolocation.py) no tenga que adivinar nada."""
+    rename_map = {}
+
+    lat_col = next((c for c in metadata.columns if c.lower() in ("lat", "latitude")), None)
+    lon_col = next((c for c in metadata.columns if c.lower() in ("lon", "lng", "longitude")), None)
+    region_col = next((c for c in metadata.columns if c.lower() in ("region", "state", "province", "admin1")), None)
+    id_col = next((c for c in metadata.columns if c.lower() == "id"), metadata.columns[0])
+
+    if lat_col is None or lon_col is None:
+        raise RuntimeError(
+            f"No se encontraron columnas de latitud/longitud reconocibles. "
+            f"Columnas disponibles: {list(metadata.columns)}. Ajusta _normalize_columns() manualmente."
+        )
+    if region_col is None:
+        print(
+            "⚠️  No se encontró una columna tipo 'region'/'province'; se usará 'city' como aproximación "
+            "de la ubicación mostrada (menos preciso a nivel de provincia)."
+        )
+        region_col = next((c for c in metadata.columns if c.lower() == "city"), None)
+        if region_col is None:
+            raise RuntimeError(
+                f"Tampoco se encontró columna 'city'. Columnas disponibles: {list(metadata.columns)}. "
+                "Ajusta _normalize_columns() manualmente."
+            )
+
+    rename_map[lat_col] = "lat"
+    rename_map[lon_col] = "lon"
+    rename_map[region_col] = "region"
+    rename_map[id_col] = "id"
+
+    print(f"Mapeo de columnas detectado: {rename_map}")
+    return metadata.rename(columns=rename_map)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--images", default="../data/osv5m_spain")
@@ -58,7 +97,9 @@ def main() -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Usando dispositivo: {device}")
 
-    metadata = pd.read_csv(metadata_path, dtype={"id": str})
+    metadata = pd.read_csv(metadata_path)
+    metadata = _normalize_columns(metadata)
+    metadata["id"] = metadata["id"].astype(str)
     print(f"{len(metadata)} imágenes en metadata.csv")
 
     processor, model = load_model(device)

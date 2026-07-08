@@ -15,3 +15,12 @@ __pycache__/
 coverage.xml
 venv/
 .venv/
+
+# Datos y artefactos del módulo de geolocalización por imagen (regenerables,
+# ver users/scripts/download_osv5m_spain.py y build_faiss_index.py -- no se
+# versionan por tamaño, igual que no hay base de datos persistente en el
+# resto del proyecto)
+users/data/
+users/scripts/_hf_scratch_cache/
+users/scripts/_completed_shards.txt
+*.faiss
