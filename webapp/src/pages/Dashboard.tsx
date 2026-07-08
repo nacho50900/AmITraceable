@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import HourlyActivityChart from '../components/HourlyActivityChart';
+import PopulationNarrowingTable from '../components/PopulationNarrowingTable';
 import ScoreBar from '../components/ScoreBar';
 import type { ExposureReport, Platform } from '../types';
 
@@ -84,6 +85,11 @@ const Dashboard: React.FC = () => {
         <ScoreBar label="Datos personales inferibles" value={report.privacy_score.inferable_data_risk} />
         <ScoreBar label="Facilidad de deanonimización" value={report.privacy_score.deanonymization_ease} />
         <p className="note">{report.privacy_score.breakdown_explanation.identity_consistency}</p>
+      </section>
+
+      <section className="card">
+        <h2>Cuánta gente comparte lo que has contado sobre ti</h2>
+        <PopulationNarrowingTable steps={report.population_narrowing} />
       </section>
 
       <section className="card">

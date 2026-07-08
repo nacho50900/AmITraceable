@@ -31,6 +31,15 @@ export interface PrivacyScore {
   breakdown_explanation: Record<string, string>;
 }
 
+export interface PopulationEstimate {
+  attribute_label: string;
+  category: string;
+  remaining_population: number | null;
+  risk_level: 'bajo' | 'medio' | 'alto' | 'critico' | 'no_estimable';
+  evidence: string[];
+  note: string | null;
+}
+
 export interface ExposureReport {
   platform: Platform;
   username: string;
@@ -40,6 +49,7 @@ export interface ExposureReport {
   inferred_attributes: InferredAttribute[];
   privacy_score: PrivacyScore;
   recommendations: string[];
+  population_narrowing: PopulationEstimate[];
 }
 
 export interface AuthStatus {

@@ -7,10 +7,13 @@ from datetime import datetime, timezone
 from app.models.schemas import (
     ExposureReport,
     InferredAttribute,
+    PopulationEstimate,
     PrivacyScore,
     SocialPost,
     WritingFingerprint,
 )
+from app.nlp.demographic_extraction import extract_demographics
+from app.scoring.k_anonymity import estimate_population_narrowing
 
 
 def generate_report(
@@ -21,6 +24,20 @@ def generate_report(
     inferred_attributes: list[InferredAttribute],
     score: PrivacyScore,
 ) -> ExposureReport:
+    demographic_findings = extract_demographics(posts)
+    narrowing_steps = estimate_population_narrowing(demographic_findings)
+    population_narrowing = [
+        PopulationEstimate(
+            attribute_label=step.attribute_label,
+            category=step.category,
+            remaining_population=step.remaining_population,
+            risk_level=step.risk_level,
+            evidence=step.evidence,
+            note=step.note,
+        )
+        for step in narrowing_steps
+    ]
+
     return ExposureReport(
         platform=platform,
         username=username,
@@ -30,6 +47,7 @@ def generate_report(
         inferred_attributes=inferred_attributes,
         privacy_score=score,
         recommendations=_build_recommendations(fingerprint, inferred_attributes, score),
+        population_narrowing=population_narrowing,
     )
 
 

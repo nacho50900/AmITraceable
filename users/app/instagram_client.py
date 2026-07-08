@@ -88,8 +88,8 @@ class InstagramClient:
     @staticmethod
     def _normalize(item: dict) -> SocialPost:
         caption = item.get("caption", "") or ""
-        hashtags = _HASHTAG_RE.findall(caption)
-        primary_hashtag = hashtags[0].lower() if hashtags else "sin_etiqueta"
+        hashtags = [h.lower() for h in _HASHTAG_RE.findall(caption)]
+        primary_hashtag = hashtags[0] if hashtags else "sin_etiqueta"
 
         like_count = item.get("like_count", 0) or 0
         comments_count = item.get("comments_count", 0) or 0
@@ -99,6 +99,10 @@ class InstagramClient:
             platform="instagram",
             type=item.get("media_type", "IMAGE").lower(),
             group=primary_hashtag,
+            # Todos los hashtags del caption (no solo el primero), para que
+            # attribute_inference.py no pierda señal de ubicación/ocupación
+            # que aparezca en hashtags secundarios.
+            tags=hashtags,
             title=None,
             text=caption,
             created_utc=datetime.fromisoformat(item["timestamp"]),

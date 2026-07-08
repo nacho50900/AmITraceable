@@ -28,6 +28,11 @@ class SocialPost(BaseModel):
     platform: str  # "reddit" | "instagram"
     type: str  # Reddit: "post"/"comment". Instagram: "image"/"video"/"carousel_album"
     group: str  # subreddit (Reddit) o primer hashtag del caption (Instagram)
+    # Todas las etiquetas del post: [subreddit] en Reddit (siempre una), o
+    # TODOS los hashtags del caption en Instagram (puede haber varios y
+    # perder los que no sean el primero penaliza la inferencia de atributos,
+    # ver attribute_inference.py). Vacío si no aplica.
+    tags: list[str] = []
     title: str | None = None
     text: str
     created_utc: datetime
@@ -69,6 +74,15 @@ class PrivacyScore(BaseModel):
     breakdown_explanation: dict[str, str]
 
 
+class PopulationEstimate(BaseModel):
+    attribute_label: str  # p.ej. "Sexo: mujer", "Vive en municipio: Leon"
+    category: str  # sexo | edad | ubicacion | estudios | ocupacion | universidad | empresa
+    remaining_population: int | None  # None si no estimable con las tablas actuales
+    risk_level: str  # bajo | medio | alto | critico | no_estimable
+    evidence: list[str]
+    note: str | None = None
+
+
 class ExposureReport(BaseModel):
     platform: str
     username: str
@@ -78,3 +92,7 @@ class ExposureReport(BaseModel):
     inferred_attributes: list[InferredAttribute]
     privacy_score: PrivacyScore
     recommendations: list[str]
+    # Estrechamiento progresivo de población compatible con cada atributo
+    # autodeclarado detectado (k-anonimato aproximado, ver scoring/k_anonymity.py).
+    # Lista vacía si no se detectó ninguna declaración explícita en el texto.
+    population_narrowing: list[PopulationEstimate] = []

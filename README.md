@@ -101,6 +101,10 @@ python -m spacy download es_core_news_sm
 cp .env.example .env   # y rellenar credenciales de Reddit
 uvicorn app.main:app --reload --port 3000
 ```
+ 
+(or if dependencies already instaled)
+venv\Scripts\activate
+uvicorn app.main:app --reload --port 3000
 
 #### 2. Webapp
 
