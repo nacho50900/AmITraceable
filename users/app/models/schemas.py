@@ -38,6 +38,15 @@ class SocialPost(BaseModel):
     created_utc: datetime
     score: int
     permalink: str
+    # URL directa a la imagen/vídeo (solo Instagram; None en Reddit). Se usa
+    # ÚNICAMENTE para el módulo opcional de geolocalización por imagen
+    # (app/vision/geolocation.py): la imagen se descarga en memoria de forma
+    # transitoria para extraer un embedding y se descarta acto seguido, sin
+    # persistirse en disco ni en base de datos (coherente con el diseño
+    # stateless del resto del proyecto, aunque supone una excepción
+    # consciente al principio original de "no se descargan imágenes" -- ver
+    # nota actualizada en instagram_client.py).
+    media_url: str | None = None
 
 
 class SocialProfile(BaseModel):
@@ -80,7 +89,16 @@ class PopulationEstimate(BaseModel):
     remaining_population: int | None  # None si no estimable con las tablas actuales
     risk_level: str  # bajo | medio | alto | critico | no_estimable
     evidence: list[str]
+    source: str = "texto"  # "texto" (autodeclaración escrita) | "imagen" (geolocation.py)
     note: str | None = None
+
+
+class ImageLocationPoint(BaseModel):
+    permalink: str  # enlace a la foto que generó esta estimación
+    province: str
+    confidence: float  # 0-1, proporción de vecinos del índice que coincidieron
+    lat: float | None
+    lon: float | None
 
 
 class ExposureReport(BaseModel):
@@ -96,3 +114,9 @@ class ExposureReport(BaseModel):
     # autodeclarado detectado (k-anonimato aproximado, ver scoring/k_anonymity.py).
     # Lista vacía si no se detectó ninguna declaración explícita en el texto.
     population_narrowing: list[PopulationEstimate] = []
+    # Una estimación de ubicación por CADA foto analizada por
+    # app/vision/geolocation.py (no solo la de mayor confianza, que es la
+    # única que se usa para population_narrowing). Se usa para pintar el
+    # mapa de puntos en el frontend. Vacía si no hay índice FAISS construido
+    # o la plataforma no es Instagram.
+    image_location_points: list[ImageLocationPoint] = []

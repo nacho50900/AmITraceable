@@ -2,10 +2,15 @@
 Extracción de datos públicos del usuario autenticado vía Instagram Platform
 API ("Business Login for Instagram").
 
-Principio de minimización (RGPD): solo se piden los campos necesarios para
-el análisis (caption, timestamp, tipo de media, permalink, engagement). No
-se descargan imágenes/vídeos en sí, ni datos que Instagram no expone a
-través de estos campos.
+Principio de minimización (RGPD), ACTUALIZADO: originalmente este módulo no
+pedía ni descargaba imágenes/vídeos, solo metadatos textuales. Desde la
+incorporación del módulo opcional de geolocalización por imagen
+(app/vision/geolocation.py), se pide también `media_url` y se descarga la
+imagen en memoria de forma transitoria SOLO para extraer un embedding
+DINOv2; la imagen nunca se guarda en disco ni en base de datos, y se
+descarta inmediatamente tras el cálculo (coherente con el diseño stateless
+del resto del proyecto). Se documenta aquí como cambio consciente de
+alcance para la memoria, no como descuido de la minimización original.
 
 Normaliza cada media al modelo genérico `SocialPost` (ver
 `app/models/schemas.py`), igual que `reddit_client.py` hace con sus posts y
@@ -16,6 +21,9 @@ comentarios. Mapeo concreto para Instagram:
   contenido de Instagram.
 - `score` <- `like_count + comments_count` (proxy de engagement), ya que
   Instagram no tiene un equivalente al voto neto de Reddit.
+- `media_url` <- URL directa de la imagen, usada solo por el módulo de
+  geolocalización (ver arriba). None si Instagram no la expone para ese
+  media (p.ej. algunos vídeos).
 """
 import re
 from datetime import datetime
@@ -62,7 +70,7 @@ class InstagramClient:
         posts: list[SocialPost] = []
         url = f"/{self._ig_user_id}/media"
         params = {
-            "fields": "id,caption,timestamp,media_type,permalink,like_count,comments_count",
+            "fields": "id,caption,timestamp,media_type,media_url,permalink,like_count,comments_count",
             "access_token": self._access_token,
             "limit": min(limit, 100),
         }
@@ -108,4 +116,5 @@ class InstagramClient:
             created_utc=datetime.fromisoformat(item["timestamp"]),
             score=like_count + comments_count,
             permalink=item.get("permalink", ""),
+            media_url=item.get("media_url"),
         )

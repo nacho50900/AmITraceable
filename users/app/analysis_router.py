@@ -52,7 +52,7 @@ _PLATFORM_CLIENT_FACTORIES: dict[str, Callable[[Request], object]] = {
 }
 
 
-def _build_report(profile: SocialProfile) -> ExposureReport:
+async def _build_report(profile: SocialProfile) -> ExposureReport:
     """Ejecuta el pipeline común (fingerprint -> inferencia -> scoring ->
     informe) sobre un perfil ya normalizado, sea cual sea su origen."""
     if not profile.posts:
@@ -65,7 +65,7 @@ def _build_report(profile: SocialProfile) -> ExposureReport:
     inferred_attributes = infer_attributes(profile.posts)
     score = compute_score(profile.posts, fingerprint, inferred_attributes)
 
-    return generate_report(
+    return await generate_report(
         platform=profile.platform,
         username=profile.username,
         posts=profile.posts,
@@ -83,4 +83,4 @@ async def analyze(platform: str, request: Request):
 
     client = factory(request)
     profile = await client.fetch_profile()
-    return _build_report(profile)
+    return await _build_report(profile)

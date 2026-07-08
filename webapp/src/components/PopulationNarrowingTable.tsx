@@ -21,6 +21,16 @@ const RISK_LABELS: Record<string, string> = {
   no_estimable: 'No estimable',
 };
 
+const SOURCE_LABELS: Record<string, string> = {
+  texto: 'Texto',
+  imagen: 'Imagen',
+};
+
+const SOURCE_ICONS: Record<string, string> = {
+  texto: '✍️',
+  imagen: '📷',
+};
+
 function formatPopulation(value: number | null): string {
   if (value === null) return '—';
   return value.toLocaleString('es-ES');
@@ -45,6 +55,7 @@ const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({ ste
             <th>Información detectada</th>
             <th>Población restante (aprox.)</th>
             <th>Riesgo</th>
+            <th>Fuente</th>
           </tr>
         </thead>
         <tbody>
@@ -63,6 +74,11 @@ const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({ ste
                   {RISK_LABELS[step.risk_level]}
                 </span>
               </td>
+              <td>
+                <span className="source-badge" title={step.source === 'imagen' ? 'Estimado a partir de una imagen (menor fiabilidad que una autodeclaración de texto)' : 'Detectado en texto que escribiste tú mismo/a'}>
+                  {SOURCE_ICONS[step.source]} {SOURCE_LABELS[step.source]}
+                </span>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -70,6 +86,13 @@ const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({ ste
       <p className="note">
         Estimación aproximada a partir de distribuciones agregadas del INE, asumiendo
         independencia entre atributos. No es un recuento exacto de personas.
+        {steps.some((s) => s.source === 'imagen') && (
+          <>
+            {' '}
+            Las filas marcadas con 📷 vienen de un análisis visual de tus fotos, no de algo
+            que hayas escrito — son menos fiables que una autodeclaración de texto.
+          </>
+        )}
       </p>
     </>
   );

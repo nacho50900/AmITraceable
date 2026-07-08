@@ -37,7 +37,16 @@ export interface PopulationEstimate {
   remaining_population: number | null;
   risk_level: 'bajo' | 'medio' | 'alto' | 'critico' | 'no_estimable';
   evidence: string[];
+  source: 'texto' | 'imagen';
   note: string | null;
+}
+
+export interface ImageLocationPoint {
+  permalink: string;
+  province: string;
+  confidence: number;
+  lat: number | null;
+  lon: number | null;
 }
 
 export interface ExposureReport {
@@ -50,6 +59,7 @@ export interface ExposureReport {
   privacy_score: PrivacyScore;
   recommendations: string[];
   population_narrowing: PopulationEstimate[];
+  image_location_points: ImageLocationPoint[];
 }
 
 export interface AuthStatus {

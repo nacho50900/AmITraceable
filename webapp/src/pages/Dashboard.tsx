@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import HourlyActivityChart from '../components/HourlyActivityChart';
+import LocationMap from '../components/LocationMap';
 import PopulationNarrowingTable from '../components/PopulationNarrowingTable';
 import ScoreBar from '../components/ScoreBar';
 import type { ExposureReport, Platform } from '../types';
@@ -90,6 +91,11 @@ const Dashboard: React.FC = () => {
       <section className="card">
         <h2>Cuánta gente comparte lo que has contado sobre ti</h2>
         <PopulationNarrowingTable steps={report.population_narrowing} />
+      </section>
+
+      <section className="card">
+        <h2>Ubicaciones estimadas a partir de tus fotos</h2>
+        <LocationMap points={report.image_location_points} />
       </section>
 
       <section className="card">

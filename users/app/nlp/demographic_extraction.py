@@ -49,6 +49,11 @@ class DemographicFindings:
     empresa: str | None = None
     # permalinks de los posts que dispararon cada detección, para trazabilidad
     evidence: dict[str, list[str]] = field(default_factory=dict)
+    # procedencia de cada dato detectado: "texto" (autodeclaración escrita,
+    # por defecto) o "imagen" (estimada vía app/vision/geolocation.py). Solo
+    # se rellena explícitamente cuando algo viene de imagen; lo que viene de
+    # este módulo es siempre "texto".
+    source: dict[str, str] = field(default_factory=dict)
 
 
 _AGE_RE = re.compile(r"\b(?:tengo|con)\s+(\d{1,2})\s+años\b|\b(\d{1,2})\s+años\b", re.I)
@@ -114,6 +119,13 @@ def extract_demographics(posts: list[SocialPost]) -> DemographicFindings:
             if m:
                 findings.empresa = m.group(1)
                 findings.evidence.setdefault("empresa", []).append(post.permalink)
+
+    # Todo lo detectado por este módulo viene de texto autodeclarado (por
+    # definición: es lo único que procesa). Se marca explícitamente para que
+    # el frontend pueda distinguirlo de lo que venga de geolocation.py.
+    for attr_name in ("sexo", "edad", "provincia", "municipio", "estudios", "ocupacion", "universidad", "empresa"):
+        if getattr(findings, attr_name) is not None:
+            findings.source[attr_name] = "texto"
 
     return findings
 

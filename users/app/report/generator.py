@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from app.models.schemas import (
     ExposureReport,
+    ImageLocationPoint,
     InferredAttribute,
     PopulationEstimate,
     PrivacyScore,
@@ -16,7 +17,7 @@ from app.nlp.demographic_extraction import extract_demographics
 from app.scoring.k_anonymity import estimate_population_narrowing
 
 
-def generate_report(
+async def generate_report(
     platform: str,
     username: str,
     posts: list[SocialPost],
@@ -25,6 +26,38 @@ def generate_report(
     score: PrivacyScore,
 ) -> ExposureReport:
     demographic_findings = extract_demographics(posts)
+
+    # Geolocalización por imagen: solo se usa como ubicación PARA EL CÁLCULO
+    # DE POBLACIÓN si el texto no dio ya una provincia/municipio explícita
+    # (la autodeclaración en texto es más fiable). Pero TODAS las
+    # estimaciones por imagen (no solo la mejor) se guardan igualmente en
+    # `image_location_points` para pintar el mapa completo en el frontend.
+    # Módulo opcional/best-effort: si el índice FAISS no está construido
+    # (ver app/vision/geolocation.py), esto simplemente no aporta nada y el
+    # resto del informe sigue generándose con normalidad.
+    image_location_points: list[ImageLocationPoint] = []
+    if platform == "instagram":
+        from app.vision.geolocation import estimate_locations_for_posts
+
+        image_estimates = await estimate_locations_for_posts(posts)
+        image_location_points = [
+            ImageLocationPoint(
+                permalink=permalink,
+                province=estimate.province,
+                confidence=estimate.confidence,
+                lat=estimate.lat,
+                lon=estimate.lon,
+            )
+            for permalink, estimate in image_estimates
+        ]
+
+        if image_estimates and demographic_findings.provincia is None and demographic_findings.municipio is None:
+            # Nos quedamos con la estimación de mayor confianza entre todas las imágenes
+            best_permalink, best_estimate = max(image_estimates, key=lambda pair: pair[1].confidence)
+            demographic_findings.provincia = best_estimate.province.lower()
+            demographic_findings.evidence.setdefault("provincia", []).append(best_permalink)
+            demographic_findings.source["provincia"] = "imagen"
+
     narrowing_steps = estimate_population_narrowing(demographic_findings)
     population_narrowing = [
         PopulationEstimate(
@@ -33,6 +66,7 @@ def generate_report(
             remaining_population=step.remaining_population,
             risk_level=step.risk_level,
             evidence=step.evidence,
+            source=step.source,
             note=step.note,
         )
         for step in narrowing_steps
@@ -48,6 +82,7 @@ def generate_report(
         privacy_score=score,
         recommendations=_build_recommendations(fingerprint, inferred_attributes, score),
         population_narrowing=population_narrowing,
+        image_location_points=image_location_points,
     )
 
 

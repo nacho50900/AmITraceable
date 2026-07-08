@@ -51,6 +51,7 @@ class PopulationNarrowingStep:
     remaining_population: int | None  # None si no estimable con las tablas actuales
     risk_level: str  # bajo | medio | alto | critico | no_estimable
     evidence: list[str]
+    source: str = "texto"  # "texto" (autodeclaración) | "imagen" (geolocation.py)
     note: str | None = None
 
 
@@ -70,6 +71,7 @@ def _apply_proportion(
     label: str,
     category: str,
     evidence: list[str],
+    source: str = "texto",
     note: str | None = None,
 ) -> tuple[float, PopulationNarrowingStep | None]:
     """Multiplica `remaining` por una proporción marginal del INE (asumiendo
@@ -82,6 +84,7 @@ def _apply_proportion(
             remaining_population=None,
             risk_level="no_estimable",
             evidence=evidence,
+            source=source,
             note="No hay dato de referencia del INE para este valor concreto en la tabla actual.",
         )
 
@@ -92,6 +95,7 @@ def _apply_proportion(
         remaining_population=round(new_remaining),
         risk_level=_risk_level(new_remaining),
         evidence=evidence,
+        source=source,
         note=note,
     )
 
@@ -107,6 +111,7 @@ def estimate_population_narrowing(findings: DemographicFindings) -> list[Populat
             f"Sexo: {findings.sexo}",
             "sexo",
             findings.evidence.get("sexo", []),
+            source=findings.source.get("sexo", "texto"),
         )
         if step:
             steps.append(step)
@@ -118,6 +123,7 @@ def estimate_population_narrowing(findings: DemographicFindings) -> list[Populat
             f"Edad: {findings.edad} años",
             "edad",
             findings.evidence.get("edad", []),
+            source=findings.source.get("edad", "texto"),
             note="Estimado repartiendo uniformemente la proporción de INE por tramos "
                  "quinquenales entre las edades de cada tramo (no hay tabla año a año "
                  "descargable directamente); ver ine_reference.py.",
@@ -145,6 +151,7 @@ def estimate_population_narrowing(findings: DemographicFindings) -> list[Populat
             else f"Vive en provincia: {location.title()}"
         )
         evidence_key = "municipio" if findings.municipio else "provincia"
+        location_source = findings.source.get(evidence_key, "texto")
 
         if pop is None:
             steps.append(
@@ -154,6 +161,7 @@ def estimate_population_narrowing(findings: DemographicFindings) -> list[Populat
                     remaining_population=None,
                     risk_level="no_estimable",
                     evidence=findings.evidence.get(evidence_key, []),
+                    source=location_source,
                     note="No hay dato de población de referencia para este municipio/provincia en la tabla actual.",
                 )
             )
@@ -167,7 +175,10 @@ def estimate_population_narrowing(findings: DemographicFindings) -> list[Populat
                     remaining_population=round(remaining),
                     risk_level=_risk_level(remaining),
                     evidence=findings.evidence.get(evidence_key, []),
-                    note="Asume distribución de edad/sexo similar a la media nacional (aproximación).",
+                    source=location_source,
+                    note="Asume distribución de edad/sexo similar a la media nacional (aproximación)."
+                    + (" Ubicación estimada a partir de una imagen, no de texto autodeclarado: "
+                       "menor fiabilidad que una autodeclaración explícita." if location_source == "imagen" else ""),
                 )
             )
 
@@ -178,6 +189,7 @@ def estimate_population_narrowing(findings: DemographicFindings) -> list[Populat
             f"Estudió: {findings.estudios.title()}",
             "estudios",
             findings.evidence.get("estudios", []),
+            source=findings.source.get("estudios", "texto"),
         )
         if step:
             steps.append(step)
@@ -189,6 +201,7 @@ def estimate_population_narrowing(findings: DemographicFindings) -> list[Populat
             f"Ocupación: {findings.ocupacion.title()}",
             "ocupacion",
             findings.evidence.get("ocupacion", []),
+            source=findings.source.get("ocupacion", "texto"),
         )
         if step:
             steps.append(step)
