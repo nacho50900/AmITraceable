@@ -88,31 +88,6 @@ async def generate_report(
         population_narrowing=population_narrowing,
         image_location_points=image_location_points,
     )
-    population_narrowing = [
-        PopulationEstimate(
-            attribute_label=step.attribute_label,
-            category=step.category,
-            remaining_population=step.remaining_population,
-            risk_level=step.risk_level,
-            evidence=step.evidence,
-            source=step.source,
-            note=step.note,
-        )
-        for step in narrowing_steps
-    ]
-
-    return ExposureReport(
-        platform=platform,
-        username=username,
-        generated_at=datetime.now(tz=timezone.utc),
-        n_posts_analyzed=len(posts),
-        fingerprint=fingerprint,
-        inferred_attributes=inferred_attributes,
-        privacy_score=score,
-        recommendations=_build_recommendations(fingerprint, inferred_attributes, score),
-        population_narrowing=population_narrowing,
-        image_location_points=image_location_points,
-    )
 
 
 def _build_recommendations(
