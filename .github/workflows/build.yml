@@ -39,6 +39,15 @@ jobs:
           python -m spacy download es_core_news_sm
 
       - name: Run users tests with coverage
+        env:
+          # Los tests de ai_analysis.py usan respx.mock para simular las
+          # respuestas de Mistral, así que NO necesitan una key real para
+          # pasar. Se inyecta igualmente por si en el futuro se añade algún
+          # test de integración real que sí la requiera; si el secret no
+          # está definido en el repo, la variable llega vacía y
+          # Settings.mistral_api_key queda en None (comportamiento normal
+          # de "IA no configurada", no un fallo de CI).
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
         run: cd users && pytest --cov=app --cov-report=xml --cov-report=term
 
       - name: Analyze with SonarQube
