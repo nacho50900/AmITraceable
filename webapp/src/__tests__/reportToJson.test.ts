@@ -11,7 +11,7 @@ describe('downloadReportAsJson', () => {
     revokeObjectURLSpy = vi.fn();
     // jsdom no implementa URL.createObjectURL/revokeObjectURL de forma nativa.
     URL.createObjectURL = createObjectURLSpy as unknown as typeof URL.createObjectURL;
-    URL.revokeObjectURL = revokeObjectURLSpy;
+    URL.revokeObjectURL = revokeObjectURLSpy as unknown as typeof URL.revokeObjectURL;
   });
 
   afterEach(() => {

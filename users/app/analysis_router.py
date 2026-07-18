@@ -17,9 +17,10 @@ import asyncio
 import json
 from typing import Callable
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from app.ai_analysis import AiAnalysisUnavailable, analyze_report_with_ai
 from app.instagram_client import InstagramClient
 from app.models.schemas import ExposureReport, SocialProfile
 from app.nlp.attribute_inference import infer_attributes
@@ -172,3 +173,30 @@ async def analyze_stream(platform: str, request: Request):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/analyze/ai-summary")
+async def ai_summary(report: ExposureReport = Body(...)):
+    """
+    Endpoint AISLADO del pipeline principal: recibe un ExposureReport ya
+    generado (el mismo JSON que el frontend ya tiene tras el análisis, se
+    lo reenvía tal cual) y pide a Mistral AI conclusiones priorizadas.
+
+    Deliberadamente NO se recalcula ni se vuelve a tocar sesión/tokens de
+    Reddit o Instagram aquí -- este endpoint solo sabe leer un informe ya
+    hecho, nada más. Esto mantiene la función de IA totalmente opcional y
+    desacoplada: si Mistral falla o no está configurado, el resto del
+    análisis (que ya se completó antes de llegar aquí) no se ve afectado
+    en absoluto.
+
+    Devuelve 503 (no 500) cuando la IA no está disponible -- falta de API
+    key, cuota del tier gratuito agotada, o error del proveedor -- para que
+    el frontend pueda distinguir claramente "esto es temporal/opcional" de
+    un fallo real de la aplicación.
+    """
+    try:
+        conclusions = await analyze_report_with_ai(report)
+    except AiAnalysisUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    return {"conclusions": conclusions}

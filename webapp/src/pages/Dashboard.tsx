@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import HourlyActivityChart from '../components/HourlyActivityChart';
+import AiSummaryCard from '../components/AiSummaryCard';
 import DownloadReportButton from '../components/DownloadReportButton';
 import LocationMap from '../components/LocationMap';
 import PopulationNarrowingTable from '../components/PopulationNarrowingTable';
@@ -154,6 +155,8 @@ const Dashboard: React.FC = () => {
           ))}
         </ul>
       </section>
+
+      <AiSummaryCard report={report} />
     </div>
   );
 };
