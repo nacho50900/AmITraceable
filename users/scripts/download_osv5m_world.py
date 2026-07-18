@@ -1,53 +1,43 @@
 """
-Descarga TODAS las imágenes de España de OpenStreetView-5M (train + test),
-respetando un límite de disco (por defecto 35GB, para dejar margen sobre
-tus 40GB libres).
+Descarga TODAS las imágenes de OpenStreetView-5M (train + test), de
+CUALQUIER país, respetando un límite de disco (por defecto 35GB, para
+dejar margen sobre tus 40GB libres).
 
-VERSIÓN CORREGIDA: la primera versión usaba
-`datasets.load_dataset("osv5m/osv5m", streaming=True)`, pero las versiones
-recientes de `datasets` (>=4.0) retiraron el soporte de "loading scripts"
-personalizados, que es justo el mecanismo que usa este repositorio. Por
-eso fallaba con "RuntimeError: Dataset scripts are no longer supported".
-Esta versión no usa `datasets` en absoluto, habla directamente con
-`huggingface_hub`.
+Esta es la versión "mundo" de download_osv5m_spain.py: mismo mecanismo
+(paralelismo por hilos, resume automático, caché local del CSV de
+metadatos), pero sin el filtro de país -- se queda con TODOS los IDs de
+cada shard, no solo los de España.
 
-VERSIÓN CON DESCARGA PARALELA: la versión anterior descargaba los shards
-.zip uno detrás de otro (secuencial), lo cual es un cuello de botella de
-red, no de CPU -- cada shard espera a que termine el anterior aunque tengas
-ancho de banda de sobra para varias descargas simultáneas. Esta versión
-descarga varios shards en paralelo con un pool de hilos (--workers, por
-defecto 4). Al ser descarga (I/O), los hilos funcionan bien pese al GIL de
-Python -- no hace falta multiproceso.
+⚠️  AVISO DE TAMAÑO: OSV-5M completo son varios millones de imágenes.
+Bajar TODO el dataset son 260 GB de red (aunque tu disco
+local se mantenga acotado por --max-disk-gb, la red que se transfiere para
+llegar a ese punto es mucho mayor, igual que en la versión de España pero
+a una escala mucho mayor porque ahora aprovechas ~100% de cada shard en
+vez de solo la fracción española). Si tu objetivo es tener una muestra
+global sin bajarte el dataset entero, usa --max-shards o --max-disk-gb
+generosamente bajo para parar pronto, no hace falta procesar los ~100
+shards de cada split para tener un dataset grande y variado.
 
 CÓMO FUNCIONA (disco acotado, red NO acotada):
 El repositorio empaqueta las imágenes en shards .zip (images/train/00.zip,
-01.zip, ...; images/test/00.zip, ...), y el CSV de metadatos no indica de
-antemano qué shard contiene qué imagen -- hay que mirar dentro de cada
-shard para saberlo. Por eso este script:
+01.zip, ...; images/test/00.zip, ...). Este script, con hasta --workers
+shards en paralelo:
+  1. Descarga cada shard .zip a una carpeta temporal propia del hilo.
+  2. Extrae TODAS las imágenes del shard que aún no tengamos guardadas.
+  3. Borra esa carpeta temporal inmediatamente.
+  4. Deja de lanzar NUEVOS shards si el total guardado se acerca a
+     --max-disk-gb (los que ya estén en marcha terminan).
 
-  1. Descarga el CSV de metadatos de train y test (ligero, sin imágenes).
-  2. Filtra las filas de España.
-  3. Para cada shard .zip (de train y de test), con hasta --workers
-     shards en paralelo:
-       a. Lo descarga a una carpeta temporal PROPIA de ese shard (para que
-          los hilos no se pisen entre sí).
-       b. Extrae SOLO las imágenes cuyo id esté en la lista de España.
-       c. Borra esa carpeta temporal inmediatamente.
-  4. Para automáticamente de lanzar NUEVOS shards si el total guardado se
-     acerca a --max-disk-gb (los que ya estén en marcha terminan).
-
-IMPORTANTE sobre el límite de disco con paralelismo: --max-disk-gb solo
-mide las imágenes YA EXTRAÍDAS en `images/`, no los .zip que se están
-descargando en ese momento. Con --workers 4 puede haber hasta 4 shards
-completos ocupando disco temporalmente (en carpetas separadas) antes de
-borrarse. Dale margen extra libre en disco proporcional a --workers.
+El CSV de metadatos (train.csv / test.csv, ~3GB cada uno) se cachea
+localmente tras la primera descarga (_<split>_metadata_cache.csv dentro de
+--output), para no volver a bajarlo en cada relanzamiento.
 
 Puedes interrumpir con Ctrl+C en cualquier momento sin perder lo ya
 guardado -- se persiste el progreso tras cada shard que termina.
 
 Uso:
     pip install huggingface_hub pandas pillow tqdm
-    python download_osv5m_spain.py --output ../data/osv5m_spain --max-disk-gb 35 --workers 6
+    python download_osv5m_world.py --output ../data/osv5m_world --max-disk-gb 35 --workers 6
 """
 import argparse
 import os
@@ -78,22 +68,11 @@ REPO_ID = "osv5m/osv5m"
 REPO_TYPE = "dataset"
 
 
-def _is_spain(country_value) -> bool:
-    """Ajusta esto si el formato del código de país en el CSV difiere de
-    lo esperado. El script imprime valores únicos de ejemplo al arrancar
-    para que lo puedas verificar antes de lanzar la descarga completa."""
-    return str(country_value).strip().upper() in ("ES", "ESP", "SPAIN")
-
-
-def _load_spain_ids(split: str, output_dir: Path) -> tuple[set[str], pd.DataFrame, str]:
-    """Descarga el CSV de metadatos de un split y devuelve (ids_españa,
-    filas_completas_indexadas_por_id, nombre_columna_id).
-
-    El CSV completo (train.csv pesa ~3GB) se cachea en local
-    (_<split>_metadata_cache.csv dentro de --output) tras la primera
-    descarga, para que relanzar el script tras un Ctrl+C no implique
-    volver a bajar esos GB de red cada vez -- solo se re-descarga si ese
-    fichero de caché no existe."""
+def _load_all_ids(split: str, output_dir: Path) -> tuple[set[str], pd.DataFrame, str]:
+    """Descarga (o carga de caché local) el CSV de metadatos de un split y
+    devuelve (todos_los_ids, filas_completas_indexadas_por_id,
+    nombre_columna_id). A diferencia de la versión España, no se filtra
+    por país -- se usan todas las filas del CSV."""
     local_cache_path = output_dir / f"_{split}_metadata_cache.csv"
 
     if local_cache_path.exists():
@@ -116,21 +95,18 @@ def _load_spain_ids(split: str, output_dir: Path) -> tuple[set[str], pd.DataFram
 
     print(f"Columnas en {split}.csv: {list(metadata.columns)}")
 
-    country_col = next((c for c in metadata.columns if c.lower() in ("country", "country_code", "iso")), None)
-    if country_col is None:
-        raise RuntimeError(
-            f"No se encontró columna de país reconocible en {split}.csv. "
-            f"Columnas disponibles: {list(metadata.columns)}. Ajusta _load_spain_ids() manualmente."
-        )
-    print(f"Valores únicos de ejemplo en '{country_col}': {metadata[country_col].dropna().unique()[:10]}")
-
     id_col = next((c for c in metadata.columns if c.lower() == "id"), metadata.columns[0])
 
-    spain_rows = metadata[metadata[country_col].apply(_is_spain)].copy()
-    spain_rows[id_col] = spain_rows[id_col].astype(str)
-    print(f"{len(spain_rows)} filas de España en {split}.csv.\n")
+    country_col = next((c for c in metadata.columns if c.lower() in ("country", "country_code", "iso")), None)
+    if country_col is not None:
+        n_countries = metadata[country_col].nunique(dropna=True)
+        print(f"{n_countries} países distintos detectados en la columna '{country_col}' (no se filtra ninguno).")
 
-    return set(spain_rows[id_col]), spain_rows.set_index(id_col), id_col
+    all_rows = metadata.copy()
+    all_rows[id_col] = all_rows[id_col].astype(str)
+    print(f"{len(all_rows)} filas totales en {split}.csv.\n")
+
+    return set(all_rows[id_col]), all_rows.set_index(id_col), id_col
 
 
 def _dir_size_gb(path: Path) -> float:
@@ -139,14 +115,14 @@ def _dir_size_gb(path: Path) -> float:
 
 def _download_and_extract_shard(
     shard_path: str,
-    spain_ids: set[str],
-    spain_rows_by_id: pd.DataFrame,
+    all_ids: set[str],
+    rows_by_id: pd.DataFrame,
     images_dir: Path,
     state_lock: threading.Lock,
     already_saved_ids: set[str],
     saved_rows: list,
 ) -> int:
-    """Descarga un shard .zip y extrae las imágenes de España que aún no
+    """Descarga un shard .zip y extrae todas las imágenes que aún no
     tengamos. Corre en su propio hilo, así que usa una carpeta de caché
     PROPIA (no la global) para no pisarse con otros hilos descargando en
     paralelo, y solo toca las estructuras compartidas (already_saved_ids,
@@ -163,7 +139,7 @@ def _download_and_extract_shard(
         with zipfile.ZipFile(local_zip_path) as zf:
             for name in zf.namelist():
                 stem = Path(name).stem
-                if stem not in spain_ids:
+                if stem not in all_ids:
                     continue
 
                 with state_lock:
@@ -176,7 +152,7 @@ def _download_and_extract_shard(
                 (images_dir / f"{stem}.jpg").write_bytes(data)
 
                 with state_lock:
-                    saved_rows.append(spain_rows_by_id.loc[stem])
+                    saved_rows.append(rows_by_id.loc[stem])
                 new_count += 1
     finally:
         # Se borra SOLO la carpeta temporal de este hilo/shard, nunca la
@@ -187,7 +163,7 @@ def _download_and_extract_shard(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", default="../data/osv5m_spain")
+    parser.add_argument("--output", default="../data/osv5m_world")
     parser.add_argument("--max-disk-gb", type=float, default=35.0, help="Tope de disco para las imágenes guardadas")
     parser.add_argument(
         "--splits", nargs="+", default=["train", "test"], choices=["train", "test"],
@@ -195,7 +171,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--max-shards", type=int, default=None,
-        help="Límite de shards a procesar por split (útil para una prueba rápida antes de lanzar todo)",
+        help="Límite de shards a procesar por split (útil para una prueba rápida, o para limitar "
+             "cuánta red se transfiere sin depender solo de --max-disk-gb)",
     )
     parser.add_argument(
         "--workers", type=int, default=4,
@@ -249,9 +226,9 @@ def main() -> None:
         if stopped_early:
             break
 
-        spain_ids, spain_rows_by_id, id_col = _load_spain_ids(split, output_dir)
-        if not spain_ids:
-            print(f"⚠️  0 filas de España en {split}, se omite este split.")
+        all_ids, rows_by_id, id_col = _load_all_ids(split, output_dir)
+        if not all_ids:
+            print(f"⚠️  0 filas en {split}, se omite este split.")
             continue
 
         shard_files = sorted(f for f in all_repo_files if f.startswith(f"images/{split}/") and f.endswith(".zip"))
@@ -281,7 +258,7 @@ def main() -> None:
                     break
                 fut = executor.submit(
                     _download_and_extract_shard,
-                    shard_path, spain_ids, spain_rows_by_id, images_dir,
+                    shard_path, all_ids, rows_by_id, images_dir,
                     state_lock, already_saved_ids, saved_rows,
                 )
                 futures[fut] = shard_path
@@ -316,7 +293,7 @@ def main() -> None:
                     if next_shard is not None:
                         fut2 = executor.submit(
                             _download_and_extract_shard,
-                            next_shard, spain_ids, spain_rows_by_id, images_dir,
+                            next_shard, all_ids, rows_by_id, images_dir,
                             state_lock, already_saved_ids, saved_rows,
                         )
                         futures[fut2] = next_shard
@@ -339,14 +316,14 @@ def main() -> None:
             executor.shutdown(wait=True)
 
     if not saved_rows:
-        print("\n⚠️  No se guardó ninguna imagen. Revisa los mensajes de arriba (columna/valores de país).")
+        print("\n⚠️  No se guardó ninguna imagen.")
         return
 
     with state_lock:
         final_metadata = pd.DataFrame(saved_rows).drop_duplicates()
         final_metadata.to_csv(existing_metadata_path, index=False)
 
-    print(f"\nListo. {len(final_metadata)} imágenes de España guardadas en {images_dir}")
+    print(f"\nListo. {len(final_metadata)} imágenes guardadas en {images_dir}")
     print(f"Disco usado por las imágenes: {_dir_size_gb(images_dir):.2f} GB")
     print(f"Metadatos en {existing_metadata_path}")
     if stopped_early:

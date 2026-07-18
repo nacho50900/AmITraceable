@@ -11,6 +11,7 @@ import httpx
 
 from app.config import settings
 from app.models.schemas import SocialPost, SocialProfile
+from app.progress import ProgressCallback, emit_progress
 
 REDDIT_API_BASE = "https://oauth.reddit.com"
 
@@ -22,11 +23,20 @@ class RedditClient:
             "User-Agent": settings.reddit_user_agent,
         }
 
-    async def fetch_profile(self) -> SocialProfile:
+    async def fetch_profile(self, progress_callback: ProgressCallback | None = None) -> SocialProfile:
         async with httpx.AsyncClient(headers=self._headers, base_url=REDDIT_API_BASE) as client:
             me = await self._get_me(client)
+
             posts = await self._fetch_submitted(client, limit=settings.max_posts)
+            await emit_progress(progress_callback, "Leyendo publicaciones...", posts_analyzed=len(posts))
+
             comments = await self._fetch_comments(client, limit=settings.max_comments)
+            await emit_progress(
+                progress_callback,
+                "Leyendo comentarios...",
+                posts_analyzed=len(posts),
+                comments_analyzed=len(comments),
+            )
 
         return SocialProfile(
             platform="reddit",

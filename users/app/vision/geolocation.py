@@ -83,7 +83,11 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
     """
     try:
         _lazy_load()
-    except FileNotFoundError:
+    except (FileNotFoundError, ImportError):
+        # FileNotFoundError: índice no construido todavía (ver scripts/).
+        # ImportError/ModuleNotFoundError: torch/faiss/transformers no
+        # instalados en este entorno -- este módulo es opcional/best-effort,
+        # así que se degrada devolviendo None en vez de tumbar el análisis.
         return None
 
     import torch
@@ -129,7 +133,7 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
 
 
 async def estimate_locations_for_posts(
-    posts: list, min_confidence: float = 0.4
+    posts: list, min_confidence: float = 0.4, progress_callback=None
 ) -> list[tuple[str, ImageLocationEstimate]]:
     """
     Orquestación de alto nivel: para cada SocialPost de tipo imagen que
@@ -143,30 +147,39 @@ async def estimate_locations_for_posts(
     existe (no se ha corrido scripts/build_faiss_index.py) o falla la
     descarga de una imagen concreta, simplemente se omite esa imagen sin
     interrumpir el resto del análisis.
+
+    `progress_callback`, si se da, se llama tras CADA foto procesada
+    (llegue o no a producir una estimación válida), con el nº de fotos
+    procesadas hasta ahora y el total a procesar -- para que el endpoint
+    de streaming pueda mostrar "analizando foto X de Y" en tiempo real.
     """
     import httpx
     from PIL import Image
     import io
 
+    from app.progress import emit_progress
+
     results: list[tuple[str, ImageLocationEstimate]] = []
+    candidate_posts = [
+        p for p in posts if getattr(p, "media_url", None) and p.type in ("image", "carousel_album")
+    ]
+    total = len(candidate_posts)
 
     async with httpx.AsyncClient(timeout=10.0) as client:
-        for post in posts:
-            media_url = getattr(post, "media_url", None)
-            if not media_url or post.type not in ("image", "carousel_album"):
-                continue
-
+        for i, post in enumerate(candidate_posts, start=1):
             try:
-                resp = await client.get(media_url)
+                resp = await client.get(post.media_url)
                 resp.raise_for_status()
                 image = Image.open(io.BytesIO(resp.content))
             except Exception:
-                continue  # imagen no descargable/decodificable: se omite, no se aborta el análisis
+                image = None  # imagen no descargable/decodificable: se omite, no se aborta el análisis
 
-            estimate = estimate_location_from_image(image)
-            # `image` sale de scope aquí y se descarta (nunca se escribe a disco)
+            if image is not None:
+                estimate = estimate_location_from_image(image)
+                # `image` sale de scope tras este bloque y se descarta (nunca se escribe a disco)
+                if estimate and estimate.confidence >= min_confidence:
+                    results.append((post.permalink, estimate))
 
-            if estimate and estimate.confidence >= min_confidence:
-                results.append((post.permalink, estimate))
+            await emit_progress(progress_callback, "Analizando fotos...", photos_analyzed=i, total_photos=total)
 
     return results

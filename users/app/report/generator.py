@@ -14,6 +14,7 @@ from app.models.schemas import (
     WritingFingerprint,
 )
 from app.nlp.demographic_extraction import extract_demographics
+from app.progress import ProgressCallback, emit_progress
 from app.scoring.k_anonymity import estimate_population_narrowing
 
 
@@ -24,6 +25,7 @@ async def generate_report(
     fingerprint: WritingFingerprint,
     inferred_attributes: list[InferredAttribute],
     score: PrivacyScore,
+    progress_callback: ProgressCallback | None = None,
 ) -> ExposureReport:
     demographic_findings = extract_demographics(posts)
 
@@ -39,7 +41,7 @@ async def generate_report(
     if platform == "instagram":
         from app.vision.geolocation import estimate_locations_for_posts
 
-        image_estimates = await estimate_locations_for_posts(posts)
+        image_estimates = await estimate_locations_for_posts(posts, progress_callback=progress_callback)
         image_location_points = [
             ImageLocationPoint(
                 permalink=permalink,
@@ -58,7 +60,34 @@ async def generate_report(
             demographic_findings.evidence.setdefault("provincia", []).append(best_permalink)
             demographic_findings.source["provincia"] = "imagen"
 
+    await emit_progress(progress_callback, "Generando el informe final...")
+
     narrowing_steps = estimate_population_narrowing(demographic_findings)
+    population_narrowing = [
+        PopulationEstimate(
+            attribute_label=step.attribute_label,
+            category=step.category,
+            remaining_population=step.remaining_population,
+            risk_level=step.risk_level,
+            evidence=step.evidence,
+            source=step.source,
+            note=step.note,
+        )
+        for step in narrowing_steps
+    ]
+
+    return ExposureReport(
+        platform=platform,
+        username=username,
+        generated_at=datetime.now(tz=timezone.utc),
+        n_posts_analyzed=len(posts),
+        fingerprint=fingerprint,
+        inferred_attributes=inferred_attributes,
+        privacy_score=score,
+        recommendations=_build_recommendations(fingerprint, inferred_attributes, score),
+        population_narrowing=population_narrowing,
+        image_location_points=image_location_points,
+    )
     population_narrowing = [
         PopulationEstimate(
             attribute_label=step.attribute_label,

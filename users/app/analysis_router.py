@@ -13,14 +13,18 @@ que las demás. Añadir una plataforma nueva es añadir una función factory y
 una entrada en el diccionario — no tocar la lógica del endpoint ni la de
 ninguna otra plataforma.
 """
+import asyncio
+import json
 from typing import Callable
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 from app.instagram_client import InstagramClient
 from app.models.schemas import ExposureReport, SocialProfile
 from app.nlp.attribute_inference import infer_attributes
 from app.nlp.fingerprint import build_fingerprint
+from app.progress import ProgressCallback, emit_progress
 from app.reddit_client import RedditClient
 from app.report.generator import generate_report
 from app.scoring.privacy_score import compute_score
@@ -52,17 +56,27 @@ _PLATFORM_CLIENT_FACTORIES: dict[str, Callable[[Request], object]] = {
 }
 
 
-async def _build_report(profile: SocialProfile) -> ExposureReport:
+async def _build_report(profile: SocialProfile, progress_callback: ProgressCallback | None = None) -> ExposureReport:
     """Ejecuta el pipeline común (fingerprint -> inferencia -> scoring ->
-    informe) sobre un perfil ya normalizado, sea cual sea su origen."""
+    informe) sobre un perfil ya normalizado, sea cual sea su origen.
+
+    `progress_callback` es opcional y no cambia el comportamiento si se
+    omite (usado por `POST /api/analyze/{platform}`, incluidos los tests
+    existentes); solo lo usa el endpoint de streaming de progreso en vivo,
+    más abajo."""
     if not profile.posts:
         raise HTTPException(
             status_code=422,
             detail="No se encontró actividad pública suficiente para analizar",
         )
 
+    await emit_progress(progress_callback, "Analizando tu forma de escribir...")
     fingerprint = build_fingerprint(profile.posts)
+
+    await emit_progress(progress_callback, "Detectando atributos personales...")
     inferred_attributes = infer_attributes(profile.posts)
+
+    await emit_progress(progress_callback, "Calculando el riesgo de privacidad...")
     score = compute_score(profile.posts, fingerprint, inferred_attributes)
 
     return await generate_report(
@@ -72,6 +86,7 @@ async def _build_report(profile: SocialProfile) -> ExposureReport:
         fingerprint=fingerprint,
         inferred_attributes=inferred_attributes,
         score=score,
+        progress_callback=progress_callback,
     )
 
 
@@ -84,3 +99,76 @@ async def analyze(platform: str, request: Request):
     client = factory(request)
     profile = await client.fetch_profile()
     return await _build_report(profile)
+
+
+@router.get("/analyze/{platform}/stream")
+async def analyze_stream(platform: str, request: Request):
+    """
+    Variante de streaming del mismo análisis, vía Server-Sent Events (SSE),
+    para que el frontend pueda mostrar una pantalla de progreso en vivo
+    ("Leyendo publicaciones...", "Analizando fotos...", contadores) en vez
+    de una espera opaca. Emite hitos REALES del pipeline (no un temporizador
+    simulado): cada `yield` corresponde a un paso que de verdad acaba de
+    terminar (una llamada a la API de la plataforma, una foto analizada...).
+
+    No sustituye a `POST /api/analyze/{platform}` (que sigue existiendo tal
+    cual, sin streaming, para compatibilidad/tests); es una ruta adicional
+    que hace el mismo trabajo y además informa del progreso mientras ocurre.
+
+    Formato de cada evento (`data: <json>\\n\\n`):
+      - En curso:  {"done": false, "stage": "...", "posts_analyzed": N, ...}
+      - Éxito:     {"done": true, "report": {...ExposureReport...}}
+      - Error:     {"done": true, "error": "..."}
+    """
+    factory = _PLATFORM_CLIENT_FACTORIES.get(platform)
+    if factory is None:
+        raise HTTPException(status_code=404, detail=f"Plataforma no soportada: {platform}")
+
+    # Se construye (y por tanto se valida la sesión/401) ANTES de abrir el
+    # stream, para poder devolver un 401/404 normal en vez de un evento SSE
+    # de error si el usuario ni siquiera está autenticado.
+    client = factory(request)
+
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def on_progress(stage: str, counts: dict) -> None:
+        await queue.put({"done": False, "stage": stage, **counts})
+
+    async def run_pipeline() -> None:
+        try:
+            await on_progress("Conectando con la plataforma...", {})
+            profile = await client.fetch_profile(progress_callback=on_progress)
+            report = await _build_report(profile, progress_callback=on_progress)
+            await queue.put({"done": True, "report": json.loads(report.model_dump_json())})
+        except HTTPException as exc:
+            await queue.put({"done": True, "error": exc.detail})
+        except Exception as exc:  # pragma: no cover - red de seguridad ante fallos inesperados
+            await queue.put({"done": True, "error": f"Error inesperado durante el análisis: {exc}"})
+
+    pipeline_task = asyncio.create_task(run_pipeline())
+
+    async def event_generator():
+        try:
+            while True:
+                item = await queue.get()
+                yield f"data: {json.dumps(item)}\n\n"
+                if item.get("done"):
+                    break
+        finally:
+            # Si el cliente cierra la conexión antes de terminar, se cancela
+            # el trabajo en curso en vez de dejarlo corriendo en segundo
+            # plano sin que nadie vaya a leer el resultado.
+            if not pipeline_task.done():
+                pipeline_task.cancel()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            # Evita que un proxy intermedio (p. ej. Nginx) almacene en búfer
+            # la respuesta y rompa el streaming en tiempo real.
+            "X-Accel-Buffering": "no",
+        },
+    )
