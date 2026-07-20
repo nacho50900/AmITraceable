@@ -154,8 +154,6 @@ async def estimate_locations_for_posts(
     de streaming pueda mostrar "analizando foto X de Y" en tiempo real.
     """
     import httpx
-    from PIL import Image
-    import io
 
     from app.progress import emit_progress
 
@@ -164,6 +162,21 @@ async def estimate_locations_for_posts(
         p for p in posts if getattr(p, "media_url", None) and p.type in ("image", "carousel_album")
     ]
     total = len(candidate_posts)
+
+    if total == 0:
+        return results
+
+    try:
+        from PIL import Image
+        import io
+    except ImportError:
+        # Pillow no es una dependencia obligatoria del núcleo de la app
+        # (requirements.txt), solo se necesita para este módulo opcional de
+        # geolocalización. Si no está instalada, se degrada devolviendo
+        # lista vacía en vez de romper el análisis completo -- mismo
+        # principio que ya se aplica a torch/faiss/transformers en
+        # _lazy_load() más arriba.
+        return results
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         for i, post in enumerate(candidate_posts, start=1):

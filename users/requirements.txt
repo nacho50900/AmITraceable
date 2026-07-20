@@ -7,6 +7,19 @@ pydantic-settings>=2.5,<3.0
 spacy>=3.7,<3.9
 scikit-learn>=1.5,<1.7
 numpy>=1.26,<3.0
+# pandas: dependencia real de app/vision/geolocation.py (metadatos del
+# índice FAISS, _index_meta, se manejan como DataFrame) y de
+# scripts/build_faiss_index.py. No es solo para tests: en cuanto el índice
+# de geolocalización esté construido, _lazy_load() la importa en producción.
+pandas>=2.0,<3.0
+# Pillow: dependencia real de app/vision/geolocation.py -- se usa para
+# decodificar cada foto descargada en memoria en cuanto hay al menos una
+# publicación candidata, incluso antes de comprobar si el índice FAISS
+# existe. El resto de dependencias pesadas del módulo (torch, faiss,
+# transformers) sí quedan fuera de aquí a propósito, porque solo hacen
+# falta cuando el índice ya está construido (ver _lazy_load en
+# geolocation.py) y se degradan solas si faltan.
+pillow>=10.0,<12.0
 itsdangerous>=2.2,<3.0
 emoji>=2.13,<3.0
 python-jose[cryptography]>=3.3,<4.0
