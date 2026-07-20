@@ -60,7 +60,7 @@ _AGE_RE = re.compile(r"\b(?:tengo|con)\s+(\d{1,2})\s+años\b|\b(\d{1,2})\s+años
 _SEX_MALE_RE = re.compile(r"\b(soy un chico|soy un chaval|soy hombre)\b", re.I)
 _SEX_FEMALE_RE = re.compile(r"\b(soy una chica|soy mujer)\b", re.I)
 _UNIVERSITY_RE = re.compile(r"\buniversidad de (\w+)", re.I)
-_COMPANY_RE = re.compile(r"\btrabajo (?:en|para)\s+([A-Z][\wÁÉÍÓÚáéíóú]+)")
+_COMPANY_RE = re.compile(r"\b(?i:trabajo) (?:en|para)\s+([A-Z][\wÁÉÍÓÚáéíóú]+)")
 _STUDY_VERB_RE = re.compile(r"\b(?:estudio|estudiante de|graduad[oa] en)\s+([a-záéíóúñ ]+)", re.I)
 
 

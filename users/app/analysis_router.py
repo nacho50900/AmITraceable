@@ -91,6 +91,41 @@ async def _build_report(profile: SocialProfile, progress_callback: ProgressCallb
     )
 
 
+@router.post("/analyze/ai-summary")
+async def ai_summary(report: ExposureReport = Body(...)):
+    """
+    Endpoint AISLADO del pipeline principal: recibe un ExposureReport ya
+    generado (el mismo JSON que el frontend ya tiene tras el análisis, se
+    lo reenvía tal cual) y pide a Mistral AI conclusiones priorizadas.
+
+    Deliberadamente NO se recalcula ni se vuelve a tocar sesión/tokens de
+    Reddit o Instagram aquí -- este endpoint solo sabe leer un informe ya
+    hecho, nada más. Esto mantiene la función de IA totalmente opcional y
+    desacoplada: si Mistral falla o no está configurado, el resto del
+    análisis (que ya se completó antes de llegar aquí) no se ve afectado
+    en absoluto.
+
+    Devuelve 503 (no 500) cuando la IA no está disponible -- falta de API
+    key, cuota del tier gratuito agotada, o error del proveedor -- para que
+    el frontend pueda distinguir claramente "esto es temporal/opcional" de
+    un fallo real de la aplicación.
+
+    IMPORTANTE: esta ruta está registrada ANTES que `POST /analyze/{platform}`
+    a propósito. FastAPI resuelve las rutas en el orden en que se registran;
+    si `/analyze/{platform}` fuera primero, "ai-summary" haría match como si
+    fuera el nombre de una plataforma (capturado por el parámetro `platform`)
+    y esta ruta nunca llegaría a ejecutarse -- ver test_analysis_router.py,
+    donde este orden está verificado explícitamente para evitar que alguien
+    lo deshaga sin darse cuenta en el futuro.
+    """
+    try:
+        conclusions = await analyze_report_with_ai(report)
+    except AiAnalysisUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    return {"conclusions": conclusions}
+
+
 @router.post("/analyze/{platform}", response_model=ExposureReport)
 async def analyze(platform: str, request: Request):
     factory = _PLATFORM_CLIENT_FACTORIES.get(platform)
@@ -173,30 +208,3 @@ async def analyze_stream(platform: str, request: Request):
             "X-Accel-Buffering": "no",
         },
     )
-
-
-@router.post("/analyze/ai-summary")
-async def ai_summary(report: ExposureReport = Body(...)):
-    """
-    Endpoint AISLADO del pipeline principal: recibe un ExposureReport ya
-    generado (el mismo JSON que el frontend ya tiene tras el análisis, se
-    lo reenvía tal cual) y pide a Mistral AI conclusiones priorizadas.
-
-    Deliberadamente NO se recalcula ni se vuelve a tocar sesión/tokens de
-    Reddit o Instagram aquí -- este endpoint solo sabe leer un informe ya
-    hecho, nada más. Esto mantiene la función de IA totalmente opcional y
-    desacoplada: si Mistral falla o no está configurado, el resto del
-    análisis (que ya se completó antes de llegar aquí) no se ve afectado
-    en absoluto.
-
-    Devuelve 503 (no 500) cuando la IA no está disponible -- falta de API
-    key, cuota del tier gratuito agotada, o error del proveedor -- para que
-    el frontend pueda distinguir claramente "esto es temporal/opcional" de
-    un fallo real de la aplicación.
-    """
-    try:
-        conclusions = await analyze_report_with_ai(report)
-    except AiAnalysisUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-
-    return {"conclusions": conclusions}
