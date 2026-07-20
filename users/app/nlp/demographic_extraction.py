@@ -72,62 +72,105 @@ def extract_demographics(posts: list[SocialPost]) -> DemographicFindings:
         if not text:
             continue
 
-        if findings.edad is None:
-            m = _AGE_RE.search(text)
-            if m:
-                age_str = m.group(1) or m.group(2)
-                age = int(age_str)
-                if 12 <= age <= 100:  # descarta falsos positivos ("100 años de historia")
-                    findings.edad = age
-                    findings.evidence.setdefault("edad", []).append(post.permalink)
+        _try_detect_edad(text, post.permalink, findings)
+        _try_detect_sexo(text, post.permalink, findings)
+        _try_detect_location(text, post.permalink, findings)
+        _try_detect_estudios(text, post.permalink, findings)
+        _try_detect_ocupacion(text, post.permalink, findings)
+        _try_detect_universidad(text, post.permalink, findings)
+        _try_detect_empresa(text, post.permalink, findings)
 
-        if findings.sexo is None:
-            if _SEX_MALE_RE.search(text):
-                findings.sexo = "hombre"
-                findings.evidence.setdefault("sexo", []).append(post.permalink)
-            elif _SEX_FEMALE_RE.search(text):
-                findings.sexo = "mujer"
-                findings.evidence.setdefault("sexo", []).append(post.permalink)
+    _mark_all_detected_as_texto(findings)
+    return findings
 
-        if findings.provincia is None or findings.municipio is None:
-            _match_location(text, post.permalink, findings)
 
-        if findings.estudios is None:
-            m = _STUDY_VERB_RE.search(text)
-            if m:
-                candidate = _strip_accents(m.group(1).strip().lower())
-                matched = next((k for k in STUDIES_DISTRIBUTION if k in candidate), None)
-                if matched:
-                    findings.estudios = matched
-                    findings.evidence.setdefault("estudios", []).append(post.permalink)
-
-        if findings.ocupacion is None:
-            lowered = _strip_accents(text.lower())
-            matched = next((k for k in OCCUPATION_DISTRIBUTION if k in lowered), None)
-            if matched:
-                findings.ocupacion = matched
-                findings.evidence.setdefault("ocupacion", []).append(post.permalink)
-
-        if findings.universidad is None:
-            m = _UNIVERSITY_RE.search(text)
-            if m:
-                findings.universidad = m.group(1)
-                findings.evidence.setdefault("universidad", []).append(post.permalink)
-
-        if findings.empresa is None:
-            m = _COMPANY_RE.search(text)
-            if m:
-                findings.empresa = m.group(1)
-                findings.evidence.setdefault("empresa", []).append(post.permalink)
-
-    # Todo lo detectado por este módulo viene de texto autodeclarado (por
-    # definición: es lo único que procesa). Se marca explícitamente para que
-    # el frontend pueda distinguirlo de lo que venga de geolocation.py.
+def _mark_all_detected_as_texto(findings: DemographicFindings) -> None:
+    """Todo lo detectado por este módulo viene de texto autodeclarado (por
+    definición: es lo único que procesa). Se marca explícitamente para que
+    el frontend pueda distinguirlo de lo que venga de geolocation.py."""
     for attr_name in ("sexo", "edad", "provincia", "municipio", "estudios", "ocupacion", "universidad", "empresa"):
         if getattr(findings, attr_name) is not None:
             findings.source[attr_name] = "texto"
 
-    return findings
+
+def _try_detect_edad(text: str, permalink: str, findings: DemographicFindings) -> None:
+    if findings.edad is not None:
+        return
+
+    match = _AGE_RE.search(text)
+    if not match:
+        return
+
+    age = int(match.group(1) or match.group(2))
+    if 12 <= age <= 100:  # descarta falsos positivos ("100 años de historia")
+        findings.edad = age
+        findings.evidence.setdefault("edad", []).append(permalink)
+
+
+def _try_detect_sexo(text: str, permalink: str, findings: DemographicFindings) -> None:
+    if findings.sexo is not None:
+        return
+
+    if _SEX_MALE_RE.search(text):
+        findings.sexo = "hombre"
+    elif _SEX_FEMALE_RE.search(text):
+        findings.sexo = "mujer"
+    else:
+        return
+
+    findings.evidence.setdefault("sexo", []).append(permalink)
+
+
+def _try_detect_estudios(text: str, permalink: str, findings: DemographicFindings) -> None:
+    if findings.estudios is not None:
+        return
+
+    match = _STUDY_VERB_RE.search(text)
+    if not match:
+        return
+
+    candidate = _strip_accents(match.group(1).strip().lower())
+    matched = next((k for k in STUDIES_DISTRIBUTION if k in candidate), None)
+    if matched:
+        findings.estudios = matched
+        findings.evidence.setdefault("estudios", []).append(permalink)
+
+
+def _try_detect_ocupacion(text: str, permalink: str, findings: DemographicFindings) -> None:
+    if findings.ocupacion is not None:
+        return
+
+    lowered = _strip_accents(text.lower())
+    matched = next((k for k in OCCUPATION_DISTRIBUTION if k in lowered), None)
+    if matched:
+        findings.ocupacion = matched
+        findings.evidence.setdefault("ocupacion", []).append(permalink)
+
+
+def _try_detect_universidad(text: str, permalink: str, findings: DemographicFindings) -> None:
+    if findings.universidad is not None:
+        return
+
+    match = _UNIVERSITY_RE.search(text)
+    if match:
+        findings.universidad = match.group(1)
+        findings.evidence.setdefault("universidad", []).append(permalink)
+
+
+def _try_detect_empresa(text: str, permalink: str, findings: DemographicFindings) -> None:
+    if findings.empresa is not None:
+        return
+
+    match = _COMPANY_RE.search(text)
+    if match:
+        findings.empresa = match.group(1)
+        findings.evidence.setdefault("empresa", []).append(permalink)
+
+
+def _try_detect_location(text: str, permalink: str, findings: DemographicFindings) -> None:
+    if findings.provincia is not None and findings.municipio is not None:
+        return
+    _match_location(text, permalink, findings)
 
 
 def _match_location(text: str, permalink: str, findings: DemographicFindings) -> None:

@@ -91,7 +91,12 @@ async def _build_report(profile: SocialProfile, progress_callback: ProgressCallb
     )
 
 
-@router.post("/analyze/ai-summary")
+@router.post(
+    "/analyze/ai-summary",
+    responses={
+        503: {"description": "El análisis con IA no está disponible (sin API key, cuota agotada, o error del proveedor)."},
+    },
+)
 async def ai_summary(report: ExposureReport = Body(...)):
     """
     Endpoint AISLADO del pipeline principal: recibe un ExposureReport ya
@@ -126,7 +131,15 @@ async def ai_summary(report: ExposureReport = Body(...)):
     return {"conclusions": conclusions}
 
 
-@router.post("/analyze/{platform}", response_model=ExposureReport)
+@router.post(
+    "/analyze/{platform}",
+    response_model=ExposureReport,
+    responses={
+        401: {"description": "No autenticado con la plataforma solicitada."},
+        404: {"description": "Plataforma no soportada."},
+        422: {"description": "No se encontró actividad pública suficiente para analizar."},
+    },
+)
 async def analyze(platform: str, request: Request):
     factory = _PLATFORM_CLIENT_FACTORIES.get(platform)
     if factory is None:
@@ -137,7 +150,13 @@ async def analyze(platform: str, request: Request):
     return await _build_report(profile)
 
 
-@router.get("/analyze/{platform}/stream")
+@router.get(
+    "/analyze/{platform}/stream",
+    responses={
+        401: {"description": "No autenticado con la plataforma solicitada."},
+        404: {"description": "Plataforma no soportada."},
+    },
+)
 async def analyze_stream(platform: str, request: Request):
     """
     Variante de streaming del mismo análisis, vía Server-Sent Events (SSE),

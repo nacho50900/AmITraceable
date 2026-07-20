@@ -46,7 +46,13 @@ async def login(request: Request):
     return RedirectResponse(f"{REDDIT_AUTH_URL}?{urlencode(params)}")
 
 
-@router.get("/callback")
+@router.get(
+    "/callback",
+    responses={
+        400: {"description": "Estado OAuth inválido (posible CSRF)."},
+        502: {"description": "Reddit no devolvió un token de acceso válido."},
+    },
+)
 async def callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
     if error:
         # El usuario denegó el consentimiento explícitamente

@@ -45,7 +45,10 @@ def _require_configured():
         )
 
 
-@router.get("/login")
+@router.get(
+    "/login",
+    responses={503: {"description": "Instagram no está configurado en este servidor (faltan credenciales)."}},
+)
 async def login(request: Request):
     """Redirige al usuario a la pantalla de consentimiento de Instagram."""
     _require_configured()
@@ -63,7 +66,14 @@ async def login(request: Request):
     return RedirectResponse(f"{IG_AUTH_URL}?{urlencode(params)}")
 
 
-@router.get("/callback")
+@router.get(
+    "/callback",
+    responses={
+        503: {"description": "Instagram no está configurado en este servidor (faltan credenciales)."},
+        400: {"description": "Estado OAuth inválido (posible CSRF)."},
+        502: {"description": "Instagram no devolvió un token válido (corto o de larga duración)."},
+    },
+)
 async def callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
     _require_configured()
 
