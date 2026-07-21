@@ -41,7 +41,7 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
             conclusiones priorizadas en lenguaje natural. Es opcional: se envía tu informe ya
             generado, no tus publicaciones originales.
           </p>
-          <button className="btn-secondary" onClick={handleAnalyze}>
+          <button type="button" className="btn-secondary" onClick={handleAnalyze}>
             Analizar con IA
           </button>
         </>
@@ -51,8 +51,8 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
 
       {status === 'success' && (
         <ul className="ai-conclusions-list">
-          {conclusions.map((conclusion, i) => (
-            <li key={i}>{conclusion}</li>
+          {conclusions.map((conclusion) => (
+            <li key={conclusion}>{conclusion}</li>
           ))}
         </ul>
       )}
@@ -68,7 +68,7 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
         <p className="note error-text">
           No se ha podido completar el análisis con IA ({message}). Puedes intentarlo de nuevo.
           <br />
-          <button className="btn-secondary" onClick={handleAnalyze}>
+          <button type="button" className="btn-secondary" onClick={handleAnalyze}>
             Reintentar
           </button>
         </p>

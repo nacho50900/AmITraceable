@@ -111,9 +111,9 @@ describe('AiSummaryCard', () => {
     render(<AiSummaryCard report={makeExposureReport()} />);
 
     await user.click(screen.getByRole('button', { name: 'Analizar con IA' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Reintentar' })).toBeInTheDocument());
+    const retryButton = await screen.findByRole('button', { name: 'Reintentar' });
 
-    await user.click(screen.getByRole('button', { name: 'Reintentar' }));
+    await user.click(retryButton);
 
     await waitFor(() => {
       expect(screen.getByText('Conclusión tras reintento')).toBeInTheDocument();

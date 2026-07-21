@@ -148,7 +148,7 @@ describe('Dashboard', () => {
     );
     renderDashboard();
 
-    await waitFor(() => expect(screen.getByText(/u\/pepito/)).toBeInTheDocument());
+    await screen.findByText(/u\/pepito/);
     expect(screen.getByText('Subreddits más frecuentes')).toBeInTheDocument();
     expect(screen.getByText(/r\/madrid \(3\)/)).toBeInTheDocument();
   });
@@ -168,7 +168,7 @@ describe('Dashboard', () => {
     );
     renderDashboard();
 
-    await waitFor(() => expect(screen.getByText(/@pepita/)).toBeInTheDocument());
+    await screen.findByText(/@pepita/);
     expect(screen.getByText('Hashtags más frecuentes')).toBeInTheDocument();
     expect(screen.getByText(/#viajes \(5\)/)).toBeInTheDocument();
     expect(api.analyze).toHaveBeenCalledWith('instagram');

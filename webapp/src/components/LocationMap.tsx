@@ -47,9 +47,9 @@ const LocationMap: React.FC<LocationMapProps> = ({ points }) => {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        {validPoints.map((point, i) => (
+        {validPoints.map((point) => (
           <CircleMarker
-            key={i}
+            key={point.permalink}
             center={[point.lat as number, point.lon as number]}
             radius={8 + point.confidence * 10}
             pathOptions={{

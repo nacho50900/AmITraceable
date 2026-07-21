@@ -118,9 +118,10 @@ class TestAnalyzeReportWithAi:
         route = respx_mock.post("https://api.mistral.ai/v1/chat/completions").mock(
             return_value=httpx.Response(429)
         )
+        report = _make_report()
 
         with pytest.raises(AiAnalysisUnavailable, match="límite del plan gratuito"):
-            await analyze_report_with_ai(_make_report())
+            await analyze_report_with_ai(report)
 
         # Ni un solo reintento: exactamente una llamada HTTP.
         assert route.call_count == 1
@@ -129,17 +130,19 @@ class TestAnalyzeReportWithAi:
     async def test_401_raises_unavailable_with_invalid_key_message(self, monkeypatch, respx_mock):
         monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
         respx_mock.post("https://api.mistral.ai/v1/chat/completions").mock(return_value=httpx.Response(401))
+        report = _make_report()
 
         with pytest.raises(AiAnalysisUnavailable, match="no es válida"):
-            await analyze_report_with_ai(_make_report())
+            await analyze_report_with_ai(report)
 
     @pytest.mark.asyncio
     async def test_other_4xx_5xx_raises_unavailable_with_status_code(self, monkeypatch, respx_mock):
         monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
         respx_mock.post("https://api.mistral.ai/v1/chat/completions").mock(return_value=httpx.Response(500))
+        report = _make_report()
 
         with pytest.raises(AiAnalysisUnavailable, match="500"):
-            await analyze_report_with_ai(_make_report())
+            await analyze_report_with_ai(report)
 
     @pytest.mark.asyncio
     async def test_network_error_raises_unavailable_not_raw_exception(self, monkeypatch, respx_mock):
@@ -147,9 +150,10 @@ class TestAnalyzeReportWithAi:
         respx_mock.post("https://api.mistral.ai/v1/chat/completions").mock(
             side_effect=httpx.ConnectError("no network")
         )
+        report = _make_report()
 
         with pytest.raises(AiAnalysisUnavailable, match="No se pudo contactar"):
-            await analyze_report_with_ai(_make_report())
+            await analyze_report_with_ai(report)
 
     @pytest.mark.asyncio
     async def test_malformed_response_body_raises_unavailable(self, monkeypatch, respx_mock):
@@ -157,9 +161,10 @@ class TestAnalyzeReportWithAi:
         respx_mock.post("https://api.mistral.ai/v1/chat/completions").mock(
             return_value=httpx.Response(200, json={"unexpected": "shape"})
         )
+        report = _make_report()
 
         with pytest.raises(AiAnalysisUnavailable, match="Respuesta inesperada"):
-            await analyze_report_with_ai(_make_report())
+            await analyze_report_with_ai(report)
 
     @pytest.mark.asyncio
     async def test_sends_report_json_and_system_prompt_in_payload(self, monkeypatch, respx_mock):

@@ -8,7 +8,7 @@ interface DownloadReportButtonProps {
 
 const DownloadReportButton: React.FC<DownloadReportButtonProps> = ({ report }) => {
   return (
-    <button className="download-report-button" onClick={() => downloadReportAsJson(report)}>
+    <button type="button" className="download-report-button" onClick={() => downloadReportAsJson(report)}>
       Descargar informe completo (JSON)
     </button>
   );

@@ -58,7 +58,10 @@ describe('LocationMap', () => {
   });
 
   test('con puntos válidos: renderiza el mapa y un marcador por punto', () => {
-    const points = [makePoint({ province: 'Madrid' }), makePoint({ province: 'Barcelona', lat: 41.4, lon: 2.2 })];
+    const points = [
+      makePoint({ province: 'Madrid', permalink: 'https://instagram.com/p/1' }),
+      makePoint({ province: 'Barcelona', lat: 41.4, lon: 2.2, permalink: 'https://instagram.com/p/2' }),
+    ];
     render(<LocationMap points={points} />);
 
     expect(screen.getByTestId('map-container')).toBeInTheDocument();
@@ -66,7 +69,10 @@ describe('LocationMap', () => {
   });
 
   test('filtra puntos inválidos pero conserva y renderiza los válidos', () => {
-    const points = [makePoint({ lat: null, lon: null }), makePoint({ province: 'Madrid' })];
+    const points = [
+      makePoint({ lat: null, lon: null, permalink: 'https://instagram.com/p/invalido' }),
+      makePoint({ province: 'Madrid', permalink: 'https://instagram.com/p/valido' }),
+    ];
     render(<LocationMap points={points} />);
 
     expect(screen.getAllByTestId('circle-marker')).toHaveLength(1);
@@ -74,8 +80,8 @@ describe('LocationMap', () => {
 
   test('el centro del mapa es la media de lat/lon de los puntos válidos', () => {
     const points = [
-      makePoint({ lat: 40.0, lon: -4.0 }),
-      makePoint({ lat: 42.0, lon: -2.0 }),
+      makePoint({ lat: 40.0, lon: -4.0, permalink: 'https://instagram.com/p/1' }),
+      makePoint({ lat: 42.0, lon: -2.0, permalink: 'https://instagram.com/p/2' }),
     ];
     render(<LocationMap points={points} />);
 

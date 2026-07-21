@@ -58,7 +58,7 @@ const Dashboard: React.FC = () => {
     return (
       <div className="page">
         <p className="error">No se pudo generar el informe: {error}</p>
-        <button onClick={handleLogout}>Volver al inicio</button>
+        <button type="button" onClick={handleLogout}>Volver al inicio</button>
       </div>
     );
   }
@@ -74,7 +74,7 @@ const Dashboard: React.FC = () => {
         </h1>
         <div className="dashboard-header-actions">
           <DownloadReportButton report={report} />
-          <button className="btn-secondary" onClick={handleLogout}>
+          <button type="button" className="btn-secondary" onClick={handleLogout}>
             Cerrar sesión y borrar datos
           </button>
         </div>
@@ -109,13 +109,13 @@ const Dashboard: React.FC = () => {
           <p>No se ha detectado ningún atributo personal claro con las heurísticas actuales.</p>
         ) : (
           <ul className="attributes-list">
-            {report.inferred_attributes.map((attr, i) => (
-              <li key={i}>
+            {report.inferred_attributes.map((attr) => (
+              <li key={`${attr.category}-${attr.value}`}>
                 <strong>{attr.category}:</strong> {attr.value}{' '}
                 <span className="confidence">(confianza {(attr.confidence * 100).toFixed(0)}%)</span>
                 <div className="evidence">
                   {attr.evidence.slice(0, 3).map((link, j) => (
-                    <a key={j} href={link} target="_blank" rel="noreferrer">
+                    <a key={link} href={link} target="_blank" rel="noreferrer">
                       Evidencia {j + 1}
                     </a>
                   ))}
@@ -150,8 +150,8 @@ const Dashboard: React.FC = () => {
       <section className="card recommendations">
         <h2>Recomendaciones</h2>
         <ul>
-          {report.recommendations.map((rec, i) => (
-            <li key={i}>{rec}</li>
+          {report.recommendations.map((rec) => (
+            <li key={rec}>{rec}</li>
           ))}
         </ul>
       </section>

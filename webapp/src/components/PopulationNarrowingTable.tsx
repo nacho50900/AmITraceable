@@ -59,8 +59,8 @@ const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({ ste
           </tr>
         </thead>
         <tbody>
-          {steps.map((step, i) => (
-            <tr key={i}>
+          {steps.map((step) => (
+            <tr key={`${step.category}-${step.attribute_label}`}>
               <td>
                 {step.attribute_label}
                 {step.note && <div className="note-inline">{step.note}</div>}
