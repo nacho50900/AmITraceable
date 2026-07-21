@@ -15,7 +15,7 @@ ninguna otra plataforma.
 """
 import asyncio
 import json
-from typing import Callable
+from typing import Annotated, Callable
 
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -97,7 +97,7 @@ async def _build_report(profile: SocialProfile, progress_callback: ProgressCallb
         503: {"description": "El análisis con IA no está disponible (sin API key, cuota agotada, o error del proveedor)."},
     },
 )
-async def ai_summary(report: ExposureReport = Body(...)):
+async def ai_summary(report: Annotated[ExposureReport, Body(...)]):
     """
     Endpoint AISLADO del pipeline principal: recibe un ExposureReport ya
     generado (el mismo JSON que el frontend ya tiene tras el análisis, se
@@ -155,6 +155,17 @@ async def analyze(platform: str, request: Request):
     responses={
         401: {"description": "No autenticado con la plataforma solicitada."},
         404: {"description": "Plataforma no soportada."},
+        422: {
+            "description": (
+                "No se encontró actividad pública suficiente para analizar. "
+                "NOTA: esta ruta nunca devuelve un 422 HTTP real -- el pipeline "
+                "(_build_report) puede lanzar esta excepción internamente, pero "
+                "run_pipeline() la captura y la entrega como evento SSE "
+                "{'done': true, 'error': ...} dentro de una respuesta 200. Se "
+                "documenta aquí igualmente porque el código que la origina es "
+                "compartido con POST /analyze/{platform}, donde sí es un 422 real."
+            )
+        },
     },
 )
 async def analyze_stream(platform: str, request: Request):

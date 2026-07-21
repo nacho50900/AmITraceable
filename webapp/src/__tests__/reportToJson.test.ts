@@ -85,6 +85,6 @@ describe('downloadReportAsJson', () => {
 
     downloadReportAsJson(report);
 
-    expect(document.querySelectorAll('a[download]').length).toBe(0);
+    expect(document.querySelectorAll('a[download]')).toHaveLength(0);
   });
 });
