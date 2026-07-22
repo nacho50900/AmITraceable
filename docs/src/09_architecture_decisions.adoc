@@ -119,3 +119,103 @@ Node) por el backend Python.
 infraestructura; (-) necesidad de mantener consistencia de convenciones
 heredadas (nombres de servicios, puertos, estructura de carpetas) aunque
 el dominio del proyecto no tenga relación con el original.
+
+=== ADR-8: Estimación de k-anonimato con proporciones agregadas del INE, no una base de datos sintética
+
+*Contexto*: se necesitaba mostrar al usuario "cuánta gente comparte tus
+características autodeclaradas" (edad, sexo, provincia, estudios...),
+al estilo de una tabla de k-anonimato clásica.
+
+*Alternativas consideradas*: construir una base de datos sintética con
+una fila por cada uno de los ~49 millones de habitantes de España
+(poblada a partir de Censo/Padrón/microdatos del INE) y resolver la
+consulta con un `SELECT COUNT(*) ... WHERE ...` real.
+
+*Decisión*: multiplicar en cadena proporciones agregadas del INE
+(`data/ine_reference.py`), asumiendo independencia estadística entre
+atributos, en vez de materializar microdatos sintéticos.
+
+*Consecuencias*: (+) coherente con el principio "sin persistencia" que
+sostiene el resto del argumentario RGPD del proyecto; (+) trivial de
+auditar (cada número del informe se puede rastrear a una multiplicación
+concreta); (+) no requiere procesar microdatos reales del INE (formato
+de registro fijo, no trivial de tratar); (-) menos preciso que microdatos
+reales en los casos donde hay correlación real entre atributos (p. ej.
+la distribución de edad no es exactamente igual en todas las provincias)
+— limitación documentada explícitamente en el propio informe.
+
+=== ADR-9: Geolocalización de fotos limitada a España y a nivel de provincia
+
+*Contexto*: se planteó geolocalizar fotos de Instagram al estilo de
+herramientas comerciales tipo GeoSpy.
+
+*Alternativas consideradas*: replicar un índice de geolocalización
+mundial (inviable: requiere cientos de millones de imágenes
+georreferenciadas e infraestructura fuera del alcance de un TFG);
+predecir coordenadas GPS exactas (poco realista: incluso el estado del
+arte publicado solo acierta la calle/1km ~26-29% de las veces).
+
+*Decisión*: DINOv2 (extracción de embeddings) + FAISS (búsqueda de
+vecinos más cercanos) contra un índice construido únicamente con
+imágenes de España (subconjunto filtrado del dataset público OSV-5M), y
+la predicción se agrega a nivel de **provincia**, no de coordenadas
+exactas.
+
+*Consecuencias*: (+) índice manejable en recursos de un TFG (varios GB
+en vez de un dataset mundial); (+) mayor precisión relativa al competir
+en un espacio de búsqueda más pequeño; (+) la granularidad de provincia
+coincide con la que ya usa el módulo de k-anonimato, integrándose de
+forma natural en el resto del informe; (-) no compite en precisión con
+herramientas comerciales que sí tienen infraestructura e índices
+mundiales propietarios — limitación reconocida y documentada, no
+ocultada.
+
+=== ADR-10: Mistral AI como proveedor de análisis con IA, por jurisdicción
+
+*Contexto*: se quería una función opcional para que un LLM leyera el
+informe ya generado y diera conclusiones en lenguaje natural. Se
+valoraron varios proveedores baratos, incluido DeepSeek.
+
+*Alternativas consideradas*: DeepSeek (más barato, pero empresa china:
+implica una transferencia internacional de datos personales fuera del
+Espacio Económico Europeo, con las obligaciones adicionales del RGPD
+Capítulo V que eso conlleva); modelo propio entrenado/fine-tuned
+localmente (descartado: coste de entrenamiento y de generación de
+dataset desproporcionado para una tarea de razonamiento en contexto
+sobre datos ya estructurados, que no requiere especialización de
+dominio).
+
+*Decisión*: Mistral AI (La Plateforme), tier gratuito, empresa con sede
+en Francia.
+
+*Consecuencias*: (+) evita justificar una transferencia internacional de
+datos personales, al procesarse dentro de la UE; (+) sin coste (tier
+gratuito, con degradación explícita si se agota la cuota, sin
+reintentos); (-) calidad de respuesta algo menor que la de modelos de
+proveedores más caros según benchmarks públicos, aceptado como
+compromiso razonable para una función complementaria opcional.
+
+=== ADR-11: Progreso en vivo vía Server-Sent Events, no polling ni WebSockets
+
+*Contexto*: el análisis completo (sobre todo con geolocalización de
+fotos activada) puede tardar varios segundos; se quería sustituir la
+espera opaca por una pantalla de progreso real.
+
+*Alternativas consideradas*: *polling* periódico desde el frontend
+(añade latencia y carga innecesaria); WebSockets (bidireccional,
+más complejo de lo que este caso de uso necesita, ya que el servidor
+nunca necesita recibir datos del cliente durante el análisis).
+
+*Decisión*: Server-Sent Events (`GET /api/analyze/{platform}/stream`),
+unidireccional servidor->cliente, con eventos JSON (`{"done": false,
+"stage": "...", ...}` en curso, `{"done": true, "report": {...}}` o
+`{"done": true, "error": "..."}` al terminar). El endpoint clásico
+(`POST /api/analyze/{platform}`) se mantiene sin cambios para
+compatibilidad y para los tests existentes.
+
+*Consecuencias*: (+) hitos de progreso REALES (cada evento corresponde a
+un paso del pipeline que de verdad acaba de terminar, no a un
+temporizador simulado); (+) más simple de implementar y depurar que
+WebSockets para un flujo unidireccional; (-) dos endpoints distintos
+para la misma lógica de negocio (`_build_report` compartido entre
+ambos, para no duplicar la orquestación).

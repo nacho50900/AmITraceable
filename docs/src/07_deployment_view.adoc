@@ -80,9 +80,9 @@ Mapeo de bloques a infraestructura::
 
 Motivación::
 Reproducir el entorno de tests sin depender de credenciales reales de
-Reddit/Instagram: las llamadas a las APIs externas se mockean con
-`respx` en los tests, así que el runner no necesita salir a red externa
-más que para instalar dependencias y hablar con SonarCloud.
+Reddit/Instagram/Mistral AI: las llamadas a las APIs externas se
+mockean con `respx` en los tests, así que el runner no necesita salir a
+red externa más que para instalar dependencias y hablar con SonarCloud.
 
 Caché::
 `actions/setup-node` y `actions/setup-python` cachean `node_modules`

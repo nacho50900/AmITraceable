@@ -18,8 +18,17 @@ ifndef::imagesdir[:imagesdir: ../images]
   cualquier momento, fuera del control de AmITraceable.
 * **Minimización de datos**: cada cliente de plataforma pide solo los
   campos estrictamente necesarios para el análisis (texto, timestamp,
-  comunidad/etiqueta, engagement, permalink) — nunca imágenes, IPs,
-  emails, ni nada que la plataforma no exponga como público.
+  comunidad/etiqueta, engagement, permalink) — nunca IPs, emails, ni nada
+  que la plataforma no exponga como público.
+* **Excepción consciente y documentada — fotos para geolocalización**: el
+  módulo opcional de geolocalización por imagen (`app/vision/geolocation.py`)
+  descarga cada foto de Instagram **en memoria, de forma transitoria**,
+  solo para extraer un embedding visual; la imagen se descarta
+  inmediatamente después y nunca se escribe a disco ni se persiste en
+  ningún sitio. Es una excepción real al principio original de "no se
+  descargan imágenes" (documentada explícitamente en el docstring de
+  `instagram_client.py`), pero coherente con el resto del diseño
+  stateless: sigue sin haber persistencia de ningún tipo.
 
 === Explicabilidad de las inferencias
 
@@ -83,6 +92,89 @@ Ninguna plataforma tiene un estatus especial en el código:
 Añadir una plataforma nueva (por ejemplo, cuando X tenga API
 disponible) implica añadir una entrada nueva en cada uno de estos
 puntos, sin modificar el comportamiento de las plataformas existentes.
+
+=== Estimación de k-anonimato sin base de datos sintética
+
+El módulo `scoring/k_anonymity.py` estima, para cada declaración
+explícita que el usuario ha hecho sobre sí mismo en su propio texto
+("tengo 24 años", "vivo en León", "estudio Medicina"...), cuánta gente en
+España comparte esa combinación de características — el mismo
+razonamiento que una tabla de k-anonimato clásica.
+
+Se valoró y se descartó explícitamente construir una base de datos
+sintética con una fila por cada uno de los ~49 millones de habitantes de
+España (poblada a partir de proporciones del Censo/Padrón del INE), por
+dos motivos: rompería el principio de diseño "sin persistencia" que
+sostiene el resto del argumentario RGPD del proyecto, y su coste de
+ingeniería (sintetizar y servir 49M filas) es desproporcionado para el
+alcance de un TFG.
+
+En su lugar, el módulo multiplica en cadena **proporciones agregadas del
+INE** (tablas de distribución por sexo, edad, provincia/municipio,
+estudios, ocupación en `data/ine_reference.py`), asumiendo independencia
+estadística entre atributos salvo que exista una tabla cruzada real. Es
+matemáticamente equivalente a "cuántas filas quedarían" en una tabla de
+microdatos si esas variables fueran independientes, y es la aproximación
+estándar en estudios de riesgo de reidentificación cuando no se dispone
+de microdatos individuales. La limitación (asumir independencia cuando en
+la realidad hay correlación entre, por ejemplo, edad y provincia) queda
+documentada explícitamente en el docstring del módulo y se marca en el
+propio informe ("estimación aproximada, no un recuento exacto").
+
+=== Geolocalización de fotos por similitud visual (módulo opcional)
+
+`vision/geolocation.py` estima la provincia más probable de una foto de
+Instagram comparándola, vía un embedding de DINOv2, contra un índice
+FAISS construido a partir de imágenes de calle georreferenciadas de
+España (subconjunto del dataset público OSV-5M, ver `scripts/`).
+
+Decisiones de diseño relevantes:
+
+* **Alcance geográfico limitado a España**, no al mundo, para que el
+  índice sea manejable en recursos de TFG (varios GB en vez de cientos)
+  y para que la precisión relativa sea mayor al competir en un espacio de
+  búsqueda mucho más pequeño.
+* **Granularidad de provincia, no de coordenadas exactas**: los
+  benchmarks públicos de geolocalización inversa de imágenes (ver
+  docstring del módulo) muestran que incluso el estado del arte solo
+  acierta la calle exacta ~26-29% de las veces, frente a ~80-93% a nivel
+  de país/región. Predecir "provincia probable" es la granularidad
+  realista y honesta, y además coincide con la que ya usa
+  `k_anonymity.py` para el resto del informe.
+* **Módulo opcional y *best-effort***: si el índice FAISS no está
+  construido, o faltan `torch`/`faiss`/`transformers`/`Pillow` en el
+  entorno, el módulo se degrada devolviendo una lista vacía en vez de
+  romper el resto del análisis — mismo principio de robustez que el resto
+  del sistema aplica a los fallos de red de las APIs externas.
+* **Prioridad del texto sobre la imagen**: si el propio usuario ya
+  declaró su ubicación explícitamente en el texto, esa autodeclaración
+  tiene prioridad sobre la estimación visual (más fiable), que solo se
+  usa como último recurso.
+
+=== Análisis del informe con IA (módulo opcional)
+
+`ai_analysis.py` permite, bajo demanda explícita del usuario (nunca
+automáticamente), enviar el informe **ya generado** (agregados y
+conclusiones propias de la herramienta, no las publicaciones originales)
+a un modelo de lenguaje externo para obtener conclusiones priorizadas en
+lenguaje natural.
+
+* **Proveedor: Mistral AI** (La Plateforme), empresa con sede en Francia.
+  Se eligió frente a alternativas más baratas fuera de la UE (ej.
+  DeepSeek) precisamente porque aquí se envían datos personales inferidos
+  de un usuario real (ubicación, ocupación, edad...), y un proveedor
+  europeo evita tener que justificar una transferencia internacional de
+  datos personales fuera del Espacio Económico Europeo (RGPD, Capítulo V,
+  arts. 44-49).
+* **Sin entrenamiento ni fine-tuning**: es razonamiento en contexto
+  (in-context learning) sobre datos ya estructurados en una única llamada
+  sin estado, no una tarea de dominio tan especializada como para
+  justificar el coste de entrenar un modelo propio.
+* **Tier gratuito, sin gasto controlado por el proyecto**: si la cuota
+  gratuita se agota (HTTP 429) o la clave de API no está configurada, el
+  módulo no reintenta ni degrada a otro proveedor de pago — simplemente
+  informa de que la función no está disponible ahora mismo, dejando el
+  resto del informe intacto.
 
 === Seguridad y límite de confianza
 

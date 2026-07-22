@@ -76,4 +76,43 @@ Ordenados de mayor a menor impacto sobre el calendario/alcance del TFG.
   atributos inferidos, y contrastar las ponderaciones del scoring
   (`_WEIGHTS` en `privacy_score.py`) contra percepción subjetiva de
   usuarios reales.
+
+| Asunción de independencia estadística en la estimación de k-anonimato
+  (edad, sexo, provincia, estudios se tratan como independientes)
+| Alta (asumida por diseño)
+| Medio
+| Documentado explícitamente como limitación en el docstring de
+  `k_anonymity.py` y en el propio informe mostrado al usuario
+  ("estimación aproximada, no un recuento exacto"). Mitigación futura:
+  incorporar tablas cruzadas del Censo/EPA para relajar la asunción en
+  variables concretas.
+
+| Coste de red para construir el índice de geolocalización
+  (descargar shards del dataset OSV-5M implica bajar cada shard
+  completo aunque solo se usen las imágenes de España, ~247GB de
+  tráfico para cubrir el split de entrenamiento completo)
+| Media (ya materializado durante el desarrollo)
+| Bajo
+| Scripts (`download_osv5m_spain.py`) con límite de disco configurable,
+  reanudables tras interrupción, y caché de Hugging Face redirigida a
+  una carpeta controlada que se vacía tras cada shard para no acumular
+  disco. El módulo es opcional: sin el índice construido, el resto de
+  la app funciona igual.
+
+| Precisión limitada del módulo de geolocalización de fotos
+  (nivel de provincia, no de calle — ver ADR-9)
+| Alta (limitación de diseño conocida)
+| Bajo
+| Documentado explícitamente en el docstring del módulo y en la interfaz
+  (mensaje de "estimación aproximada" junto al mapa). No se presenta
+  como una capacidad equivalente a herramientas comerciales.
+
+| Dependencia del tier gratuito de Mistral AI para el análisis con IA
+  (límite de peticiones/minuto y tope mensual de tokens)
+| Media
+| Bajo
+| El módulo no reintenta ni degrada a un proveedor de pago al agotarse
+  la cuota (HTTP 429): informa de que la función no está disponible
+  ahora mismo, sin generar ningún gasto no presupuestado. Es una
+  función complementaria opcional, no crítica para el resto del informe.
 |===

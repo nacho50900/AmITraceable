@@ -26,6 +26,17 @@ ifndef::imagesdir[:imagesdir: ../images]
 | _(sin integrar; tarjeta "Coming Soon" en la interfaz)_
 | —
 
+| Mistral AI (La Plateforme)
+| Informe de exposición ya generado (JSON), bajo demanda explícita del
+  usuario
+| Conclusiones priorizadas en lenguaje natural. Opcional: sin
+  `MISTRAL_API_KEY` configurada, esta integración no se usa.
+
+| Hugging Face (dataset OSV-5M)
+| _(solo en tiempo de preparación, no en tiempo de ejecución de la app)_
+| Imágenes georreferenciadas de España usadas para construir el índice
+  FAISS del módulo de geolocalización (`users/scripts/`).
+
 | SonarCloud
 | Resultados de análisis estático + cobertura (`lcov.info`,
   `coverage.xml`) enviados desde el pipeline de CI
@@ -48,11 +59,14 @@ ifndef::imagesdir[:imagesdir: ../images]
        |                                        v
        |                          [ users (FastAPI, Python) ]
        |                                        |
-       |                     +------------------+------------------+
-       |                     |                                     |
-       |                 HTTPS OAuth/REST                    HTTPS OAuth/REST
-       |                     v                                     v
-       |            [ Reddit Data API ]                 [ Instagram Platform API ]
+       |            +-----------------+---------+---------+-----------------+
+       |            |                 |                   |                 |
+       |        HTTPS OAuth       HTTPS OAuth        HTTPS REST        HTTPS REST
+       |         /REST                /REST         (bajo demanda)   (opcional)
+       |            v                 v                   v                 v
+       |   [ Reddit Data API ] [ Instagram API ] [ Mistral AI API ] [ Índice FAISS local,
+       |                                                              construido offline
+       |                                                              desde OSV-5M/HF ]
        |
        |  /metrics (Prometheus scrape, red interna Docker)
        v
@@ -72,11 +86,22 @@ Mapeo de canales:
 | webapp <-> users
 | HTTPS + JSON, cookie de sesión firmada (`SessionMiddleware`)
 | Estado de autenticación por plataforma, informe de exposición
+  (incluido vía streaming SSE)
 
 | users <-> Reddit / Instagram
 | HTTPS (OAuth 2.0 + REST/JSON)
 | Intercambio de `code` por `access_token`, lectura de perfil y
   contenido público
+
+| users <-> Mistral AI
+| HTTPS + JSON, solo bajo demanda explícita del usuario
+| Informe ya generado (agregados, no publicaciones originales),
+  respuesta con conclusiones en lenguaje natural
+
+| users <-> índice FAISS (local)
+| Acceso a disco/memoria, sin red en tiempo de ejecución
+| Embeddings de imágenes de referencia de España, construidos offline
+  (ver `users/scripts/`) a partir del dataset OSV-5M de Hugging Face
 
 | Prometheus <-> users
 | HTTP (scrape interno, red Docker `monitor-net`)

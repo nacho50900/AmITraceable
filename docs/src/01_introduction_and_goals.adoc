@@ -69,9 +69,33 @@ explícitamente fuera de alcance como trabajo futuro.
 | Puntuación 0-100 ponderando riesgo de geolocalización, datos
   inferibles y facilidad de deanonimización.
 
-| RF-6 Informe con recomendaciones
+| RF-6 Estimación de k-anonimato
+| A partir de declaraciones explícitas del usuario en su texto (edad,
+  sexo, ubicación, estudios, ocupación...), estimar cuánta población en
+  España comparte esa combinación de características, usando
+  distribuciones agregadas del INE.
+
+| RF-7 Geolocalización de fotos (Instagram)
+| Estimación opcional, por similitud visual, de la provincia más
+  probable de cada foto, con nivel de confianza y visualización en mapa.
+
+| RF-8 Informe con recomendaciones
 | Informe final con explicación de cada componente del score y
   recomendaciones concretas y accionables.
+
+| RF-9 Análisis con IA (opcional)
+| Envío del informe ya generado a un modelo de lenguaje (Mistral AI)
+  bajo demanda explícita del usuario, para obtener conclusiones
+  priorizadas en lenguaje natural.
+
+| RF-10 Exportación del informe
+| Descarga del informe completo en JSON, para portabilidad de datos
+  (RGPD Art. 20).
+
+| RF-11 Progreso de análisis en vivo
+| El análisis se puede seguir en tiempo real (vía Server-Sent Events)
+  mostrando qué etapa del pipeline está en curso, en vez de una espera
+  opaca.
 |===
 
 === Objetivos de calidad
@@ -100,9 +124,10 @@ explícitamente fuera de alcance como trabajo futuro.
 
 | 4
 | Fiabilidad verificable
-| Cobertura de tests significativa en ambos servicios (93%+ en el
-  backend Python en la versión actual), con integraciones externas
-  (Reddit, Instagram) mockeadas, no dependientes de red real.
+| Cobertura de tests significativa en ambos servicios (~95% en el
+  backend Python, ~89% en el frontend TypeScript en la versión actual),
+  con integraciones externas (Reddit, Instagram, Mistral AI) mockeadas,
+  no dependientes de red real.
 
 | 5
 | Usabilidad del consentimiento

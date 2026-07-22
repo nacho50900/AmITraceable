@@ -57,7 +57,9 @@ Interfaces importantes::
 users/app/
 ├── main.py                    - Punto de entrada FastAPI, wiring de routers
 ├── config.py                  - Configuración (pydantic-settings) desde .env
-├── analysis_router.py         - Endpoint único /api/analyze/{platform}
+├── progress.py                - Callback de progreso compartido (streaming SSE)
+├── analysis_router.py         - Endpoints de análisis (síncrono, streaming, IA)
+├── ai_analysis.py             - Análisis del informe vía Mistral AI (opcional)
 ├── auth/
 │   ├── reddit_oauth.py        - OAuth Reddit (login/callback/logout/status)
 │   └── instagram_oauth.py     - OAuth Instagram (login/callback/logout/status)
@@ -65,14 +67,24 @@ users/app/
 ├── instagram_client.py        - Extracción + normalización a SocialProfile
 ├── models/
 │   └── schemas.py             - SocialPost, SocialProfile, WritingFingerprint,
-│                                 InferredAttribute, PrivacyScore, ExposureReport
+│                                 InferredAttribute, PrivacyScore, PopulationEstimate,
+│                                 ImageLocationPoint, ExposureReport
 ├── nlp/
-│   ├── fingerprint.py          - Módulo 2: fingerprinting de escritura
-│   └── attribute_inference.py  - Inferencia de atributos personales
+│   ├── fingerprint.py              - Módulo 2: fingerprinting de escritura
+│   ├── attribute_inference.py      - Inferencia de atributos por comunidad/hashtag
+│   └── demographic_extraction.py   - Declaraciones explícitas en texto (edad, sexo,
+│                                      ubicación, estudios, ocupación, universidad, empresa)
+├── data/
+│   └── ine_reference.py       - Tablas de distribución poblacional (INE)
 ├── scoring/
-│   └── privacy_score.py        - Módulo 4: motor de scoring
+│   ├── privacy_score.py       - Módulo 4: motor de scoring
+│   └── k_anonymity.py         - Estimación de k-anonimato (estrechamiento de población)
+├── vision/
+│   └── geolocation.py         - Geolocalización de fotos por similitud visual (opcional)
 └── report/
-    └── generator.py             - Módulo 5: informe + recomendaciones
+    └── generator.py           - Módulo 5: informe + recomendaciones
+
+scripts/                       - Descarga de OSV-5M y construcción del índice FAISS
 ----
 
 ==== `auth/{platform}_oauth.py`
@@ -117,10 +129,23 @@ Orquesta el pipeline común (fingerprint -> inferencia -> scoring ->
 informe) para cualquier plataforma registrada. Resuelve el cliente
 correspondiente a partir de la sesión mediante un diccionario de
 factories (`_PLATFORM_CLIENT_FACTORIES`), sin lógica condicional
-especial por plataforma en el cuerpo del endpoint.
+especial por plataforma en el cuerpo del endpoint. Expone tres variantes
+del mismo análisis:
+
+* `POST /api/analyze/{platform}` -- variante síncrona clásica, responde
+  con el `ExposureReport` completo al terminar.
+* `GET /api/analyze/{platform}/stream` -- misma lógica vía Server-Sent
+  Events, emitiendo hitos de progreso reales ("Leyendo publicaciones...",
+  "Analizando fotos...", con contadores) a medida que el pipeline los
+  completa, para que el frontend pueda mostrar una pantalla de progreso
+  en vivo en vez de una espera opaca.
+* `POST /api/analyze/ai-summary` -- endpoint aislado del pipeline
+  principal: recibe un `ExposureReport` ya generado y lo reenvía a
+  `ai_analysis.py`.
 
 Interfaces::
-`POST /api/analyze/{platform}` -> `ExposureReport`.
+Ver arriba. Todos documentados con sus posibles códigos de respuesta en
+`/docs` (OpenAPI).
 
 Ubicación::
 `users/app/analysis_router.py`.
@@ -146,6 +171,59 @@ evidencia (permalinks).
 Ubicación::
 `users/app/nlp/attribute_inference.py`.
 
+==== `nlp/demographic_extraction.py`
+
+Propósito/Responsabilidad::
+Detecta declaraciones EXPLÍCITAS que el propio usuario hace sobre sí
+mismo en su texto ("tengo 24 años", "vivo en León", "estudio Medicina"),
+mediante regex, distinto de `attribute_inference.py` (que infiere de
+forma indirecta a partir de en qué comunidades participa). Alimenta el
+estimador de k-anonimato.
+
+Ubicación::
+`users/app/nlp/demographic_extraction.py`.
+
+==== `scoring/k_anonymity.py`
+
+Propósito/Responsabilidad::
+Estima, para cada declaración detectada por `demographic_extraction.py`,
+cuánta población en España comparte esa combinación de características
+(ver <<section-concepts>>, "Estimación de k-anonimato sin base de datos
+sintética"). Devuelve una cascada de pasos (`PopulationNarrowingStep`)
+con la población restante, nivel de riesgo y fuente (texto/imagen) de
+cada uno.
+
+Ubicación::
+`users/app/scoring/k_anonymity.py`, tablas en `users/app/data/ine_reference.py`.
+
+==== `vision/geolocation.py` (opcional)
+
+Propósito/Responsabilidad::
+Estima la provincia más probable de una foto de Instagram por similitud
+visual (DINOv2 + FAISS) contra un índice de imágenes georreferenciadas
+de España (ver <<section-concepts>>). Módulo *best-effort*: se degrada a
+"sin resultado" si el índice no está construido o faltan sus
+dependencias opcionales.
+
+Interfaces::
+`estimate_locations_for_posts(posts, progress_callback=None)`, llamado
+desde `report/generator.py` solo cuando `platform == "instagram"`.
+
+Ubicación::
+`users/app/vision/geolocation.py`, scripts de preparación del índice en
+`users/scripts/`.
+
+==== `ai_analysis.py` (opcional)
+
+Propósito/Responsabilidad::
+Envía un `ExposureReport` ya generado a Mistral AI y devuelve
+conclusiones priorizadas en lenguaje natural. Desacoplado del pipeline
+principal: se invoca solo bajo demanda explícita desde
+`POST /api/analyze/ai-summary`.
+
+Ubicación::
+`users/app/ai_analysis.py`.
+
 ==== `scoring/privacy_score.py`
 
 Propósito/Responsabilidad::
@@ -161,8 +239,10 @@ Ubicación::
 ==== `report/generator.py`
 
 Propósito/Responsabilidad::
-Ensambla el `ExposureReport` final y genera recomendaciones concretas a
-partir de los umbrales del score.
+Ensambla el `ExposureReport` final: fingerprint, atributos inferidos,
+score, estrechamiento de población (k-anonimato), puntos de ubicación
+por imagen (si aplica), y recomendaciones generadas a partir de los
+umbrales del score.
 
 Ubicación::
 `users/app/report/generator.py`.
@@ -172,15 +252,21 @@ Ubicación::
 [source]
 ----
 webapp/src/
-├── main.tsx                 - Entrada, enrutado (React Router)
-├── api.ts                   - Cliente HTTP tipado, un método por endpoint
-├── types.ts                 - Tipos TS espejo de los esquemas Pydantic
+├── main.tsx                  - Entrada, enrutado (React Router)
+├── api.ts                    - Cliente HTTP tipado, un método por endpoint
+├── types.ts                  - Tipos TS espejo de los esquemas Pydantic
 ├── pages/
-│   ├── Landing.tsx           - Consentimiento + selector de plataforma
-│   └── Dashboard.tsx         - Informe de exposición
-└── components/
-    ├── ScoreBar.tsx           - Barra de riesgo (0-100) con color semántico
-    └── HourlyActivityChart.tsx - Gráfico de actividad horaria (recharts)
+│   ├── Landing.tsx            - Consentimiento + selector de plataforma
+│   └── Dashboard.tsx          - Informe de exposición completo
+├── components/
+│   ├── ScoreBar.tsx                   - Barra de riesgo (0-100) con color semántico
+│   ├── HourlyActivityChart.tsx        - Gráfico de actividad horaria (Recharts)
+│   ├── PopulationNarrowingTable.tsx   - Tabla de estrechamiento de población (k-anonimato)
+│   ├── LocationMap.tsx                - Mapa de ubicaciones estimadas por foto (Leaflet)
+│   ├── AiSummaryCard.tsx              - Análisis con IA bajo demanda (opcional)
+│   └── DownloadReportButton.tsx       - Exportación del informe a JSON
+└── utils/
+    └── reportToJson.ts        - Serialización del informe a JSON, descarga en navegador
 ----
 
 ==== `Landing.tsx`
@@ -197,10 +283,46 @@ Ubicación::
 ==== `Dashboard.tsx`
 
 Propósito/Responsabilidad::
-Dispara el análisis (`POST /api/analyze/{platform}`) y renderiza el
-informe: score global, atributos inferidos con evidencia, gráfico de
-actividad horaria, perfil de escritura y recomendaciones. Determina la
-plataforma activa por query param (`?platform=reddit|instagram`).
+Dispara el análisis (vía streaming SSE, con pantalla de progreso en
+vivo) y renderiza el informe completo: score global con desglose, tabla
+de estrechamiento de población, mapa de ubicaciones estimadas por foto,
+atributos inferidos con evidencia, gráfico de actividad horaria, perfil
+de escritura, recomendaciones, análisis con IA bajo demanda, y botón de
+descarga del informe en JSON. Determina la plataforma activa por query
+param (`?platform=reddit|instagram`).
 
 Ubicación::
 `webapp/src/pages/Dashboard.tsx`.
+
+==== `PopulationNarrowingTable.tsx`
+
+Propósito/Responsabilidad::
+Muestra la cascada de estrechamiento de población (k-anonimato):
+información detectada, población restante estimada, nivel de riesgo, y
+si la fuente fue texto autodeclarado o una estimación por imagen (con
+aviso de menor fiabilidad en ese segundo caso).
+
+Ubicación::
+`webapp/src/components/PopulationNarrowingTable.tsx`.
+
+==== `LocationMap.tsx`
+
+Propósito/Responsabilidad::
+Mapa (Leaflet + OpenStreetMap, sin API key) con un punto por foto cuya
+ubicación se ha podido estimar, con tamaño/color según el nivel de
+confianza y tooltip con provincia, confianza y coordenadas exactas al
+pasar el ratón.
+
+Ubicación::
+`webapp/src/components/LocationMap.tsx`.
+
+==== `AiSummaryCard.tsx`
+
+Propósito/Responsabilidad::
+Botón bajo demanda para enviar el informe ya generado a
+`POST /api/analyze/ai-summary` y mostrar las conclusiones. Distingue
+explícitamente el caso "no disponible" (503: sin API key o cuota
+agotada) de un error genérico (con opción de reintentar).
+
+Ubicación::
+`webapp/src/components/AiSummaryCard.tsx`.

@@ -59,6 +59,61 @@ ifndef::imagesdir[:imagesdir: ../images]
   persona (ubicación, ocupación, rutina, en el contexto de este
   proyecto).
 
+| k-anonimato
+| Propiedad de un conjunto de datos en la que cada combinación de
+  características (edad, sexo, ubicación...) es compartida por al menos
+  *k* individuos. En este proyecto se usa como marco conceptual para
+  estimar cuánta gente en España comparte lo que el usuario ha declarado
+  explícitamente sobre sí mismo (`scoring/k_anonymity.py`) — cuanto más
+  bajo el número resultante, más fácil sería, en teoría, identificar a
+  esa persona a partir de esas características.
+
+| INE (Instituto Nacional de Estadística)
+| Organismo público español responsable de las estadísticas oficiales
+  (Censo, Padrón, Encuesta de Población Activa...). Fuente de las
+  distribuciones agregadas de población usadas por el estimador de
+  k-anonimato (`data/ine_reference.py`).
+
+| Server-Sent Events (SSE)
+| Tecnología web para enviar actualizaciones desde el servidor al
+  cliente sobre una única conexión HTTP de larga duración, unidireccional
+  (servidor -> cliente). Usada en `GET /api/analyze/{platform}/stream`
+  para reportar el progreso del análisis en tiempo real.
+
+| Embedding
+| Representación numérica (vector) de un dato complejo (una imagen, un
+  texto) en un espacio donde la distancia entre vectores refleja
+  similitud semántica/visual. Usado en este proyecto para comparar fotos
+  por similitud visual (DINOv2).
+
+| DINOv2
+| Modelo de visión por computador (Meta AI) que extrae *embeddings* de
+  imágenes sin necesidad de etiquetas, usado en este proyecto para
+  representar cada foto antes de buscar las más parecidas en el índice
+  de referencia.
+
+| FAISS (Facebook AI Similarity Search)
+| Librería para búsqueda eficiente de vecinos más cercanos entre
+  vectores de alta dimensión. Usada para encontrar, dado el *embedding*
+  de una foto, las imágenes más parecidas del índice de referencia de
+  España.
+
+| OSV-5M (OpenStreetView-5M)
+| Dataset público de investigación con millones de imágenes de calle
+  georreferenciadas de todo el mundo, usado (filtrado solo a España)
+  como base del índice de geolocalización de este proyecto.
+
+| LLM (Large Language Model)
+| Modelo de lenguaje de gran escala. En este proyecto, Mistral AI se usa
+  bajo demanda para generar conclusiones en lenguaje natural a partir
+  del informe ya calculado — sin entrenamiento ni ajuste fino propio, ver
+  ADR-10.
+
+| Portabilidad de datos (RGPD Art. 20)
+| Derecho de una persona a recibir sus datos personales en un formato
+  estructurado, de uso común y lectura mecánica. Motiva la función de
+  exportación del informe en JSON de este proyecto.
+
 | Cuenta Business / Creator (Instagram)
 | Tipos de cuenta profesional de Instagram, requisito de la Instagram
   Platform API — las cuentas personales normales no tienen acceso vía

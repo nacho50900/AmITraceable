@@ -28,8 +28,8 @@ image::01_2_iso-25010-topics-EN.drawio.png["Categorías de requisitos de calidad
   existentes.
 
 | Fiabilidad
-| **Alta**. Cobertura de tests significativa (93%+ en el backend),
-  quality gate de SonarCloud en cada push.
+| **Alta**. Cobertura de tests significativa (~95% backend, ~89%
+  frontend), quality gate de SonarCloud en cada push.
 
 | Usabilidad
 | **Media-alta**. El consentimiento debe quedar claro antes de
@@ -95,4 +95,13 @@ image::01_2_iso-25010-topics-EN.drawio.png["Categorías de requisitos de calidad
   real de cada cuenta pase por la pantalla de autorización de
   Reddit/Instagram, control fuera del alcance del código modificado
   (ver ADR-5).
+
+| QS-7
+| El índice FAISS de geolocalización no está construido, faltan sus
+  dependencias opcionales (`torch`/`faiss`/`transformers`/`Pillow`), o
+  no hay `MISTRAL_API_KEY` configurada.
+| El resto del análisis se completa con normalidad: el módulo afectado
+  se degrada devolviendo "sin resultado"/"no disponible" en vez de
+  romper el pipeline completo (verificado explícitamente con tests que
+  simulan la ausencia de cada dependencia opcional).
 |===

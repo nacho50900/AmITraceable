@@ -64,4 +64,29 @@ ifndef::imagesdir[:imagesdir: ../images]
   trivialmente evadible por quien controla el entorno de ejecución; el
   verdadero control de acceso ya lo impone el servidor de autorización
   de cada plataforma, no el código propio.
+
+| Estimación de k-anonimato con proporciones agregadas del INE, no una
+  base de datos sintética
+| Se descartó construir una base de datos con una fila por cada uno de
+  los ~49M habitantes de España por romper el principio de "sin
+  persistencia" y por su coste de ingeniería. Multiplicar proporciones
+  agregadas en cadena es matemáticamente equivalente y mucho más simple
+  de auditar (ver ADR-8).
+
+| Geolocalización de fotos limitada a España y a nivel de provincia
+| Un índice mundial a nivel de calle está fuera del alcance de un TFG y
+  no es realista ni para el estado del arte publicado. Limitar el
+  índice a España y predecir solo la provincia da resultados honestos y
+  manejables en recursos (ver ADR-9).
+
+| Mistral AI como proveedor del análisis con IA opcional
+| Frente a alternativas más baratas fuera de la UE (p. ej. DeepSeek),
+  se eligió un proveedor europeo para evitar transferencias
+  internacionales de datos personales, dado que se envían atributos
+  inferidos de un usuario real (ver ADR-10).
+
+| Progreso de análisis en vivo vía Server-Sent Events
+| Sustituye la espera opaca del análisis por hitos de progreso reales,
+  sin la complejidad añadida de WebSockets para un flujo que solo
+  necesita ser unidireccional (ver ADR-11).
 |===

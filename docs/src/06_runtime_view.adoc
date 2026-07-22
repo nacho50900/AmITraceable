@@ -56,12 +56,14 @@ BE -> BE: guarda access_token + user_id en cookie de sesión
 BE --> Usuario: 307 redirect a /dashboard?platform=instagram
 ----
 
-=== Escenario 3: Pipeline de análisis
+=== Escenario 3: Pipeline de análisis (con progreso en vivo)
 
-Ocurre por completo en memoria durante una única petición HTTP; no se
-escribe nada a disco en ningún punto.
+Ocurre por completo en memoria durante una única conexión; no se escribe
+nada a disco en ningún punto. El frontend usa la variante de streaming
+(`GET /api/analyze/{platform}/stream`, Server-Sent Events) para mostrar
+una pantalla de progreso real en vez de una espera opaca.
 
-[plantuml, "Secuencia de análisis", png]
+[plantuml, "Secuencia de análisis con progreso", png]
 ----
 participant "webapp\n(Dashboard)" as FE
 participant "analysis_router" as Router
@@ -70,11 +72,14 @@ participant "nlp.fingerprint" as FP
 participant "nlp.attribute_inference" as Attr
 participant "scoring.privacy_score" as Score
 participant "report.generator" as Report
+participant "nlp.demographic_extraction\n+ scoring.k_anonymity" as KAnon
+participant "vision.geolocation\n(solo Instagram, opcional)" as Geo
 
-FE -> Router: POST /api/analyze/{platform}
+FE -> Router: GET /api/analyze/{platform}/stream
 Router -> Router: busca factory de la plataforma en el diccionario
 Router -> Client: construye cliente con el token de sesión
 Client -> Client: llama a la API externa (perfil + posts/media)
+Client --> Router: SSE: "Leyendo publicaciones..." (progreso)
 Client --> Router: SocialProfile (posts normalizados)
 Router -> FP: build_fingerprint(posts)
 FP --> Router: WritingFingerprint
@@ -82,12 +87,53 @@ Router -> Attr: infer_attributes(posts)
 Attr --> Router: [InferredAttribute]
 Router -> Score: compute_score(posts, fingerprint, attrs)
 Score --> Router: PrivacyScore
-Router -> Report: generate_report(platform, ...)
+Router -> Report: generate_report(platform, ..., progress_callback)
+Report -> KAnon: extract_demographics(posts) + estimate_population_narrowing(...)
+KAnon --> Report: [PopulationEstimate]
+alt platform == "instagram"
+  Report -> Geo: estimate_locations_for_posts(posts, progress_callback)
+  Geo --> Report: SSE: "Analizando fotos..." (progreso, N/M)
+  Geo --> Report: [ImageLocationPoint]
+end
 Report --> Router: ExposureReport
-Router --> FE: 200 OK (JSON ExposureReport)
+Router --> FE: SSE final: {"done": true, "report": {...}}
 ----
 
-=== Escenario 4: Integración continua (push a `main`)
+=== Escenario 4: Análisis del informe con IA (opcional, bajo demanda)
+
+Independiente del escenario anterior: el usuario ya tiene el informe en
+pantalla y pulsa explícitamente "Analizar con IA".
+
+[plantuml, "Secuencia de análisis con IA", png]
+----
+actor Usuario
+participant "webapp\n(AiSummaryCard)" as FE
+participant "analysis_router\n(ai_summary)" as Router
+participant "ai_analysis.py" as AI
+participant "Mistral AI API" as Mistral
+
+Usuario -> FE: Pulsa "Analizar con IA"
+FE -> Router: POST /api/analyze/ai-summary (ExposureReport ya generado)
+Router -> AI: analyze_report_with_ai(report)
+AI -> AI: ¿MISTRAL_API_KEY configurada?
+alt sin API key
+  AI --> Router: AiAnalysisUnavailable
+  Router --> FE: 503 (no disponible)
+else con API key
+  AI -> Mistral: POST /v1/chat/completions (informe en JSON + system prompt)
+  alt cuota agotada (429)
+    Mistral --> AI: 429
+    AI --> Router: AiAnalysisUnavailable (sin reintentar)
+    Router --> FE: 503 (no disponible ahora mismo)
+  else éxito
+    Mistral --> AI: conclusiones en lenguaje natural
+    AI --> Router: [conclusiones]
+    Router --> FE: 200 {"conclusions": [...]}
+  end
+end
+----
+
+=== Escenario 5: Integración continua (push a `main`)
 
 [plantuml, "Secuencia de CI", png]
 ----
