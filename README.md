@@ -196,6 +196,8 @@ y usa la URL `https://xxx.trycloudflare.com` que te dé tanto en
 login y el callback compartan dominio (la cookie de sesión no viaja entre
 `localhost` y el túnel).
 
+Tras reiniciarse la url y ponerse en Meta developers y en los archivos env DEBE REINICIARSE UNICORN SIN --RELOAD para que se recarge el archivo .env del backend.
+
 ### Scripts de geolocalización por imagen (opcional)
 
 El módulo de geolocalización de fotos (`app/vision/geolocation.py`) es

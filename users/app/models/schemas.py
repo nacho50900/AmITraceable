@@ -51,9 +51,17 @@ class SocialPost(BaseModel):
 
 class SocialProfile(BaseModel):
     platform: str
-    username: str
+    username: str  # handle/alias, p.ej. "@ana_perez" -- no es necesariamente el nombre real
     account_created_utc: datetime | None = None  # Instagram no expone este dato
     bio: str | None = None
+    # Nombre público que muestra la plataforma (si la API lo expone), p.ej.
+    # "Ana Pérez" en Instagram. None en Reddit (no expone nombre real, solo
+    # el handle, que ya va en `username`). Se usa ÚNICAMENTE como señal
+    # débil para inferir sexo por convención de nombre en español -- ver
+    # app/nlp/ai_attribute_extraction.py, donde se marca con una
+    # procedencia distinta ("ia_nombre") y menor fiabilidad que una
+    # autodeclaración explícita en texto.
+    full_name: str | None = None
     posts: list[SocialPost]
 
 
@@ -89,7 +97,9 @@ class PopulationEstimate(BaseModel):
     remaining_population: int | None  # None si no estimable con las tablas actuales
     risk_level: str  # bajo | medio | alto | critico | no_estimable
     evidence: list[str]
-    source: str = "texto"  # "texto" (autodeclaración escrita) | "imagen" (geolocation.py)
+    # "texto" (autodeclaración por regex) | "imagen" (geolocation.py) | "ia" (autodeclaración
+    # detectada por IA) | "ia_nombre" (estimación de sexo por nombre público, no autodeclaración)
+    source: str = "texto"
     note: str | None = None
 
 

@@ -88,6 +88,8 @@ async def _build_report(profile: SocialProfile, progress_callback: ProgressCallb
         inferred_attributes=inferred_attributes,
         score=score,
         progress_callback=progress_callback,
+        bio=profile.bio,
+        full_name=profile.full_name,
     )
 
 

@@ -4,6 +4,7 @@ y accionables a partir del score y los atributos inferidos.
 """
 from datetime import datetime, timezone
 
+from app.config import settings
 from app.models.schemas import (
     ExposureReport,
     ImageLocationPoint,
@@ -13,6 +14,7 @@ from app.models.schemas import (
     SocialPost,
     WritingFingerprint,
 )
+from app.nlp.ai_attribute_extraction import extract_demographics_with_ai, merge_findings
 from app.nlp.demographic_extraction import extract_demographics
 from app.progress import ProgressCallback, emit_progress
 from app.scoring.k_anonymity import estimate_population_narrowing
@@ -26,8 +28,45 @@ async def generate_report(
     inferred_attributes: list[InferredAttribute],
     score: PrivacyScore,
     progress_callback: ProgressCallback | None = None,
+    bio: str | None = None,
+    full_name: str | None = None,
 ) -> ExposureReport:
-    demographic_findings = extract_demographics(posts)
+    # La biografía se trata como una publicación más de cara a las regex de
+    # autodeclaración (mismo criterio que un post/comentario, solo que sin
+    # permalink real -- se usa "bio" como identificador de evidencia). Así
+    # "estudiante de enfermería" en la bio se detecta con el mismo código
+    # que si estuviera en un post, sin duplicar lógica de detección.
+    posts_for_demographics = posts
+    if bio:
+        bio_pseudo_post = SocialPost(
+            id="bio",
+            platform=platform,
+            type="bio",
+            group="sin_etiqueta",
+            tags=[],
+            text=bio,
+            created_utc=datetime.now(tz=timezone.utc),
+            score=0,
+            permalink="bio",
+        )
+        posts_for_demographics = [bio_pseudo_post, *posts]
+
+    demographic_findings = extract_demographics(posts_for_demographics)
+
+    # Extracción de autodeclaraciones con IA: complementa las regex (que
+    # solo cubren un vocabulario fijo) leyendo el texto -- y también el
+    # nombre público de la cuenta, que sirve como señal débil de sexo -- de
+    # forma más flexible. Se ejecuta automáticamente en cada análisis, sin
+    # ningún botón. Ver docstring de app/nlp/ai_attribute_extraction.py
+    # para el razonamiento RGPD. Módulo opcional/best-effort: sin
+    # MISTRAL_API_KEY, o si la llamada falla, esto no aporta nada y el
+    # informe se sigue generando solo con lo detectado por regex.
+    if settings.mistral_api_key:
+        await emit_progress(progress_callback, "Buscando autodeclaraciones con IA...")
+        ai_findings = await extract_demographics_with_ai(
+            posts, username=username, full_name=full_name, bio=bio
+        )
+        demographic_findings = merge_findings(demographic_findings, ai_findings)
 
     # Geolocalización por imagen: solo se usa como ubicación PARA EL CÁLCULO
     # DE POBLACIÓN si el texto no dio ya una provincia/municipio explícita

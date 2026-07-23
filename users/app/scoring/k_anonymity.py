@@ -51,7 +51,11 @@ class PopulationNarrowingStep:
     remaining_population: int | None  # None si no estimable con las tablas actuales
     risk_level: str  # bajo | medio | alto | critico | no_estimable
     evidence: list[str]
-    source: str = "texto"  # "texto" (autodeclaración) | "imagen" (geolocation.py)
+    # "texto" (autodeclaración detectada por regex) | "imagen" (geolocation.py) |
+    # "ia" (autodeclaración detectada por IA en texto/bio) | "ia_nombre" (estimación de
+    # sexo por convención cultural del nombre público, no autodeclaración -- ver
+    # app/nlp/ai_attribute_extraction.py)
+    source: str = "texto"
     note: str | None = None
 
 
@@ -103,13 +107,22 @@ def _apply_proportion(
 def _step_sexo(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
     if not findings.sexo:
         return remaining, None
+    source = findings.source.get("sexo", "texto")
+    note = None
+    if source == "ia_nombre":
+        note = (
+            "Estimado por convención cultural del nombre público de la cuenta, no por una "
+            "autodeclaración explícita: fiabilidad menor (nombres unisex, apodos o "
+            "transliteraciones pueden dar una estimación incorrecta)."
+        )
     return _apply_proportion(
         remaining,
         SEX_DISTRIBUTION.get(findings.sexo),
         f"Sexo: {findings.sexo}",
         "sexo",
         findings.evidence.get("sexo", []),
-        source=findings.source.get("sexo", "texto"),
+        source=source,
+        note=note,
     )
 
 

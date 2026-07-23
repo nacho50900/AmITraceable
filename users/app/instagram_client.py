@@ -56,15 +56,35 @@ class InstagramClient:
             # Instagram no expone la fecha de creación de la cuenta vía esta
             # API; se deja sin rellenar (campo opcional en SocialProfile).
             account_created_utc=None,
-            bio=None,
+            bio=me.get("biography"),
+            full_name=me.get("name"),
             posts=media_items,
         )
 
     async def _get_me(self, client: httpx.AsyncClient) -> dict:
+        """Pide también `name` y `biography`, usados por la extracción de
+        atributos con IA (ver app/nlp/ai_attribute_extraction.py).
+
+        OJO (pendiente de confirmar en el panel de Meta): a diferencia del
+        Graph API vía Página de Facebook, donde estos campos están
+        garantizados, la documentación de "Instagram API with Instagram
+        Login" (`graph.instagram.com`, la que usa este cliente) no los
+        listaba de forma consistente en `/me` en el momento de escribir
+        esto -- puede depender del tipo de cuenta (Business vs Creator) o
+        haber cambiado. Por eso se reintenta sin ellos si Meta devuelve 400
+        (campo no soportado), en vez de romper el login por un campo
+        opcional. TODO: verificar en el panel de la app si `name`/
+        `biography` llegan realmente poblados para tu cuenta de prueba.
+        """
         resp = await client.get(
             "/me",
-            params={"fields": "user_id,username", "access_token": self._access_token},
+            params={"fields": "user_id,username,name,biography", "access_token": self._access_token},
         )
+        if resp.status_code == 400:
+            resp = await client.get(
+                "/me",
+                params={"fields": "user_id,username", "access_token": self._access_token},
+            )
         resp.raise_for_status()
         return resp.json()
 
