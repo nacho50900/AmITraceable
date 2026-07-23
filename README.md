@@ -55,9 +55,10 @@ navegador.
 
 - `webapp/` — frontend React + Vite + **TypeScript**. Landing (consentimiento
   + login OAuth), Dashboard (informe completo con mapa, tablas y gráficos).
-- `users/` — backend **Python + FastAPI**. A pesar del nombre heredado de
-  la plantilla, aquí vive toda la lógica de OAuth, NLP, k-anonimato,
-  geolocalización por imagen, scoring y el informe (ver `users/app/`).
+- `backend/` — backend **Python + FastAPI** (renombrado desde `users/`,
+  nombre heredado de la plantilla). Aquí vive toda la lógica de OAuth, NLP,
+  k-anonimato, geolocalización por imagen, scoring y el informe (ver
+  `backend/app/`).
 - `docs/` — documentación de arquitectura Arc42.
 
 ## ⚠️ Alcance y limitaciones (importante para la memoria del TFG)
@@ -67,13 +68,13 @@ navegador.
 - **No hay base de datos.** Todo el estado vive en una cookie de sesión
   firmada (`SessionMiddleware`) con los tokens de acceso. Cerrar sesión =
   borrar todo rastro.
-- La estimación de k-anonimato (`users/app/scoring/k_anonymity.py`) usa
+- La estimación de k-anonimato (`backend/app/scoring/k_anonymity.py`) usa
   **distribuciones agregadas del INE** y asume independencia entre
   atributos (no microdatos reales, no correlaciones cruzadas) — es una
   aproximación documentada, no un conteo exacto. Ver el docstring del
   módulo para la justificación de diseño frente a la alternativa
   descartada (base de datos sintética de ~49M filas).
-- La geolocalización por imagen (`users/app/vision/geolocation.py`) es
+- La geolocalización por imagen (`backend/app/vision/geolocation.py`) es
   **opcional y best-effort**: si el índice FAISS no está construido (ver
   [Scripts de geolocalización](#scripts-de-geolocalizaci%C3%B3n-por-imagen-opcional)
   más abajo), esa función del pipeline simplemente no aporta nada, sin
@@ -81,17 +82,17 @@ navegador.
   provincia, no de calle (ver benchmarks de reverse geolocation citados en
   los docstrings).
 - Las heurísticas de inferencia de atributos
-  (`users/app/nlp/attribute_inference.py`,
-  `users/app/nlp/demographic_extraction.py`) son deliberadamente simples
+  (`backend/app/nlp/attribute_inference.py`,
+  `backend/app/nlp/demographic_extraction.py`) son deliberadamente simples
   (listas + regex) para mantener el sistema explicable y auditable.
-- El análisis con IA (`users/app/ai_analysis.py`) es **totalmente
+- El análisis con IA (`backend/app/ai_analysis.py`) es **totalmente
   opcional**: sin `MISTRAL_API_KEY` configurada, esa sección del dashboard
   simplemente indica que no está disponible; el resto de la app funciona
   igual.
 - La correlación *entre plataformas* (Reddit + Instagram combinados) y el
   componente `identity_consistency_risk` del scoring quedan como
   **trabajo futuro**, documentado explícitamente en
-  `users/app/scoring/privacy_score.py`.
+  `backend/app/scoring/privacy_score.py`.
 
 ## Componentes
 
@@ -106,7 +107,7 @@ SPA creada con [Vite](https://vitejs.dev/) y [React](https://react.dev/) en Type
 - `src/utils/reportToJson.ts` — exportación del informe a JSON.
 - Tests: Vitest + Testing Library (`src/__tests__/`), E2E con Playwright + Cucumber (`webapp/test/`, ver `webapp/E2E.md`).
 
-### Users — backend Python/FastAPI (`users/`)
+### Backend Python/FastAPI (`backend/`)
 
 - `app/auth/reddit_oauth.py`, `app/auth/instagram_oauth.py` — OAuth 2.0 con cada plataforma.
 - `app/reddit_client.py`, `app/instagram_client.py` — extracción de posts/comentarios/publicaciones públicas, normalizados a un modelo común (`SocialPost`).
@@ -135,18 +136,18 @@ docker-compose up --build
 ```
 
 - Web application: http://localhost
-- Users (backend) API: http://localhost:3000 (docs interactivos en `/docs`)
+- Backend API: http://localhost:3000 (docs interactivos en `/docs`)
 - Grafana: http://localhost:9091 · Prometheus: http://localhost:9090
 
-Antes de levantarlo, crea `users/.env` a partir de `users/.env.example`
+Antes de levantarlo, crea `backend/.env` a partir de `backend/.env.example`
 (ver [variables de entorno](#variables-de-entorno) más abajo).
 
 ### Without Docker
 
-#### 1. Backend (`users/`)
+#### 1. Backend (`backend/`)
 
 ```bash
-cd users
+cd backend
 python3 -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
@@ -171,7 +172,7 @@ La webapp estará en http://localhost:5173
 
 ### Variables de entorno
 
-Ver `users/.env.example` para la lista completa comentada. Resumen:
+Ver `backend/.env.example` para la lista completa comentada. Resumen:
 
 | Variable | Obligatoria | Notas |
 |---|---|---|
@@ -196,8 +197,6 @@ y usa la URL `https://xxx.trycloudflare.com` que te dé tanto en
 login y el callback compartan dominio (la cookie de sesión no viaja entre
 `localhost` y el túnel).
 
-Tras reiniciarse la url y ponerse en Meta developers y en los archivos env DEBE REINICIARSE UNICORN SIN --RELOAD para que se recarge el archivo .env del backend.
-
 ### Scripts de geolocalización por imagen (opcional)
 
 El módulo de geolocalización de fotos (`app/vision/geolocation.py`) es
@@ -205,7 +204,7 @@ opcional: sin el índice FAISS construido, simplemente no aporta nada al
 informe, sin errores. Para activarlo:
 
 ```bash
-cd users
+cd backend
 pip install torch transformers faiss-cpu huggingface_hub pandas pillow tqdm
 
 python scripts/download_osv5m_spain.py --output data/osv5m_spain --max-disk-gb 35
@@ -235,7 +234,7 @@ Estos datos/artefactos **no se versionan** en el repositorio (ver
 - `npm run start:all` — levanta webapp + backend Python a la vez (conveniencia para desarrollo/E2E).
 - `npm run lint` — ESLint.
 
-### Users (backend Python)
+### Backend (Python)
 
 - `uvicorn app.main:app --reload --port 3000` — arranca el backend en desarrollo.
 - `pytest` — tests unitarios (~117 tests).

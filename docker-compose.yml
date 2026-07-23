@@ -1,12 +1,12 @@
 services:
   users:
-    build: ./users
+    build: backend
     container_name: users
     image: ghcr.io/arquisoft/identity-exposure-tfg-users:latest
     ports:
       - "3000:3000"
     env_file:
-      - ./users/.env
+      - backend/.env
     networks:
       - monitor-net
 

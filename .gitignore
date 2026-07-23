@@ -4,7 +4,7 @@ lcov.info
 docs/build
 .env
 webapp/.env
-users/.env
+backend/.env
 .vscode/
 
 # Python
@@ -20,7 +20,7 @@ venv/
 # ver users/scripts/download_osv5m_spain.py y build_faiss_index.py -- no se
 # versionan por tamaño, igual que no hay base de datos persistente en el
 # resto del proyecto)
-users/data/
-users/scripts/_hf_scratch_cache/
-users/scripts/_completed_shards.txt
+backend/data/
+backend/scripts/_hf_scratch_cache/
+backend/scripts/_completed_shards.txt
 *.faiss
