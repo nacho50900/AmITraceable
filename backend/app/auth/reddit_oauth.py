@@ -18,6 +18,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
+from app.auth.dynamic_origin import frontend_target
 from app.config import settings
 
 router = APIRouter(prefix="/auth/reddit", tags=["auth"])
@@ -56,7 +57,7 @@ async def login(request: Request):
 async def callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
     if error:
         # El usuario denegó el consentimiento explícitamente
-        return RedirectResponse(f"{settings.frontend_origin}/?auth_error={error}")
+        return RedirectResponse(f"{frontend_target(request, settings.frontend_origin)}/?auth_error={error}")
 
     saved_state = request.session.get("reddit_oauth_state")
     if not state or state != saved_state:
@@ -82,7 +83,7 @@ async def callback(request: Request, code: str | None = None, state: str | None 
     request.session["reddit_access_token"] = token_data["access_token"]
     request.session.pop("reddit_oauth_state", None)
 
-    return RedirectResponse(f"{settings.frontend_origin}/dashboard")
+    return RedirectResponse(f"{frontend_target(request, settings.frontend_origin)}/dashboard")
 
 
 @router.post("/logout")

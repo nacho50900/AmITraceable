@@ -105,7 +105,7 @@ jobs:
       - name: Publish to Registry (backend)
         uses: elgohr/Publish-Docker-Github-Action@v5
         with:
-          name: ${{ github.repository_owner }}/${{ github.event.repository.name }}-backend
+          name: nacho50900/amitraceable-backend
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
           registry: ghcr.io
@@ -125,12 +125,15 @@ jobs:
       - name: Publish to Registry (webapp)
         uses: elgohr/Publish-Docker-Github-Action@v5
         with:
-          name: ${{ github.repository_owner }}/${{ github.event.repository.name }}-webapp
+          name: nacho50900/amitraceable-webapp
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
           registry: ghcr.io
           workdir: webapp
-          buildargs: VITE_API_URL=http://${{ secrets.DEPLOY_HOST }}:3000
+          # Sin VITE_API_URL: la imagen usa rutas relativas de por sí (ver
+          # webapp/nginx.conf, que proxea /auth y /api hacia "backend" por
+          # DNS interno de Docker) -- funciona igual en local que aquí, sin
+          # necesitar DEPLOY_HOST para esto.
 
   deploy:
     name: Deploy over SSH

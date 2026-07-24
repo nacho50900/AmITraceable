@@ -24,8 +24,8 @@ app = FastAPI(
 
 # Métricas Prometheus en /metrics, equivalente al express-prom-bundle que
 # usaba el servicio Node original. El docker-compose y el prometheus.yml
-# de la plantilla ya apuntan a este contenedor ("users:3000"), así que no
-# hace falta tocar esa parte de la infraestructura.
+# ya apuntan a este contenedor ("backend:3000"), así que no hace falta
+# tocar esa parte de la infraestructura.
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
 app.add_middleware(
@@ -37,7 +37,13 @@ app.add_middleware(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_origin],
+    # CORS se decide en el arranque, no puede ser dinámico por petición
+    # (a diferencia del redirect_uri de Instagram o la redirección final
+    # tras el login -- ver app/auth/dynamic_origin.py). Con webapp+backend
+    # bajo el mismo origen (nginx de por medio) esto en la práctica no
+    # llega a entrar en juego para esas rutas; solo importa de verdad en
+    # desarrollo local sin proxy (frontend y backend en puertos distintos).
+    allow_origins=[settings.frontend_origin or "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -181,3 +181,20 @@ class TestDynamicRedirectUriFallback:
 
         with pytest.raises(Exception):
             _redirect_uri(request)
+
+
+def test_callback_falls_back_to_request_host_without_frontend_origin(monkeypatch):
+    """Mismo fallback que en Reddit (ver app/auth/dynamic_origin.py), para
+    que ambas plataformas se comporten igual sin FRONTEND_ORIGIN fijada."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "frontend_origin", None)
+
+    resp = client.get(
+        "/auth/instagram/callback",
+        params={"error": "access_denied"},
+        headers={"host": "random-tunnel-name.trycloudflare.com"},
+        follow_redirects=False,
+    )
+
+    assert resp.headers["location"] == "https://random-tunnel-name.trycloudflare.com/?auth_error=access_denied"

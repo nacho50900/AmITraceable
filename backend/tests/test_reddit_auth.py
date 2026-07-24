@@ -88,3 +88,20 @@ def test_reddit_logout_clears_only_reddit_session_keys():
 def test_analyze_reddit_requires_authentication():
     resp = client.post("/api/analyze/reddit")
     assert resp.status_code == 401
+
+
+def test_callback_falls_back_to_request_host_without_frontend_origin(monkeypatch):
+    """Sin FRONTEND_ORIGIN configurada, la redirección final se deriva del
+    Host de la propia petición -- ver app/auth/dynamic_origin.py."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "frontend_origin", None)
+
+    resp = client.get(
+        "/auth/reddit/callback",
+        params={"error": "access_denied"},
+        headers={"host": "random-tunnel-name.trycloudflare.com"},
+        follow_redirects=False,
+    )
+
+    assert resp.headers["location"] == "https://random-tunnel-name.trycloudflare.com/?auth_error=access_denied"

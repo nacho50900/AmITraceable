@@ -26,7 +26,12 @@ class Settings(BaseSettings):
     instagram_redirect_uri: str | None = None
 
     session_secret_key: str
-    frontend_origin: str = "http://localhost:5173"
+    # Opcional. Si no se fija, se deriva dinámicamente del Host de cada
+    # petición para la redirección final tras el login -- ver
+    # app/auth/dynamic_origin.py. Para CORS (que sí necesita un valor fijo
+    # en el arranque, no puede ser dinámico por petición) se sigue usando
+    # "http://localhost:5173" como valor por defecto si esto queda vacío.
+    frontend_origin: str | None = None
 
     # Análisis con IA (opcional): si no se rellena, el botón "Analizar con
     # IA" del frontend simplemente devuelve "no disponible" en vez de

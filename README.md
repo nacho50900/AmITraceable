@@ -178,24 +178,29 @@ Ver `backend/.env.example` para la lista completa comentada. Resumen:
 |---|---|---|
 | `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_REDIRECT_URI`, `REDDIT_USER_AGENT` | Sí | App tipo "web app" en https://www.reddit.com/prefs/apps |
 | `SESSION_SECRET_KEY` | Sí | Cadena aleatoria larga, firma la cookie de sesión |
-| `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`, `INSTAGRAM_REDIRECT_URI` | No | Sin ellas, Instagram devuelve 503 pero Reddit sigue funcionando. App "API setup with Instagram Login" en Meta for Developers; requiere `redirect_uri` HTTPS (ver nota de túnel más abajo) |
-| `FRONTEND_ORIGIN` | Sí | Para CORS; por defecto `http://localhost:5173` |
+| `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | No | Sin ellas, Instagram devuelve 503 pero Reddit sigue funcionando. App "API setup with Instagram Login" en Meta for Developers |
+| `INSTAGRAM_REDIRECT_URI` | No | Déjala vacía si usas Docker (ver nota de túnel más abajo): se deriva sola del Host de cada petición. Fíjala solo con dominio propio en producción |
+| `FRONTEND_ORIGIN` | No | Déjala vacía si usas Docker: se deriva sola del Host. Fíjala (p. ej. `http://localhost:5173`) solo si sirves frontend y backend en puertos distintos sin Docker |
 | `MISTRAL_API_KEY` | No | Tier gratuito de [Mistral AI](https://console.mistral.ai). Sin ella, la sección "Analizar con IA" del dashboard indica que no está disponible, sin afectar al resto |
 | `MISTRAL_MODEL` | No | Por defecto `mistral-small-latest` |
 
 **Nota sobre Instagram y HTTPS en local:** la API de Instagram (Business
 Login) exige que `redirect_uri` sea HTTPS, incluso en desarrollo. Para
-probarlo en local sin dominio propio, usa un túnel de Cloudflare:
+probarlo en local sin dominio propio, usa un túnel de Cloudflare apuntando
+a la **webapp** (puerto 8080), no al backend directamente -- la webapp
+lleva su propio nginx que hace de proxy hacia el backend bajo el mismo
+origen (ver `webapp/nginx.conf`), así que un único túnel sirve para todo:
 
 ```bash
-cloudflared tunnel --url http://localhost:3000
+cloudflared tunnel --url http://localhost:8080
 ```
 
-y usa la URL `https://xxx.trycloudflare.com` que te dé tanto en
-`INSTAGRAM_REDIRECT_URI` como en la app de Meta Developers (con el path
-`/auth/instagram/callback`), y en `VITE_API_URL` de la webapp para que el
-login y el callback compartan dominio (la cookie de sesión no viaja entre
-`localhost` y el túnel).
+Con `INSTAGRAM_REDIRECT_URI` y `FRONTEND_ORIGIN` vacías en `.env` (valor
+por defecto), lo único que hay que hacer con la URL `https://xxx.trycloudflare.com`
+que te dé cada vez es darla de alta en la app de Meta Developers (con el
+path `/auth/instagram/callback`) -- eso sigue siendo manual, Meta no tiene
+API para gestionar esa lista. Todo lo demás (`.env`, reconstruir imágenes,
+reiniciar `uvicorn`) se adapta solo en cada reinicio del túnel.
 
 ### Scripts de geolocalización por imagen (opcional)
 

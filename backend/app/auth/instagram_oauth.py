@@ -36,6 +36,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
+from app.auth.dynamic_origin import current_origin, frontend_target
 from app.config import settings
 
 router = APIRouter(prefix="/auth/instagram", tags=["auth"])
@@ -73,14 +74,7 @@ def _redirect_uri(request: Request) -> str:
     """
     if settings.instagram_redirect_uri:
         return settings.instagram_redirect_uri
-    host = request.headers.get("host")
-    if not host:
-        raise HTTPException(
-            status_code=503,
-            detail="No se pudo determinar el redirect_uri de Instagram (sin cabecera Host ni "
-            "INSTAGRAM_REDIRECT_URI configurada).",
-        )
-    return f"https://{host}/auth/instagram/callback"
+    return f"{current_origin(request)}/auth/instagram/callback"
 
 
 @router.get(
@@ -117,7 +111,7 @@ async def callback(request: Request, code: str | None = None, state: str | None 
 
     if error:
         # El usuario denegó el consentimiento explícitamente
-        return RedirectResponse(f"{settings.frontend_origin}/?auth_error={error}")
+        return RedirectResponse(f"{frontend_target(request, settings.frontend_origin)}/?auth_error={error}")
 
     saved_state = request.session.get("instagram_oauth_state")
     if not state or state != saved_state:
@@ -161,7 +155,7 @@ async def callback(request: Request, code: str | None = None, state: str | None 
     request.session["instagram_user_id"] = str(ig_user_id)
     request.session.pop("instagram_oauth_state", None)
 
-    return RedirectResponse(f"{settings.frontend_origin}/dashboard?platform=instagram")
+    return RedirectResponse(f"{frontend_target(request, settings.frontend_origin)}/dashboard?platform=instagram")
 
 
 @router.post("/logout")

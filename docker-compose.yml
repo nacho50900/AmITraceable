@@ -2,7 +2,7 @@ services:
   backend:
     build: ./backend
     container_name: backend
-    image: ghcr.io/arquisoft/identity-exposure-tfg-backend:latest
+    image: ghcr.io/nacho50900/amitraceable-backend:latest
     ports:
       - "3000:3000"
     env_file:
@@ -14,9 +14,15 @@ services:
     build:
       context: ./webapp
       args:
-        - VITE_API_URL=http://localhost:3000
+        # Vacío: la imagen trae su propio nginx.conf que hace de proxy
+        # hacia "backend" bajo el mismo origen (ver webapp/nginx.conf), así
+        # que el frontend llama a la API con rutas relativas. Esto es lo
+        # que permite que un túnel de Cloudflare apuntando SOLO a este
+        # servicio (puerto 8080 en el host) sirva también, transparentemente,
+        # todo lo de auth/instagram y auth/reddit.
+        - VITE_API_URL=
     container_name: webapp
-    image: ghcr.io/arquisoft/identity-exposure-tfg-webapp:latest
+    image: ghcr.io/nacho50900/amitraceable-webapp:latest
     ports:
       - "8080:80"
     depends_on:
