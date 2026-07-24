@@ -18,6 +18,16 @@ Consentimiento explícito: el único scope solicitado es
 `instagram_business_basic` (perfil + lectura de media pública propia). No
 se piden permisos de mensajería ni de publicación, que no hacen falta para
 este análisis y ampliarían innecesariamente lo que el usuario autoriza.
+
+redirect_uri dinámico: si `INSTAGRAM_REDIRECT_URI` no está fijada en el
+entorno, se deriva del header `Host` de la propia petición entrante en vez
+de leerse de settings -- pensado para desarrollo local con túneles
+"rápidos" de Cloudflare (trycloudflare.com), cuya URL cambia en cada
+reinicio de `cloudflared`. Con esto, un reinicio del túnel ya no exige
+tocar `.env` ni reiniciar `uvicorn`; solo queda dar de alta la URL nueva en
+el panel de Meta for Developers, que sigue siendo un paso manual porque
+Meta no expone una API para gestionar esa lista de redirect URIs válidos.
+Ver `_redirect_uri` para la nota de seguridad sobre fiarse del Host.
 """
 import secrets
 from urllib.parse import urlencode
@@ -38,11 +48,39 @@ SCOPES = "instagram_business_basic"
 
 
 def _require_configured():
-    if not (settings.instagram_app_id and settings.instagram_app_secret and settings.instagram_redirect_uri):
+    if not (settings.instagram_app_id and settings.instagram_app_secret):
         raise HTTPException(
             status_code=503,
             detail="Instagram no está configurado en este servidor (faltan credenciales).",
         )
+
+
+def _redirect_uri(request: Request) -> str:
+    """Devuelve el redirect_uri a usar en las llamadas a Instagram.
+
+    Prioridad: `INSTAGRAM_REDIRECT_URI` si está fijada explícitamente en el
+    entorno (recomendado en producción, con un dominio propio y estable).
+    Si no, se deriva del Host de la petición entrante -- para que un
+    túnel rápido de Cloudflare que cambia de URL en cada reinicio no
+    obligue a editar `.env` ni a reiniciar el proceso.
+
+    Nota de seguridad: esto confía en el header `Host` tal cual lo reenvía
+    el proxy/túnel. No es una vía de ataque útil aquí porque Meta rechaza
+    de todos modos cualquier redirect_uri que no esté en SU lista blanca
+    (configurada a mano en el panel) -- un Host falsificado en el peor
+    caso provoca un rechazo de Meta ("Invalid redirect_uri"), nunca una
+    redirección a un dominio no autorizado por Meta.
+    """
+    if settings.instagram_redirect_uri:
+        return settings.instagram_redirect_uri
+    host = request.headers.get("host")
+    if not host:
+        raise HTTPException(
+            status_code=503,
+            detail="No se pudo determinar el redirect_uri de Instagram (sin cabecera Host ni "
+            "INSTAGRAM_REDIRECT_URI configurada).",
+        )
+    return f"https://{host}/auth/instagram/callback"
 
 
 @router.get(
@@ -58,7 +96,7 @@ async def login(request: Request):
 
     params = {
         "client_id": settings.instagram_app_id,
-        "redirect_uri": settings.instagram_redirect_uri,
+        "redirect_uri": _redirect_uri(request),
         "response_type": "code",
         "scope": SCOPES,
         "state": state,
@@ -93,7 +131,7 @@ async def callback(request: Request, code: str | None = None, state: str | None 
                 "client_id": settings.instagram_app_id,
                 "client_secret": settings.instagram_app_secret,
                 "grant_type": "authorization_code",
-                "redirect_uri": settings.instagram_redirect_uri,
+                "redirect_uri": _redirect_uri(request),
                 "code": code,
             },
         )

@@ -95,3 +95,89 @@ def test_instagram_logout_clears_only_instagram_session_keys():
 def test_analyze_instagram_requires_authentication():
     resp = client.post("/api/analyze/instagram")
     assert resp.status_code == 401
+
+
+class TestDynamicRedirectUriFallback:
+    """Sin INSTAGRAM_REDIRECT_URI en el entorno, el redirect_uri se deriva
+    del Host de la petición -- pensado para túneles rápidos de Cloudflare
+    que cambian de URL en cada reinicio (ver docstring de
+    app/auth/instagram_oauth.py)."""
+
+    def test_login_derives_redirect_uri_from_host_header(self, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "instagram_redirect_uri", None)
+
+        resp = client.get(
+            "/auth/instagram/login",
+            headers={"host": "random-tunnel-name.trycloudflare.com"},
+            follow_redirects=False,
+        )
+
+        assert resp.status_code == 307
+        location = resp.headers["location"]
+        assert (
+            "redirect_uri=https%3A%2F%2Frandom-tunnel-name.trycloudflare.com%2Fauth%2Finstagram%2Fcallback"
+            in location
+        )
+
+    def test_configured_value_takes_priority_over_host_header(self, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "instagram_redirect_uri", "https://fixed-domain.example/auth/instagram/callback")
+
+        resp = client.get(
+            "/auth/instagram/login",
+            headers={"host": "random-tunnel-name.trycloudflare.com"},
+            follow_redirects=False,
+        )
+
+        location = resp.headers["location"]
+        assert "redirect_uri=https%3A%2F%2Ffixed-domain.example%2Fauth%2Finstagram%2Fcallback" in location
+
+    @respx.mock
+    def test_callback_uses_same_dynamic_redirect_uri_as_login(self, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "instagram_redirect_uri", None)
+
+        session_client = TestClient(app, base_url="https://random-tunnel-name.trycloudflare.com")
+        login_resp = session_client.get(
+            "/auth/instagram/login", headers={"host": "random-tunnel-name.trycloudflare.com"}, follow_redirects=False
+        )
+        state = login_resp.headers["location"].split("state=")[1].split("&")[0]
+
+        token_route = respx.post("https://api.instagram.com/oauth/access_token").mock(
+            return_value=httpx.Response(200, json={"access_token": "short-lived-token", "user_id": 123456}),
+        )
+        respx.get("https://graph.instagram.com/access_token").mock(
+            return_value=httpx.Response(200, json={"access_token": "long-lived-token", "expires_in": 5184000}),
+        )
+
+        callback_resp = session_client.get(
+            "/auth/instagram/callback",
+            params={"code": "fake-code", "state": state},
+            headers={"host": "random-tunnel-name.trycloudflare.com"},
+            follow_redirects=False,
+        )
+
+        assert callback_resp.status_code == 307
+        sent_redirect_uri = token_route.calls[0].request.content.decode()
+        assert "random-tunnel-name.trycloudflare.com" in sent_redirect_uri
+
+    def test_missing_host_and_no_configured_uri_returns_503(self, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "instagram_redirect_uri", None)
+
+        # httpx/TestClient siempre manda algún Host, así que forzamos el caso
+        # límite llamando directamente a la función auxiliar.
+        from starlette.requests import Request
+
+        from app.auth.instagram_oauth import _redirect_uri
+
+        scope = {"type": "http", "headers": []}
+        request = Request(scope)
+
+        with pytest.raises(Exception):
+            _redirect_uri(request)
