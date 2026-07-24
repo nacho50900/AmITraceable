@@ -1,12 +1,12 @@
 services:
-  users:
-    build: backend
-    container_name: users
-    image: ghcr.io/arquisoft/identity-exposure-tfg-users:latest
+  backend:
+    build: ./backend
+    container_name: backend
+    image: ghcr.io/arquisoft/identity-exposure-tfg-backend:latest
     ports:
       - "3000:3000"
     env_file:
-      - backend/.env
+      - ./backend/.env
     networks:
       - monitor-net
 
@@ -20,7 +20,7 @@ services:
     ports:
       - "80:80"
     depends_on:
-      - users
+      - backend
     networks:
       - monitor-net
 
@@ -30,7 +30,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./users/monitoring/prometheus:/etc/prometheus
+      - ./backend/monitoring/prometheus:/etc/prometheus
     networks:
       - monitor-net
 
@@ -40,7 +40,7 @@ services:
     ports:
       - "9091:3000"
     volumes:
-      - ./users/monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./backend/monitoring/grafana/provisioning:/etc/grafana/provisioning
     networks:
       - monitor-net
 
