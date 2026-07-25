@@ -1,5 +1,6 @@
 import React from 'react';
 import type { PopulationEstimate } from '../types';
+import PopulationPictogram from './PopulationPictogram';
 
 interface PopulationNarrowingTableProps {
   steps: PopulationEstimate[];
@@ -24,11 +25,23 @@ const RISK_LABELS: Record<string, string> = {
 const SOURCE_LABELS: Record<string, string> = {
   texto: 'Texto',
   imagen: 'Imagen',
+  ia: 'IA (texto)',
+  ia_nombre: 'IA (nombre)',
 };
 
 const SOURCE_ICONS: Record<string, string> = {
   texto: '✍️',
   imagen: '📷',
+  ia: '🤖',
+  ia_nombre: '🤖',
+};
+
+const SOURCE_TITLES: Record<string, string> = {
+  texto: 'Detectado en texto que escribiste tú mismo/a',
+  imagen: 'Estimado a partir de una imagen (menor fiabilidad que una autodeclaración de texto)',
+  ia: 'Detectado por un modelo de IA en texto/biografía que escribiste tú mismo/a',
+  ia_nombre:
+    'Estimado por convención cultural del nombre público de tu cuenta, no por algo que hayas escrito -- fiabilidad menor',
 };
 
 function formatPopulation(value: number | null): string {
@@ -53,7 +66,7 @@ const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({ ste
         <thead>
           <tr>
             <th>Información detectada</th>
-            <th>Población restante (aprox.)</th>
+            <th>Cuánta gente lo comparte</th>
             <th>Riesgo</th>
             <th>Fuente</th>
           </tr>
@@ -65,7 +78,13 @@ const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({ ste
                 {step.attribute_label}
                 {step.note && <div className="note-inline">{step.note}</div>}
               </td>
-              <td>{formatPopulation(step.remaining_population)}</td>
+              <td>
+                {step.proportion !== null && step.remaining_population !== null ? (
+                  <PopulationPictogram proportion={step.proportion} remainingPopulation={step.remaining_population} />
+                ) : (
+                  <span className="population-fallback">{formatPopulation(step.remaining_population)}</span>
+                )}
+              </td>
               <td>
                 <span
                   className="risk-pill"
@@ -75,7 +94,7 @@ const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({ ste
                 </span>
               </td>
               <td>
-                <span className="source-badge" title={step.source === 'imagen' ? 'Estimado a partir de una imagen (menor fiabilidad que una autodeclaración de texto)' : 'Detectado en texto que escribiste tú mismo/a'}>
+                <span className="source-badge" title={SOURCE_TITLES[step.source]}>
                   {SOURCE_ICONS[step.source]} {SOURCE_LABELS[step.source]}
                 </span>
               </td>
@@ -91,6 +110,13 @@ const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({ ste
             {' '}
             Las filas marcadas con 📷 vienen de un análisis visual de tus fotos, no de algo
             que hayas escrito — son menos fiables que una autodeclaración de texto.
+          </>
+        )}
+        {steps.some((s) => s.source === 'ia_nombre') && (
+          <>
+            {' '}
+            Las filas marcadas con 🤖 (nombre) son una estimación por el nombre público de tu
+            cuenta, no algo que hayas declarado — la fiabilidad es menor.
           </>
         )}
       </p>

@@ -13,6 +13,7 @@ function makeStep(overrides: Partial<PopulationEstimate> = {}): PopulationEstima
     evidence: ['https://x/1'],
     source: 'texto',
     note: null,
+    proportion: 24_957_175 / 49_128_297,
     ...overrides,
   };
 }
@@ -34,13 +35,18 @@ describe('PopulationNarrowingTable', () => {
     expect(screen.getByText('Edad: 24 años')).toBeInTheDocument();
   });
 
-  test('formatea la población restante con separador de miles en español', () => {
-    render(<PopulationNarrowingTable steps={[makeStep({ remaining_population: 24957175 })]} />);
+  test('con proporción conocida: muestra el pictograma con el porcentaje', () => {
+    render(<PopulationNarrowingTable steps={[makeStep({ remaining_population: 24957175, proportion: 0.5 })]} />);
+    expect(screen.getByText('50%')).toBeInTheDocument();
+  });
+
+  test('sin proporción calculable: cae al número formateado con separador de miles', () => {
+    render(<PopulationNarrowingTable steps={[makeStep({ remaining_population: 24957175, proportion: null })]} />);
     expect(screen.getByText('24.957.175')).toBeInTheDocument();
   });
 
-  test('población no estimable se muestra como guion largo', () => {
-    render(<PopulationNarrowingTable steps={[makeStep({ remaining_population: null })]} />);
+  test('población no estimable (sin proporción ni población) se muestra como guion largo', () => {
+    render(<PopulationNarrowingTable steps={[makeStep({ remaining_population: null, proportion: null })]} />);
     expect(screen.getByText('—')).toBeInTheDocument();
   });
 
@@ -75,6 +81,17 @@ describe('PopulationNarrowingTable', () => {
   test('fuente "imagen" muestra el icono y etiqueta correctos', () => {
     render(<PopulationNarrowingTable steps={[makeStep({ source: 'imagen' })]} />);
     expect(screen.getByText(/📷 Imagen/)).toBeInTheDocument();
+  });
+
+  test('fuente "ia" muestra el icono y etiqueta correctos', () => {
+    render(<PopulationNarrowingTable steps={[makeStep({ source: 'ia' })]} />);
+    expect(screen.getByText(/🤖 IA \(texto\)/)).toBeInTheDocument();
+  });
+
+  test('fuente "ia_nombre" muestra el icono y etiqueta correctos, y añade la advertencia de fiabilidad', () => {
+    render(<PopulationNarrowingTable steps={[makeStep({ source: 'ia_nombre' })]} />);
+    expect(screen.getByText(/🤖 IA \(nombre\)/)).toBeInTheDocument();
+    expect(screen.getByText(/estimación por el nombre público/)).toBeInTheDocument();
   });
 
   test('sin filas de fuente "imagen": la nota final NO menciona las fotos', () => {

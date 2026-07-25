@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AiSummaryUnavailableError, api } from '../api';
 import type { ExposureReport } from '../types';
 
@@ -6,19 +6,23 @@ interface AiSummaryCardProps {
   report: ExposureReport;
 }
 
-type Status = 'idle' | 'loading' | 'success' | 'unavailable' | 'error';
+type Status = 'loading' | 'success' | 'empty' | 'unavailable' | 'error';
 
 const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
-  const [status, setStatus] = useState<Status>('idle');
+  const [status, setStatus] = useState<Status>('loading');
   const [conclusions, setConclusions] = useState<string[]>([]);
   const [message, setMessage] = useState<string>('');
 
-  const handleAnalyze = async () => {
+  const runAnalysis = async () => {
     setStatus('loading');
     try {
       const result = await api.aiSummary(report);
-      setConclusions(result.conclusions);
-      setStatus('success');
+      if (result.conclusions.length === 0) {
+        setStatus('empty');
+      } else {
+        setConclusions(result.conclusions);
+        setStatus('success');
+      }
     } catch (err) {
       if (err instanceof AiSummaryUnavailableError) {
         setMessage(err.message);
@@ -30,24 +34,18 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
     }
   };
 
+  // Se dispara solo, sin que el usuario tenga que pulsar nada -- el
+  // informe ya generado se envía en cuanto está disponible.
+  useEffect(() => {
+    runAnalysis();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report]);
+
   return (
     <section className="card ai-summary-card">
       <h2>Conclusiones generadas por IA</h2>
 
-      {status === 'idle' && (
-        <>
-          <p className="note">
-            Un modelo de IA (Mistral AI, con sede en la UE) puede leer este informe y darte
-            conclusiones priorizadas en lenguaje natural. Es opcional: se envía tu informe ya
-            generado, no tus publicaciones originales.
-          </p>
-          <button type="button" className="btn-secondary" onClick={handleAnalyze}>
-            Analizar con IA
-          </button>
-        </>
-      )}
-
-      {status === 'loading' && <p className="note">Generando conclusiones...</p>}
+      {status === 'loading' && <p className="note">Analizando el informe con IA...</p>}
 
       {status === 'success' && (
         <ul className="ai-conclusions-list">
@@ -57,18 +55,20 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
         </ul>
       )}
 
-      {status === 'unavailable' && (
+      {status === 'empty' && (
         <p className="note">
-          {message} El resto de tu informe sigue disponible con normalidad; esta es solo una
-          función complementaria opcional.
+          La IA ha revisado tu informe y no ha encontrado ninguna conclusión que merezca la
+          pena destacar más allá de lo que ya ves en el resto del dashboard.
         </p>
       )}
 
+      {status === 'unavailable' && <p className="note">{message}</p>}
+
       {status === 'error' && (
         <p className="note error-text">
-          No se ha podido completar el análisis con IA ({message}). Puedes intentarlo de nuevo.
+          No se ha podido completar el análisis con IA ({message}).
           <br />
-          <button type="button" className="btn-secondary" onClick={handleAnalyze}>
+          <button type="button" className="btn-secondary" onClick={runAnalysis}>
             Reintentar
           </button>
         </p>

@@ -63,7 +63,7 @@ class TestGenerateReportPlatformBranching:
 
         async def _should_not_be_called(*args, **kwargs):
             called["n"] += 1
-            return []
+            return geolocation.GeolocationOutcome(index_available=False, results=[])
 
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _should_not_be_called)
 
@@ -86,14 +86,17 @@ class TestGenerateReportPlatformBranching:
     @pytest.mark.asyncio
     async def test_instagram_image_estimate_fills_missing_location_with_source_imagen(self, monkeypatch):
         async def _fake_estimate(posts, progress_callback=None):
-            return [
-                (
-                    "https://ig/1",
-                    geolocation.ImageLocationEstimate(
-                        province="Madrid", confidence=0.8, k_neighbors=15, mean_similarity=0.7, lat=40.4, lon=-3.7
-                    ),
-                )
-            ]
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[
+                    (
+                        "https://ig/1",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.8, k_neighbors=15, mean_similarity=0.7, lat=40.4, lon=-3.7
+                        ),
+                    )
+                ],
+            )
 
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
 
@@ -111,14 +114,17 @@ class TestGenerateReportPlatformBranching:
     @pytest.mark.asyncio
     async def test_instagram_text_location_takes_priority_over_image(self, monkeypatch):
         async def _fake_estimate(posts, progress_callback=None):
-            return [
-                (
-                    "https://ig/1",
-                    geolocation.ImageLocationEstimate(
-                        province="Barcelona", confidence=0.9, k_neighbors=15, mean_similarity=0.9
-                    ),
-                )
-            ]
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[
+                    (
+                        "https://ig/1",
+                        geolocation.ImageLocationEstimate(
+                            province="Barcelona", confidence=0.9, k_neighbors=15, mean_similarity=0.9
+                        ),
+                    )
+                ],
+            )
 
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
 
@@ -136,6 +142,64 @@ class TestGenerateReportPlatformBranching:
         assert "eon" in location_steps[0].attribute_label  # León / Leon según normalización
 
 
+    @pytest.mark.asyncio
+    async def test_low_confidence_image_shown_but_not_used_for_narrowing(self, monkeypatch):
+        """Con el nuevo GeolocationOutcome sin filtrar, una estimación de baja
+        confianza debe seguir apareciendo en image_location_points (para que
+        el frontend la muestre), pero NO debe alimentar population_narrowing
+        (eso sigue exigiendo >= MIN_CONFIDENCE_FOR_POPULATION_NARROWING)."""
+
+        async def _fake_estimate(posts, progress_callback=None):
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[
+                    (
+                        "https://ig/1",
+                        geolocation.ImageLocationEstimate(
+                            province="Sevilla", confidence=0.15, k_neighbors=15, mean_similarity=0.3
+                        ),
+                    )
+                ],
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+
+        report = await generate_report(
+            "instagram", "user", [_post(platform="instagram", media_url="https://cdn/1.jpg")],
+            _fingerprint(), [], _score(),
+        )
+
+        assert len(report.image_location_points) == 1
+        assert report.image_location_points[0].confidence == 0.15
+        location_steps = [s for s in report.population_narrowing if s.category == "ubicacion"]
+        assert location_steps == []
+
+    @pytest.mark.asyncio
+    async def test_geolocation_available_reflects_index_state(self, monkeypatch):
+        async def _fake_unavailable(posts, progress_callback=None):
+            return geolocation.GeolocationOutcome(index_available=False, results=[])
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_unavailable)
+
+        report = await generate_report(
+            "instagram", "user", [_post(platform="instagram", media_url="https://cdn/1.jpg")],
+            _fingerprint(), [], _score(),
+        )
+
+        assert report.geolocation_available is False
+
+    @pytest.mark.asyncio
+    async def test_geolocation_available_is_false_for_reddit(self, monkeypatch):
+        async def _should_not_be_called(*args, **kwargs):
+            raise AssertionError("no debería llamarse para Reddit")
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _should_not_be_called)
+
+        report = await generate_report("reddit", "user", [_post()], _fingerprint(), [], _score())
+
+        assert report.geolocation_available is False
+
+
 class TestGenerateReportProgress:
     @pytest.mark.asyncio
     async def test_emits_final_stage_event(self, monkeypatch):
@@ -145,7 +209,7 @@ class TestGenerateReportProgress:
             events.append(stage)
 
         async def _no_images(*args, **kwargs):
-            return []
+            return geolocation.GeolocationOutcome(index_available=False, results=[])
 
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _no_images)
 

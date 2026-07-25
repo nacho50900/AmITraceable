@@ -1,10 +1,16 @@
 import React from 'react';
 import { CircleMarker, MapContainer, Popup, TileLayer, Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import type { ImageLocationPoint } from '../types';
+import type { ImageLocationPoint, Platform } from '../types';
 
 interface LocationMapProps {
   points: ImageLocationPoint[];
+  platform: Platform;
+  /** report.geolocation_available -- false si el índice FAISS no está
+   * construido en este servidor (o faltan sus dependencias opcionales).
+   * Distinto de "se analizaron fotos pero ninguna dio resultado fiable":
+   * nunca se muestran ambos mensajes a la vez. */
+  available: boolean;
 }
 
 // Centro aproximado de España peninsular, usado como fallback si no hay
@@ -17,74 +23,108 @@ function confidenceColor(confidence: number): string {
   return '#3aa657'; // baja -> verde (menos preocupante)
 }
 
-const LocationMap: React.FC<LocationMapProps> = ({ points }) => {
-  const validPoints = points.filter((p) => p.lat !== null && p.lon !== null);
-
-  if (validPoints.length === 0) {
+const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }) => {
+  if (platform !== 'instagram') {
     return (
       <p className="note">
-        No se ha podido estimar la ubicación de ninguna de tus fotos (el índice de
-        geolocalización no está disponible, o ninguna imagen tuvo suficiente similitud
-        con el índice de referencia).
+        Reddit no tiene fotos que analizar aquí -- esta sección solo aplica a Instagram.
       </p>
     );
   }
 
-  const center: [number, number] = [
-    validPoints.reduce((sum, p) => sum + (p.lat ?? 0), 0) / validPoints.length,
-    validPoints.reduce((sum, p) => sum + (p.lon ?? 0), 0) / validPoints.length,
-  ];
+  if (!available) {
+    return (
+      <p className="note">
+        El índice de geolocalización por imagen no está construido en este servidor, así que
+        esta función no está disponible ahora mismo.
+      </p>
+    );
+  }
+
+  if (points.length === 0) {
+    return (
+      <p className="note">
+        No se ha podido analizar ninguna de tus fotos (puede que no tuvieras fotos públicas,
+        o que no se pudieran descargar).
+      </p>
+    );
+  }
+
+  const mappablePoints = points.filter((p) => p.lat !== null && p.lon !== null);
+  const center: [number, number] =
+    mappablePoints.length > 0
+      ? [
+          mappablePoints.reduce((sum, p) => sum + (p.lat ?? 0), 0) / mappablePoints.length,
+          mappablePoints.reduce((sum, p) => sum + (p.lon ?? 0), 0) / mappablePoints.length,
+        ]
+      : SPAIN_CENTER;
 
   return (
     <>
-      <MapContainer
-        center={validPoints.length > 0 ? center : SPAIN_CENTER}
-        zoom={6}
-        style={{ height: '360px', width: '100%', borderRadius: '12px' }}
-        scrollWheelZoom={false}
-      >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        {validPoints.map((point) => (
-          <CircleMarker
-            key={point.permalink}
-            center={[point.lat as number, point.lon as number]}
-            radius={8 + point.confidence * 10}
-            pathOptions={{
-              color: confidenceColor(point.confidence),
-              fillColor: confidenceColor(point.confidence),
-              fillOpacity: 0.5,
-            }}
-          >
-            <Tooltip direction="top" offset={[0, -8]} opacity={1}>
-              <strong>{point.province}</strong>
-              <br />
-              Confianza: {Math.round(point.confidence * 100)}%
-              <br />
-              {(point.lat as number).toFixed(4)}, {(point.lon as number).toFixed(4)}
-            </Tooltip>
-            <Popup>
-              <strong>{point.province}</strong>
-              <br />
-              Confianza: {Math.round(point.confidence * 100)}%
-              <br />
-              Coordenadas: {(point.lat as number).toFixed(4)}, {(point.lon as number).toFixed(4)}
-              <br />
-              <a href={point.permalink} target="_blank" rel="noreferrer">
-                Ver publicación
-              </a>
-            </Popup>
-          </CircleMarker>
-        ))}
-      </MapContainer>
+      {mappablePoints.length > 0 && (
+        <MapContainer
+          center={center}
+          zoom={6}
+          style={{ height: '360px', width: '100%', borderRadius: '12px' }}
+          scrollWheelZoom={false}
+        >
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          {mappablePoints.map((point) => (
+            <CircleMarker
+              key={point.permalink}
+              center={[point.lat as number, point.lon as number]}
+              radius={8 + point.confidence * 10}
+              pathOptions={{
+                color: confidenceColor(point.confidence),
+                fillColor: confidenceColor(point.confidence),
+                fillOpacity: 0.5,
+              }}
+            >
+              <Tooltip direction="top" offset={[0, -8]} opacity={1}>
+                <strong>{point.province}</strong>
+                <br />
+                Confianza: {Math.round(point.confidence * 100)}%
+                <br />
+                {(point.lat as number).toFixed(4)}, {(point.lon as number).toFixed(4)}
+              </Tooltip>
+              <Popup>
+                <strong>{point.province}</strong>
+                <br />
+                Confianza: {Math.round(point.confidence * 100)}%
+                <br />
+                Coordenadas: {(point.lat as number).toFixed(4)}, {(point.lon as number).toFixed(4)}
+                <br />
+                <a href={point.permalink} target="_blank" rel="noreferrer">
+                  Ver publicación
+                </a>
+              </Popup>
+            </CircleMarker>
+          ))}
+        </MapContainer>
+      )}
+
       <p className="note">
-        Cada punto es una estimación aproximada (no una ubicación exacta) basada en
-        similitud visual contra un índice de imágenes de referencia de España. El tamaño y
-        color del punto reflejan la confianza de la estimación, no la precisión exacta del
-        lugar.
+        Cada foto se ha comparado contra un índice de imágenes de referencia de España; el
+        resultado es una similitud visual aproximada, no una ubicación exacta. Se muestran
+        <strong> todas</strong> las fotos analizadas, incluidas las de confianza baja.
       </p>
+
+      <ul className="image-location-list">
+        {points.map((point) => (
+          <li key={point.permalink}>
+            <a href={point.permalink} target="_blank" rel="noreferrer">
+              Ver publicación
+            </a>
+            <span>
+              {point.province} — confianza {Math.round(point.confidence * 100)}%
+              {point.lat === null && ' (sin coordenadas para el mapa)'}
+            </span>
+          </li>
+        ))}
+      </ul>
     </>
   );
 };

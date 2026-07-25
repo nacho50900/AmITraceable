@@ -191,13 +191,18 @@ class TestEstimateLocationsForPosts:
         Post = namedtuple("Post", ["type", "media_url", "permalink"])
         posts = [Post(type="text", media_url=None, permalink="https://x/1")]
 
-        results = await geolocation.estimate_locations_for_posts(posts)
+        outcome = await geolocation.estimate_locations_for_posts(posts)
 
-        assert results == []
+        assert outcome.results == []
 
     @pytest.mark.asyncio
-    async def test_reports_progress_per_photo_and_filters_by_confidence(self, monkeypatch, respx_mock):
+    async def test_returns_every_processed_photo_unfiltered_by_confidence(self, monkeypatch, respx_mock):
+        """Ya no se descarta nada por umbral aquí dentro -- eso es
+        responsabilidad de quien llama (report/generator.py), para que el
+        informe pueda mostrar cada foto con su confianza real."""
         import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
 
         Post = namedtuple("Post", ["type", "media_url", "permalink"])
         posts = [
@@ -214,9 +219,10 @@ class TestEstimateLocationsForPosts:
         respx_mock.get("https://cdn.fake/1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
         respx_mock.get("https://cdn.fake/2.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
 
-        # La primera imagen "vota" con confianza alta (pasa el filtro), la
-        # segunda con confianza baja (se descarta) -- se simula sustituyendo
-        # directamente estimate_location_from_image en vez de todo el índice.
+        # La primera imagen "vota" con confianza alta, la segunda con
+        # confianza baja -- se simula sustituyendo directamente
+        # estimate_location_from_image en vez de todo el índice. Ambas
+        # deben aparecer en el resultado, sin filtrar.
         call_count = {"n": 0}
 
         def _fake_estimate(image, k=15):
@@ -236,13 +242,15 @@ class TestEstimateLocationsForPosts:
         async def on_progress(stage, counts):
             progress_events.append((stage, counts))
 
-        results = await geolocation.estimate_locations_for_posts(
-            posts, min_confidence=0.4, progress_callback=on_progress
-        )
+        outcome = await geolocation.estimate_locations_for_posts(posts, progress_callback=on_progress)
 
-        assert len(results) == 1
-        assert results[0][0] == "https://ig/1"
-        assert results[0][1].province == "Madrid"
+        assert outcome.index_available is True
+        assert len(outcome.results) == 2
+        assert outcome.results[0][0] == "https://ig/1"
+        assert outcome.results[0][1].province == "Madrid"
+        assert outcome.results[0][1].confidence == 0.9
+        assert outcome.results[1][1].province == "Sevilla"
+        assert outcome.results[1][1].confidence == 0.1
 
         assert progress_events == [
             ("Analizando fotos...", {"photos_analyzed": 1, "total_photos": 2}),
@@ -253,11 +261,27 @@ class TestEstimateLocationsForPosts:
     async def test_skips_image_that_fails_to_download_without_aborting(self, monkeypatch, respx_mock):
         import httpx
 
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+
         Post = namedtuple("Post", ["type", "media_url", "permalink"])
         posts = [Post(type="image", media_url="https://cdn.fake/broken.jpg", permalink="https://ig/1")]
 
         respx_mock.get("https://cdn.fake/broken.jpg").mock(return_value=httpx.Response(500))
 
-        results = await geolocation.estimate_locations_for_posts(posts)
+        outcome = await geolocation.estimate_locations_for_posts(posts)
 
-        assert results == []
+        assert outcome.results == []
+
+    @pytest.mark.asyncio
+    async def test_index_unavailable_short_circuits_without_downloading(self, monkeypatch):
+        """Sin índice/dependencias, ni se intenta descargar nada -- y se
+        distingue explícitamente de 'se procesaron fotos pero sin resultado'."""
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: False)
+
+        Post = namedtuple("Post", ["type", "media_url", "permalink"])
+        posts = [Post(type="image", media_url="https://cdn.fake/1.jpg", permalink="https://ig/1")]
+
+        outcome = await geolocation.estimate_locations_for_posts(posts)
+
+        assert outcome.index_available is False
+        assert outcome.results == []

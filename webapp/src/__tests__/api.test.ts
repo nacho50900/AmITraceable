@@ -10,9 +10,41 @@ function mockFetchOnce(status: number, body: unknown, ok = status >= 200 && stat
   });
 }
 
+// jsdom no implementa EventSource -- este stub mínimo permite disparar
+// mensajes/errores manualmente desde los tests, guardando la última
+// instancia creada para poder acceder a ella desde fuera.
+class FakeEventSource {
+  static CLOSED = 2;
+  static instances: FakeEventSource[] = [];
+  url: string;
+  withCredentials: boolean;
+  readyState = 1;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+
+  constructor(url: string, options?: { withCredentials?: boolean }) {
+    this.url = url;
+    this.withCredentials = options?.withCredentials ?? false;
+    FakeEventSource.instances.push(this);
+  }
+
+  close() {
+    this.readyState = FakeEventSource.CLOSED;
+  }
+
+  emit(data: unknown) {
+    this.onmessage?.({ data: JSON.stringify(data) });
+  }
+
+  triggerError() {
+    this.onerror?.();
+  }
+}
+
 describe('api', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    FakeEventSource.instances = [];
   });
 
   test('petición exitosa devuelve el cuerpo JSON parseado', async () => {
@@ -119,5 +151,94 @@ describe('api', () => {
     expect(options.method).toBe('POST');
     expect(options.headers['Content-Type']).toBe('application/json');
     expect(JSON.parse(options.body)).toEqual(report);
+  });
+
+  describe('analyzeStream', () => {
+    test('abre un EventSource con withCredentials hacia /api/analyze/{platform}/stream', () => {
+      vi.stubGlobal('EventSource', FakeEventSource);
+
+      api.analyzeStream('reddit', () => {});
+
+      expect(FakeEventSource.instances).toHaveLength(1);
+      const source = FakeEventSource.instances[0];
+      expect(source.url).toContain('/api/analyze/reddit/stream');
+      expect(source.withCredentials).toBe(true);
+    });
+
+    test('parsea cada mensaje y lo entrega tal cual al callback', () => {
+      vi.stubGlobal('EventSource', FakeEventSource);
+      const onEvent = vi.fn();
+
+      api.analyzeStream('reddit', onEvent);
+      const source = FakeEventSource.instances[0];
+      source.emit({ done: false, stage: 'Analizando fotos...', photos_analyzed: 1, total_photos: 3 });
+
+      expect(onEvent).toHaveBeenCalledWith({
+        done: false,
+        stage: 'Analizando fotos...',
+        photos_analyzed: 1,
+        total_photos: 3,
+      });
+    });
+
+    test('al recibir done=true, cierra la conexión sola', () => {
+      vi.stubGlobal('EventSource', FakeEventSource);
+      const onEvent = vi.fn();
+
+      api.analyzeStream('instagram', onEvent);
+      const source = FakeEventSource.instances[0];
+      source.emit({ done: true, report: makeExposureReport() });
+
+      expect(source.readyState).toBe(FakeEventSource.CLOSED);
+    });
+
+    test('mensaje mal formado (no JSON) se ignora sin llamar al callback', () => {
+      vi.stubGlobal('EventSource', FakeEventSource);
+      const onEvent = vi.fn();
+
+      api.analyzeStream('reddit', onEvent);
+      const source = FakeEventSource.instances[0];
+      source.onmessage?.({ data: 'esto no es json' });
+
+      expect(onEvent).not.toHaveBeenCalled();
+    });
+
+    test('error de red real (readyState no CLOSED) entrega un evento de error', () => {
+      vi.stubGlobal('EventSource', FakeEventSource);
+      const onEvent = vi.fn();
+
+      api.analyzeStream('reddit', onEvent);
+      const source = FakeEventSource.instances[0];
+      source.triggerError();
+
+      expect(onEvent).toHaveBeenCalledWith({
+        done: true,
+        error: 'Se perdió la conexión con el servidor durante el análisis.',
+      });
+      expect(source.readyState).toBe(FakeEventSource.CLOSED);
+    });
+
+    test('error tras un cierre ya limpio (readyState CLOSED) no duplica el evento de error', () => {
+      vi.stubGlobal('EventSource', FakeEventSource);
+      const onEvent = vi.fn();
+
+      api.analyzeStream('reddit', onEvent);
+      const source = FakeEventSource.instances[0];
+      source.emit({ done: true, report: makeExposureReport() });
+      onEvent.mockClear();
+      source.triggerError(); // el navegador puede disparar esto igualmente tras el cierre normal
+
+      expect(onEvent).not.toHaveBeenCalled();
+    });
+
+    test('la función de limpieza devuelta cierra la conexión', () => {
+      vi.stubGlobal('EventSource', FakeEventSource);
+
+      const stop = api.analyzeStream('reddit', () => {});
+      const source = FakeEventSource.instances[0];
+      stop();
+
+      expect(source.readyState).toBe(FakeEventSource.CLOSED);
+    });
   });
 });

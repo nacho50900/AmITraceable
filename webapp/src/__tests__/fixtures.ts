@@ -49,11 +49,13 @@ export function makeExposureReport(overrides: Partial<ExposureReport> = {}): Exp
         evidence: ['https://instagram.com/p/1'],
         source: 'texto',
         note: null,
+        proportion: 0.508,
       },
     ],
     image_location_points: [
       { permalink: 'https://instagram.com/p/1', province: 'Madrid', confidence: 0.6, lat: 40.41, lon: -3.7 },
     ],
+    geolocation_available: true,
     ...overrides,
   };
 }

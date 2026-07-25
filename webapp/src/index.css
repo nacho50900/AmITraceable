@@ -447,3 +447,130 @@ body {
 .error {
   color: #e0635c;
 }
+
+/* Pictograma de población (PopulationPictogram.tsx) */
+.pictogram {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pictogram-percent {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text-dim);
+  min-width: 42px;
+}
+
+.pictogram-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 220px;
+}
+
+.pictogram-figure {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+}
+
+.pictogram-compact {
+  gap: 6px;
+}
+
+.pictogram-compact .pictogram-figure {
+  width: 20px;
+  height: 20px;
+}
+
+.pictogram-compact-label {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.population-fallback {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+/* Pantalla de progreso en vivo (Dashboard.tsx, vía SSE) */
+.progress-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.progress-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progress-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.progress-list li.progress-current {
+  color: var(--text);
+}
+
+.progress-list li.progress-current::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: progress-pulse 1s ease-in-out infinite;
+}
+
+.progress-list li:not(.progress-current)::before {
+  content: '✓';
+  color: #3aa657;
+  flex-shrink: 0;
+}
+
+@keyframes progress-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* Lista de fotos analizadas por geolocalización (LocationMap.tsx) */
+.image-location-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.image-location-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.image-location-list a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.image-location-list a:hover {
+  text-decoration: underline;
+}

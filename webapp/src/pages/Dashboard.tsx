@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import HourlyActivityChart from '../components/HourlyActivityChart';
@@ -19,21 +19,57 @@ const Dashboard: React.FC = () => {
   const [report, setReport] = useState<ExposureReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Fases YA completadas del pipeline, en el orden en que han llegado por
+  // el stream -- para pintar la lista de progreso en vivo (no un
+  // temporizador simulado: cada línea corresponde a un evento real emitido
+  // por el backend, ver app/progress.py y analysis_router.py).
+  const [completedStages, setCompletedStages] = useState<string[]>([]);
+  const [currentStage, setCurrentStage] = useState<string | null>(null);
   const navigate = useNavigate();
+  const stopStreamRef = useRef<(() => void) | null>(null);
+  // Ref auxiliar para poder leer la fase "actual" dentro del callback del
+  // stream sin depender de un closure obsoleto de setState (evita tener
+  // que meter currentStage como dependencia del useEffect y re-suscribirse
+  // al stream en cada cambio de fase).
+  const currentStageRef = useRef<string | null>(null);
 
   useEffect(() => {
-    api
-      .authStatus(platform)
-      .then((status) => {
-        if (!status.authenticated) {
-          navigate('/');
-          return undefined;
+    let cancelled = false;
+
+    api.authStatus(platform).then((status) => {
+      if (cancelled) return;
+      if (!status.authenticated) {
+        navigate('/');
+        return;
+      }
+
+      stopStreamRef.current = api.analyzeStream(platform, (event) => {
+        if (cancelled) return;
+
+        if (!event.done) {
+          const previousStage = currentStageRef.current;
+          currentStageRef.current = event.stage;
+          if (previousStage) {
+            setCompletedStages((prev) => [...prev, previousStage]);
+          }
+          setCurrentStage(event.stage);
+          return;
         }
-        return api.analyze(platform);
-      })
-      .then((data) => data && setReport(data))
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setLoading(false));
+
+        if ('report' in event) {
+          setReport(event.report);
+        } else {
+          setError(event.error);
+        }
+        setLoading(false);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      stopStreamRef.current?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [platform, navigate]);
 
   const handleLogout = async () => {
@@ -49,7 +85,15 @@ const Dashboard: React.FC = () => {
   if (loading) {
     return (
       <div className="page">
-        <p>Analizando tu actividad pública en {platformLabel}… esto puede tardar unos segundos.</p>
+        <div className="progress-screen">
+          <p>Analizando tu actividad pública en {platformLabel}…</p>
+          <ul className="progress-list">
+            {completedStages.map((stage, i) => (
+              <li key={`${stage}-${i}`}>{stage}</li>
+            ))}
+            {currentStage && <li className="progress-current">{currentStage}</li>}
+          </ul>
+        </div>
       </div>
     );
   }
@@ -100,7 +144,7 @@ const Dashboard: React.FC = () => {
 
       <section className="card">
         <h2>Ubicaciones estimadas a partir de tus fotos</h2>
-        <LocationMap points={report.image_location_points} />
+        <LocationMap points={report.image_location_points} platform={report.platform} available={report.geolocation_available} />
       </section>
 
       <section className="card">

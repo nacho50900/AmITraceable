@@ -37,8 +37,12 @@ export interface PopulationEstimate {
   remaining_population: number | null;
   risk_level: 'bajo' | 'medio' | 'alto' | 'critico' | 'no_estimable';
   evidence: string[];
-  source: 'texto' | 'imagen';
+  source: 'texto' | 'imagen' | 'ia' | 'ia_nombre';
   note: string | null;
+  // remaining_population / poblacion total de España, ya calculado en el
+  // backend (ver app/scoring/k_anonymity.py) para no duplicar esa
+  // constante aquí. null si remaining_population también lo es.
+  proportion: number | null;
 }
 
 export interface ImageLocationPoint {
@@ -60,7 +64,17 @@ export interface ExposureReport {
   recommendations: string[];
   population_narrowing: PopulationEstimate[];
   image_location_points: ImageLocationPoint[];
+  // false si el índice de geolocalización no está construido en este
+  // servidor (o la plataforma no es Instagram) -- distinto de "se
+  // analizaron fotos pero ninguna dio resultado fiable".
+  geolocation_available: boolean;
 }
+
+// Eventos que llegan por /api/analyze/{platform}/stream (Server-Sent Events).
+export type AnalysisProgressEvent =
+  | { done: false; stage: string; [key: string]: unknown }
+  | { done: true; report: ExposureReport }
+  | { done: true; error: string };
 
 export interface AuthStatus {
   authenticated: boolean;

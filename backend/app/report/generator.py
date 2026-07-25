@@ -70,17 +70,23 @@ async def generate_report(
 
     # Geolocalización por imagen: solo se usa como ubicación PARA EL CÁLCULO
     # DE POBLACIÓN si el texto no dio ya una provincia/municipio explícita
-    # (la autodeclaración en texto es más fiable). Pero TODAS las
-    # estimaciones por imagen (no solo la mejor) se guardan igualmente en
-    # `image_location_points` para pintar el mapa completo en el frontend.
+    # (la autodeclaración en texto es más fiable), y solo si supera
+    # MIN_CONFIDENCE_FOR_POPULATION_NARROWING. Pero TODAS las estimaciones
+    # por imagen (también las de baja confianza) se guardan igualmente en
+    # `image_location_points`, para que el frontend pueda mostrar cada
+    # foto analizada con su confianza real -- no solo las que "cuentan".
     # Módulo opcional/best-effort: si el índice FAISS no está construido
-    # (ver app/vision/geolocation.py), esto simplemente no aporta nada y el
-    # resto del informe sigue generándose con normalidad.
+    # (ver app/vision/geolocation.py), `geolocation_available` queda a
+    # False y el resto del informe sigue generándose con normalidad.
+    MIN_CONFIDENCE_FOR_POPULATION_NARROWING = 0.4
+
     image_location_points: list[ImageLocationPoint] = []
+    geolocation_available = False
     if platform == "instagram":
         from app.vision.geolocation import estimate_locations_for_posts
 
-        image_estimates = await estimate_locations_for_posts(posts, progress_callback=progress_callback)
+        geo_outcome = await estimate_locations_for_posts(posts, progress_callback=progress_callback)
+        geolocation_available = geo_outcome.index_available
         image_location_points = [
             ImageLocationPoint(
                 permalink=permalink,
@@ -89,12 +95,15 @@ async def generate_report(
                 lat=estimate.lat,
                 lon=estimate.lon,
             )
-            for permalink, estimate in image_estimates
+            for permalink, estimate in geo_outcome.results
         ]
 
-        if image_estimates and demographic_findings.provincia is None and demographic_findings.municipio is None:
-            # Nos quedamos con la estimación de mayor confianza entre todas las imágenes
-            best_permalink, best_estimate = max(image_estimates, key=lambda pair: pair[1].confidence)
+        confident_estimates = [
+            pair for pair in geo_outcome.results if pair[1].confidence >= MIN_CONFIDENCE_FOR_POPULATION_NARROWING
+        ]
+        if confident_estimates and demographic_findings.provincia is None and demographic_findings.municipio is None:
+            # Nos quedamos con la estimación de mayor confianza entre las que superan el umbral
+            best_permalink, best_estimate = max(confident_estimates, key=lambda pair: pair[1].confidence)
             demographic_findings.provincia = best_estimate.province.lower()
             demographic_findings.evidence.setdefault("provincia", []).append(best_permalink)
             demographic_findings.source["provincia"] = "imagen"
@@ -111,6 +120,7 @@ async def generate_report(
             evidence=step.evidence,
             source=step.source,
             note=step.note,
+            proportion=step.proportion,
         )
         for step in narrowing_steps
     ]
@@ -126,6 +136,7 @@ async def generate_report(
         recommendations=_build_recommendations(fingerprint, inferred_attributes, score),
         population_narrowing=population_narrowing,
         image_location_points=image_location_points,
+        geolocation_available=geolocation_available,
     )
 
 

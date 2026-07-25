@@ -57,6 +57,11 @@ class PopulationNarrowingStep:
     # app/nlp/ai_attribute_extraction.py)
     source: str = "texto"
     note: str | None = None
+    # remaining_population / TOTAL_POPULATION_ES, ya calculado aquí para que el
+    # frontend no tenga que conocer ni duplicar esa constante (usado para el
+    # pictograma de población, ver PopulationPictogram.tsx). None si remaining_population
+    # también lo es.
+    proportion: float | None = None
 
 
 def _risk_level(remaining: float) -> str:
@@ -101,6 +106,7 @@ def _apply_proportion(
         evidence=evidence,
         source=source,
         note=note,
+        proportion=new_remaining / TOTAL_POPULATION_ES,
     )
 
 

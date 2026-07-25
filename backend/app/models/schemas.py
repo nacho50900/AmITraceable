@@ -101,6 +101,9 @@ class PopulationEstimate(BaseModel):
     # detectada por IA) | "ia_nombre" (estimación de sexo por nombre público, no autodeclaración)
     source: str = "texto"
     note: str | None = None
+    # remaining_population / TOTAL_POPULATION_ES -- ya calculado en el backend para
+    # que el frontend no tenga que conocer esa constante (pictograma de población).
+    proportion: float | None = None
 
 
 class ImageLocationPoint(BaseModel):
@@ -130,3 +133,9 @@ class ExposureReport(BaseModel):
     # mapa de puntos en el frontend. Vacía si no hay índice FAISS construido
     # o la plataforma no es Instagram.
     image_location_points: list[ImageLocationPoint] = []
+    # False si el índice FAISS de geolocalización no está construido en
+    # este servidor (o faltan sus dependencias opcionales), o la
+    # plataforma no es Instagram. Sirve para que el frontend distinga ese
+    # caso ("la función no está disponible aquí") de "se analizaron fotos
+    # pero ninguna dio una estimación fiable" -- son mensajes distintos.
+    geolocation_available: bool = False

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { api } from '../api';
 import Dashboard from '../pages/Dashboard';
 import { makeExposureReport } from './fixtures';
+import type { AnalysisProgressEvent } from '../types';
 
 const mockNavigate = vi.hoisted(() => vi.fn());
 
@@ -23,14 +24,22 @@ vi.mock('react-router-dom', async () => {
   return { ...actual, useNavigate: () => mockNavigate };
 });
 
-vi.mock('../api', () => ({
-  api: {
-    authStatus: vi.fn(),
-    analyze: vi.fn(),
-    logout: vi.fn(),
-    loginUrl: (platform: string) => `http://localhost:3000/auth/${platform}/login`,
-  },
-}));
+vi.mock('../api', async () => {
+  const actual = await vi.importActual<typeof import('../api')>('../api');
+  return {
+    ...actual,
+    api: {
+      authStatus: vi.fn(),
+      analyzeStream: vi.fn(),
+      logout: vi.fn(),
+      loginUrl: (platform: string) => `http://localhost:3000/auth/${platform}/login`,
+      // AiSummaryCard se dispara solo en cuanto hay informe; en estos tests
+      // no nos interesa su comportamiento, así que se deja "colgado" sin
+      // resolver para que no interfiera con las aserciones del Dashboard.
+      aiSummary: vi.fn(() => new Promise(() => {})),
+    },
+  };
+});
 
 // LocationMap usa react-leaflet, que depende de APIs de navegador real que
 // jsdom no implementa de forma fiable (igual que en LocationMap.test.tsx).
@@ -52,11 +61,28 @@ function renderDashboard() {
   );
 }
 
+/** Helper: monta analyzeStream para que emita la secuencia de eventos dada
+ * (síncronamente, uno tras otro) y devuelva una función de limpieza mock. */
+function mockStream(events: AnalysisProgressEvent[]) {
+  const stop = vi.fn();
+  vi.mocked(api.analyzeStream).mockImplementation((_platform, onEvent) => {
+    events.forEach((event) => onEvent(event));
+    return stop;
+  });
+  return stop;
+}
+
+function neverEmits() {
+  const stop = vi.fn();
+  vi.mocked(api.analyzeStream).mockImplementation(() => stop);
+  return stop;
+}
+
 describe('Dashboard', () => {
   beforeEach(() => {
     window.history.pushState({}, '', '/'); // sin query param -> plataforma por defecto (reddit)
     vi.mocked(api.authStatus).mockReset();
-    vi.mocked(api.analyze).mockReset();
+    vi.mocked(api.analyzeStream).mockReset();
     vi.mocked(api.logout).mockReset();
     mockNavigate.mockReset();
   });
@@ -72,28 +98,46 @@ describe('Dashboard', () => {
     expect(screen.getByText(/Analizando tu actividad pública en Reddit/)).toBeInTheDocument();
   });
 
-  test('usuario no autenticado: redirige a "/" sin llegar a pedir el análisis', async () => {
+  test('usuario no autenticado: redirige a "/" sin llegar a abrir el stream', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: false });
     renderDashboard();
 
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/'));
-    expect(api.analyze).not.toHaveBeenCalled();
+    expect(api.analyzeStream).not.toHaveBeenCalled();
   });
 
-  test('usuario autenticado: pide el análisis y muestra el informe', async () => {
+  test('usuario autenticado: abre el stream y muestra el informe final', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
-    vi.mocked(api.analyze).mockResolvedValue(makeExposureReport({ username: 'usuario_prueba' }));
+    mockStream([{ done: true, report: makeExposureReport({ username: 'usuario_prueba' }) }]);
     renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByText(/usuario_prueba/)).toBeInTheDocument();
     });
-    expect(api.analyze).toHaveBeenCalledWith('reddit');
+    expect(api.analyzeStream).toHaveBeenCalledWith('reddit', expect.any(Function));
+  });
+
+  test('muestra las fases de progreso en vivo mientras el análisis está en curso', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([
+      { done: false, stage: 'Conectando con la plataforma...' },
+      { done: false, stage: 'Leyendo publicaciones...' },
+      { done: false, stage: 'Analizando vocabulario...' },
+    ]);
+    renderDashboard();
+
+    await waitFor(() => {
+      // Las dos primeras ya "completadas" (llegó una fase posterior);
+      // la última es la fase actual en curso.
+      expect(screen.getByText('Conectando con la plataforma...')).toBeInTheDocument();
+      expect(screen.getByText('Leyendo publicaciones...')).toBeInTheDocument();
+      expect(screen.getByText('Analizando vocabulario...')).toBeInTheDocument();
+    });
   });
 
   test('error durante el análisis: muestra el mensaje y el botón de volver', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
-    vi.mocked(api.analyze).mockRejectedValue(new Error('fallo de red simulado'));
+    mockStream([{ done: true, error: 'fallo de red simulado' }]);
     renderDashboard();
 
     await waitFor(() => {
@@ -105,7 +149,7 @@ describe('Dashboard', () => {
   test('botón "Volver al inicio" tras un error hace logout y navega a "/"', async () => {
     const user = userEvent.setup();
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
-    vi.mocked(api.analyze).mockRejectedValue(new Error('fallo'));
+    mockStream([{ done: true, error: 'fallo' }]);
     vi.mocked(api.logout).mockResolvedValue({ status: 'ok' });
     renderDashboard();
 
@@ -121,7 +165,7 @@ describe('Dashboard', () => {
   test('botón "Cerrar sesión y borrar datos" hace logout y navega a "/"', async () => {
     const user = userEvent.setup();
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
-    vi.mocked(api.analyze).mockResolvedValue(makeExposureReport());
+    mockStream([{ done: true, report: makeExposureReport() }]);
     vi.mocked(api.logout).mockResolvedValue({ status: 'ok' });
     renderDashboard();
 
@@ -134,18 +178,38 @@ describe('Dashboard', () => {
     });
   });
 
+  test('se desmonta durante la carga: cierra el stream (función de limpieza)', () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    const stop = neverEmits();
+    const { unmount } = renderDashboard();
+
+    unmount();
+
+    // authStatus resuelve async, así que el stream puede no haberse abierto
+    // aún en el momento del unmount -- lo importante es que, si se abrió,
+    // stop() haya sido invocada y no quede una conexión colgada.
+    return waitFor(() => {
+      if (vi.mocked(api.analyzeStream).mock.calls.length > 0) {
+        expect(stop).toHaveBeenCalled();
+      }
+    });
+  });
+
   test('plataforma reddit (por defecto): usa prefijo "u/" y etiqueta de subreddits', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
-    vi.mocked(api.analyze).mockResolvedValue(
-      makeExposureReport({
-        platform: 'reddit',
-        username: 'pepito',
-        fingerprint: {
-          ...makeExposureReport().fingerprint,
-          top_groups: [['madrid', 3]],
-        },
-      })
-    );
+    mockStream([
+      {
+        done: true,
+        report: makeExposureReport({
+          platform: 'reddit',
+          username: 'pepito',
+          fingerprint: {
+            ...makeExposureReport().fingerprint,
+            top_groups: [['madrid', 3]],
+          },
+        }),
+      },
+    ]);
     renderDashboard();
 
     await screen.findByText(/u\/pepito/);
@@ -156,27 +220,30 @@ describe('Dashboard', () => {
   test('plataforma instagram (por query param): usa prefijo "@" y etiqueta de hashtags', async () => {
     window.history.pushState({}, '', '/?platform=instagram');
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
-    vi.mocked(api.analyze).mockResolvedValue(
-      makeExposureReport({
-        platform: 'instagram',
-        username: 'pepita',
-        fingerprint: {
-          ...makeExposureReport().fingerprint,
-          top_groups: [['viajes', 5]],
-        },
-      })
-    );
+    mockStream([
+      {
+        done: true,
+        report: makeExposureReport({
+          platform: 'instagram',
+          username: 'pepita',
+          fingerprint: {
+            ...makeExposureReport().fingerprint,
+            top_groups: [['viajes', 5]],
+          },
+        }),
+      },
+    ]);
     renderDashboard();
 
     await screen.findByText(/@pepita/);
     expect(screen.getByText('Hashtags más frecuentes')).toBeInTheDocument();
     expect(screen.getByText(/#viajes \(5\)/)).toBeInTheDocument();
-    expect(api.analyze).toHaveBeenCalledWith('instagram');
+    expect(api.analyzeStream).toHaveBeenCalledWith('instagram', expect.any(Function));
   });
 
   test('sin atributos inferidos: muestra el mensaje de fallback', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
-    vi.mocked(api.analyze).mockResolvedValue(makeExposureReport({ inferred_attributes: [] }));
+    mockStream([{ done: true, report: makeExposureReport({ inferred_attributes: [] }) }]);
     renderDashboard();
 
     await waitFor(() => {
@@ -186,18 +253,21 @@ describe('Dashboard', () => {
 
   test('con atributos inferidos: muestra categoría, valor, confianza y hasta 3 evidencias', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
-    vi.mocked(api.analyze).mockResolvedValue(
-      makeExposureReport({
-        inferred_attributes: [
-          {
-            category: 'ubicacion',
-            value: 'Posible vínculo con Madrid',
-            confidence: 0.75,
-            evidence: ['https://x/1', 'https://x/2', 'https://x/3', 'https://x/4'],
-          },
-        ],
-      })
-    );
+    mockStream([
+      {
+        done: true,
+        report: makeExposureReport({
+          inferred_attributes: [
+            {
+              category: 'ubicacion',
+              value: 'Posible vínculo con Madrid',
+              confidence: 0.75,
+              evidence: ['https://x/1', 'https://x/2', 'https://x/3', 'https://x/4'],
+            },
+          ],
+        }),
+      },
+    ]);
     renderDashboard();
 
     await waitFor(() => {
@@ -211,9 +281,12 @@ describe('Dashboard', () => {
 
   test('muestra el score global redondeado a un decimal', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
-    vi.mocked(api.analyze).mockResolvedValue(
-      makeExposureReport({ privacy_score: { ...makeExposureReport().privacy_score, overall_score: 42.567 } })
-    );
+    mockStream([
+      {
+        done: true,
+        report: makeExposureReport({ privacy_score: { ...makeExposureReport().privacy_score, overall_score: 42.567 } }),
+      },
+    ]);
     renderDashboard();
 
     await waitFor(() => {
@@ -223,7 +296,7 @@ describe('Dashboard', () => {
 
   test('muestra el número de publicaciones analizadas', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
-    vi.mocked(api.analyze).mockResolvedValue(makeExposureReport({ n_posts_analyzed: 77 }));
+    mockStream([{ done: true, report: makeExposureReport({ n_posts_analyzed: 77 }) }]);
     renderDashboard();
 
     await waitFor(() => {

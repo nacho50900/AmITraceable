@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
 import LocationMap from '../components/LocationMap';
 import type { ImageLocationPoint } from '../types';
@@ -43,18 +43,40 @@ function makePoint(overrides: Partial<ImageLocationPoint> = {}): ImageLocationPo
 }
 
 describe('LocationMap', () => {
-  test('sin puntos válidos: muestra el mensaje explicativo, no el mapa', () => {
-    render(<LocationMap points={[]} />);
+  test('plataforma reddit: mensaje específico de "no hay fotos", ni mapa ni lista', () => {
+    render(<LocationMap points={[]} platform="reddit" available={false} />);
 
-    expect(screen.getByText(/No se ha podido estimar la ubicación/)).toBeInTheDocument();
+    expect(screen.getByText(/Reddit no tiene fotos/)).toBeInTheDocument();
+    expect(screen.queryByTestId('map-container')).not.toBeInTheDocument();
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+  });
+
+  test('índice no disponible: mensaje específico, sin mencionar confianza', () => {
+    render(<LocationMap points={[]} platform="instagram" available={false} />);
+
+    expect(screen.getByText(/índice de geolocalización por imagen no está construido/)).toBeInTheDocument();
     expect(screen.queryByTestId('map-container')).not.toBeInTheDocument();
   });
 
-  test('puntos con lat/lon null se filtran y no cuentan como válidos', () => {
-    const points = [makePoint({ lat: null, lon: null })];
-    render(<LocationMap points={points} />);
+  test('índice no disponible con puntos (no debería pasar, pero por si acaso): igualmente prioriza ese mensaje', () => {
+    render(<LocationMap points={[makePoint()]} platform="instagram" available={false} />);
 
-    expect(screen.getByText(/No se ha podido estimar la ubicación/)).toBeInTheDocument();
+    expect(screen.getByText(/índice de geolocalización por imagen no está construido/)).toBeInTheDocument();
+  });
+
+  test('disponible pero sin fotos analizadas: mensaje distinto al de índice no disponible', () => {
+    render(<LocationMap points={[]} platform="instagram" available={true} />);
+
+    expect(screen.getByText(/No se ha podido analizar ninguna de tus fotos/)).toBeInTheDocument();
+    expect(screen.queryByText(/índice de geolocalización por imagen no está construido/)).not.toBeInTheDocument();
+  });
+
+  test('puntos con lat/lon null no se pintan en el mapa, pero sí aparecen en la lista', () => {
+    const points = [makePoint({ lat: null, lon: null })];
+    render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    expect(screen.queryByTestId('map-container')).not.toBeInTheDocument();
+    expect(screen.getByText(/sin coordenadas para el mapa/)).toBeInTheDocument();
   });
 
   test('con puntos válidos: renderiza el mapa y un marcador por punto', () => {
@@ -62,28 +84,42 @@ describe('LocationMap', () => {
       makePoint({ province: 'Madrid', permalink: 'https://instagram.com/p/1' }),
       makePoint({ province: 'Barcelona', lat: 41.4, lon: 2.2, permalink: 'https://instagram.com/p/2' }),
     ];
-    render(<LocationMap points={points} />);
+    render(<LocationMap points={points} platform="instagram" available={true} />);
 
     expect(screen.getByTestId('map-container')).toBeInTheDocument();
     expect(screen.getAllByTestId('circle-marker')).toHaveLength(2);
   });
 
-  test('filtra puntos inválidos pero conserva y renderiza los válidos', () => {
+  test('todas las fotos, también las de baja confianza, aparecen en la lista', () => {
+    const points = [
+      makePoint({ permalink: 'https://instagram.com/p/alta', confidence: 0.9 }),
+      makePoint({ permalink: 'https://instagram.com/p/baja', confidence: 0.1 }),
+    ];
+    render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    const list = screen.getByRole('list');
+    expect(within(list).getAllByRole('link', { name: 'Ver publicación' })).toHaveLength(2);
+    expect(screen.getByText(/confianza 90%/)).toBeInTheDocument();
+    expect(screen.getByText(/confianza 10%/)).toBeInTheDocument();
+  });
+
+  test('mapa solo incluye los puntos con coordenadas, aunque la lista los tenga todos', () => {
     const points = [
       makePoint({ lat: null, lon: null, permalink: 'https://instagram.com/p/invalido' }),
       makePoint({ province: 'Madrid', permalink: 'https://instagram.com/p/valido' }),
     ];
-    render(<LocationMap points={points} />);
+    render(<LocationMap points={points} platform="instagram" available={true} />);
 
     expect(screen.getAllByTestId('circle-marker')).toHaveLength(1);
+    expect(within(screen.getByRole('list')).getAllByRole('link', { name: 'Ver publicación' })).toHaveLength(2);
   });
 
-  test('el centro del mapa es la media de lat/lon de los puntos válidos', () => {
+  test('el centro del mapa es la media de lat/lon de los puntos con coordenadas', () => {
     const points = [
       makePoint({ lat: 40.0, lon: -4.0, permalink: 'https://instagram.com/p/1' }),
       makePoint({ lat: 42.0, lon: -2.0, permalink: 'https://instagram.com/p/2' }),
     ];
-    render(<LocationMap points={points} />);
+    render(<LocationMap points={points} platform="instagram" available={true} />);
 
     const container = screen.getByTestId('map-container');
     const center = JSON.parse(container.getAttribute('data-center')!);
@@ -91,28 +127,32 @@ describe('LocationMap', () => {
   });
 
   test('confianza alta (>=0.7) usa el color de riesgo más intenso', () => {
-    render(<LocationMap points={[makePoint({ confidence: 0.9 })]} />);
+    render(<LocationMap points={[makePoint({ confidence: 0.9 })]} platform="instagram" available={true} />);
     expect(screen.getByTestId('circle-marker')).toHaveAttribute('data-color', '#d3403a');
   });
 
   test('confianza media (0.4-0.69) usa el color ámbar', () => {
-    render(<LocationMap points={[makePoint({ confidence: 0.5 })]} />);
+    render(<LocationMap points={[makePoint({ confidence: 0.5 })]} platform="instagram" available={true} />);
     expect(screen.getByTestId('circle-marker')).toHaveAttribute('data-color', '#d6a51c');
   });
 
   test('confianza baja (<0.4) usa el color verde', () => {
-    render(<LocationMap points={[makePoint({ confidence: 0.2 })]} />);
+    render(<LocationMap points={[makePoint({ confidence: 0.2 })]} platform="instagram" available={true} />);
     expect(screen.getByTestId('circle-marker')).toHaveAttribute('data-color', '#3aa657');
   });
 
   test('el radio del marcador crece con la confianza', () => {
-    render(<LocationMap points={[makePoint({ confidence: 1.0 })]} />);
+    render(<LocationMap points={[makePoint({ confidence: 1.0 })]} platform="instagram" available={true} />);
     expect(screen.getByTestId('circle-marker')).toHaveAttribute('data-radius', '18'); // 8 + 1.0*10
   });
 
   test('el tooltip muestra provincia, porcentaje de confianza y coordenadas', () => {
     render(
-      <LocationMap points={[makePoint({ province: 'Sevilla', confidence: 0.42, lat: 37.3886, lon: -5.9823 })]} />
+      <LocationMap
+        points={[makePoint({ province: 'Sevilla', confidence: 0.42, lat: 37.3886, lon: -5.9823 })]}
+        platform="instagram"
+        available={true}
+      />
     );
 
     const tooltip = screen.getAllByTestId('tooltip')[0];
@@ -123,15 +163,21 @@ describe('LocationMap', () => {
   });
 
   test('el popup incluye un enlace a la publicación original', () => {
-    render(<LocationMap points={[makePoint({ permalink: 'https://instagram.com/p/xyz' })]} />);
+    render(
+      <LocationMap
+        points={[makePoint({ permalink: 'https://instagram.com/p/xyz' })]}
+        platform="instagram"
+        available={true}
+      />
+    );
 
-    const link = screen.getByRole('link', { name: 'Ver publicación' });
-    expect(link).toHaveAttribute('href', 'https://instagram.com/p/xyz');
-    expect(link).toHaveAttribute('target', '_blank');
+    const links = screen.getAllByRole('link', { name: 'Ver publicación' });
+    expect(links[0]).toHaveAttribute('href', 'https://instagram.com/p/xyz');
+    expect(links[0]).toHaveAttribute('target', '_blank');
   });
 
-  test('con puntos válidos: muestra la nota explicativa sobre precisión aproximada', () => {
-    render(<LocationMap points={[makePoint()]} />);
-    expect(screen.getByText(/estimación aproximada/i)).toBeInTheDocument();
+  test('con puntos válidos: muestra la nota explicativa sobre similitud aproximada', () => {
+    render(<LocationMap points={[makePoint()]} platform="instagram" available={true} />);
+    expect(screen.getByText(/similitud visual aproximada/i)).toBeInTheDocument();
   });
 });

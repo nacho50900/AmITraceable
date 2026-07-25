@@ -47,6 +47,43 @@ class ImageLocationEstimate:
     lon: float | None = None
 
 
+def _geolocation_available() -> bool:
+    """Comprobación barata (sin cargar el modelo ni el índice) de si el
+    módulo de geolocalización está realmente operativo: ficheros del índice
+    presentes Y dependencias opcionales (torch/faiss/transformers)
+    instaladas. Se usa para poder distinguir en el informe "el índice no
+    está construido en este servidor" de "se analizaron tus fotos pero
+    ninguna tuvo suficiente confianza" -- son situaciones distintas y no
+    deben mostrarse con el mismo mensaje (ver report/generator.py)."""
+    index_path = _INDEX_DIR / "index.faiss"
+    meta_path = _INDEX_DIR / "index_meta.csv"
+    if not index_path.exists() or not meta_path.exists():
+        return False
+    try:
+        import faiss  # noqa: F401
+        import torch  # noqa: F401
+        from transformers import AutoImageProcessor, AutoModel  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+@dataclass
+class GeolocationOutcome:
+    # Ver _geolocation_available(). Si es False, `results` está vacío
+    # siempre (no se llegó ni a intentar procesar imágenes).
+    index_available: bool
+    # UNA entrada por cada foto que se pudo procesar (embedding + consulta
+    # al índice), con su confianza REAL, sin filtrar por ningún umbral --
+    # a diferencia de versiones anteriores de este módulo, que descartaban
+    # en silencio las de baja confianza. El umbral de fiabilidad (para
+    # decidir si una estimación es lo bastante buena como para alimentar
+    # el cálculo de k-anonimato) es responsabilidad del llamador, no de
+    # este módulo -- ver MIN_CONFIDENCE_FOR_POPULATION_NARROWING en
+    # report/generator.py.
+    results: list[tuple[str, ImageLocationEstimate]]
+
+
 def _lazy_load():
     global _model, _processor, _index, _index_meta
     if _model is not None:
@@ -132,21 +169,23 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
     )
 
 
-async def estimate_locations_for_posts(
-    posts: list, min_confidence: float = 0.4, progress_callback=None
-) -> list[tuple[str, ImageLocationEstimate]]:
+async def estimate_locations_for_posts(posts: list, progress_callback=None) -> GeolocationOutcome:
     """
     Orquestación de alto nivel: para cada SocialPost de tipo imagen que
     tenga `media_url`, descarga la imagen EN MEMORIA (nunca a disco),
     extrae el embedding, consulta el índice, y descarta la imagen
-    inmediatamente. Devuelve solo las estimaciones con confianza >=
-    min_confidence, junto al permalink del post que la generó (para poder
-    mostrar evidencia en el informe).
+    inmediatamente. Devuelve TODAS las estimaciones que se pudieron
+    calcular (con su confianza real, sin filtrar), junto al permalink del
+    post que la generó -- el filtrado por umbral de fiabilidad, si hace
+    falta, lo hace el llamador (ver `report/generator.py`).
 
     Se ejecuta en segundo plano de forma best-effort: si el índice no
     existe (no se ha corrido scripts/build_faiss_index.py) o falla la
     descarga de una imagen concreta, simplemente se omite esa imagen sin
-    interrumpir el resto del análisis.
+    interrumpir el resto del análisis. `GeolocationOutcome.index_available`
+    permite al llamador distinguir "el índice no está construido" de "se
+    analizaron fotos pero ninguna dio una estimación" -- son mensajes
+    distintos de cara al usuario.
 
     `progress_callback`, si se da, se llama tras CADA foto procesada
     (llegue o no a producir una estimación válida), con el nº de fotos
@@ -157,14 +196,16 @@ async def estimate_locations_for_posts(
 
     from app.progress import emit_progress
 
+    index_available = _geolocation_available()
+
     results: list[tuple[str, ImageLocationEstimate]] = []
     candidate_posts = [
         p for p in posts if getattr(p, "media_url", None) and p.type in ("image", "carousel_album")
     ]
     total = len(candidate_posts)
 
-    if total == 0:
-        return results
+    if total == 0 or not index_available:
+        return GeolocationOutcome(index_available=index_available, results=results)
 
     try:
         from PIL import Image
@@ -175,8 +216,10 @@ async def estimate_locations_for_posts(
         # geolocalización. Si no está instalada, se degrada devolviendo
         # lista vacía en vez de romper el análisis completo -- mismo
         # principio que ya se aplica a torch/faiss/transformers en
-        # _lazy_load() más arriba.
-        return results
+        # _lazy_load() más arriba. Se marca index_available=False para que
+        # el frontend lo trate igual que "módulo no operativo en este
+        # servidor", que es justo lo que es.
+        return GeolocationOutcome(index_available=False, results=results)
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         for i, post in enumerate(candidate_posts, start=1):
@@ -190,9 +233,9 @@ async def estimate_locations_for_posts(
             if image is not None:
                 estimate = estimate_location_from_image(image)
                 # `image` sale de scope tras este bloque y se descarta (nunca se escribe a disco)
-                if estimate and estimate.confidence >= min_confidence:
+                if estimate is not None:
                     results.append((post.permalink, estimate))
 
             await emit_progress(progress_callback, "Analizando fotos...", photos_analyzed=i, total_photos=total)
 
-    return results
+    return GeolocationOutcome(index_available=index_available, results=results)
