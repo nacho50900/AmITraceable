@@ -86,7 +86,10 @@ const Dashboard: React.FC = () => {
     return (
       <div className="page">
         <div className="progress-screen">
-          <p>Analizando tu actividad pública en {platformLabel}…</p>
+          <p className="progress-heading">
+            <span className="spinner" aria-hidden="true" />
+            Analizando tu actividad pública en {platformLabel}…
+          </p>
           <ul className="progress-list">
             {completedStages.map((stage, i) => (
               <li key={`${stage}-${i}`}>{stage}</li>
