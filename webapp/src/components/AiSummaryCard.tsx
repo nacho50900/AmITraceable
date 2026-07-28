@@ -45,7 +45,7 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
 
   return (
     <section className="card ai-summary-card">
-      <h2>Conclusiones generadas por IA</h2>
+      <h2>Recomendaciones y Conclusiones</h2>
 
       {status === 'loading' && <p className="note">Analizando el informe con IA...</p>}
 
