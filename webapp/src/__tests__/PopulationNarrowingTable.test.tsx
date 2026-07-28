@@ -19,18 +19,18 @@ function makeStep(overrides: Partial<PopulationEstimate> = {}): PopulationEstima
 }
 
 describe('PopulationNarrowingTable', () => {
-  test('lista vacía: muestra el mensaje explicativo, no la tabla', () => {
-    render(<PopulationNarrowingTable steps={[]} />);
+  test('lista vacía: muestra el mensaje explicativo, sin bloques de atributo', () => {
+    const { container } = render(<PopulationNarrowingTable steps={[]} />);
 
     expect(screen.getByText(/No se han detectado declaraciones explícitas/)).toBeInTheDocument();
-    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.population-step')).toHaveLength(0);
   });
 
-  test('renderiza una fila por cada paso, con las 4 columnas', () => {
+  test('renderiza un bloque por cada paso, con su etiqueta', () => {
     const steps = [makeStep({ attribute_label: 'Sexo: mujer' }), makeStep({ attribute_label: 'Edad: 24 años' })];
-    render(<PopulationNarrowingTable steps={steps} />);
+    const { container } = render(<PopulationNarrowingTable steps={steps} />);
 
-    expect(screen.getAllByRole('row')).toHaveLength(3); // 1 cabecera + 2 filas
+    expect(container.querySelectorAll('.population-step')).toHaveLength(2);
     expect(screen.getByText('Sexo: mujer')).toBeInTheDocument();
     expect(screen.getByText('Edad: 24 años')).toBeInTheDocument();
   });

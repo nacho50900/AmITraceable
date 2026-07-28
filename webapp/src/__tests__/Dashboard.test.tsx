@@ -241,44 +241,6 @@ describe('Dashboard', () => {
     expect(api.analyzeStream).toHaveBeenCalledWith('instagram', expect.any(Function));
   });
 
-  test('sin atributos inferidos: muestra el mensaje de fallback', async () => {
-    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
-    mockStream([{ done: true, report: makeExposureReport({ inferred_attributes: [] }) }]);
-    renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByText(/No se ha detectado ningún atributo personal claro/)).toBeInTheDocument();
-    });
-  });
-
-  test('con atributos inferidos: muestra categoría, valor, confianza y hasta 3 evidencias', async () => {
-    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
-    mockStream([
-      {
-        done: true,
-        report: makeExposureReport({
-          inferred_attributes: [
-            {
-              category: 'ubicacion',
-              value: 'Posible vínculo con Madrid',
-              confidence: 0.75,
-              evidence: ['https://x/1', 'https://x/2', 'https://x/3', 'https://x/4'],
-            },
-          ],
-        }),
-      },
-    ]);
-    renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByText('ubicacion:')).toBeInTheDocument();
-    });
-    expect(screen.getByText(/Posible vínculo con Madrid/)).toBeInTheDocument();
-    expect(screen.getByText(/confianza 75%/)).toBeInTheDocument();
-    // Máximo 3 enlaces de evidencia aunque haya 4 en los datos
-    expect(screen.getAllByText(/Evidencia \d/)).toHaveLength(3);
-  });
-
   test('muestra el score global redondeado a un decimal', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
     mockStream([
@@ -301,6 +263,16 @@ describe('Dashboard', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/77 publicaciones\/comentarios analizados/)).toBeInTheDocument();
+    });
+  });
+
+  test('la sección de población usa el título "Qué se puede inferir sobre ti", sin una segunda sección redundante', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([{ done: true, report: makeExposureReport() }]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Qué se puede inferir sobre ti')).toHaveLength(1);
     });
   });
 });

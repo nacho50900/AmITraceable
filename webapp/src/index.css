@@ -449,6 +449,15 @@ body {
 }
 
 /* Pictograma de población (PopulationPictogram.tsx) */
+.ai-verdict {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 0 0 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed var(--border);
+}
+
 .pictogram {
   display: flex;
   align-items: center;
@@ -491,10 +500,72 @@ body {
   color: var(--text-dim);
 }
 
+/* Versión grande: bloque visual destacado, una fila por atributo (ver
+   PopulationNarrowingTable). El tamaño de cada monigote se calcula en el
+   propio componente (más grande cuantos menos monigotes haga falta
+   dibujar) y se aplica inline -- aquí solo el resto del layout. */
+.pictogram-lg {
+  gap: 20px;
+}
+
+.pictogram-lg .pictogram-percent {
+  font-size: 40px;
+  font-weight: 700;
+  color: var(--text);
+  min-width: unset;
+}
+
+.pictogram-lg .pictogram-grid {
+  max-width: 100%;
+  gap: 10px;
+}
+
+.pictogram-lg .pictogram-compact-label {
+  font-size: 24px;
+  font-weight: 600;
+}
+
 .population-fallback {
   font-family: var(--mono);
   font-size: 13px;
   color: var(--text-dim);
+}
+
+/* Lista de atributos detectados (PopulationNarrowingTable.tsx), en formato
+   de tarjeta apilada en vez de tabla, para dejar sitio al pictograma grande. */
+.population-narrowing-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-bottom: 16px;
+}
+
+.population-step {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  background: var(--bg-card);
+}
+
+.population-step-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.population-step-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.population-step-visual {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
 }
 
 /* Pantalla de progreso en vivo (Dashboard.tsx, vía SSE) */

@@ -141,36 +141,13 @@ const Dashboard: React.FC = () => {
       </section>
 
       <section className="card">
-        <h2>Cuánta gente comparte lo que has contado sobre ti</h2>
+        <h2>Qué se puede inferir sobre ti</h2>
         <PopulationNarrowingTable steps={report.population_narrowing} />
       </section>
 
       <section className="card">
         <h2>Ubicaciones estimadas a partir de tus fotos</h2>
         <LocationMap points={report.image_location_points} platform={report.platform} available={report.geolocation_available} />
-      </section>
-
-      <section className="card">
-        <h2>Qué se puede inferir sobre ti</h2>
-        {report.inferred_attributes.length === 0 ? (
-          <p>No se ha detectado ningún atributo personal claro con las heurísticas actuales.</p>
-        ) : (
-          <ul className="attributes-list">
-            {report.inferred_attributes.map((attr) => (
-              <li key={`${attr.category}-${attr.value}`}>
-                <strong>{attr.category}:</strong> {attr.value}{' '}
-                <span className="confidence">(confianza {(attr.confidence * 100).toFixed(0)}%)</span>
-                <div className="evidence">
-                  {attr.evidence.slice(0, 3).map((link, j) => (
-                    <a key={link} href={link} target="_blank" rel="noreferrer">
-                      Evidencia {j + 1}
-                    </a>
-                  ))}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
       </section>
 
       <section className="card">
@@ -192,15 +169,6 @@ const Dashboard: React.FC = () => {
             .map(([s, c]) => `${groupingPrefix}${s} (${c})`)
             .join(', ')}
         </p>
-      </section>
-
-      <section className="card recommendations">
-        <h2>Recomendaciones</h2>
-        <ul>
-          {report.recommendations.map((rec) => (
-            <li key={rec}>{rec}</li>
-          ))}
-        </ul>
       </section>
 
       <AiSummaryCard report={report} />

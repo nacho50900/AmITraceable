@@ -194,7 +194,14 @@ def main() -> None:
     already_saved_ids: set[str] = set()
     if existing_metadata_path.exists():
         previous = pd.read_csv(existing_metadata_path)
-        prev_id_col = next((c for c in previous.columns if c.lower() == "id"), previous.columns[0])
+        prev_id_col = next((c for c in previous.columns if c.lower() == "id"), None)
+        if prev_id_col is None:
+            raise RuntimeError(
+                f"{existing_metadata_path} no tiene una columna 'id' reconocible (columnas: "
+                f"{list(previous.columns)}). Si viene de una ejecución con una versión antigua "
+                "de este script, bórralo y usa scripts/recover_metadata.py para reconstruirlo a "
+                "partir de las imágenes ya descargadas, en vez de borrar y volver a descargar todo."
+            )
         previous[prev_id_col] = previous[prev_id_col].astype(str)
         saved_rows = [row for _, row in previous.iterrows()]
         already_saved_ids = set(previous[prev_id_col])
@@ -215,7 +222,14 @@ def main() -> None:
         """Debe llamarse siempre con state_lock ya adquirido."""
         completed_shards_path.write_text("\n".join(sorted(completed_shards)))
         if saved_rows:
-            pd.DataFrame(saved_rows).drop_duplicates().to_csv(existing_metadata_path, index=False)
+            # Ver el mismo comentario en download_osv5m_spain.py: sin
+            # reset_index() aquí, el id (usado como índice por
+            # `set_index(id_col)` en _load_all_ids) se pierde al guardar con
+            # to_csv(index=False), y build_faiss_index.py luego no puede
+            # casar ninguna fila con ningún fichero de imagen real.
+            pd.DataFrame(saved_rows).drop_duplicates().rename_axis(id_col).reset_index().to_csv(
+                existing_metadata_path, index=False
+            )
 
     api = HfApi()
     all_repo_files = api.list_repo_files(repo_id=REPO_ID, repo_type=REPO_TYPE)
@@ -320,7 +334,7 @@ def main() -> None:
         return
 
     with state_lock:
-        final_metadata = pd.DataFrame(saved_rows).drop_duplicates()
+        final_metadata = pd.DataFrame(saved_rows).drop_duplicates().rename_axis(id_col).reset_index()
         final_metadata.to_csv(existing_metadata_path, index=False)
 
     print(f"\nListo. {len(final_metadata)} imágenes guardadas en {images_dir}")

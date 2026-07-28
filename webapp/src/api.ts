@@ -74,8 +74,8 @@ export const api = {
   // (que el frontend ya tiene en memoria) para que una IA externa (Mistral,
   // tier gratuito) dé conclusiones priorizadas. Si no está disponible,
   // lanza AiSummaryUnavailableError en vez de un Error genérico.
-  aiSummary: (report: ExposureReport): Promise<{ conclusions: string[] }> =>
-    request<{ conclusions: string[] }>('/api/analyze/ai-summary', {
+  aiSummary: (report: ExposureReport): Promise<{ verdict: string; conclusions: string[] }> =>
+    request<{ verdict: string; conclusions: string[] }>('/api/analyze/ai-summary', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(report),

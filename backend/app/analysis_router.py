@@ -126,11 +126,11 @@ async def ai_summary(report: Annotated[ExposureReport, Body(...)]):
     lo deshaga sin darse cuenta en el futuro.
     """
     try:
-        conclusions = await analyze_report_with_ai(report)
+        result = await analyze_report_with_ai(report)
     except AiAnalysisUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
-    return {"conclusions": conclusions}
+    return result
 
 
 @router.post(

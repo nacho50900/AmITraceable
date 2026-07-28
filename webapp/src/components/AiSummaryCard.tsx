@@ -10,6 +10,7 @@ type Status = 'loading' | 'success' | 'empty' | 'unavailable' | 'error';
 
 const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
   const [status, setStatus] = useState<Status>('loading');
+  const [verdict, setVerdict] = useState<string>('');
   const [conclusions, setConclusions] = useState<string[]>([]);
   const [message, setMessage] = useState<string>('');
 
@@ -17,9 +18,10 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
     setStatus('loading');
     try {
       const result = await api.aiSummary(report);
-      if (result.conclusions.length === 0) {
+      if (!result.verdict && result.conclusions.length === 0) {
         setStatus('empty');
       } else {
+        setVerdict(result.verdict);
         setConclusions(result.conclusions);
         setStatus('success');
       }
@@ -48,11 +50,16 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
       {status === 'loading' && <p className="note">Analizando el informe con IA...</p>}
 
       {status === 'success' && (
-        <ul className="ai-conclusions-list">
-          {conclusions.map((conclusion) => (
-            <li key={conclusion}>{conclusion}</li>
-          ))}
-        </ul>
+        <>
+          {verdict && <p className="ai-verdict">{verdict}</p>}
+          {conclusions.length > 0 && (
+            <ul className="ai-conclusions-list">
+              {conclusions.map((conclusion) => (
+                <li key={conclusion}>{conclusion}</li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
 
       {status === 'empty' && (

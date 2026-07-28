@@ -206,16 +206,16 @@ def _make_report() -> ExposureReport:
 
 
 class TestAiSummaryEndpoint:
-    def test_success_returns_conclusions(self, monkeypatch):
+    def test_success_returns_verdict_and_conclusions(self, monkeypatch):
         async def _fake_analyze(report):
-            return ["Conclusión 1", "Conclusión 2"]
+            return {"verdict": "Riesgo bajo en general.", "conclusions": ["Conclusión 1", "Conclusión 2"]}
 
         monkeypatch.setattr(analysis_router, "analyze_report_with_ai", _fake_analyze)
 
         resp = client.post("/api/analyze/ai-summary", json=_make_report().model_dump(mode="json"))
 
         assert resp.status_code == 200
-        assert resp.json() == {"conclusions": ["Conclusión 1", "Conclusión 2"]}
+        assert resp.json() == {"verdict": "Riesgo bajo en general.", "conclusions": ["Conclusión 1", "Conclusión 2"]}
 
     def test_unavailable_returns_503_not_500(self, monkeypatch):
         async def _fake_analyze(report):

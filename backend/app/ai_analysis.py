@@ -35,6 +35,15 @@ Decisiones de diseño (para la memoria):
    -- el usuario ya dio su consentimiento OAuth para todo el análisis al
    principio), pero sigue siendo una llamada AISLADA y opcional: si falla o
    no está configurada, el resto del informe no se ve afectado.
+
+5. `report.recommendations` (las reglas fijas basadas en umbrales, ver
+   `_build_recommendations` en report/generator.py) ya no se muestra como
+   sección propia en el dashboard -- se le pasa al LLM como INSUMO
+   explícito, para que las use de base y decida cuáles de verdad merecen
+   la pena mencionar (con el mismo criterio de "nada obvio" del resto del
+   prompt), en vez de mostrarlas todas sin filtrar. Así no se pierde esa
+   señal (barata, determinista, sin depender de que la IA esté disponible
+   ese día) ni se duplica con las conclusiones de la IA.
 """
 import json
 
@@ -52,6 +61,21 @@ _SYSTEM_PROMPT = (
     "objetivo y sin alarmismo innecesario. No repitas los datos del informe tal cual "
     "aparecen (el usuario ya los ha visto en el dashboard); en su lugar, sintetiza qué "
     "significan en conjunto.\n\n"
+    "El informe incluye un campo `recommendations`: son recomendaciones fijas generadas "
+    "por reglas simples (umbrales de puntuación), no por ti. Úsalas como INSUMO de "
+    "partida -- no las copies literalmente, pero tenlas en cuenta al decidir tus "
+    "conclusiones y no ignores un riesgo real solo porque ya esté ahí listado; si de "
+    "verdad aportan algo, intégralas de forma sintetizada en tus propias conclusiones.\n\n"
+    "Responde ÚNICAMENTE con un JSON con esta forma exacta, sin texto adicional ni "
+    "backticks:\n"
+    '{"veredicto": "<una frase>", "conclusiones": ["<frase 1>", "<frase 2>", ...]}\n\n'
+    "El campo 'veredicto' es una valoración general de una sola frase, el titular del "
+    "informe: p. ej. \"Este perfil no comparte directamente información que permita "
+    "identificarte con facilidad\", o \"La línea general es buena, pero la publicación "
+    "sobre [tema] revela [dato concreto]\". Debe reflejar fielmente el nivel de riesgo "
+    "real del informe (si el riesgo es bajo, dilo así de claro; no dramatices ni "
+    "suavices un riesgo alto).\n\n"
+    "El campo 'conclusiones' es una lista de hallazgos MÁS ESPECÍFICOS que el veredicto. "
     "Criterio de selección, muy importante: NO listes una conclusión solo por rellenar. "
     "Descarta cualquier cosa obvia, genérica o que cualquiera adivinaría sin leer el "
     "informe (p. ej. \"comparte menos información personal\", \"ten cuidado con lo que "
@@ -59,11 +83,11 @@ _SYSTEM_PROMPT = (
     "conclusiones que combinen varios datos del informe de una forma que no sea obvia a "
     "simple vista, o que señalen un riesgo concreto y accionable que el usuario "
     "probablemente no había considerado. Sé objetiva: basa cada conclusión en datos "
-    "concretos del informe, no en suposiciones. Da como máximo 5 conclusiones, "
-    "ordenadas de mayor a menor riesgo -- pero si de verdad no hay más de 1 o 2 que "
-    "merezcan la pena (o ninguna), da solo esas, no rellenes hasta llegar a un mínimo. "
-    "Cada conclusión: 1-2 frases, concreta y accionable. No inventes datos que no estén "
-    "en el informe."
+    "concretos del informe, no en suposiciones. Da como máximo 5 conclusiones -- pero si "
+    "de verdad no hay más de 1 o 2 que merezcan la pena (o ninguna), da solo esas, no "
+    "rellenes hasta llegar a un mínimo; una lista vacía es una respuesta válida. Cada "
+    "conclusión: 1-2 frases, concreta y accionable. No inventes datos que no estén en el "
+    "informe."
 )
 
 
@@ -73,14 +97,15 @@ class AiAnalysisUnavailable(Exception):
     la traduce a una respuesta clara para el frontend, nunca a un 500 opaco."""
 
 
-async def analyze_report_with_ai(report: ExposureReport) -> list[str]:
+async def analyze_report_with_ai(report: ExposureReport) -> dict:
     if not settings.mistral_api_key:
         raise AiAnalysisUnavailable(
             "El análisis con IA no está configurado en este servidor (falta MISTRAL_API_KEY)."
         )
 
     # Se manda el informe ya generado (agregados/conclusiones propias de la
-    # herramienta), no los posts originales -- minimización de datos.
+    # herramienta, incluido `recommendations`) -- minimización de datos, no
+    # se reenvían los posts originales.
     report_json = report.model_dump_json(indent=2)
 
     payload = {
@@ -92,12 +117,13 @@ async def analyze_report_with_ai(report: ExposureReport) -> list[str]:
                 "content": (
                     "Aquí tienes el informe de exposición de privacidad:\n"
                     f"<informe>\n{report_json}\n</informe>\n\n"
-                    "Dame tus conclusiones priorizadas."
+                    "Dame el veredicto general y tus conclusiones priorizadas."
                 ),
             },
         ],
         "temperature": 0.3,
-        "max_tokens": 500,
+        "response_format": {"type": "json_object"},
+        "max_tokens": 600,
     }
     headers = {"Authorization": f"Bearer {settings.mistral_api_key}"}
 
@@ -121,14 +147,19 @@ async def analyze_report_with_ai(report: ExposureReport) -> list[str]:
 
     data = response.json()
     try:
-        text = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError) as exc:
+        content = data["choices"][0]["message"]["content"]
+        parsed = json.loads(content)
+    except (KeyError, IndexError, json.JSONDecodeError) as exc:
         raise AiAnalysisUnavailable("Respuesta inesperada del servicio de IA.") from exc
 
-    # El prompt pide de 3 a 5 conclusiones; se devuelven como lista de
-    # líneas no vacías (el modelo normalmente las numera o las pone en
-    # líneas separadas), recortando numeración/viñetas iniciales.
-    lines = [line.strip().lstrip("-•0123456789. ").strip() for line in text.strip().splitlines()]
-    conclusions = [line for line in lines if line]
+    verdict = parsed.get("veredicto")
+    verdict = verdict.strip() if isinstance(verdict, str) else ""
 
-    return conclusions or [text.strip()]
+    raw_conclusions = parsed.get("conclusiones")
+    conclusions = (
+        [c.strip() for c in raw_conclusions if isinstance(c, str) and c.strip()]
+        if isinstance(raw_conclusions, list)
+        else []
+    )
+
+    return {"verdict": verdict, "conclusions": conclusions}

@@ -5,6 +5,11 @@ interface PopulationPictogramProps {
    * calculada en el backend -- ver app/scoring/k_anonymity.py. */
   proportion: number | null;
   remainingPopulation: number | null;
+  /** 'large' para un bloque visual destacado (una fila por atributo, ver
+   * PopulationNarrowingTable): monigotes grandes de verdad cuando hay
+   * pocos (p.ej. 250px+ para un 50%, que son solo 2). 'small' para usos
+   * más compactos con muchos monigotes. */
+  size?: 'small' | 'large';
 }
 
 // Si tocaría dibujar más de este número de monigotes para representar la
@@ -12,6 +17,18 @@ interface PopulationPictogramProps {
 // legible -- se cambia a un único monigote turquesa + "de X" con el
 // número absoluto de personas.
 const MAX_FIGURES = 100;
+
+/** Tamaño (px) de cada monigote en modo grande: cuantos MENOS monigotes
+ * haga falta dibujar, MÁS grande se ve cada uno -- para un 50% (2
+ * monigotes) deben verse genuinamente grandes, no un icono minúsculo. */
+function largeFigureSize(totalFigures: number): number {
+  if (totalFigures <= 2) return 260;
+  if (totalFigures <= 4) return 180;
+  if (totalFigures <= 10) return 110;
+  if (totalFigures <= 25) return 64;
+  if (totalFigures <= 50) return 40;
+  return 26;
+}
 
 /**
  * Representación visual "isotype" (un monigote = una porción de la
@@ -21,7 +38,11 @@ const MAX_FIGURES = 100;
  * único monigote turquesa junto al número absoluto de personas, que es más
  * legible que una rejilla enorme.
  */
-const PopulationPictogram: React.FC<PopulationPictogramProps> = ({ proportion, remainingPopulation }) => {
+const PopulationPictogram: React.FC<PopulationPictogramProps> = ({
+  proportion,
+  remainingPopulation,
+  size = 'small',
+}) => {
   if (proportion === null || proportion <= 0 || remainingPopulation === null) {
     return null;
   }
@@ -29,23 +50,32 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({ proportion, r
   const percentLabel = proportion * 100 >= 1 ? `${Math.round(proportion * 100)}%` : `${(proportion * 100).toFixed(2)}%`;
   const totalFigures = Math.round(1 / proportion);
   const populationLabel = remainingPopulation.toLocaleString('es-ES');
+  const isLarge = size === 'large';
 
   if (totalFigures > MAX_FIGURES) {
+    const compactSize = isLarge ? 220 : 20;
     return (
       <div
-        className="pictogram pictogram-compact"
+        className={`pictogram pictogram-compact ${isLarge ? 'pictogram-lg' : ''}`}
         role="img"
         aria-label={`Aproximadamente ${percentLabel} de la población: 1 de cada ${populationLabel} personas`}
       >
-        <img src="/monigote-selected.png" alt="" className="pictogram-figure" />
+        <img
+          src="/monigote-selected.png"
+          alt=""
+          className="pictogram-figure"
+          style={{ width: compactSize, height: compactSize }}
+        />
         <span className="pictogram-compact-label">de {populationLabel}</span>
       </div>
     );
   }
 
+  const figureSize = isLarge ? largeFigureSize(totalFigures) : 14;
+
   return (
     <div
-      className="pictogram"
+      className={`pictogram ${isLarge ? 'pictogram-lg' : ''}`}
       role="img"
       aria-label={`Aproximadamente ${percentLabel} de la población comparte esta característica (${populationLabel} personas)`}
     >
@@ -57,6 +87,7 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({ proportion, r
             src={i === 0 ? '/monigote-selected.png' : '/monigote.png'}
             alt=""
             className="pictogram-figure"
+            style={{ width: figureSize, height: figureSize }}
           />
         ))}
       </div>

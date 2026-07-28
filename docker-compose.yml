@@ -7,6 +7,14 @@ services:
       - "3000:3000"
     env_file:
       - ./backend/.env
+    volumes:
+      # El índice FAISS de geolocalización (backend/data/osv5m_spain/) no
+      # se copia dentro de la imagen (pesa demasiado y se regenera con
+      # scripts/build_faiss_index.py, ver .gitignore) -- se monta en vez de
+      # eso, para que el contenedor vea el mismo índice que ya tengas
+      # construido en tu disco. Sin este volumen, el backend informará
+      # "índice no construido" aunque exista de verdad en tu máquina.
+      - ./backend/data:/app/data
     networks:
       - monitor-net
 

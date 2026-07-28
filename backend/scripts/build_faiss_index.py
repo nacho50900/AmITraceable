@@ -57,7 +57,24 @@ def _normalize_columns(metadata: pd.DataFrame) -> pd.DataFrame:
     lat_col = next((c for c in metadata.columns if c.lower() in ("lat", "latitude")), None)
     lon_col = next((c for c in metadata.columns if c.lower() in ("lon", "lng", "longitude")), None)
     region_col = next((c for c in metadata.columns if c.lower() in ("region", "state", "province", "admin1")), None)
-    id_col = next((c for c in metadata.columns if c.lower() == "id"), metadata.columns[0])
+    id_col = next((c for c in metadata.columns if c.lower() == "id"), None)
+
+    if id_col is None:
+        # Antes esto caía por defecto a metadata.columns[0], que en la
+        # práctica podía ser LA MISMA columna que lat_col/lon_col/region_col
+        # (p.ej. si la primera columna del CSV es "latitude" y no hay
+        # ninguna columna llamada literalmente "id") -- eso colisiona en el
+        # dict `rename_map` de más abajo y descarta en silencio el mapeo de
+        # "lat", dejando el índice sin datos utilizables sin ningún error
+        # visible (todas las imágenes se "procesan" pero ninguna encuentra
+        # su fichero). Mejor fallar aquí con un mensaje claro.
+        raise RuntimeError(
+            f"No se encontró una columna 'id' reconocible en el CSV. Columnas disponibles: "
+            f"{list(metadata.columns)}. Si este metadata.csv viene de una versión antigua de "
+            "download_osv5m_spain.py/download_osv5m_world.py (con el bug que perdía la columna "
+            "id al guardar), usa scripts/recover_metadata.py para reconstruirlo a partir de las "
+            "imágenes ya descargadas, en vez de borrar y volver a descargar todo."
+        )
 
     if lat_col is None or lon_col is None:
         raise RuntimeError(

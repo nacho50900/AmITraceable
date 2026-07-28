@@ -61,4 +61,45 @@ describe('PopulationPictogram', () => {
     render(<PopulationPictogram proportion={0.001} remainingPopulation={49128} />);
     expect(screen.getByText('de 49.128')).toBeInTheDocument();
   });
+
+  describe('size="large"', () => {
+    test('50% (2 monigotes): cada uno se ve genuinamente grande (260px)', () => {
+      const { container } = render(
+        <PopulationPictogram proportion={0.5} remainingPopulation={24_500_000} size="large" />
+      );
+      const images = container.querySelectorAll('img');
+      expect(images).toHaveLength(2);
+      images.forEach((img) => {
+        expect(img).toHaveStyle({ width: '260px', height: '260px' });
+      });
+    });
+
+    test('10% (10 monigotes): más pequeños que en el caso de 2, pero siguen siendo grandes', () => {
+      const { container } = render(
+        <PopulationPictogram proportion={0.1} remainingPopulation={4_900_000} size="large" />
+      );
+      const images = container.querySelectorAll('img');
+      expect(images).toHaveLength(10);
+      images.forEach((img) => {
+        expect(img).toHaveStyle({ width: '110px', height: '110px' });
+      });
+    });
+
+    test('modo compacto (<1%) en grande: el monigote único también es grande (220px)', () => {
+      const { container } = render(
+        <PopulationPictogram proportion={0.0035} remainingPopulation={170000} size="large" />
+      );
+      const images = container.querySelectorAll('img');
+      expect(images).toHaveLength(1);
+      expect(images[0]).toHaveStyle({ width: '220px', height: '220px' });
+    });
+
+    test('tamaño por defecto (sin size) sigue siendo el pequeño (14px)', () => {
+      const { container } = render(<PopulationPictogram proportion={0.5} remainingPopulation={24_500_000} />);
+      const images = container.querySelectorAll('img');
+      images.forEach((img) => {
+        expect(img).toHaveStyle({ width: '14px', height: '14px' });
+      });
+    });
+  });
 });

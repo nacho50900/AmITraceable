@@ -32,11 +32,17 @@ describe('AiSummaryCard', () => {
     expect(screen.queryByRole('button', { name: 'Analizar con IA' })).not.toBeInTheDocument();
   });
 
-  test('éxito: muestra la lista de conclusiones devueltas', async () => {
-    vi.mocked(api.aiSummary).mockResolvedValue({ conclusions: ['Primera conclusión', 'Segunda conclusión'] });
+  test('éxito: muestra el veredicto general y la lista de conclusiones', async () => {
+    vi.mocked(api.aiSummary).mockResolvedValue({
+      verdict: 'Este perfil no comparte información que permita identificarte con facilidad.',
+      conclusions: ['Primera conclusión', 'Segunda conclusión'],
+    });
     render(<AiSummaryCard report={makeExposureReport()} />);
 
     await waitFor(() => {
+      expect(
+        screen.getByText('Este perfil no comparte información que permita identificarte con facilidad.')
+      ).toBeInTheDocument();
       expect(screen.getByText('Primera conclusión')).toBeInTheDocument();
       expect(screen.getByText('Segunda conclusión')).toBeInTheDocument();
     });
@@ -44,14 +50,24 @@ describe('AiSummaryCard', () => {
 
   test('éxito: llama a api.aiSummary con el informe exacto recibido por props', async () => {
     const report = makeExposureReport({ username: 'otro_usuario' });
-    vi.mocked(api.aiSummary).mockResolvedValue({ conclusions: ['x'] });
+    vi.mocked(api.aiSummary).mockResolvedValue({ verdict: 'Veredicto.', conclusions: [] });
     render(<AiSummaryCard report={report} />);
 
     await waitFor(() => expect(api.aiSummary).toHaveBeenCalledWith(report));
   });
 
-  test('lista vacía: la IA no encontró nada que merezca la pena destacar', async () => {
-    vi.mocked(api.aiSummary).mockResolvedValue({ conclusions: [] });
+  test('veredicto sin conclusiones adicionales: se muestra igualmente el veredicto, sin lista', async () => {
+    vi.mocked(api.aiSummary).mockResolvedValue({ verdict: 'Riesgo bajo en general.', conclusions: [] });
+    const { container } = render(<AiSummaryCard report={makeExposureReport()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Riesgo bajo en general.')).toBeInTheDocument();
+    });
+    expect(container.querySelector('.ai-conclusions-list')).not.toBeInTheDocument();
+  });
+
+  test('respuesta totalmente vacía (sin veredicto ni conclusiones): la IA no encontró nada que destacar', async () => {
+    vi.mocked(api.aiSummary).mockResolvedValue({ verdict: '', conclusions: [] });
     render(<AiSummaryCard report={makeExposureReport()} />);
 
     await waitFor(() => {
@@ -92,7 +108,7 @@ describe('AiSummaryCard', () => {
     const user = userEvent.setup();
     vi.mocked(api.aiSummary)
       .mockRejectedValueOnce(new Error('fallo de red'))
-      .mockResolvedValueOnce({ conclusions: ['Conclusión tras reintento'] });
+      .mockResolvedValueOnce({ verdict: '', conclusions: ['Conclusión tras reintento'] });
     render(<AiSummaryCard report={makeExposureReport()} />);
 
     const retryButton = await screen.findByRole('button', { name: 'Reintentar' });
