@@ -1,0 +1,19 @@
+# Dependencias del módulo OPCIONAL de geolocalización por imagen (ver
+# app/vision/geolocation.py). Deliberadamente fuera de requirements.txt:
+# son pesadas (varios cientos de MB) y la mayoría de instalaciones (solo
+# Reddit, o Instagram sin el índice FAISS construido) no las necesitan.
+#
+# OJO: esto NO es solo para poder ejecutar scripts/build_faiss_index.py
+# (eso puedes hacerlo fuera de Docker, con tu propio venv). Si quieres que
+# el backend desplegado con Docker use de verdad el índice ya construido
+# en cada análisis de Instagram, la IMAGEN del backend necesita instalar
+# esto también -- ver el ARG WITH_GEOLOCATION en el Dockerfile.
+#
+# torch: se usa el índice oficial de builds SOLO-CPU de PyTorch en vez del
+# paquete por defecto de PyPI (que incluye CUDA y pesa bastante más) --
+# este contenedor corre en CPU de todos modos, ver la conversación sobre
+# GPU passthrough en Docker.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.2,<3.0
+transformers>=4.40,<5.0
+faiss-cpu>=1.8,<2.0

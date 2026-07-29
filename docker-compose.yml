@@ -1,6 +1,14 @@
 services:
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        # torch/faiss/transformers (varios cientos de MB): necesarios para
+        # que la geolocalización por imagen funcione DE VERDAD en este
+        # contenedor (no solo para poder construir el índice, que puedes
+        # hacer aparte con tu propio venv). Ponlo en "false" si prefieres
+        # una imagen más ligera y no usas esta función.
+        - WITH_GEOLOCATION=true
     container_name: backend
     image: ghcr.io/nacho50900/amitraceable-backend:latest
     ports:
@@ -15,6 +23,13 @@ services:
       # construido en tu disco. Sin este volumen, el backend informará
       # "índice no construido" aunque exista de verdad en tu máquina.
       - ./backend/data:/app/data
+      # Caché de HuggingFace (pesos del modelo DINOv2, ~90MB): sin este
+      # volumen, se re-descarga en CADA reinicio del contenedor (el
+      # filesystem del contenedor es efímero) -- con él, solo la primera
+      # vez. Se precarga en el arranque igualmente (ver _lifespan en
+      # app/main.py), así que el ahorro real es solo en la descarga, no en
+      # la carga en memoria (esa sigue pasando en cada arranque).
+      - ./backend/data/hf_cache:/root/.cache/huggingface
     networks:
       - monitor-net
 

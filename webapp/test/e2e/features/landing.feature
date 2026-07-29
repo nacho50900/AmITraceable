@@ -6,3 +6,9 @@ Feature: Landing page consent screen
     Given the landing page is open
     Then I should see the consent notice
     And I should see a link to connect with Reddit
+
+  Scenario: The X card is marked as "Coming Soon" and its CTA is disabled
+    Given the landing page is open
+    When I select the X card
+    Then I should see the X card marked as "Coming Soon"
+    And the connect button should be disabled and say "Próximamente"

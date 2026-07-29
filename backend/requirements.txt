@@ -15,10 +15,19 @@ pandas>=2.0,<3.0
 # Pillow: dependencia real de app/vision/geolocation.py -- se usa para
 # decodificar cada foto descargada en memoria en cuanto hay al menos una
 # publicación candidata, incluso antes de comprobar si el índice FAISS
-# existe. El resto de dependencias pesadas del módulo (torch, faiss,
-# transformers) sí quedan fuera de aquí a propósito, porque solo hacen
-# falta cuando el índice ya está construido (ver _lazy_load en
-# geolocation.py) y se degradan solas si faltan.
+# existe.
+#
+# El resto de dependencias pesadas del módulo (torch, faiss, transformers)
+# están en requirements-vision.txt, NO aquí -- pero ojo, a diferencia de lo
+# que decía antes este comentario: no es que "solo hagan falta para
+# construir el índice". También hacen falta EN EL ANÁLISIS (para calcular
+# el embedding de cada foto del usuario y consultar el índice ya
+# construido), así que si quieres que la geolocalización funcione de
+# verdad en un backend desplegado con Docker, tienes que instalar también
+# requirements-vision.txt en esa imagen -- ver el ARG WITH_GEOLOCATION del
+# Dockerfile. El código se degrada solo (sin romper nada) si faltan, pero
+# eso significa que la función simplemente no estará disponible, no que no
+# hagan falta.
 pillow>=10.0,<12.0
 itsdangerous>=2.2,<3.0
 emoji>=2.13,<3.0

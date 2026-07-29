@@ -185,6 +185,51 @@ class TestEstimateLocationFromImage:
         assert result.lon is None
 
 
+class TestGeolocationAvailable:
+    """Cubre justo el bug real que hizo que, con el índice ya construido y
+    montado, el backend siguiera diciendo "no disponible": la comprobación
+    de ficheros pasaba, pero torch/faiss/transformers no estaban instaladas
+    en la imagen del backend (requirements-vision.txt es opcional, ver
+    Dockerfile/ARG WITH_GEOLOCATION) -- ver requirements.txt para el
+    porqué esto no es solo cosa del script de construcción del índice."""
+
+    def test_false_when_index_files_missing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(geolocation, "_INDEX_DIR", tmp_path / "no_existe")
+        assert geolocation._geolocation_available() is False
+
+    def test_false_when_only_one_of_the_two_index_files_exists(self, tmp_path, monkeypatch):
+        (tmp_path / "index.faiss").write_bytes(b"x")
+        # falta index_meta.csv
+        monkeypatch.setattr(geolocation, "_INDEX_DIR", tmp_path)
+        assert geolocation._geolocation_available() is False
+
+    def test_false_when_index_exists_but_a_dependency_is_not_importable(self, tmp_path, monkeypatch):
+        (tmp_path / "index.faiss").write_bytes(b"x")
+        (tmp_path / "index_meta.csv").write_text("a,b\n")
+        monkeypatch.setattr(geolocation, "_INDEX_DIR", tmp_path)
+        # Poner None en sys.modules fuerza ImportError en "import faiss",
+        # sin necesitar que el paquete esté realmente instalado o no.
+        monkeypatch.setitem(sys.modules, "faiss", None)
+
+        assert geolocation._geolocation_available() is False
+
+    def test_true_when_index_exists_and_dependencies_import_correctly(self, tmp_path, monkeypatch):
+        (tmp_path / "index.faiss").write_bytes(b"x")
+        (tmp_path / "index_meta.csv").write_text("a,b\n")
+        monkeypatch.setattr(geolocation, "_INDEX_DIR", tmp_path)
+        try:
+            import faiss  # noqa: F401
+            import torch  # noqa: F401
+            import transformers  # noqa: F401
+        except ImportError:
+            pytest.skip(
+                "torch/faiss/transformers no instaladas en este entorno "
+                "(requirements-vision.txt es opcional, ver Dockerfile)"
+            )
+
+        assert geolocation._geolocation_available() is True
+
+
 class TestEstimateLocationsForPosts:
     @pytest.mark.asyncio
     async def test_no_candidate_posts_returns_empty_without_network_calls(self):
