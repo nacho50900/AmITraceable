@@ -26,7 +26,7 @@ describe('AiSummaryCard', () => {
     vi.mocked(api.aiSummary).mockImplementation(() => new Promise(() => {})); // nunca resuelve
     render(<AiSummaryCard report={makeExposureReport()} />);
 
-    expect(screen.getByText('Conclusiones generadas por IA')).toBeInTheDocument();
+    expect(screen.getByText('Recomendaciones y Conclusiones')).toBeInTheDocument();
     expect(screen.getByText('Analizando el informe con IA...')).toBeInTheDocument();
     expect(api.aiSummary).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: 'Analizar con IA' })).not.toBeInTheDocument();

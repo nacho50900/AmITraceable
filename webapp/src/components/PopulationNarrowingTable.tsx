@@ -62,46 +62,40 @@ const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({ ste
 
   return (
     <>
-      <table className="population-narrowing-table">
-        <thead>
-          <tr>
-            <th>Información detectada</th>
-            <th>Cuánta gente lo comparte</th>
-            <th>Riesgo</th>
-            <th>Fuente</th>
-          </tr>
-        </thead>
-        <tbody>
-          {steps.map((step) => (
-            <tr key={`${step.category}-${step.attribute_label}`}>
-              <td>
-                {step.attribute_label}
-                {step.note && <div className="note-inline">{step.note}</div>}
-              </td>
-              <td>
-                {step.proportion !== null && step.remaining_population !== null ? (
-                  <PopulationPictogram proportion={step.proportion} remainingPopulation={step.remaining_population} />
-                ) : (
-                  <span className="population-fallback">{formatPopulation(step.remaining_population)}</span>
-                )}
-              </td>
-              <td>
+      <div className="population-narrowing-list">
+        {steps.map((step) => (
+          <div className="population-step" key={`${step.category}-${step.attribute_label}`}>
+            <div className="population-step-header">
+              <strong>{step.attribute_label}</strong>
+              <div className="population-step-badges">
                 <span
                   className="risk-pill"
                   style={{ background: RISK_COLORS[step.risk_level], color: '#fff' }}
                 >
                   {RISK_LABELS[step.risk_level]}
                 </span>
-              </td>
-              <td>
                 <span className="source-badge" title={SOURCE_TITLES[step.source]}>
                   {SOURCE_ICONS[step.source]} {SOURCE_LABELS[step.source]}
                 </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+              </div>
+            </div>
+
+            {step.note && <p className="note-inline">{step.note}</p>}
+
+            <div className="population-step-visual">
+              {step.proportion !== null && step.remaining_population !== null ? (
+                <PopulationPictogram
+                  proportion={step.proportion}
+                  remainingPopulation={step.remaining_population}
+                  size="large"
+                />
+              ) : (
+                <span className="population-fallback">{formatPopulation(step.remaining_population)}</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
       <p className="note">
         Estimación aproximada a partir de distribuciones agregadas del INE, asumiendo
         independencia entre atributos. No es un recuento exacto de personas.
