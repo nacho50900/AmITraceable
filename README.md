@@ -32,18 +32,26 @@ terceros.
 3. **Infiere atributos personales** de forma explicable (ubicación,
    ocupación, rutina) a partir de en qué comunidades/hashtags participas.
 4. **Detecta declaraciones explícitas** sobre ti mismo en el texto ("tengo
-   24 años", "vivo en León", "estudio Medicina"...) y estima, a partir de
-   distribuciones agregadas del INE, **cuánta gente en España comparte esa
-   combinación de características** (estilo k-anonimato: "solo 17 personas
-   en España cumplen esto").
+   24 años", "vivo en León", "estudio Medicina"...) combinando regex
+   (rápido, gratuito, determinista) con un modelo de IA (Mistral, opcional)
+   que capta redacciones más libres que la regex no reconoce -- y también
+   una estimación (más débil, marcada aparte) de sexo por convención
+   cultural del nombre público de la cuenta. A partir de ahí, y de
+   distribuciones agregadas del INE, estima **cuánta gente en España
+   comparte esa combinación de características** (estilo k-anonimato:
+   "solo 17 personas en España cumplen esto"), representado visualmente
+   como un pictograma de monigotes (turquesa = tú, negro = el resto).
 5. **Estima la ubicación de tus fotos** (solo Instagram) comparándolas por
    similitud visual (DINOv2 + FAISS) contra un índice de imágenes
-   georreferenciadas de España, mostrando los resultados en un mapa.
-6. Calcula un **score de privacidad** (0-100) con desglose por componente,
-   y da **recomendaciones concretas**.
-7. Opcionalmente, envía el informe ya generado a un modelo de IA (Mistral
-   AI, tier gratuito) para obtener conclusiones priorizadas en lenguaje
-   natural.
+   georreferenciadas de España, mostrando cada foto analizada con su
+   confianza real (no solo las que superan un umbral) en un mapa y una
+   lista.
+6. Calcula un **score de privacidad** (0-100) con desglose por componente.
+7. Envía automáticamente el informe ya generado (incluidas las
+   recomendaciones por reglas fijas, como insumo) a un modelo de IA
+   (Mistral AI, tier gratuito) para obtener un **veredicto general** de una
+   frase y conclusiones específicas y no obvias -- sin necesidad de pulsar
+   ningún botón.
 8. Permite **descargar el informe completo en JSON** (portabilidad de
    datos, RGPD Art. 20).
 
@@ -75,20 +83,23 @@ navegador.
   módulo para la justificación de diseño frente a la alternativa
   descartada (base de datos sintética de ~49M filas).
 - La geolocalización por imagen (`backend/app/vision/geolocation.py`) es
-  **opcional y best-effort**: si el índice FAISS no está construido (ver
-  [Scripts de geolocalización](#scripts-de-geolocalizaci%C3%B3n-por-imagen-opcional)
-  más abajo), esa función del pipeline simplemente no aporta nada, sin
-  romper el resto del análisis. Su precisión realista es a nivel de
-  provincia, no de calle (ver benchmarks de reverse geolocation citados en
-  los docstrings).
+  **opcional y best-effort**: si el índice FAISS no está construido, o si
+  el backend no tiene instaladas sus dependencias pesadas (`torch`,
+  `faiss`, `transformers` -- ver `requirements-vision.txt` y el `ARG
+  WITH_GEOLOCATION` del `Dockerfile`), esa función del pipeline
+  simplemente no aporta nada, sin romper el resto del análisis. Su
+  precisión realista es a nivel de provincia, no de calle (ver benchmarks
+  de reverse geolocation citados en los docstrings).
 - Las heurísticas de inferencia de atributos
   (`backend/app/nlp/attribute_inference.py`,
   `backend/app/nlp/demographic_extraction.py`) son deliberadamente simples
   (listas + regex) para mantener el sistema explicable y auditable.
-- El análisis con IA (`backend/app/ai_analysis.py`) es **totalmente
-  opcional**: sin `MISTRAL_API_KEY` configurada, esa sección del dashboard
-  simplemente indica que no está disponible; el resto de la app funciona
-  igual.
+- El análisis con IA (`backend/app/ai_analysis.py`,
+  `backend/app/nlp/ai_attribute_extraction.py`) es **totalmente opcional**:
+  ambos usan la misma `MISTRAL_API_KEY`. Sin ella, el veredicto/conclusiones
+  del dashboard indican que no está disponible, y la detección de
+  atributos se queda solo con lo que encuentren las regex -- el resto de
+  la app funciona igual.
 - La correlación *entre plataformas* (Reddit + Instagram combinados) y el
   componente `identity_consistency_risk` del scoring quedan como
   **trabajo futuro**, documentado explícitamente en
@@ -101,30 +112,32 @@ navegador.
 SPA creada con [Vite](https://vitejs.dev/) y [React](https://react.dev/) en TypeScript.
 
 - `src/pages/Landing.tsx` — pantalla de consentimiento + login OAuth (Reddit/Instagram).
-- `src/pages/Dashboard.tsx` — informe completo: score, tabla de estrechamiento de población, mapa de ubicaciones estimadas, atributos inferidos, gráfico horario, perfil de escritura, recomendaciones, análisis con IA y descarga en JSON.
-- `src/components/` — `ScoreBar`, `HourlyActivityChart`, `PopulationNarrowingTable`, `LocationMap` (Leaflet/OpenStreetMap), `AiSummaryCard`, `DownloadReportButton`.
-- `src/api.ts` / `src/types.ts` — cliente tipado del backend.
+- `src/pages/Dashboard.tsx` — informe completo: score, progreso en vivo vía SSE, tabla de estrechamiento de población (con pictograma visual), mapa + lista de ubicaciones estimadas, gráfico horario, perfil de escritura, veredicto y conclusiones de IA, descarga en JSON.
+- `src/components/` — `ScoreBar`, `HourlyActivityChart`, `PopulationNarrowingTable`, `PopulationPictogram` (representación visual tipo isotype: monigotes turquesa/negro), `LocationMap` (Leaflet/OpenStreetMap), `AiSummaryCard`, `DownloadReportButton`.
+- `src/api.ts` / `src/types.ts` — cliente tipado del backend, incluido `analyzeStream` (SSE vía `EventSource`).
 - `src/utils/reportToJson.ts` — exportación del informe a JSON.
 - Tests: Vitest + Testing Library (`src/__tests__/`), E2E con Playwright + Cucumber (`webapp/test/`, ver `webapp/E2E.md`).
 
 ### Backend Python/FastAPI (`backend/`)
 
 - `app/auth/reddit_oauth.py`, `app/auth/instagram_oauth.py` — OAuth 2.0 con cada plataforma.
+- `app/auth/dynamic_origin.py` — deriva el `redirect_uri` de Instagram y el destino de la redirección final del Host de cada petición cuando no hay un valor fijo en `.env` (pensado para túneles de Cloudflare, cuya URL cambia en cada reinicio).
 - `app/reddit_client.py`, `app/instagram_client.py` — extracción de posts/comentarios/publicaciones públicas, normalizados a un modelo común (`SocialPost`).
 - `app/nlp/fingerprint.py` — huella de escritura (longitud de frase, vocabulario, emojis, patrón horario, keywords TF-IDF, idioma).
 - `app/nlp/attribute_inference.py` — inferencia explicable de atributos (ubicación, ocupación, rutina) a partir de comunidades/hashtags.
-- `app/nlp/demographic_extraction.py` — extracción de declaraciones explícitas en texto (edad, sexo, ubicación, estudios, ocupación, universidad, empresa).
+- `app/nlp/demographic_extraction.py` — extracción de declaraciones explícitas en texto por regex (edad, sexo, ubicación, estudios, ocupación, universidad, empresa).
+- `app/nlp/ai_attribute_extraction.py` — la misma extracción, pero vía IA (Mistral, opcional): capta redacciones libres que la regex no reconoce, y una estimación aparte de sexo por nombre público de la cuenta (marcada con menor fiabilidad). Complementa a la regex, nunca la sustituye.
 - `app/data/ine_reference.py` — tablas de distribución poblacional (INE) usadas para el estrechamiento de población.
-- `app/scoring/k_anonymity.py` — motor de estimación de k-anonimato (estrechamiento de población en cascada).
+- `app/scoring/k_anonymity.py` — motor de estimación de k-anonimato (estrechamiento de población en cascada), expone también la proporción ya calculada para el pictograma del frontend.
 - `app/scoring/privacy_score.py` — motor de scoring de privacidad (0-100).
-- `app/vision/geolocation.py` — geolocalización de fotos por similitud visual (DINOv2 + FAISS), opcional.
-- `app/ai_analysis.py` — análisis del informe vía Mistral AI, opcional.
+- `app/vision/geolocation.py` — geolocalización de fotos por similitud visual (DINOv2 + FAISS), opcional. Devuelve todas las estimaciones (con su confianza real) más un flag de si el índice está disponible, para poder distinguir "no hay índice" de "no hay resultados fiables".
+- `app/ai_analysis.py` — veredicto general + conclusiones sobre el informe vía Mistral AI, opcional; se dispara automáticamente, sin botón, y usa `recommendations` como insumo.
 - `app/progress.py` — callback de progreso compartido, usado por el endpoint de streaming.
 - `app/analysis_router.py` — endpoints de análisis (`/api/analyze/{platform}`, `/api/analyze/{platform}/stream`, `/api/analyze/ai-summary`).
-- `app/report/generator.py` — ensamblado del informe final + recomendaciones.
-- `app/main.py` — app FastAPI, métricas Prometheus en `/metrics`.
+- `app/report/generator.py` — ensamblado del informe final + recomendaciones (estas últimas ya no se muestran como sección propia en el dashboard, ver más arriba).
+- `app/main.py` — app FastAPI; en el arranque (`lifespan`) precarga el modelo de geolocalización si está disponible, en vez de esperar al primer análisis; métricas Prometheus en `/metrics`.
 - `tests/` — pytest (unit + endpoints), ~95% cobertura, para Sonar.
-- `scripts/` — descarga del dataset OSV-5M y construcción del índice FAISS (ver más abajo).
+- `scripts/` — descarga del dataset OSV-5M, construcción del índice FAISS, y recuperación de metadatos (ver más abajo).
 - `monitoring/` — configuración de Prometheus/Grafana.
 
 ## Running the Project
@@ -135,12 +148,24 @@ SPA creada con [Vite](https://vitejs.dev/) y [React](https://react.dev/) en Type
 docker-compose up --build
 ```
 
-- Web application: http://localhost
+- Web application: http://localhost:8080
 - Backend API: http://localhost:3000 (docs interactivos en `/docs`)
 - Grafana: http://localhost:9091 · Prometheus: http://localhost:9090
 
 Antes de levantarlo, crea `backend/.env` a partir de `backend/.env.example`
 (ver [variables de entorno](#variables-de-entorno) más abajo).
+
+**Geolocalización por imagen en Docker:** el `docker-compose.yml` trae
+`WITH_GEOLOCATION=true` por defecto, que instala `torch`/`faiss`/
+`transformers` en la imagen del backend (ver `requirements-vision.txt`,
+unos cientos de MB extra, con la build solo-CPU de PyTorch). Sin esto, el
+backend puede tener el índice FAISS perfectamente construido y montado y
+aun así reportar "no disponible" -- esas librerías hacen falta en el
+análisis, no solo para construir el índice. Si no vas a usar
+geolocalización, ponlo a `false` para una imagen más ligera. El modelo se
+precarga en el arranque del contenedor (no en el primer análisis) y su
+caché se persiste en `backend/data/hf_cache/` para no volver a
+descargarlo en cada reinicio.
 
 ### Without Docker
 
@@ -210,11 +235,15 @@ informe, sin errores. Para activarlo:
 
 ```bash
 cd backend
-pip install torch transformers faiss-cpu huggingface_hub pandas pillow tqdm
+pip install -r requirements-vision.txt huggingface_hub pandas tqdm
 
 python scripts/download_osv5m_spain.py --output data/osv5m_spain --max-disk-gb 35
 python scripts/build_faiss_index.py --images data/osv5m_spain
 ```
+
+(`requirements-vision.txt` ya apunta al índice de PyTorch solo-CPU, más
+pequeño que el paquete de PyPI por defecto -- ver también el `ARG
+WITH_GEOLOCATION` del `Dockerfile` si vas a correr esto dentro de Docker.)
 
 - `download_osv5m_spain.py` descarga solo las imágenes de España del
   dataset [OpenStreetView-5M](https://huggingface.co/datasets/osv5m/osv5m)
@@ -224,6 +253,11 @@ python scripts/build_faiss_index.py --images data/osv5m_spain
   pesada en tráfico de red, ~260GB).
 - `build_faiss_index.py` extrae embeddings con DINOv2 y construye el
   índice de búsqueda por similitud.
+- `recover_metadata.py` reconstruye `metadata.csv` a partir de las
+  imágenes ya descargadas, sin volver a bajarlas -- pensado para el caso
+  (ya corregido, pero por si tienes un `metadata.csv` de una ejecución
+  anterior al fix) en que se perdía la columna `id` al guardar, dejando el
+  índice sin poder casar ninguna imagen con su fila de metadatos.
 
 Estos datos/artefactos **no se versionan** en el repositorio (ver
 `.gitignore`): son regenerables ejecutando los scripts.
@@ -233,16 +267,16 @@ Estos datos/artefactos **no se versionan** en el repositorio (ver
 ### Webapp (`webapp/package.json`)
 
 - `npm run dev` — servidor de desarrollo.
-- `npm test` — tests unitarios (Vitest).
+- `npm test` — tests unitarios (Vitest, ~100 tests).
 - `npm run test:coverage` — tests con cobertura (para Sonar).
-- `npm run test:e2e` — tests E2E (levanta webapp + backend y corre Cucumber; ver `webapp/E2E.md`).
+- `npm run test:e2e` — tests E2E (levanta webapp + backend sueltos y corre Cucumber; ver `webapp/E2E.md`). Cubre la pantalla de consentimiento y que el dashboard exige autenticación real contra el backend (sin mockear), pero no el flujo completo de OAuth (necesitaría credenciales reales) ni el montaje con Docker/nginx.
 - `npm run start:all` — levanta webapp + backend Python a la vez (conveniencia para desarrollo/E2E).
 - `npm run lint` — ESLint.
 
 ### Backend (Python)
 
 - `uvicorn app.main:app --reload --port 3000` — arranca el backend en desarrollo.
-- `pytest` — tests unitarios (~117 tests).
+- `pytest` — tests unitarios (~153 tests, 1 se salta si no tienes instalado `requirements-vision.txt` en local).
 - `pytest --cov=app --cov-report=xml --cov-report=term` — tests con cobertura (genera `coverage.xml` para Sonar).
 
 ## Respecto a SonarQube
