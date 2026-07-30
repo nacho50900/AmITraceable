@@ -616,27 +616,26 @@ body {
 
 .progress-list li.progress-current {
   color: var(--text);
+  font-weight: 500;
 }
 
-.progress-list li.progress-current::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
+.progress-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
   flex-shrink: 0;
-  animation: progress-pulse 1s ease-in-out infinite;
 }
 
-.progress-list li:not(.progress-current)::before {
-  content: '✓';
+.progress-icon-done {
   color: #3aa657;
-  flex-shrink: 0;
+  font-weight: 700;
 }
 
-@keyframes progress-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+.spinner-sm {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
 }
 
 /* Lista de fotos analizadas por geolocalización (LocationMap.tsx) */

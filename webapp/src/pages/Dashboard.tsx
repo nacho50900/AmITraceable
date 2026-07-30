@@ -14,6 +14,20 @@ function readPlatform(): Platform {
   return value === 'instagram' ? 'instagram' : 'reddit';
 }
 
+// Algunas fases emiten contadores parciales además del texto (p. ej. el
+// análisis de fotos emite photos_analyzed/total_photos en cada foto
+// procesada, ver app/vision/geolocation.py). Cuando esos contadores están
+// presentes se añaden al texto de la fase ("Analizando fotos (3/10)...");
+// el resto de fases se muestran tal cual las manda el backend.
+function formatStageLabel(stage: string, counts: Record<string, unknown>): string {
+  const analyzed = counts.photos_analyzed;
+  const total = counts.total_photos;
+  if (typeof analyzed === 'number' && typeof total === 'number' && total > 0) {
+    return `${stage.replace(/\.\.\.$/, '')} (${analyzed}/${total})...`;
+  }
+  return stage;
+}
+
 const Dashboard: React.FC = () => {
   const [platform] = useState<Platform>(readPlatform);
   const [report, setReport] = useState<ExposureReport | null>(null);
@@ -25,6 +39,7 @@ const Dashboard: React.FC = () => {
   // por el backend, ver app/progress.py y analysis_router.py).
   const [completedStages, setCompletedStages] = useState<string[]>([]);
   const [currentStage, setCurrentStage] = useState<string | null>(null);
+  const [currentCounts, setCurrentCounts] = useState<Record<string, unknown>>({});
   const navigate = useNavigate();
   const stopStreamRef = useRef<(() => void) | null>(null);
   // Ref auxiliar para poder leer la fase "actual" dentro del callback del
@@ -47,12 +62,22 @@ const Dashboard: React.FC = () => {
         if (cancelled) return;
 
         if (!event.done) {
+          const counts: Record<string, unknown> = { ...event };
+          delete counts.done;
+          delete counts.stage;
+          const { stage } = event;
           const previousStage = currentStageRef.current;
-          currentStageRef.current = event.stage;
-          if (previousStage) {
+          currentStageRef.current = stage;
+          // Solo se marca como "completada" cuando la fase cambia de
+          // verdad -- una misma fase puede repetirse varias veces seguidas
+          // (p. ej. una emisión por cada foto analizada) y en ese caso debe
+          // seguir mostrándose como la fase EN CURSO, no duplicarse en la
+          // lista de completadas.
+          if (previousStage && previousStage !== stage) {
             setCompletedStages((prev) => [...prev, previousStage]);
           }
-          setCurrentStage(event.stage);
+          setCurrentStage(stage);
+          setCurrentCounts(counts);
           return;
         }
 
@@ -92,9 +117,17 @@ const Dashboard: React.FC = () => {
           </p>
           <ul className="progress-list">
             {completedStages.map((stage, i) => (
-              <li key={`${stage}-${i}`}>{stage}</li>
+              <li key={`${stage}-${i}`} className="progress-done">
+                <span className="progress-icon progress-icon-done" aria-hidden="true">✓</span>
+                {stage}
+              </li>
             ))}
-            {currentStage && <li className="progress-current">{currentStage}</li>}
+            {currentStage && (
+              <li className="progress-current">
+                <span className="spinner spinner-sm" aria-hidden="true" />
+                {formatStageLabel(currentStage, currentCounts)}
+              </li>
+            )}
           </ul>
         </div>
       </div>

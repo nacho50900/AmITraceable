@@ -135,6 +135,26 @@ describe('Dashboard', () => {
     });
   });
 
+  test('fase de análisis de fotos: muestra el contador x/TOTAL y no la duplica en completadas', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([
+      { done: false, stage: 'Leyendo publicaciones...' },
+      { done: false, stage: 'Analizando fotos...', photos_analyzed: 1, total_photos: 3 },
+      { done: false, stage: 'Analizando fotos...', photos_analyzed: 2, total_photos: 3 },
+      { done: false, stage: 'Analizando fotos...', photos_analyzed: 3, total_photos: 3 },
+    ]);
+    renderDashboard();
+
+    await waitFor(() => {
+      // "Leyendo publicaciones..." ya completada; la fase de fotos, en
+      // curso, se muestra una sola vez con el contador más reciente -- no
+      // una línea por cada emisión repetida del mismo nombre de fase.
+      expect(screen.getByText('Leyendo publicaciones...')).toBeInTheDocument();
+      expect(screen.getByText('Analizando fotos (3/3)...')).toBeInTheDocument();
+      expect(screen.queryAllByText(/Analizando fotos/)).toHaveLength(1);
+    });
+  });
+
   test('error durante el análisis: muestra el mensaje y el botón de volver', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
     mockStream([{ done: true, error: 'fallo de red simulado' }]);
