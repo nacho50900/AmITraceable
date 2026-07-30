@@ -29,6 +29,15 @@ ifndef::imagesdir[:imagesdir: ../images]
   descargan imágenes" (documentada explícitamente en el docstring de
   `instagram_client.py`), pero coherente con el resto del diseño
   stateless: sigue sin haber persistencia de ningún tipo.
+* **Excepción consciente y documentada — extracción de atributos con IA**:
+  a diferencia del análisis del informe con IA (que solo envía agregados
+  ya generados), `nlp/ai_attribute_extraction.py` envía TEXTO CRUDO
+  (publicaciones y biografía públicos) a Mistral AI, automáticamente en
+  cada análisis, para poder detectar autodeclaraciones que las regex no
+  reconocen. Es una segunda excepción al principio de minimización,
+  justificada de la misma forma: es indispensable para la propia función,
+  y el usuario ya dio su consentimiento OAuth sobre ese mismo contenido
+  público al principio del flujo.
 
 === Explicabilidad de las inferencias
 
@@ -46,9 +55,24 @@ justificar *por qué* llega a esa conclusión. Se prefirió esta
 explicabilidad frente a usar modelos de ML más sofisticados pero menos
 trazables.
 
+Este mismo principio se extiende a la extracción de autodeclaraciones vía
+IA (`nlp/ai_attribute_extraction.py`): no reemplaza a las regex de
+`demographic_extraction.py`, solo rellena huecos que estas no
+encontraron, y cada campo detectado por IA queda marcado con su
+procedencia (`source: "ia"` o `"ia_nombre"`) y su evidencia, igual que
+los detectados por regex. La distinción entre `"ia"` (autodeclaración en
+texto/bio) e `"ia_nombre"` (estimación por convención cultural del nombre
+público de la cuenta, no una autodeclaración) es intencional: son señales
+de fiabilidad muy distinta y nunca se presentan mezcladas en el mismo
+nivel de confianza. El LLM tampoco decide a qué categoría del INE
+pertenece un valor -- solo propone texto libre, que se normaliza contra
+las mismas tablas que usan las regex, así que una alucinación del modelo
+simplemente no encuentra coincidencia en vez de colar una estimación de
+población falsa.
+
 === Modelo de dominio multiplataforma
 
-`SocialPost` / `SocialProfile` (`users/app/models/schemas.py`) son el
+`SocialPost` / `SocialProfile` (`backend/app/models/schemas.py`) son el
 modelo común que alimenta todo el pipeline, independientemente de la
 plataforma de origen:
 
@@ -99,7 +123,12 @@ El módulo `scoring/k_anonymity.py` estima, para cada declaración
 explícita que el usuario ha hecho sobre sí mismo en su propio texto
 ("tengo 24 años", "vivo en León", "estudio Medicina"...), cuánta gente en
 España comparte esa combinación de características — el mismo
-razonamiento que una tabla de k-anonimato clásica.
+razonamiento que una tabla de k-anonimato clásica. Las declaraciones
+pueden venir de las regex de `demographic_extraction.py` o, cuando estas
+no encuentran nada para un campo, de `ai_attribute_extraction.py` (ver
+<<section-concepts>>, "Explicabilidad de las inferencias") -- el motor de
+k-anonimato en sí mismo es indiferente al origen, solo consume el
+resultado ya combinado.
 
 Se valoró y se descartó explícitamente construir una base de datos
 sintética con una fila por cada uno de los ~49 millones de habitantes de
@@ -121,6 +150,13 @@ la realidad hay correlación entre, por ejemplo, edad y provincia) queda
 documentada explícitamente en el docstring del módulo y se marca en el
 propio informe ("estimación aproximada, no un recuento exacto").
 
+Cada paso de la cascada expone también la proporción resultante sobre el
+total de España (`remaining_population / TOTAL_POPULATION_ES`), ya
+calculada en el backend, precisamente para que el frontend no tenga que
+conocer ni duplicar esa constante al representarla visualmente (ver
+`PopulationPictogram.tsx`, un monigote turquesa por cada porción de
+población frente al resto en negro).
+
 === Geolocalización de fotos por similitud visual (módulo opcional)
 
 `vision/geolocation.py` estima la provincia más probable de una foto de
@@ -141,11 +177,31 @@ Decisiones de diseño relevantes:
   de país/región. Predecir "provincia probable" es la granularidad
   realista y honesta, y además coincide con la que ya usa
   `k_anonymity.py` para el resto del informe.
-* **Módulo opcional y *best-effort***: si el índice FAISS no está
-  construido, o faltan `torch`/`faiss`/`transformers`/`Pillow` en el
-  entorno, el módulo se degrada devolviendo una lista vacía en vez de
-  romper el resto del análisis — mismo principio de robustez que el resto
-  del sistema aplica a los fallos de red de las APIs externas.
+* **Módulo opcional y *best-effort*, con distinción explícita de causa**:
+  el módulo devuelve TODAS las estimaciones que consigue calcular, con su
+  confianza real, sin filtrar por umbral -- ese filtrado (para decidir si
+  alimenta o no el cálculo de k-anonimato) es responsabilidad de quien lo
+  llama, no del propio módulo. Además expone un flag independiente que
+  distingue "el índice no está construido, o faltan sus dependencias
+  opcionales" de "se analizaron fotos pero ninguna dio resultado
+  fiable" -- son causas distintas y nunca se comunican con el mismo
+  mensaje, para no confundir al usuario sobre qué está pasando de
+  verdad.
+* **Las dependencias pesadas (`torch`/`faiss`/`transformers`) no son solo
+  para construir el índice**: también hacen falta en el propio análisis
+  (calcular el embedding de la foto del usuario y consultar el índice),
+  así que viven en `requirements-vision.txt`, instalado en la imagen
+  Docker solo si se construye con `--build-arg WITH_GEOLOCATION=true`.
+  Un backend desplegado sin ese flag puede tener el índice perfectamente
+  construido y montado y aun así reportar la función como no disponible
+  -- comportamiento correcto y esperado, no un fallo.
+* **Precarga en el arranque del contenedor, no en la primera petición**:
+  el modelo DINOv2 y el índice se cargan en el `lifespan` de FastAPI si
+  están disponibles, para que el coste (E/S de disco, y de red la
+  primera vez que se descargan los pesos del modelo) lo pague
+  `docker-compose up`, no el primer usuario que analice una cuenta de
+  Instagram. La caché de los pesos del modelo se persiste en un volumen
+  para no repetir esa descarga en cada reinicio del contenedor.
 * **Prioridad del texto sobre la imagen**: si el propio usuario ya
   declaró su ubicación explícitamente en el texto, esa autodeclaración
   tiene prioridad sobre la estimación visual (más fiable), que solo se
@@ -153,11 +209,24 @@ Decisiones de diseño relevantes:
 
 === Análisis del informe con IA (módulo opcional)
 
-`ai_analysis.py` permite, bajo demanda explícita del usuario (nunca
-automáticamente), enviar el informe **ya generado** (agregados y
-conclusiones propias de la herramienta, no las publicaciones originales)
-a un modelo de lenguaje externo para obtener conclusiones priorizadas en
-lenguaje natural.
+`ai_analysis.py` envía el informe **ya generado** (agregados y
+conclusiones propias de la herramienta -- incluidas las recomendaciones
+por reglas fijas, como insumo -- nunca las publicaciones originales) a un
+modelo de lenguaje externo, **automáticamente en cuanto el informe está
+listo**, sin que el usuario tenga que pulsar nada. La respuesta es un
+JSON estructurado con un veredicto general de una frase (una valoración
+honesta del riesgo real, ni suavizada ni exagerada) y una lista de
+conclusiones específicas, con criterio explícito de descartar cualquier
+cosa obvia o genérica -- una lista vacía es una respuesta válida si de
+verdad no hay nada que merezca destacarse más allá de lo obvio.
+
+Esto es una integración de Mistral AI **independiente** de
+`nlp/ai_attribute_extraction.py` (ver más arriba): comparten proveedor y
+`MISTRAL_API_KEY`, pero una analiza el informe ya agregado que genera la
+propia herramienta, y la otra analiza texto/bio públicos para detectar
+autodeclaraciones -- cada una con su propio prompt, su propio
+razonamiento de minimización de datos, y su propio modo de fallo
+aislado.
 
 * **Proveedor: Mistral AI** (La Plateforme), empresa con sede en Francia.
   Se eligió frente a alternativas más baratas fuera de la UE (ej.
@@ -175,6 +244,11 @@ lenguaje natural.
   módulo no reintenta ni degrada a otro proveedor de pago — simplemente
   informa de que la función no está disponible ahora mismo, dejando el
   resto del informe intacto.
+* **Automático, no bajo demanda**: la primera versión exigía pulsar un
+  botón. Se cambió porque el consentimiento OAuth inicial ya cubre todo
+  el análisis y un botón adicional no añadía protección real, solo
+  fricción -- la función sigue siendo aislada y opcional en caso de
+  fallo, solo cambió cuándo se dispara.
 
 === Seguridad y límite de confianza
 
@@ -219,6 +293,19 @@ Medidas de seguridad efectivas adoptadas:
   memoria, no con llamadas reales — permite desarrollarlo y verificarlo
   incluso mientras el acceso real a la Data API de Reddit está pendiente
   de aprobación (Reddit for Researchers).
+* **Comportamiento de arranque testeado, no solo endpoints**: el
+  `lifespan` de FastAPI (precarga de geolocalización) se prueba
+  entrando/saliendo del `with TestClient(app)`, con `_geolocation_available`
+  y `_lazy_load` mockeados, en vez de asumir que "si el resto de tests
+  pasa, el arranque también funciona" -- fue precisamente un fallo de
+  este tipo (dependencias ausentes en la imagen Docker) el que motivó
+  añadir esta cobertura.
+* **E2E como complemento, no sustituto**: además de la suite de Vitest
+  (con la API mockeada), hay un escenario E2E (Playwright + Cucumber) que
+  entra directo al dashboard sin sesión y comprueba la redirección real
+  contra el backend -- cobertura que los tests con `vi.mock('../api')`
+  no pueden dar, porque mockean justo la pieza que se quiere verificar.
+  Sigue sin cubrir el montaje completo con Docker/Nginx.
 
 === Concepto de observabilidad
 
@@ -233,6 +320,10 @@ Node a Python.
 Tras sufrir varias roturas de entorno por versiones de paquete ancladas
 a fechas antiguas (incompatibles con versiones más recientes de Python
 o de otras dependencias — ver <<section-technical-risks>>),
-`requirements.txt`/`requirements-dev.txt` usan rangos de versión
-(`>=x,<y`) en vez de pines exactos, dejando que `pip` resuelva la
-combinación compatible disponible en cada entorno.
+`requirements.txt`/`requirements-dev.txt`/`requirements-vision.txt` usan
+rangos de versión (`>=x,<y`) en vez de pines exactos, dejando que `pip`
+resuelva la combinación compatible disponible en cada entorno.
+`requirements-vision.txt` (dependencias pesadas de geolocalización) se
+mantiene deliberadamente separado de `requirements.txt`, instalable a
+demanda (`ARG WITH_GEOLOCATION` del `Dockerfile`), para no obligar a
+todas las instalaciones a cargar con ese peso.

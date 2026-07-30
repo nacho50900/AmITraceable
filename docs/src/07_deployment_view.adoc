@@ -25,35 +25,46 @@ ifndef::imagesdir[:imagesdir: ../images]
 
 | Publicación de imágenes
 | `release-deploy.yml`, disparado al publicar un release en GitHub
-| Build y publicación de imágenes Docker de `users` y `webapp` en GHCR
-  (`ghcr.io`).
+| Build y publicación de imágenes Docker de `backend` y `webapp` en GHCR
+  (`ghcr.io/nacho50900/amitraceable-backend`,
+  `ghcr.io/nacho50900/amitraceable-webapp`).
 |===
 
 === Infraestructura nivel 1: despliegue con Docker Compose
 
 [source]
 ----
-+--------------------------------------------------------------------+
-|                         Docker host                                 |
-|                                                                       |
-|  red "monitor-net" (bridge)                                          |
-|                                                                       |
-|  +-----------+   +-----------+   +--------------+   +-------------+ |
-|  |  webapp   |   |   users   |   |  prometheus  |   |   grafana   | |
-|  | (nginx)   |   | (uvicorn) |   |              |   |             | |
-|  | :80       |   | :3000     |   | :9090        |   | :9091->3000 | |
-|  +-----------+   +-----------+   +--------------+   +-------------+ |
-|        |               |                |                  |        |
-+--------|---------------|----------------|------------------|--------+
-         |               |                |                  |
-     localhost:80   localhost:3000   localhost:9090     localhost:9091
++------------------------------------------------------------------------+
+|                         Docker host                                     |
+|                                                                           |
+|  red "monitor-net" (bridge)                                             |
+|                                                                           |
+|  +-----------+   +-----------+   +--------------+   +-------------+      |
+|  |  webapp   |-->|  backend  |   |  prometheus  |   |   grafana   |      |
+|  | (nginx,   |   | (uvicorn) |   |              |   |             |      |
+|  |  proxy)   |   | :3000     |   | :9090        |   | :9091->3000 |      |
+|  | :80       |   +-----------+   +--------------+   +-------------+      |
+|  +-----------+         |                |                  |            |
+|        |                |                |                  |            |
+|        |          [ volúmenes: ./backend/data (índice FAISS),            |
+|        |            ./backend/data/hf_cache (caché de modelo) ]          |
++--------|----------------|----------------|------------------|-----------+
+         |                |                |                  |
+    localhost:8080   localhost:3000   localhost:9090     localhost:9091
 ----
 
 Motivación::
 Cada componente en su propio contenedor, en la misma red interna
 (`monitor-net`) para que Prometheus pueda hacer *scrape* de
-`users:3000/metrics` sin exponerlo públicamente más que a través del
-propio backend.
+`backend:3000/metrics` sin exponerlo públicamente más que a través del
+propio backend. `webapp` es además el único punto de entrada HTTP de
+cara al navegador para todo lo demás: su Nginx hace de proxy inverso
+hacia `backend` bajo el mismo origen (rutas `/auth/*`, `/api/*`), lo que
+permite que un único túnel de desarrollo (Cloudflare) apuntando solo al
+puerto de `webapp` sirva también, transparentemente, la autenticación y
+la API (ver ADR-12 y <<section-solution-strategy>>). El puerto 3000 del
+backend sigue expuesto al host directamente, útil para depurar contra
+`/docs` sin pasar por el proxy.
 
 Mapeo de bloques a infraestructura::
 [cols="1,2", options="header"]
@@ -62,14 +73,24 @@ Mapeo de bloques a infraestructura::
 
 | `webapp`
 | SPA de React compilada (`vite build`), servida como estáticos por
-  Nginx. Recibe `VITE_API_URL` como build arg apuntando al backend.
+  Nginx, que también actúa de proxy inverso hacia `backend`. Se
+  construye con `VITE_API_URL` vacío a propósito (rutas relativas, ver
+  `webapp/nginx.conf`) -- solo tendría sentido un valor absoluto si se
+  sirviera sin ese proxy delante.
 
-| `users`
+| `backend`
 | Backend FastAPI completo (todos los módulos descritos en
-  <<section-building-block-view>>).
+  <<section-building-block-view>>). Construido con
+  `--build-arg WITH_GEOLOCATION=true` por defecto en `docker-compose.yml`
+  (instala `torch`/`faiss`/`transformers`, ver `requirements-vision.txt`)
+  para que la geolocalización por imagen funcione de verdad, no solo el
+  resto del análisis. Monta dos volúmenes: el índice FAISS
+  (`./backend/data`) y la caché de modelos de Hugging Face
+  (`./backend/data/hf_cache`, para no volver a descargar el modelo en
+  cada reinicio).
 
 | `prometheus`
-| Recolección de métricas expuestas en `users:3000/metrics`
+| Recolección de métricas expuestas en `backend:3000/metrics`
   (`prometheus-fastapi-instrumentator`).
 
 | `grafana`

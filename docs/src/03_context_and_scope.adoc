@@ -12,7 +12,8 @@ ifndef::imagesdir[:imagesdir: ../images]
 | Usuario final
 | Consentimiento OAuth, ninguna otra entrada manual (no hay formularios
   de datos personales)
-| Informe de exposición (score, atributos inferidos, recomendaciones)
+| Informe de exposición (score, qué se puede inferir sobre ti con su
+  fuente y representación visual, veredicto y conclusiones de IA)
 
 | Reddit (Data API)
 | `access_token` tras autorización del usuario
@@ -27,15 +28,19 @@ ifndef::imagesdir[:imagesdir: ../images]
 | —
 
 | Mistral AI (La Plateforme)
-| Informe de exposición ya generado (JSON), bajo demanda explícita del
-  usuario
-| Conclusiones priorizadas en lenguaje natural. Opcional: sin
-  `MISTRAL_API_KEY` configurada, esta integración no se usa.
+| (a) Informe de exposición ya generado (JSON, incluidas las
+  recomendaciones por reglas fijas como insumo) -- se envía
+  automáticamente en cuanto el informe está listo, sin acción explícita
+  del usuario; (b) por separado, texto/biografía públicos, para detectar
+  autodeclaraciones que las regex no reconocen
+| (a) Veredicto general + conclusiones específicas en lenguaje natural;
+  (b) atributos detectados en formato estructurado. Opcional: sin
+  `MISTRAL_API_KEY` configurada, ninguna de las dos integraciones se usa.
 
 | Hugging Face (dataset OSV-5M)
 | _(solo en tiempo de preparación, no en tiempo de ejecución de la app)_
 | Imágenes georreferenciadas de España usadas para construir el índice
-  FAISS del módulo de geolocalización (`users/scripts/`).
+  FAISS del módulo de geolocalización (`backend/scripts/`).
 
 | SonarCloud
 | Resultados de análisis estático + cobertura (`lcov.info`,
@@ -52,25 +57,31 @@ ifndef::imagesdir[:imagesdir: ../images]
 
 [source]
 ----
-                     HTTPS                         HTTPS (OAuth + REST)
- [ Navegador ] <----------------> [ webapp (React SPA, Nginx) ]
-       |                                        |
-       |                                        | HTTPS/JSON + cookie de sesión firmada
-       |                                        v
-       |                          [ users (FastAPI, Python) ]
-       |                                        |
-       |            +-----------------+---------+---------+-----------------+
-       |            |                 |                   |                 |
-       |        HTTPS OAuth       HTTPS OAuth        HTTPS REST        HTTPS REST
-       |         /REST                /REST         (bajo demanda)   (opcional)
-       |            v                 v                   v                 v
-       |   [ Reddit Data API ] [ Instagram API ] [ Mistral AI API ] [ Índice FAISS local,
-       |                                                              construido offline
-       |                                                              desde OSV-5M/HF ]
-       |
-       |  /metrics (Prometheus scrape, red interna Docker)
-       v
-[ Prometheus ] ---- datasource ----> [ Grafana ]
+                     HTTPS
+ [ Navegador ] <----------------> [ webapp (React SPA + Nginx) ]
+                                              |
+                                              | proxy_pass /auth/*, /api/*
+                                              | (mismo origen de cara al navegador --
+                                              |  ver webapp/nginx.conf)
+                                              v
+                                  [ backend (FastAPI, Python) ]
+                                              |
+                     +-----------------+------+------+-----------------+
+                     |                 |             |                 |
+                 HTTPS OAuth       HTTPS OAuth    HTTPS REST        HTTPS REST
+                  /REST                /REST      (automático,      (automático,
+                     v                 v           informe)         atributos)
+            [ Reddit Data API ] [ Instagram API ] [    Mistral AI API     ]
+                                                              |
+                                                              v
+                                                  [ Índice FAISS local,
+                                                    construido offline
+                                                    desde OSV-5M/HF ]
+
+  /metrics (Prometheus scrape, red interna Docker) desde [ backend ]
+                     |
+                     v
+            [ Prometheus ] ---- datasource ----> [ Grafana ]
 ----
 
 Mapeo de canales:
@@ -79,31 +90,36 @@ Mapeo de canales:
 |===
 | Canal | Protocolo | Datos que transporta
 
-| Navegador <-> webapp
+| Navegador <-> webapp (Nginx)
 | HTTPS
-| HTML/JS/CSS estático (SPA), peticiones `fetch` a la API del backend
+| HTML/JS/CSS estático (SPA), peticiones `fetch`/`EventSource` a rutas
+  relativas (`/auth/*`, `/api/*`) -- Nginx las reenvía al backend bajo el
+  mismo origen, así que de cara al navegador todo vive en un solo dominio
 
-| webapp <-> users
-| HTTPS + JSON, cookie de sesión firmada (`SessionMiddleware`)
+| webapp (Nginx) <-> backend
+| HTTP interno (red Docker `monitor-net`) + JSON, cookie de sesión
+  firmada (`SessionMiddleware`)
 | Estado de autenticación por plataforma, informe de exposición
   (incluido vía streaming SSE)
 
-| users <-> Reddit / Instagram
+| backend <-> Reddit / Instagram
 | HTTPS (OAuth 2.0 + REST/JSON)
 | Intercambio de `code` por `access_token`, lectura de perfil y
   contenido público
 
-| users <-> Mistral AI
-| HTTPS + JSON, solo bajo demanda explícita del usuario
-| Informe ya generado (agregados, no publicaciones originales),
-  respuesta con conclusiones en lenguaje natural
+| backend <-> Mistral AI
+| HTTPS + JSON, automático en cuanto hay informe/atributos que analizar
+  (sin acción explícita del usuario)
+| Informe ya generado (agregados, no publicaciones originales) o
+  texto/bio públicos; respuesta con veredicto+conclusiones o atributos
+  estructurados según el caso
 
-| users <-> índice FAISS (local)
+| backend <-> índice FAISS (local)
 | Acceso a disco/memoria, sin red en tiempo de ejecución
 | Embeddings de imágenes de referencia de España, construidos offline
-  (ver `users/scripts/`) a partir del dataset OSV-5M de Hugging Face
+  (ver `backend/scripts/`) a partir del dataset OSV-5M de Hugging Face
 
-| Prometheus <-> users
+| Prometheus <-> backend
 | HTTP (scrape interno, red Docker `monitor-net`)
 | Métricas de la instrumentación FastAPI (`/metrics`)
 

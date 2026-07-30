@@ -97,7 +97,10 @@ Ordenados de mayor a menor impacto sobre el calendario/alcance del TFG.
   reanudables tras interrupción, y caché de Hugging Face redirigida a
   una carpeta controlada que se vacía tras cada shard para no acumular
   disco. El módulo es opcional: sin el índice construido, el resto de
-  la app funciona igual.
+  la app funciona igual. Mitigación adicional tras un incidente real
+  (ver fila siguiente): `recover_metadata.py` permite reconstruir
+  `metadata.csv` a partir de las imágenes ya descargadas, sin tener que
+  repetir la descarga completa.
 
 | Precisión limitada del módulo de geolocalización de fotos
   (nivel de provincia, no de calle — ver ADR-9)
@@ -107,12 +110,47 @@ Ordenados de mayor a menor impacto sobre el calendario/alcance del TFG.
   (mensaje de "estimación aproximada" junto al mapa). No se presenta
   como una capacidad equivalente a herramientas comerciales.
 
-| Dependencia del tier gratuito de Mistral AI para el análisis con IA
+| Dependencia del tier gratuito de Mistral AI, usado por dos funciones
+  independientes (análisis del informe y extracción de atributos)
   (límite de peticiones/minuto y tope mensual de tokens)
 | Media
 | Bajo
-| El módulo no reintenta ni degrada a un proveedor de pago al agotarse
-  la cuota (HTTP 429): informa de que la función no está disponible
-  ahora mismo, sin generar ningún gasto no presupuestado. Es una
-  función complementaria opcional, no crítica para el resto del informe.
+| Ninguna de las dos llamadas reintenta ni degrada a un proveedor de
+  pago al agotarse la cuota (HTTP 429): cada una informa por separado de
+  que no está disponible ahora mismo, sin generar ningún gasto no
+  presupuestado. Ambas son funciones complementarias opcionales, no
+  críticas para el resto del informe -- si una falla, la otra puede
+  seguir funcionando con normalidad.
+
+| Pérdida silenciosa de la columna `id` al guardar `metadata.csv`
+  (`download_osv5m_spain.py`/`_world.py` usaban el id como índice del
+  DataFrame y luego guardaban con `to_csv(index=False)`, descartándolo
+  sin ningún error visible)
+| Alta (ya materializado y corregido)
+| Alto (mientras estuvo activo: ninguna imagen descargada podía casarse
+  con su fila de metadatos, invalidando por completo la construcción del
+  índice sin ningún mensaje de error claro -- solo un
+  `ValueError: need at least one array to concatenate` al final del
+  proceso, tras haber "procesado" cientos de miles de filas)
+| Corregido en ambos scripts (`reset_index()` antes de guardar);
+  hardened además la detección de la columna `id` en
+  `build_faiss_index.py` para fallar con un mensaje claro en vez de
+  colisionar en silencio con otra columna. `recover_metadata.py`
+  permite reconstruir el `metadata.csv` de datasets ya descargados con
+  la versión rota, sin tener que repetir la descarga de imágenes.
+
+| Dependencias de geolocalización ausentes en la imagen Docker
+  desplegada, aunque el índice FAISS esté correctamente construido y
+  montado (`torch`/`faiss`/`transformers` no estaban en ningún
+  `requirements*.txt` instalado por el `Dockerfile`, bajo la premisa
+  incorrecta de que "solo hacen falta para construir el índice")
+| Alta (ya materializado y corregido)
+| Medio (la función se reportaba como "no disponible" de forma
+  indistinguible de un índice mal construido, dificultando el
+  diagnóstico)
+| Corregido con `requirements-vision.txt` + `ARG WITH_GEOLOCATION` en el
+  `Dockerfile` (ver ADR-15); test dedicado
+  (`TestGeolocationAvailable`) que cubre explícitamente el caso "índice
+  presente pero dependencia no importable", que es justo el que pasó
+  desapercibido la primera vez.
 |===

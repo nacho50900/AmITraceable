@@ -31,7 +31,8 @@ microservicio Python aparte solo para NLP; reescribir todo en Node
 usando bindings de NLP menos maduros.
 
 *Decisión*: sustituir el contenido de `users/` por Python/FastAPI
-completo, conservando la carpeta y la infraestructura circundante.
+completo, conservando inicialmente la carpeta y la infraestructura
+circundante; renombrada más adelante a `backend/` (ver ADR-7).
 
 *Consecuencias*: (+) acceso directo al ecosistema NLP de Python
 (spaCy, scikit-learn) sin llamadas entre servicios; (-) hubo que
@@ -113,12 +114,21 @@ Prometheus/Grafana, GitHub Actions y SonarCloud configurados.
 
 *Decisión*: partir de ese repositorio, eliminando el servicio `gamey`
 (Rust, ajeno al TFG) y sustituyendo el contenido de `users/` (antes
-Node) por el backend Python.
+Node) por el backend Python. La carpeta se mantuvo con el nombre
+heredado (`users/`) durante buena parte del desarrollo -- coste de
+oportunidad aceptado frente a tocar Docker Compose, CI y SonarCloud
+antes de que el resto del proyecto estuviera estable -- y se renombró a
+`backend/` más adelante, actualizando esas mismas piezas de golpe.
 
 *Consecuencias*: (+) ahorro significativo de tiempo de configuración de
 infraestructura; (-) necesidad de mantener consistencia de convenciones
 heredadas (nombres de servicios, puertos, estructura de carpetas) aunque
-el dominio del proyecto no tenga relación con el original.
+el dominio del proyecto no tenga relación con el original; (-) el
+rename posterior tuvo que tocar simultáneamente `docker-compose.yml`, dos
+workflows de GitHub Actions, `sonar-project.properties`, `.gitignore` y
+la configuración de Prometheus -- todos los sitios que hacían referencia
+literal a la carpeta por nombre, un recordatorio de que ese acoplamiento
+disperso tiene coste real cuando llega el momento de deshacerlo.
 
 === ADR-8: Estimación de k-anonimato con proporciones agregadas del INE, no una base de datos sintética
 
@@ -195,6 +205,12 @@ reintentos); (-) calidad de respuesta algo menor que la de modelos de
 proveedores más caros según benchmarks públicos, aceptado como
 compromiso razonable para una función complementaria opcional.
 
+*Nota*: este mismo razonamiento de jurisdicción aplicó también, sin
+volver a discutirlo desde cero, cuando se añadió una segunda integración
+independiente con el mismo proveedor (`nlp/ai_attribute_extraction.py`,
+ver ADR-13) que envía texto/bio públicos en vez de un informe ya
+agregado.
+
 === ADR-11: Progreso en vivo vía Server-Sent Events, no polling ni WebSockets
 
 *Contexto*: el análisis completo (sobre todo con geolocalización de
@@ -219,3 +235,131 @@ temporizador simulado); (+) más simple de implementar y depurar que
 WebSockets para un flujo unidireccional; (-) dos endpoints distintos
 para la misma lógica de negocio (`_build_report` compartido entre
 ambos, para no duplicar la orquestación).
+
+=== ADR-12: Webapp y backend bajo el mismo origen (proxy de Nginx), en vez de `VITE_API_URL` absoluto
+
+*Contexto*: en desarrollo local con un túnel rápido de Cloudflare
+(`trycloudflare.com`, gratuito) para poder probar el login de Instagram
+(que exige `redirect_uri` HTTPS), la webapp y el backend vivían en
+dominios distintos. Cada reinicio del túnel generaba una URL nueva que
+había que propagar manualmente a tres sitios: `INSTAGRAM_REDIRECT_URI`,
+el panel de Meta for Developers, y `VITE_API_URL` de la webapp.
+
+*Alternativas consideradas*: automatizar la propagación de la URL nueva
+con un script que reescribiera `.env` y reconstruyera la webapp en cada
+reinicio del túnel (descartado: sigue exigiendo un paso manual en Meta,
+que no tiene API para gestionar su lista de redirect URIs válidos, así
+que la automatización no eliminaba el cuello de botella real, solo lo
+desplazaba); usar un túnel con nombre/persistente de Cloudflare
+(descartado por el momento: exige un dominio propio en Cloudflare, fuera
+del alcance gratuito del proyecto).
+
+*Decisión*: servir la webapp y el backend bajo un único origen. El
+Nginx de la imagen de la webapp hace de proxy inverso hacia el backend
+(`/auth/*`, `/api/*`) bajo el mismo dominio de cara al navegador; la
+webapp se construye con `VITE_API_URL` vacío (rutas relativas). El
+`redirect_uri` de Instagram y el destino de la redirección final tras el
+login se derivan del header `Host` de la petición entrante cuando no hay
+un valor fijo en `.env` (`auth/dynamic_origin.py`).
+
+*Consecuencias*: (+) un único túnel apuntando al puerto de la webapp
+sirve también, transparentemente, la autenticación y la API; (+) solo
+queda un paso manual (dar de alta la URL en Meta), no tres sitios que
+sincronizar; (+) el mismo mecanismo simplifica también producción (ya no
+hace falta un `DEPLOY_HOST` para construir la imagen de la webapp,
+Docker resuelve `backend` por DNS interno igual en local que
+desplegado); (-) la derivación dinámica solo es correcta cuando webapp y
+backend comparten origen de verdad -- documentado explícitamente para no
+asumir por error que sirve también para desarrollo sin Docker con
+puertos distintos (`npm run dev` + `uvicorn` sueltos).
+
+=== ADR-13: Extracción de atributos con IA como complemento de las regex, nunca sustituto
+
+*Contexto*: las regex de `demographic_extraction.py` tienen un
+vocabulario fijo ("estudio X", "estudiante de X"...); cualquier
+redacción real que no encaje se pierde en silencio (p. ej. "voy a 2º de
+Enfermería").
+
+*Alternativas consideradas*: sustituir las regex por extracción vía IA
+por completo (descartado: perdería la garantía de coincidencia exacta y
+determinista que ya funcionaba bien, y encarecería/ralentizaría el
+análisis incluso para los casos que las regex ya resolvían gratis);
+pedir a la IA que decidiera directamente la categoría del INE
+correspondiente (descartado: una alucinación del modelo podría colar una
+categoría inventada como si fuera una estimación de población real).
+
+*Decisión*: `nlp/ai_attribute_extraction.py` corre siempre después de
+las regex y solo rellena los campos que estas no encontraron
+(`merge_findings`, con las regex teniendo prioridad). El LLM solo
+propone texto libre; la normalización final contra las tablas del INE
+la sigue haciendo el propio código, igual que para las regex. Además,
+propone por separado una estimación de sexo por convención cultural del
+nombre público de la cuenta, marcada con una procedencia distinta
+(`ia_nombre`) y una nota de menor fiabilidad explícita en el informe --
+nunca se mezcla con una autodeclaración real en el mismo nivel de
+confianza.
+
+*Consecuencias*: (+) capta redacciones libres sin perder la
+trazabilidad ni la resistencia a alucinaciones del enfoque por regex;
+(+) coherente con el principio de explicabilidad del resto del proyecto
+(ver <<section-concepts>>); (-) el análisis ahora depende, para esta
+mejora concreta, de una llamada de red adicional a un tercero (Mistral),
+mitigado por ser opcional y degradarse con gracia sin `MISTRAL_API_KEY`.
+
+=== ADR-14: Análisis del informe con IA disparado automáticamente, no bajo demanda
+
+*Contexto*: la primera versión exigía que el usuario pulsara
+explícitamente "Analizar con IA" tras ver el informe.
+
+*Decisión*: se dispara solo, en cuanto el informe principal está
+disponible, sin confirmación adicional del usuario.
+
+*Justificación*: el consentimiento OAuth inicial ya cubre todo el
+análisis que la herramienta hace sobre la cuenta del usuario; un botón
+adicional para una llamada que solo envía agregados ya generados (nunca
+las publicaciones originales) no añadía ninguna protección de privacidad
+real, solo fricción de interfaz. La función sigue siendo aislada y
+opcional en caso de fallo (sin `MISTRAL_API_KEY`, o si Mistral no
+responde, el resto del informe no se ve afectado) -- lo único que
+cambió es cuándo se dispara, no las garantías de degradación.
+
+*Consecuencias*: (+) el usuario ve el veredicto y las conclusiones sin
+un paso extra; (-) una llamada más a Mistral en cada análisis (incluso
+si el usuario no llega a mirar esa sección), aceptado por ser
+gratuita/de bajo coste y por degradarse sin romper nada si falla.
+
+=== ADR-15: Dependencias de geolocalización activables por build-arg, con precarga en el arranque
+
+*Contexto*: `torch`/`faiss`/`transformers` no estaban en
+`requirements.txt` bajo la premisa de que "solo hacen falta para
+construir el índice" (un script que se corre aparte, no en el backend
+desplegado). Esa premisa resultó ser incorrecta: el propio análisis en
+producción también necesita esas librerías para calcular el embedding de
+cada foto del usuario y consultar el índice ya construido -- sin ellas
+en la imagen del backend, la función se reporta como "no disponible"
+aunque el índice exista y esté montado correctamente.
+
+*Alternativas consideradas*: instalarlas siempre en `requirements.txt`
+(descartado por defecto: cientos de MB extra en instalaciones que no
+usan Instagram o no quieren geolocalización); mantener el bug
+implícitamente y limitarse a documentar "esta función requiere pasos
+adicionales que no automatizamos" (descartado: no es coherente con el
+resto del proyecto, que sí tiene la ambición de que los módulos
+opcionales se activen limpiamente).
+
+*Decisión*: `requirements-vision.txt` aparte, instalado en la imagen
+Docker solo si se construye con `--build-arg WITH_GEOLOCATION=true`
+(activado por defecto en `docker-compose.yml`), usando el índice de
+PyTorch solo-CPU (más ligero que el paquete de PyPI por defecto, que
+incluye CUDA). El modelo y el índice se precargan en el `lifespan` de
+FastAPI al arrancar el contenedor, no en la primera petición de
+análisis, y la caché de los pesos del modelo se persiste en un volumen
+para no volver a descargarlos en cada reinicio.
+
+*Consecuencias*: (+) instalaciones sin geolocalización siguen siendo
+ligeras; (+) el primer usuario en analizar una cuenta de Instagram tras
+un despliegue no paga el coste de cargar el modelo; (+) el modelo no se
+vuelve a descargar en cada reinicio del contenedor; (-) activar
+geolocalización añade varios minutos a la primera construcción de la
+imagen (descarga de `torch`), mitigado con timeouts/reintentos más
+generosos en `pip` para conexiones lentas.

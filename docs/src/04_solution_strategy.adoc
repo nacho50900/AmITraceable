@@ -19,9 +19,10 @@ ifndef::imagesdir[:imagesdir: ../images]
 | Backend Python (FastAPI) en vez de reutilizar el servicio Node de la
   plantilla
 | El ecosistema de NLP necesario (spaCy, TF-IDF vía scikit-learn) es
-  nativo de Python. Se mantiene la carpeta `users/` y toda su
-  infraestructura circundante (Docker, Prometheus/Grafana, tests, CI) de
-  la plantilla universitaria, sustituyendo únicamente el contenido.
+  nativo de Python. Se conserva toda la infraestructura circundante
+  (Docker, Prometheus/Grafana, tests, CI) de la plantilla universitaria,
+  sustituyendo el contenido del servicio Node original y, más adelante,
+  renombrando su carpeta de `users/` (nombre heredado) a `backend/`.
 
 | Modelo de datos genérico (`SocialPost`/`SocialProfile`) en vez de un
   modelo específico de una plataforma reutilizado para las demás
@@ -89,4 +90,32 @@ ifndef::imagesdir[:imagesdir: ../images]
 | Sustituye la espera opaca del análisis por hitos de progreso reales,
   sin la complejidad añadida de WebSockets para un flujo que solo
   necesita ser unidireccional (ver ADR-11).
+
+| Análisis con IA automático, no bajo demanda
+| El primer diseño exigía que el usuario pulsara un botón para analizar
+  el informe con IA. Se cambió a disparo automático (en cuanto el
+  informe está listo) porque el consentimiento OAuth inicial ya cubre
+  todo el análisis, y un botón adicional no añadía ninguna protección
+  real -- solo fricción. El coste (una llamada más a Mistral por
+  análisis) se acepta porque la función sigue siendo aislada y opcional:
+  si falla o no está configurada, el resto del informe no se ve
+  afectado.
+
+| Webapp y backend bajo el mismo origen (proxy de Nginx)
+| El desarrollo local con túneles rápidos de Cloudflare (URL nueva en
+  cada reinicio) chocaba con tener la webapp y el backend en dominios
+  distintos: el `redirect_uri` de Instagram y la redirección final tras
+  el login necesitaban conocer esa URL cambiante en dos sitios. Se
+  resolvió sirviendo ambos bajo un único origen (Nginx de la webapp hace
+  de proxy hacia el backend, ver ADR-12) y derivando esas URLs del
+  `Host` de cada petición cuando no hay un valor fijo en `.env` -- así
+  solo queda un paso manual (dar de alta la URL en el panel de Meta), no
+  dos.
+
+| Precarga del modelo de geolocalización en el arranque del contenedor
+| Cargar el modelo DINOv2 y el índice FAISS de forma perezosa (en la
+  primera petición de análisis) significaba que el primer usuario en
+  analizar una cuenta de Instagram tras un despliegue pagaba ese coste
+  de arranque. Se adelantó al `lifespan` de arranque de FastAPI: el
+  coste lo paga `docker-compose up`, no el usuario.
 |===

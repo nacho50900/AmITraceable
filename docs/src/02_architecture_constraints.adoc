@@ -40,8 +40,11 @@ ifndef::imagesdir[:imagesdir: ../images]
   monitorización Prometheus/Grafana, CI en GitHub Actions y análisis de
   calidad con SonarCloud. Se eliminó el servicio `gamey` (Rust, ajeno al
   TFG) y se sustituyó el contenido Node.js de `users/` por el backend
-  Python, manteniendo el nombre de carpeta y toda la infraestructura
-  circundante.
+  Python. La carpeta se mantuvo con el nombre heredado (`users/`) durante
+  buena parte del desarrollo, y se renombró más adelante a `backend/`
+  (nombre que sí describe su función) una vez estabilizado el resto de la
+  infraestructura que dependía de esa ruta (Docker Compose, CI,
+  SonarCloud, Prometheus).
 |===
 
 === Restricciones organizativas
@@ -97,5 +100,11 @@ ifndef::imagesdir[:imagesdir: ../images]
 | Explicabilidad ante sofisticación
 | Las heurísticas de inferencia de atributos son deliberadamente simples
   (listas curadas + regex) en vez de modelos de machine learning, para
-  que cualquier resultado se pueda justificar con evidencia trazable.
+  que cualquier resultado se pueda justificar con evidencia trazable. La
+  extracción de autodeclaraciones vía IA (Mistral, opcional) sigue este
+  mismo principio en vez de romperlo: solo rellena huecos que la regex no
+  encontró (nunca los sustituye), y cada campo detectado por IA queda
+  marcado con su procedencia (`ia` / `ia_nombre`) y su evidencia, con
+  menor fiabilidad explícita cuando la señal es más débil (p. ej. una
+  estimación de sexo por el nombre público de la cuenta).
 |===

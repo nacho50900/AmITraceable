@@ -105,9 +105,11 @@ ifndef::imagesdir[:imagesdir: ../images]
 
 | LLM (Large Language Model)
 | Modelo de lenguaje de gran escala. En este proyecto, Mistral AI se usa
-  bajo demanda para generar conclusiones en lenguaje natural a partir
-  del informe ya calculado — sin entrenamiento ni ajuste fino propio, ver
-  ADR-10.
+  automáticamente (sin acción explícita del usuario) para dos funciones
+  independientes: generar un veredicto y conclusiones en lenguaje natural
+  a partir del informe ya calculado, y complementar la detección de
+  autodeclaraciones en texto — sin entrenamiento ni ajuste fino propio en
+  ninguno de los dos casos, ver ADR-10, ADR-13 y ADR-14.
 
 | Portabilidad de datos (RGPD Art. 20)
 | Derecho de una persona a recibir sus datos personales en un formato
@@ -160,6 +162,26 @@ ifndef::imagesdir[:imagesdir: ../images]
 | Prometheus / Grafana
 | Prometheus: sistema de recolección de métricas por *scraping*.
   Grafana: herramienta de visualización de esas métricas en dashboards.
+
+| Pictograma (isotype chart)
+| Representación visual de una proporción usando repetición de un
+  icono simple (un icono = una porción de la magnitud representada), en
+  vez de un gráfico numérico abstracto. Usado en este proyecto para
+  mostrar cuánta población comparte una característica detectada
+  (`PopulationPictogram.tsx`): un monigote turquesa frente a N negros.
+
+| Proxy inverso (reverse proxy)
+| Servidor que recibe peticiones en nombre de otro servicio y se las
+  reenvía, devolviendo la respuesta como si la hubiera generado él
+  mismo. En este proyecto, el Nginx de la webapp actúa de proxy inverso
+  hacia el backend, para que ambos compartan un único origen de cara al
+  navegador (ver ADR-12).
+
+| `lifespan` (FastAPI)
+| Gestor de contexto asíncrono que FastAPI ejecuta al arrancar y al
+  apagar la aplicación, usado en este proyecto para precargar el modelo
+  de geolocalización antes de aceptar peticiones (ver ADR-15), en vez de
+  esperar a la primera petición que lo necesite.
 
 | TFG
 | Trabajo de Fin de Grado.

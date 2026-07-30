@@ -12,7 +12,7 @@ Reddit" en el mazo de cartas hasta que llega autenticado al dashboard.
 ----
 actor Usuario
 participant "webapp\n(Landing)" as FE
-participant "users\n(reddit_oauth.py)" as BE
+participant "backend\n(reddit_oauth.py)" as BE
 participant "Reddit\n(authorize + token)" as Reddit
 
 Usuario -> FE: Selecciona carta "Reddit" y pulsa "Conectar"
@@ -33,21 +33,26 @@ Usuario -> FE: GET /dashboard?platform=reddit
 === Escenario 2: Autenticación y consentimiento (Instagram)
 
 Mismo patrón que Reddit, con un paso adicional: Instagram exige canjear
-el token corto por uno de larga duración (60 días).
+el token corto por uno de larga duración (60 días). El `redirect_uri`
+usado en ambos pasos se deriva del `Host` de la petición
+(`auth/dynamic_origin.py`) cuando no hay un valor fijo en `.env` -- debe
+ser idéntico en `/login` y en `/callback`, o Instagram rechaza el canje.
 
 [plantuml, "Secuencia OAuth Instagram", png]
 ----
 actor Usuario
 participant "webapp\n(Landing)" as FE
-participant "users\n(instagram_oauth.py)" as BE
+participant "backend\n(instagram_oauth.py)" as BE
 participant "Instagram\n(authorize + token)" as IG
 
 Usuario -> FE: Selecciona carta "Instagram" y pulsa "Conectar"
 FE -> BE: GET /auth/instagram/login
+BE -> BE: redirect_uri = INSTAGRAM_REDIRECT_URI o Host de la petición
 BE --> Usuario: 307 redirect a Instagram (authorize)
 Usuario -> IG: Pantalla de consentimiento (cuenta Business/Creator)
 IG --> Usuario: aprueba
 IG -> BE: GET /auth/instagram/callback?code=...&state=...
+BE -> BE: mismo redirect_uri que en /login
 BE -> IG: POST /oauth/access_token (code -> token corto)
 IG --> BE: access_token corto + user_id
 BE -> IG: GET /access_token?grant_type=ig_exchange_token
@@ -72,7 +77,9 @@ participant "nlp.fingerprint" as FP
 participant "nlp.attribute_inference" as Attr
 participant "scoring.privacy_score" as Score
 participant "report.generator" as Report
-participant "nlp.demographic_extraction\n+ scoring.k_anonymity" as KAnon
+participant "nlp.demographic_extraction\n(regex)" as Regex
+participant "nlp.ai_attribute_extraction\n(Mistral, opcional)" as AiAttr
+participant "scoring.k_anonymity" as KAnon
 participant "vision.geolocation\n(solo Instagram, opcional)" as Geo
 
 FE -> Router: GET /api/analyze/{platform}/stream
@@ -88,52 +95,89 @@ Attr --> Router: [InferredAttribute]
 Router -> Score: compute_score(posts, fingerprint, attrs)
 Score --> Router: PrivacyScore
 Router -> Report: generate_report(platform, ..., progress_callback)
-Report -> KAnon: extract_demographics(posts) + estimate_population_narrowing(...)
-KAnon --> Report: [PopulationEstimate]
+Report -> Regex: extract_demographics(posts + bio)
+Regex --> Report: DemographicFindings (parcial)
+alt MISTRAL_API_KEY configurada
+  Report --> Report: SSE: "Buscando autodeclaraciones con IA..." (progreso)
+  Report -> AiAttr: extract_demographics_with_ai(posts, username, full_name, bio)
+  AiAttr --> Report: DemographicFindings (solo huecos que la regex no encontró)
+  Report -> Report: merge_findings(regex, ia) -- la regex nunca se pisa
+end
+Report -> KAnon: estimate_population_narrowing(findings combinados)
+KAnon --> Report: [PopulationEstimate] (con proportion ya calculada)
 alt platform == "instagram"
   Report -> Geo: estimate_locations_for_posts(posts, progress_callback)
   Geo --> Report: SSE: "Analizando fotos..." (progreso, N/M)
-  Geo --> Report: [ImageLocationPoint]
+  Geo --> Report: GeolocationOutcome(index_available, [todas las estimaciones])
+  Report -> Report: solo las de confianza >= umbral alimentan KAnon;\ntodas se guardan en image_location_points
 end
 Report --> Router: ExposureReport
 Router --> FE: SSE final: {"done": true, "report": {...}}
 ----
 
-=== Escenario 4: Análisis del informe con IA (opcional, bajo demanda)
+=== Escenario 4: Análisis del informe con IA (opcional, automático)
 
-Independiente del escenario anterior: el usuario ya tiene el informe en
-pantalla y pulsa explícitamente "Analizar con IA".
+Independiente del escenario anterior en el backend, pero encadenado en el
+frontend: en cuanto `Dashboard.tsx` recibe el `ExposureReport` (evento
+final del streaming del escenario 3), dispara esta llamada por su cuenta
+-- sin que el usuario tenga que pulsar nada.
 
 [plantuml, "Secuencia de análisis con IA", png]
 ----
-actor Usuario
-participant "webapp\n(AiSummaryCard)" as FE
+participant "webapp\n(Dashboard)" as FE
+participant "webapp\n(AiSummaryCard)" as Card
 participant "analysis_router\n(ai_summary)" as Router
 participant "ai_analysis.py" as AI
 participant "Mistral AI API" as Mistral
 
-Usuario -> FE: Pulsa "Analizar con IA"
-FE -> Router: POST /api/analyze/ai-summary (ExposureReport ya generado)
+FE -> Card: monta con el ExposureReport ya recibido
+Card -> Router: POST /api/analyze/ai-summary (ExposureReport, con recommendations incluidas)
 Router -> AI: analyze_report_with_ai(report)
 AI -> AI: ¿MISTRAL_API_KEY configurada?
 alt sin API key
   AI --> Router: AiAnalysisUnavailable
-  Router --> FE: 503 (no disponible)
+  Router --> Card: 503 (no disponible)
 else con API key
-  AI -> Mistral: POST /v1/chat/completions (informe en JSON + system prompt)
+  AI -> Mistral: POST /v1/chat/completions\n(informe en JSON + system prompt,\nresponse_format=json_object)
   alt cuota agotada (429)
     Mistral --> AI: 429
     AI --> Router: AiAnalysisUnavailable (sin reintentar)
-    Router --> FE: 503 (no disponible ahora mismo)
+    Router --> Card: 503 (no disponible ahora mismo)
   else éxito
-    Mistral --> AI: conclusiones en lenguaje natural
-    AI --> Router: [conclusiones]
-    Router --> FE: 200 {"conclusions": [...]}
+    Mistral --> AI: {"veredicto": "...", "conclusiones": [...]}
+    AI -> AI: parsea JSON, filtra items no-string/vacíos
+    AI --> Router: {verdict, conclusions}
+    Router --> Card: 200 {"verdict": "...", "conclusions": [...]}
   end
 end
 ----
 
-=== Escenario 5: Integración continua (push a `main`)
+=== Escenario 5: Arranque del contenedor (precarga de geolocalización)
+
+Ocurre antes de que el backend acepte ninguna petición. Sustituye la
+carga perezosa (en la primera petición de análisis) para que el primer
+usuario no pague ese coste.
+
+[plantuml, "Secuencia de arranque", png]
+----
+participant "docker-compose up" as Docker
+participant "main.py\n(lifespan)" as Main
+participant "vision.geolocation" as Geo
+
+Docker -> Main: arranca el proceso uvicorn
+Main -> Geo: _geolocation_available()?
+alt índice construido y dependencias instaladas
+  Main -> Geo: _lazy_load() (en un hilo aparte, no bloquea el event loop)
+  Geo -> Geo: descarga/carga pesos DINOv2 (caché en volumen persistente)
+  Geo -> Geo: lee el índice FAISS de disco
+  Geo --> Main: modelo e índice en memoria
+else no disponible
+  Main -> Main: no hace nada, sigue el arranque normal
+end
+Main --> Docker: backend listo para aceptar peticiones
+----
+
+=== Escenario 6: Integración continua (push a `main`)
 
 [plantuml, "Secuencia de CI", png]
 ----
@@ -144,9 +188,9 @@ participant "SonarCloud" as Sonar
 
 Dev -> GH: git push (main)
 GH -> CI: dispara workflow build.yml
-CI -> CI: cache npm (webapp) / pip (users), instala si falta
+CI -> CI: cache npm (webapp) / pip (backend), instala si falta
 CI -> CI: npm run test:coverage (webapp) -> lcov.info
-CI -> CI: pytest --cov=app --cov-report=xml (users) -> coverage.xml
+CI -> CI: pytest --cov=app --cov-report=xml (backend) -> coverage.xml
 CI -> Sonar: sonar-scanner (fuentes + coberturas)
 Sonar --> CI: resultado del Quality Gate
 CI --> Dev: estado del workflow (verde/rojo) en GitHub
