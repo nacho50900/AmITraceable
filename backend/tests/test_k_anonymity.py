@@ -114,6 +114,41 @@ class TestEstimatePopulationNarrowing:
         assert steps[0].remaining_population is None
         assert steps[0].risk_level == "no_estimable"
 
+    def test_comunidad_autonoma_used_when_no_municipio_or_provincia(self):
+        findings = DemographicFindings(
+            comunidad_autonoma="canarias",
+            evidence={"comunidad_autonoma": ["https://ig/1"]},
+            source={"comunidad_autonoma": "imagen"},
+        )
+
+        steps = estimate_population_narrowing(findings)
+
+        assert len(steps) == 1
+        step = steps[0]
+        assert step.category == "ubicacion"
+        assert "comunidad autónoma" in step.attribute_label.lower()
+        assert "canarias" in step.attribute_label.lower()
+        assert step.remaining_population is not None
+        assert step.remaining_population > 0
+        assert step.source == "imagen"
+
+    def test_provincia_takes_priority_over_comunidad_autonoma_when_both_present(self):
+        findings = DemographicFindings(provincia="las palmas", comunidad_autonoma="canarias")
+
+        steps = estimate_population_narrowing(findings)
+
+        assert len(steps) == 1
+        assert "provincia" in steps[0].attribute_label.lower()
+
+    def test_unknown_comunidad_autonoma_is_no_estimable_not_a_crash(self):
+        findings = DemographicFindings(comunidad_autonoma="comunidad_inventada")
+
+        steps = estimate_population_narrowing(findings)
+
+        assert len(steps) == 1
+        assert steps[0].remaining_population is None
+        assert steps[0].risk_level == "no_estimable"
+
     def test_universidad_and_empresa_are_always_no_estimable(self):
         findings = DemographicFindings(universidad="Salamanca", empresa="Acme")
 

@@ -20,10 +20,12 @@ import unicodedata
 from dataclasses import dataclass, field
 
 from app.data.ine_reference import (
+    AUTONOMOUS_COMMUNITY_PROVINCES,
     MUNICIPALITY_POPULATION,
     OCCUPATION_DISTRIBUTION,
     PROVINCE_POPULATION,
     STUDIES_DISTRIBUTION,
+    resolve_autonomous_community_in_text,
 )
 from app.models.schemas import SocialPost
 
@@ -43,6 +45,26 @@ class DemographicFindings:
     edad: int | None = None
     provincia: str | None = None
     municipio: str | None = None
+    # Se rellena en dos casos: (1) autodeclaración explícita de una
+    # comunidad autónoma COMPLETA en el propio texto (p.ej. "vivo en
+    # Canarias", sin decir la isla/provincia) -- lo detecta este mismo
+    # módulo, ver `_match_location`; o (2) geolocation.py (vía
+    # report/generator.py) cuando la estimación por imagen solo identifica
+    # una comunidad con VARIAS provincias posibles y no hay autodeclaración
+    # de texto que la sustituya. En ambos casos es porque no se puede
+    # reducir a una sola provincia sin inventar información -- ver
+    # AUTONOMOUS_COMMUNITY_PROVINCES en ine_reference.py.
+    comunidad_autonoma: str | None = None
+    # Permalinks de fotos cuyo pie de foto indica que la persona está DE
+    # VIAJE/VACACIONES en ese sitio (no en su lugar de residencia habitual)
+    # -- ver app/nlp/travel_detection.py (regex) y ai_attribute_extraction.py
+    # (campo "fotos_de_viaje" del prompt). NUNCA lo rellena este módulo (solo
+    # detecta autodeclaraciones de sexo/edad/ubicación/etc., no intención de
+    # viaje); se deja aquí para que report/generator.py tenga un único sitio
+    # donde consultar "qué fotos NO debo usar para inferir dónde vive esta
+    # persona". No participa en merge_findings (no es un campo INE, es una
+    # exclusión que se une con travel_detection.py, no se sobrescribe).
+    travel_permalinks: set[str] = field(default_factory=set)
     estudios: str | None = None
     ocupacion: str | None = None
     universidad: str | None = None
@@ -95,7 +117,10 @@ def _mark_all_detected_as_texto(findings: DemographicFindings) -> None:
     """Todo lo detectado por este módulo viene de texto autodeclarado (por
     definición: es lo único que procesa). Se marca explícitamente para que
     el frontend pueda distinguirlo de lo que venga de geolocation.py."""
-    for attr_name in ("sexo", "edad", "provincia", "municipio", "estudios", "ocupacion", "universidad", "empresa"):
+    for attr_name in (
+        "sexo", "edad", "provincia", "municipio", "comunidad_autonoma",
+        "estudios", "ocupacion", "universidad", "empresa",
+    ):
         if getattr(findings, attr_name) is not None:
             findings.source[attr_name] = "texto"
 
@@ -175,7 +200,7 @@ def _try_detect_empresa(text: str, permalink: str, findings: DemographicFindings
 
 
 def _try_detect_location(text: str, permalink: str, findings: DemographicFindings) -> None:
-    if findings.provincia is not None and findings.municipio is not None:
+    if findings.provincia is not None or findings.municipio is not None or findings.comunidad_autonoma is not None:
         return
     _match_location(text, permalink, findings)
 
@@ -188,14 +213,34 @@ def _match_location(text: str, permalink: str, findings: DemographicFindings) ->
     m = re.search(r"\bvivo en ([a-z ]+)", lowered)
     candidate = m.group(1).strip() if m else None
 
-    if candidate:
-        muni_match = next((k for k in MUNICIPALITY_POPULATION if k in candidate), None)
-        if muni_match and findings.municipio is None:
-            findings.municipio = muni_match
-            findings.evidence.setdefault("municipio", []).append(permalink)
-            return
+    if not candidate:
+        return
 
-        prov_match = next((k for k in PROVINCE_POPULATION if k in candidate), None)
-        if prov_match and findings.provincia is None:
-            findings.provincia = prov_match
-            findings.evidence.setdefault("provincia", []).append(permalink)
+    muni_match = next((k for k in MUNICIPALITY_POPULATION if k in candidate), None)
+    if muni_match:
+        findings.municipio = muni_match
+        findings.evidence.setdefault("municipio", []).append(permalink)
+        return
+
+    prov_match = next((k for k in PROVINCE_POPULATION if k in candidate), None)
+    if prov_match:
+        findings.provincia = prov_match
+        findings.evidence.setdefault("provincia", []).append(permalink)
+        return
+
+    # Ni municipio ni provincia concreta: puede que haya nombrado una
+    # comunidad autónoma COMPLETA (p.ej. "vivo en Canarias", "vivo en
+    # Andalucía"). Si esa comunidad tiene una sola provincia, no hay
+    # ambigüedad y se usa directamente esa provincia (más específico); si
+    # tiene varias, se guarda al nivel de comunidad autónoma.
+    ccaa = resolve_autonomous_community_in_text(candidate)
+    if ccaa is None:
+        return
+
+    provinces = AUTONOMOUS_COMMUNITY_PROVINCES[ccaa]
+    if len(provinces) == 1:
+        findings.provincia = provinces[0]
+        findings.evidence.setdefault("provincia", []).append(permalink)
+    else:
+        findings.comunidad_autonoma = ccaa
+        findings.evidence.setdefault("comunidad_autonoma", []).append(permalink)

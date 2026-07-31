@@ -51,6 +51,15 @@ inesperada...), se devuelven unos `DemographicFindings` vacíos y el
 pipeline sigue con normalidad solo con lo que hayan encontrado las regex --
 mismo principio de "módulo opcional que nunca rompe el resto" que
 `vision/geolocation.py` y `ai_analysis.py`.
+
+También se pide un campo aparte "fotos_de_viaje": publicaciones cuyo texto
+indica que la persona está de viaje/vacaciones/de paso por un sitio. No es
+una autodeclaración de atributo (no rellena provincia/municipio), sino una
+lista de EXCLUSIÓN que usa report/generator.py para no confundir "dónde fue
+tomada esta foto" con "dónde vive esta persona" al combinar geolocalización
+de imagen con inferencia de residencia -- ver
+app/nlp/travel_detection.py (su equivalente por regex, que actúa como red
+de seguridad cuando no hay IA disponible) y `DemographicFindings.travel_permalinks`.
 """
 import json
 import logging
@@ -59,10 +68,12 @@ import httpx
 
 from app.config import settings
 from app.data.ine_reference import (
+    AUTONOMOUS_COMMUNITY_PROVINCES,
     MUNICIPALITY_POPULATION,
     OCCUPATION_DISTRIBUTION,
     PROVINCE_POPULATION,
     STUDIES_DISTRIBUTION,
+    resolve_autonomous_community,
 )
 from app.models.schemas import SocialPost
 from app.nlp.demographic_extraction import DemographicFindings, _strip_accents
@@ -75,7 +86,10 @@ MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
 _FREE_TEXT_FIELDS = ("universidad", "empresa")
 # Todos los campos que puede rellenar este módulo, en el mismo orden que
 # `DemographicFindings`, usado por `merge_findings`.
-_ALL_FIELDS = ("sexo", "edad", "provincia", "municipio", "estudios", "ocupacion", "universidad", "empresa")
+_ALL_FIELDS = (
+    "sexo", "edad", "provincia", "municipio", "comunidad_autonoma",
+    "estudios", "ocupacion", "universidad", "empresa",
+)
 
 _SYSTEM_PROMPT = (
     "Eres un extractor de datos. Se te da: (1) el nombre público y la biografía de una "
@@ -86,18 +100,31 @@ _SYSTEM_PROMPT = (
     "nunca inferencias o suposiciones tuyas. Responde EXCLUSIVAMENTE con un JSON con esta "
     "forma exacta, sin texto adicional ni backticks:\n"
     '{"sexo": "hombre"|"mujer"|null, "edad": <entero>|null, "provincia": <string>|null, '
-    '"municipio": <string>|null, "estudios": <string>|null, "ocupacion": <string>|null, '
-    '"universidad": <string>|null, "empresa": <string>|null, '
+    '"municipio": <string>|null, "comunidad_autonoma": <string>|null, "estudios": <string>|null, '
+    '"ocupacion": <string>|null, "universidad": <string>|null, "empresa": <string>|null, '
     '"sexo_por_nombre": "hombre"|"mujer"|null, '
+    '"fotos_de_viaje": [<identificador_de_publicacion>, ...], '
     '"evidence": {"<nombre_de_campo>": "<identificador_de_publicacion_o_bio>"}}\n'
     "Usa null si no hay una declaración explícita y clara para ese campo. No inventes "
     "datos que no estén literalmente en el texto. El campo 'evidence' debe indicar, para "
     "cada campo que no sea null, el identificador exacto (el que va entre corchetes, o la "
-    "palabra 'bio' si viene de la biografía) que lo prueba. 'sexo_por_nombre' es distinto "
+    "palabra 'bio' si viene de la biografía) que lo prueba. 'comunidad_autonoma' es DISTINTO "
+    "de 'provincia': úsalo SOLO cuando la persona diga que vive en una comunidad autónoma "
+    "española COMPLETA sin especificar la provincia concreta (p. ej. 'vivo en Canarias', 'soy "
+    "de Andalucía', 'vivo en el País Vasco'); si además especifica la provincia o ciudad "
+    "(p. ej. 'vivo en Las Palmas', 'vivo en Sevilla'), usa 'provincia' o 'municipio' en su "
+    "lugar y deja 'comunidad_autonoma' en null. 'sexo_por_nombre' es distinto "
     "de 'sexo': aquí NO busques una autodeclaración, sino tu mejor estimación de qué sexo "
     "sugiere culturalmente el NOMBRE PÚBLICO de la cuenta en español (p. ej. 'Ana' -> "
     "'mujer'); usa null si el nombre es ambiguo, es un alias/apodo sin relación con un "
-    "nombre real, o no se te ha proporcionado nombre."
+    "nombre real, o no se te ha proporcionado nombre. 'fotos_de_viaje' es una lista aparte, "
+    "sin relación con las autodeclaraciones anteriores: incluye ahí el identificador de "
+    "CUALQUIER publicación cuyo texto indique que la persona está de viaje, de vacaciones, "
+    "de paso, o visitando temporalmente un sitio que NO es necesariamente donde vive (p. ej. "
+    "'De viaje en Roma', 'Unos días en la playa', 'Visitando a mi prima en Londres'). El "
+    "objetivo es señalar publicaciones que NO deben usarse para deducir dónde vive la "
+    "persona habitualmente, aunque la foto en sí esté geolocalizada con confianza. Si un "
+    "texto no da ninguna pista de viaje/vacaciones, NO lo incluyas en esa lista."
 )
 
 
@@ -233,6 +260,24 @@ def _set_location(findings: DemographicFindings, parsed: dict, evidence_map: dic
         if matched:
             findings.provincia = matched
             _set_evidence(findings, "provincia", evidence_map)
+            return
+
+    # Ninguna coincidencia de municipio/provincia: puede que el modelo haya
+    # devuelto una comunidad autónoma COMPLETA en su propio campo (ver
+    # 'comunidad_autonoma' en _SYSTEM_PROMPT). Si esa comunidad tiene una
+    # sola provincia, no hay ambigüedad y se usa esa provincia directamente
+    # (más específico); si tiene varias, se guarda a nivel de comunidad.
+    ccaa_raw = parsed.get("comunidad_autonoma")
+    if isinstance(ccaa_raw, str) and ccaa_raw.strip():
+        ccaa = resolve_autonomous_community(ccaa_raw)
+        if ccaa is not None:
+            provinces = AUTONOMOUS_COMMUNITY_PROVINCES[ccaa]
+            if len(provinces) == 1:
+                findings.provincia = provinces[0]
+                _set_evidence(findings, "provincia", evidence_map)
+            else:
+                findings.comunidad_autonoma = ccaa
+                _set_evidence(findings, "comunidad_autonoma", evidence_map)
 
 
 def _to_findings(parsed: dict) -> DemographicFindings:
@@ -270,6 +315,10 @@ def _to_findings(parsed: dict) -> DemographicFindings:
         if isinstance(value, str) and value.strip():
             setattr(findings, field, value.strip())
             _set_evidence(findings, field, evidence_map)
+
+    fotos_de_viaje = parsed.get("fotos_de_viaje")
+    if isinstance(fotos_de_viaje, list):
+        findings.travel_permalinks = {p for p in fotos_de_viaje if isinstance(p, str) and p.strip()}
 
     return findings
 

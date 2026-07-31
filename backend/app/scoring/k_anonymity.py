@@ -34,6 +34,8 @@ from dataclasses import dataclass
 
 from app.data.ine_reference import (
     AGE_DISTRIBUTION_1Y,
+    AUTONOMOUS_COMMUNITY_DISPLAY_NAMES,
+    CCAA_POPULATION,
     MUNICIPALITY_POPULATION,
     OCCUPATION_DISTRIBUTION,
     PROVINCE_POPULATION,
@@ -171,26 +173,37 @@ def _location_note(source: str) -> str:
 
 
 def _step_location(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
-    """Usa municipio si está disponible (más específico); si no, provincia.
-    Nunca los dos a la vez (el municipio ya está contenido en la provincia;
-    aplicar ambos contaría el filtro geográfico dos veces).
+    """Usa municipio si está disponible (más específico); si no, provincia;
+    si no, comunidad autónoma (menos específico, solo lo rellena
+    geolocation.py -- ver `_assign_geolocated_region` en report/generator.py
+    -- cuando la imagen solo permite identificar una comunidad con varias
+    provincias, p.ej. Canarias). Nunca más de uno a la vez: cada nivel ya
+    contiene al siguiente, y aplicar varios contaría el filtro geográfico
+    más de una vez.
 
-    La población de un municipio/provincia no es una "proporción sobre el
-    total nacional" en el mismo sentido que sexo/edad -- es un recuento
-    absoluto. Para combinarlo con los filtros ya aplicados (sexo, edad),
-    asumimos que ese municipio/provincia tiene una pirámide de edad/sexo
-    similar a la nacional (limitación documentada en el docstring del
-    módulo) y reescalamos:
-    remaining_tras_geografia = poblacion_municipio * (remaining / TOTAL_ES)
+    La población de un municipio/provincia/comunidad no es una "proporción
+    sobre el total nacional" en el mismo sentido que sexo/edad -- es un
+    recuento absoluto. Para combinarlo con los filtros ya aplicados (sexo,
+    edad), asumimos que esa zona tiene una pirámide de edad/sexo similar a
+    la nacional (limitación documentada en el docstring del módulo) y
+    reescalamos: remaining_tras_geografia = poblacion_zona * (remaining / TOTAL_ES)
     """
-    location = findings.municipio or findings.provincia
-    if not location:
+    if findings.municipio:
+        location, table = findings.municipio, MUNICIPALITY_POPULATION
+        evidence_key = "municipio"
+        label = f"Vive en municipio: {location.title()}"
+    elif findings.provincia:
+        location, table = findings.provincia, PROVINCE_POPULATION
+        evidence_key = "provincia"
+        label = f"Vive en provincia: {location.title()}"
+    elif findings.comunidad_autonoma:
+        location, table = findings.comunidad_autonoma, CCAA_POPULATION
+        evidence_key = "comunidad_autonoma"
+        display_name = AUTONOMOUS_COMMUNITY_DISPLAY_NAMES.get(location, location.title())
+        label = f"Vive en comunidad autónoma: {display_name}"
+    else:
         return remaining, None
 
-    is_municipio = bool(findings.municipio)
-    table = MUNICIPALITY_POPULATION if is_municipio else PROVINCE_POPULATION
-    label = f"Vive en {'municipio' if is_municipio else 'provincia'}: {location.title()}"
-    evidence_key = "municipio" if is_municipio else "provincia"
     source = findings.source.get(evidence_key, "texto")
     evidence = findings.evidence.get(evidence_key, [])
 

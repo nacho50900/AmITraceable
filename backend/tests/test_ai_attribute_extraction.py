@@ -31,6 +31,7 @@ def _mock_content(**fields) -> dict:
         "edad": None,
         "provincia": None,
         "municipio": None,
+        "comunidad_autonoma": None,
         "estudios": None,
         "ocupacion": None,
         "universidad": None,
@@ -111,6 +112,51 @@ class TestSuccessfulExtraction:
         assert findings.source["municipio"] == "ia"
 
     @pytest.mark.asyncio
+    async def test_detects_multi_province_comunidad_autonoma(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(comunidad_autonoma="Canarias", evidence={"comunidad_autonoma": "bio"}),
+            )
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="ana", bio="Vivo en Canarias")
+
+        assert findings.comunidad_autonoma == "canarias"
+        assert findings.provincia is None
+        assert findings.source["comunidad_autonoma"] == "ia"
+        assert findings.evidence["comunidad_autonoma"] == ["bio"]
+
+    @pytest.mark.asyncio
+    async def test_single_province_comunidad_autonoma_resolves_to_province(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(comunidad_autonoma="Región de Murcia"))
+        )
+
+        findings = await extract_demographics_with_ai([_post("Vivo en Murcia")], username="ana")
+
+        assert findings.provincia == "murcia"
+        assert findings.comunidad_autonoma is None
+
+    @pytest.mark.asyncio
+    async def test_provincia_wins_over_comunidad_autonoma_when_both_present(self, monkeypatch, respx_mock):
+        """Si el modelo (por error o porque el texto lo permitía) devuelve
+        ambos campos, la provincia concreta es más específica y gana."""
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200, json=_mock_content(provincia="Las Palmas", comunidad_autonoma="Canarias")
+            )
+        )
+
+        findings = await extract_demographics_with_ai([_post("Vivo en Las Palmas, Canarias")], username="ana")
+
+        assert findings.provincia == "las palmas"
+        assert findings.comunidad_autonoma is None
+
+    @pytest.mark.asyncio
     async def test_edad_out_of_range_is_discarded(self, monkeypatch, respx_mock):
         monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
         respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content(edad=200)))
@@ -168,6 +214,33 @@ class TestSexoPorNombre:
         assert findings.sexo == "mujer"
         assert findings.source["sexo"] == "ia_nombre"
         assert findings.evidence["sexo"] == ["nombre público de la cuenta"]
+
+    @pytest.mark.asyncio
+    async def test_detects_travel_photos(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200, json=_mock_content(fotos_de_viaje=["https://x/1", "https://x/2"])
+            )
+        )
+
+        findings = await extract_demographics_with_ai(
+            [_post("De viaje por Italia", permalink="https://x/1"), _post("En casa", permalink="https://x/2")],
+            username="ana",
+        )
+
+        assert findings.travel_permalinks == {"https://x/1", "https://x/2"}
+
+    @pytest.mark.asyncio
+    async def test_missing_fotos_de_viaje_field_defaults_to_empty_set(self, monkeypatch, respx_mock):
+        """Si el LLM no devuelve el campo (o devuelve algo con forma
+        inesperada), no debe romper -- se queda como conjunto vacío."""
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content()))
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="ana")
+
+        assert findings.travel_permalinks == set()
 
     @pytest.mark.asyncio
     async def test_profile_name_and_bio_are_sent_in_prompt(self, monkeypatch, respx_mock):

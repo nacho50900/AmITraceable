@@ -174,6 +174,177 @@ MUNICIPALITY_POPULATION = {
     "teruel": 35_000,
 }
 
+# Mapeo comunidad autónoma -> provincias del INE que la componen (claves de
+# PROVINCE_POPULATION). Necesario porque `app/vision/geolocation.py` estima
+# ubicación a nivel de COMUNIDAD AUTÓNOMA (es la granularidad de la columna
+# "region" del dataset OSV-5M/Nominatim), mientras que PROVINCE_POPULATION
+# está a nivel de PROVINCIA -- sin este mapeo, ninguna estimación por imagen
+# podía casar nunca con la tabla de provincias y todo salía "no estimable"
+# (ver k_anonymity.py: se añade un nivel "comunidad_autonoma" intermedio,
+# menos específico que provincia pero más que nada, para las comunidades con
+# varias provincias donde no se puede elegir una sola sin más información).
+AUTONOMOUS_COMMUNITY_PROVINCES: dict[str, list[str]] = {
+    "andalucia": ["sevilla", "cadiz", "malaga", "granada", "cordoba", "jaen", "almeria", "huelva"],
+    "aragon": ["zaragoza", "huesca", "teruel"],
+    "asturias": ["asturias"],
+    "baleares": ["baleares"],
+    "canarias": ["las palmas", "santa cruz de tenerife"],
+    "cantabria": ["cantabria"],
+    "castilla y leon": ["valladolid", "leon", "burgos", "salamanca", "zamora", "avila", "palencia", "segovia", "soria"],
+    "castilla la mancha": ["toledo", "ciudad real", "albacete", "guadalajara", "cuenca"],
+    "cataluna": ["barcelona", "tarragona", "gerona", "lerida"],
+    "comunidad valenciana": ["valencia", "alicante", "castellon"],
+    "extremadura": ["badajoz", "caceres"],
+    "galicia": ["a coruna", "pontevedra", "lugo", "orense"],
+    "madrid": ["madrid"],
+    "murcia": ["murcia"],
+    "navarra": ["navarra"],
+    "pais vasco": ["vizcaya", "guipuzcoa", "alava"],
+    "la rioja": ["la rioja"],
+    "ceuta": ["ceuta"],
+    "melilla": ["melilla"],
+}
+
+# Nombre legible de cada comunidad autónoma (para las etiquetas del
+# informe), a partir de su clave interna en AUTONOMOUS_COMMUNITY_PROVINCES.
+AUTONOMOUS_COMMUNITY_DISPLAY_NAMES: dict[str, str] = {
+    "andalucia": "Andalucía",
+    "aragon": "Aragón",
+    "asturias": "Asturias",
+    "baleares": "Islas Baleares",
+    "canarias": "Canarias",
+    "cantabria": "Cantabria",
+    "castilla y leon": "Castilla y León",
+    "castilla la mancha": "Castilla-La Mancha",
+    "cataluna": "Cataluña",
+    "comunidad valenciana": "Comunidad Valenciana",
+    "extremadura": "Extremadura",
+    "galicia": "Galicia",
+    "madrid": "Comunidad de Madrid",
+    "murcia": "Región de Murcia",
+    "navarra": "Comunidad Foral de Navarra",
+    "pais vasco": "País Vasco",
+    "la rioja": "La Rioja",
+    "ceuta": "Ceuta",
+    "melilla": "Melilla",
+}
+
+# Alias reconocidos -> clave canónica de AUTONOMOUS_COMMUNITY_PROVINCES. Ya
+# normalizados (sin tildes, minúsculas) porque `resolve_autonomous_community`
+# normaliza el valor de entrada con el mismo criterio antes de buscar aquí.
+# Incluye variantes en español (con/sin "comunidad de"/"principado de"...) Y
+# en inglés, porque el "region" de OSV-5M/Nominatim puede venir en cualquiera
+# de los dos idiomas según cómo se generaron los metadatos del dataset.
+_AUTONOMOUS_COMMUNITY_ALIASES: dict[str, str] = {
+    "andalucia": "andalucia",
+    "andalusia": "andalucia",
+    "aragon": "aragon",
+    "asturias": "asturias",
+    "principado de asturias": "asturias",
+    "baleares": "baleares",
+    "islas baleares": "baleares",
+    "illes balears": "baleares",
+    "balearic islands": "baleares",
+    "canarias": "canarias",
+    "islas canarias": "canarias",
+    "canary islands": "canarias",
+    "cantabria": "cantabria",
+    "castilla y leon": "castilla y leon",
+    "castilla-y-leon": "castilla y leon",
+    "castile and leon": "castilla y leon",
+    "castille and leon": "castilla y leon",
+    "castilla la mancha": "castilla la mancha",
+    "castilla-la mancha": "castilla la mancha",
+    "castile-la mancha": "castilla la mancha",
+    "cataluna": "cataluna",
+    "catalunya": "cataluna",
+    "catalonia": "cataluna",
+    "comunidad valenciana": "comunidad valenciana",
+    "comunitat valenciana": "comunidad valenciana",
+    "valencian community": "comunidad valenciana",
+    "region of valencia": "comunidad valenciana",
+    "extremadura": "extremadura",
+    "galicia": "galicia",
+    "madrid": "madrid",
+    "comunidad de madrid": "madrid",
+    "community of madrid": "madrid",
+    "murcia": "murcia",
+    "region de murcia": "murcia",
+    "region of murcia": "murcia",
+    "murcia region": "murcia",
+    "navarra": "navarra",
+    "comunidad foral de navarra": "navarra",
+    "navarre": "navarra",
+    "pais vasco": "pais vasco",
+    "euskadi": "pais vasco",
+    "basque country": "pais vasco",
+    "la rioja": "la rioja",
+    "rioja": "la rioja",
+    "ceuta": "ceuta",
+    "melilla": "melilla",
+}
+
+
+def resolve_autonomous_community(raw_region: str) -> str | None:
+    """Normaliza `raw_region` (tal como viene de geolocation.py, en español
+    o inglés, con o sin tildes/mayúsculas) y devuelve la clave canónica de
+    AUTONOMOUS_COMMUNITY_PROVINCES, o None si no se reconoce (p.ej. otro
+    país, o "desconocido" cuando el índice FAISS no tenía dato de región).
+    Requiere COINCIDENCIA EXACTA tras normalizar -- para eso sirve (un
+    campo estructurado que ya trae solo el nombre de la región). Para
+    texto libre en una frase, usar `resolve_autonomous_community_in_text`."""
+    normalized = _strip_accents(raw_region).strip().lower()
+    return _AUTONOMOUS_COMMUNITY_ALIASES.get(normalized)
+
+
+def resolve_autonomous_community_in_text(text: str) -> str | None:
+    """Como `resolve_autonomous_community`, pero para una frase libre (p.ej.
+    "canarias, aunque he vivido fuera"): busca si algún alias conocido
+    aparece como SUBCADENA del texto ya normalizado -- mismo criterio de
+    coincidencia por subcadena que ya usan las tablas de provincia/
+    municipio en demographic_extraction.py y ai_attribute_extraction.py.
+    Usado por la detección por regex de autodeclaraciones tipo "vivo en
+    Canarias" (comunidad autónoma completa, sin provincia concreta)."""
+    normalized = _strip_accents(text).strip().lower()
+    matched_alias = next((alias for alias in _AUTONOMOUS_COMMUNITY_ALIASES if alias in normalized), None)
+    return _AUTONOMOUS_COMMUNITY_ALIASES.get(matched_alias) if matched_alias else None
+
+
+def _strip_accents(text: str) -> str:
+    import unicodedata
+
+    normalized = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in normalized if not unicodedata.combining(c))
+
+
+def _build_ccaa_population() -> dict[str, int]:
+    """Suma la población de las provincias de cada comunidad autónoma a
+    partir de PROVINCE_POPULATION (que cubre las 50 provincias + Ceuta y
+    Melilla), en vez de mantener una segunda cifra hardcodeada que podría
+    quedar desincronizada si se actualiza PROVINCE_POPULATION."""
+    return {
+        ccaa: sum(PROVINCE_POPULATION[province] for province in provinces)
+        for ccaa, provinces in AUTONOMOUS_COMMUNITY_PROVINCES.items()
+    }
+
+
+# Población por comunidad autónoma, derivada de PROVINCE_POPULATION (ver
+# _build_ccaa_population). Usada por k_anonymity.py cuando la geolocalización
+# por imagen solo puede identificar la comunidad autónoma (varias provincias
+# posibles) y no una provincia concreta.
+CCAA_POPULATION: dict[str, int] = _build_ccaa_population()
+
+
+# Reverso de AUTONOMOUS_COMMUNITY_PROVINCES: provincia -> comunidad autónoma
+# a la que pertenece. Usado por report/generator.py para agrupar varias
+# fotos por comunidad autónoma aunque cada una se haya resuelto a un nivel
+# distinto (p.ej. una foto dio directamente "Sevilla" y otra dio
+# "Andalusia": ambas deben sumar como señal de la misma comunidad).
+PROVINCE_TO_CCAA: dict[str, str] = {
+    province: ccaa for ccaa, provinces in AUTONOMOUS_COMMUNITY_PROVINCES.items() for province in provinces
+}
+
+
 # Proporción de la población adulta (25-64) con una titulación/ámbito de
 # estudio concreto. MUY aproximado (basado en órdenes de magnitud de
 # graduados universitarios en España por rama, ~40% de esa franja tiene

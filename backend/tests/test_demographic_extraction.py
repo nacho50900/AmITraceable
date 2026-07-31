@@ -86,6 +86,39 @@ class TestLocation:
         assert findings.municipio is None
         assert findings.provincia is None
 
+    def test_detects_multi_province_comunidad_autonoma(self):
+        """'Canarias' no es una provincia del INE (son dos: Las Palmas y
+        Santa Cruz de Tenerife), así que debe quedar a nivel de comunidad
+        autónoma, no perderse."""
+        findings = extract_demographics([_post("Vivo en Canarias, cerca de la playa")])
+        assert findings.comunidad_autonoma == "canarias"
+        assert findings.provincia is None
+        assert findings.municipio is None
+        assert findings.source["comunidad_autonoma"] == "texto"
+        assert findings.evidence["comunidad_autonoma"] == ["https://x/1"]
+
+    def test_detects_english_comunidad_autonoma_name(self):
+        findings = extract_demographics([_post("Vivo en Andalusia toda mi vida")])
+        assert findings.comunidad_autonoma == "andalucia"
+
+    def test_single_province_comunidad_autonoma_resolves_directly_to_province(self):
+        """Asturias es una comunidad de una sola provincia: como su nombre
+        ya coincide con una clave de PROVINCE_POPULATION, se resuelve
+        directamente como provincia (más específico), sin pasar por
+        comunidad_autonoma."""
+        findings = extract_demographics([_post("Vivo en Asturias, junto al mar")])
+        assert findings.provincia == "asturias"
+        assert findings.comunidad_autonoma is None
+
+    def test_comunidad_autonoma_does_not_override_already_found_provincia(self):
+        posts = [
+            _post("Vivo en León desde hace años", i=1),
+            _post("Vivo en Canarias", permalink="https://x/2", i=2),
+        ]
+        findings = extract_demographics(posts)
+        assert findings.municipio == "leon"
+        assert findings.comunidad_autonoma is None
+
 
 class TestStudies:
     def test_detects_estudio_x(self):
