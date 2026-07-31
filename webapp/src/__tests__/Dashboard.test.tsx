@@ -324,4 +324,87 @@ describe('Dashboard', () => {
       expect(screen.getAllByText('Qué se puede inferir sobre ti')).toHaveLength(1);
     });
   });
+
+  test('avisa de confianza insuficiente cuando hay fotos pero ninguna dio una ubicación de residencia fiable', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    // Fixture por defecto: 1 foto en image_location_points, pero
+    // population_narrowing no trae ningún paso "ubicacion" con source "imagen".
+    mockStream([{ done: true, report: makeExposureReport() }]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          'El índice de confianza del análisis de las imágenes no es suficiente para estimar la comunidad autónoma de residencia.',
+        ),
+      ).toBeInTheDocument();
+    });
+  });
+
+  test('no avisa de confianza insuficiente cuando las fotos sí dieron una ubicación de residencia fiable', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([
+      {
+        done: true,
+        report: makeExposureReport({
+          population_narrowing: [
+            {
+              attribute_label: 'Vive en comunidad autónoma: Canarias',
+              category: 'ubicacion',
+              remaining_population: 2200000,
+              risk_level: 'medio',
+              evidence: ['https://instagram.com/p/1', 'https://instagram.com/p/2'],
+              source: 'imagen',
+              note: null,
+              proportion: 0.045,
+            },
+          ],
+        }),
+      },
+    ]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/Vive en comunidad autónoma: Canarias/)).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText(/El índice de confianza del análisis de las imágenes no es suficiente/),
+    ).not.toBeInTheDocument();
+  });
+
+  test('no avisa de confianza insuficiente cuando no se ha analizado ninguna foto', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([{ done: true, report: makeExposureReport({ image_location_points: [] }) }]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Ubicaciones estimadas a partir de tus fotos')).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText(/El índice de confianza del análisis de las imágenes no es suficiente/),
+    ).not.toBeInTheDocument();
+  });
+
+  test('muestra el número de personas que comparten los rasgos combinados', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([{ done: true, report: makeExposureReport({ remaining_population_all_traits: 1234567 }) }]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/En España hay/)).toBeInTheDocument();
+      expect(screen.getByText('1.234.567')).toBeInTheDocument();
+      expect(screen.getByText(/personas que comparten tus rasgos/)).toBeInTheDocument();
+    });
+  });
+
+  test('no muestra el resumen de rasgos combinados cuando no hay ningún rasgo estimable', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([{ done: true, report: makeExposureReport({ remaining_population_all_traits: null }) }]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Qué se puede inferir sobre ti')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/personas que comparten tus rasgos/)).not.toBeInTheDocument();
+  });
 });

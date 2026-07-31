@@ -66,6 +66,39 @@ class PopulationNarrowingStep:
     proportion: float | None = None
 
 
+# Categorías que participan en la cadena de estrechamiento (mismo criterio
+# que _CHAINED_STEPS, ver más abajo -- se define aquí arriba porque
+# `final_remaining_population` la necesita y así queda cerca de donde se usa).
+_CHAINED_CATEGORIES = {"sexo", "edad", "ubicacion", "estudios", "ocupacion"}
+
+
+def final_remaining_population(steps: list[PopulationNarrowingStep]) -> int | None:
+    """Nº de personas en España que compartirían, EN CONJUNTO, todos los
+    rasgos encadenables que se hayan podido estimar (sexo + edad + ubicación
+    + estudios + ocupación) -- no la proporción de un rasgo aislado, sino la
+    intersección de todos ellos. Para el informe: "en España hay X personas
+    que comparten tus rasgos".
+
+    Cada escalón de la cadena ya lleva en su propio `remaining_population`
+    el acumulado incluyendo TODOS los anteriores (ver `estimate_population_narrowing`
+    y `_apply_proportion`): un escalón "no estimable" no rompe la cadena, es
+    un no-op (no se descuenta población por él, simplemente no se afina
+    más). Por eso basta con quedarse con el ÚLTIMO escalón de categoría
+    encadenable que SÍ tenga `remaining_population` -- es, matemáticamente,
+    el resultado final de la cadena completa, sin tener que repetir aquí la
+    lógica de encadenado.
+
+    None si NINGÚN rasgo encadenable se pudo estimar (el informe no llegó a
+    afinar nada más allá de la población total de España, así que no hay
+    ningún número nuevo que mostrar aquí)."""
+    candidates = [
+        step.remaining_population
+        for step in steps
+        if step.category in _CHAINED_CATEGORIES and step.remaining_population is not None
+    ]
+    return candidates[-1] if candidates else None
+
+
 def _risk_level(remaining: float) -> str:
     if remaining >= 100_000:
         return "bajo"

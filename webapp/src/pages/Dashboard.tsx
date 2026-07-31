@@ -209,6 +209,17 @@ const Dashboard: React.FC = () => {
 
   if (!report) return null;
 
+  // Hubo fotos analizadas (report.image_location_points no está vacío) pero
+  // ninguna llegó al consenso mínimo para estimar una comunidad autónoma /
+  // provincia de residencia (ver HIGH_CONFIDENCE*/MODERATE_CONFIDENCE* en
+  // report/generator.py) -- se comprueba mirando si existe algún paso de
+  // "Qué se puede inferir sobre ti" de categoría "ubicacion" cuyo origen
+  // sea "imagen". Independiente de si el TEXTO sí dio una ubicación: este
+  // aviso es específicamente sobre la fiabilidad del análisis de imagen.
+  const imageLocationConfidenceInsufficient =
+    report.image_location_points.length > 0 &&
+    !report.population_narrowing.some((step) => step.category === 'ubicacion' && step.source === 'imagen');
+
   return (
     <div className="page dashboard">
       <header className="dashboard-header">
@@ -240,10 +251,25 @@ const Dashboard: React.FC = () => {
       <section className="card">
         <h2>Qué se puede inferir sobre ti</h2>
         <PopulationNarrowingTable steps={report.population_narrowing} />
+        {report.remaining_population_all_traits !== null && (
+          <p className="trait-summary">
+            En España hay{' '}
+            <span className="trait-summary-number">
+              {report.remaining_population_all_traits.toLocaleString('es-ES')}
+            </span>{' '}
+            personas que comparten tus rasgos.
+          </p>
+        )}
       </section>
 
       <section className="card">
         <h2>Ubicaciones estimadas a partir de tus fotos</h2>
+        {imageLocationConfidenceInsufficient && (
+          <p className="note">
+            El índice de confianza del análisis de las imágenes no es suficiente para estimar la
+            comunidad autónoma de residencia.
+          </p>
+        )}
         <LocationMap points={report.image_location_points} platform={report.platform} available={report.geolocation_available} />
       </section>
 

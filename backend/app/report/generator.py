@@ -27,7 +27,7 @@ from app.nlp.ai_attribute_extraction import extract_demographics_with_ai, merge_
 from app.nlp.demographic_extraction import DemographicFindings, extract_demographics
 from app.nlp.travel_detection import detect_travel_permalinks
 from app.progress import ProgressCallback, emit_progress
-from app.scoring.k_anonymity import estimate_population_narrowing
+from app.scoring.k_anonymity import estimate_population_narrowing, final_remaining_population
 
 # Umbrales para aceptar una estimación de RESIDENCIA HABITUAL a partir de
 # geolocalización de imágenes (ver `_infer_home_region`). Antes de este
@@ -329,6 +329,7 @@ async def generate_report(
         privacy_score=score,
         recommendations=_build_recommendations(fingerprint, inferred_attributes, score),
         population_narrowing=population_narrowing,
+        remaining_population_all_traits=final_remaining_population(narrowing_steps),
         image_location_points=image_location_points,
         geolocation_available=geolocation_available,
     )

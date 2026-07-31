@@ -3,6 +3,7 @@ from app.scoring.k_anonymity import (
     PopulationNarrowingStep,
     _risk_level,
     estimate_population_narrowing,
+    final_remaining_population,
 )
 
 
@@ -203,3 +204,43 @@ class TestEstimatePopulationNarrowing:
         steps = estimate_population_narrowing(findings)
 
         assert [s.category for s in steps] == ["sexo", "edad", "ubicacion", "estudios", "ocupacion"]
+
+
+class TestFinalRemainingPopulation:
+    def test_none_when_no_chained_trait_detected(self):
+        findings = DemographicFindings(universidad="UNED")  # solo un standalone, no encadenable
+        steps = estimate_population_narrowing(findings)
+
+        assert final_remaining_population(steps) is None
+
+    def test_equals_last_chained_step_when_all_are_estimable(self):
+        findings = DemographicFindings(sexo="hombre", edad=30, provincia="madrid")
+        steps = estimate_population_narrowing(findings)
+
+        location_step = next(s for s in steps if s.category == "ubicacion")
+        assert final_remaining_population(steps) == location_step.remaining_population
+        # Es MENOR que el de un solo rasgo aislado: la intersección de varios
+        # rasgos siempre reduce (o deja igual) la población, nunca la aumenta.
+        sexo_step = next(s for s in steps if s.category == "sexo")
+        assert final_remaining_population(steps) <= sexo_step.remaining_population
+
+    def test_no_estimable_intermediate_step_does_not_break_the_chain(self):
+        """Si un rasgo intermedio (p.ej. ubicación) no es estimable, el
+        siguiente rasgo encadenable debe seguir partiendo del acumulado
+        anterior, no resetearse -- el resultado final debe ser el del
+        último escalón realmente estimable (estudios), no None."""
+        findings = DemographicFindings(
+            sexo="hombre", provincia="provincia_no_existe_en_la_tabla", estudios="derecho"
+        )
+        steps = estimate_population_narrowing(findings)
+
+        estudios_step = next(s for s in steps if s.category == "estudios")
+        assert final_remaining_population(steps) == estudios_step.remaining_population
+        assert final_remaining_population(steps) is not None
+
+    def test_standalone_steps_are_ignored(self):
+        findings = DemographicFindings(sexo="hombre", universidad="UNED", empresa="Acme")
+        steps = estimate_population_narrowing(findings)
+
+        sexo_step = next(s for s in steps if s.category == "sexo")
+        assert final_remaining_population(steps) == sexo_step.remaining_population

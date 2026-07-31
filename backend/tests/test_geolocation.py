@@ -17,11 +17,29 @@ import pytest
 from app.vision import geolocation
 
 
+class _FakeExif:
+    """Sustituye al objeto Exif de Pillow lo justo para _extract_exif_gps:
+    solo necesita soportar .get_ifd(tag) -> dict."""
+
+    def __init__(self, gps_ifd=None):
+        self._gps_ifd = gps_ifd or {}
+
+    def get_ifd(self, tag):
+        return self._gps_ifd
+
+
 class _FakeImage:
-    """Sustituye a PIL.Image: solo necesita soportar .convert('RGB')."""
+    """Sustituye a PIL.Image: solo necesita soportar .convert('RGB') y,
+    para los tests de EXIF GPS, .getexif()."""
+
+    def __init__(self, gps_ifd=None):
+        self._gps_ifd = gps_ifd
 
     def convert(self, mode):
         return self
+
+    def getexif(self):
+        return _FakeExif(self._gps_ifd)
 
 
 class _NoGradContext:
@@ -183,6 +201,86 @@ class TestEstimateLocationFromImage:
         assert result is not None
         assert result.lat is None
         assert result.lon is None
+
+    def test_discards_non_representative_photo_when_neighbors_are_geographically_scattered(self, monkeypatch):
+        """Caso motivador: una foto de solo mar/cielo/primer plano puede
+        parecerse visualmente a imágenes de referencia de puntos muy
+        alejados entre sí (Galicia, Cádiz, Baleares, Barcelona...). Ninguna
+        provincia "ganadora" sería significativa ahí -- debe descartarse."""
+        meta = pd.DataFrame(
+            {
+                "id": ["1", "2", "3", "4"],
+                # Galicia, Cádiz, Baleares, Barcelona: >300km de dispersión media
+                "lat": [42.9, 36.5, 39.6, 41.4],
+                "lon": [-8.5, -6.3, 2.9, 2.2],
+                "region": ["Galicia", "Andalucia", "Baleares", "Cataluna"],
+            }
+        )
+        _install_fake_index(monkeypatch, meta, search_indices=[0, 1, 2, 3])
+        _install_fake_embedding(monkeypatch)
+
+        assert geolocation.estimate_location_from_image(_FakeImage(), k=4) is None
+
+    def test_does_not_discard_when_too_few_neighbors_have_coordinates(self, monkeypatch):
+        """Con menos de _MIN_NEIGHBORS_WITH_COORDS_FOR_SPREAD_CHECK vecinos
+        con coordenadas, no hay datos suficientes para juzgar dispersión --
+        no debe descartarse por eso (sería un falso positivo)."""
+        meta = pd.DataFrame(
+            {
+                "id": ["1", "2", "3", "4"],
+                "lat": [42.9, None, None, None],
+                "lon": [-8.5, None, None, None],
+                "region": ["Galicia", "Galicia", "Galicia", "Galicia"],
+            }
+        )
+        _install_fake_index(monkeypatch, meta, search_indices=[0, 1, 2, 3])
+        _install_fake_embedding(monkeypatch)
+
+        assert geolocation.estimate_location_from_image(_FakeImage(), k=4) is not None
+
+    def test_uses_exif_gps_directly_without_calling_the_model(self, monkeypatch):
+        """Si la foto trae GPS real en el EXIF, se usa directamente (la
+        región conocida más cercana a esas coordenadas) y NO se llama al
+        modelo -- se comprueba sustituyendo _model por algo que revienta si
+        se invoca, para asegurar que de verdad no se usa."""
+        meta = pd.DataFrame(
+            {
+                "id": ["1", "2"],
+                "lat": [40.4168, 41.3874],  # Madrid, Barcelona
+                "lon": [-3.7038, 2.1686],
+                "region": ["Madrid", "Cataluna"],
+            }
+        )
+        _install_fake_index(monkeypatch, meta, search_indices=[0, 1])
+
+        def _model_should_not_be_called(**kwargs):
+            raise AssertionError("no debería llamarse al modelo cuando hay GPS en el EXIF")
+
+        monkeypatch.setattr(geolocation, "_model", _model_should_not_be_called)
+        monkeypatch.setattr(geolocation, "_processor", _model_should_not_be_called)
+        monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(no_grad=lambda: _NoGradContext()))
+
+        # GPS EXIF: Madrid, 40°25'00"N 3°42'14"W (formato estándar EXIF: grados, minutos, segundos)
+        gps_ifd = {1: "N", 2: (40.0, 25.0, 0.0), 3: "W", 4: (3.0, 42.0, 14.0)}
+        image = _FakeImage(gps_ifd=gps_ifd)
+
+        result = geolocation.estimate_location_from_image(image)
+
+        assert result is not None
+        assert result.province == "Madrid"
+        assert result.confidence == 1.0
+        assert result.lat == pytest.approx(40.4167, abs=0.001)
+        assert result.lon == pytest.approx(-3.7039, abs=0.001)
+
+    def test_falls_back_to_model_when_no_exif_gps(self, monkeypatch):
+        meta = pd.DataFrame({"id": ["1"], "lat": [40.0], "lon": [-3.7], "region": ["Madrid"]})
+        _install_fake_index(monkeypatch, meta, search_indices=[0])
+        _install_fake_embedding(monkeypatch)
+
+        result = geolocation.estimate_location_from_image(_FakeImage(gps_ifd=None), k=1)
+
+        assert result is not None
+        assert result.k_neighbors == 1  # vino del modelo (vota entre k vecinos), no del atajo EXIF (k_neighbors=0)
 
 
 class TestGeolocationAvailable:

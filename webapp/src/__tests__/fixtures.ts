@@ -52,6 +52,7 @@ export function makeExposureReport(overrides: Partial<ExposureReport> = {}): Exp
         proportion: 0.508,
       },
     ],
+    remaining_population_all_traits: 24957175,
     image_location_points: [
       { permalink: 'https://instagram.com/p/1', province: 'Madrid', confidence: 0.6, lat: 40.41, lon: -3.7 },
     ],

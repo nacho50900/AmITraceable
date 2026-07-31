@@ -462,6 +462,21 @@ class TestGenerateReportPlatformBranching:
 
         assert report.geolocation_available is False
 
+    @pytest.mark.asyncio
+    async def test_remaining_population_all_traits_reflects_combined_chain(self, monkeypatch):
+        posts = [_post(text="Vivo en Madrid, tengo 30 años y soy hombre", platform="reddit")]
+
+        report = await generate_report("reddit", "user", posts, _fingerprint(), [], _score())
+
+        location_step = next(s for s in report.population_narrowing if s.category == "ubicacion")
+        assert report.remaining_population_all_traits == location_step.remaining_population
+
+    @pytest.mark.asyncio
+    async def test_remaining_population_all_traits_is_none_without_chained_findings(self):
+        report = await generate_report("reddit", "user", [_post()], _fingerprint(), [], _score())
+
+        assert report.remaining_population_all_traits is None
+
 
 class TestGenerateReportProgress:
     @pytest.mark.asyncio

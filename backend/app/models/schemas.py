@@ -127,6 +127,13 @@ class ExposureReport(BaseModel):
     # autodeclarado detectado (k-anonimato aproximado, ver scoring/k_anonymity.py).
     # Lista vacía si no se detectó ninguna declaración explícita en el texto.
     population_narrowing: list[PopulationEstimate] = []
+    # Nº de personas en España que compartirían, EN CONJUNTO, todos los
+    # rasgos encadenables detectados (sexo + edad + ubicación + estudios +
+    # ocupación) -- no el porcentaje de un rasgo aislado, sino la
+    # intersección de todos los que se hayan podido estimar. Ver
+    # scoring/k_anonymity.py::final_remaining_population(). None si no se
+    # pudo estimar ningún rasgo encadenable (no hay número que mostrar).
+    remaining_population_all_traits: int | None = None
     # Una estimación de ubicación por CADA foto analizada por
     # app/vision/geolocation.py (no solo la de mayor confianza, que es la
     # única que se usa para population_narrowing). Se usa para pintar el

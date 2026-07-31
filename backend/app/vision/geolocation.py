@@ -15,6 +15,16 @@ Requiere que ya exista el índice generado por scripts/build_faiss_index.py
 (index.faiss + index_meta.csv). Si no existe, `estimate_location_from_image`
 devuelve None en vez de fallar, para que el resto del análisis pueda seguir
 funcionando sin este módulo (es opcional/best-effort, no crítico).
+
+También devuelve None (foto descartada, no analizada) cuando la foto no
+tiene contenido suficientemente distintivo como para geolocalizarla con
+algún sentido -- p.ej. una foto donde solo se ve el mar y la espalda de
+alguien puede parecerse, visualmente, a imágenes de referencia de medio
+litoral español a la vez. Ver `_neighbor_spread_km` /
+`_MAX_NEIGHBOR_SPREAD_KM`: si los vecinos más parecidos están repartidos
+por una zona demasiado amplia, ninguna provincia "ganadora" sería
+significativa, así que se descarta en vez de mostrar una ubicación que
+parecería más fiable de lo que en realidad es.
 """
 from collections import Counter
 from dataclasses import dataclass
@@ -24,6 +34,23 @@ import numpy as np
 
 _INDEX_DIR = Path(__file__).parent.parent.parent / "data" / "osv5m_spain"
 _MODEL_NAME = "facebook/dinov2-small"
+
+# Umbral de "foto no representativa" (ver `_neighbor_spread_km` y su uso en
+# estimate_location_from_image): si los k vecinos más parecidos están
+# repartidos, en MEDIA, a más de esto del centroide, la foto se descarta en
+# vez de asignarle una provincia. Motivación: una foto genérica (solo mar,
+# solo cielo, un primer plano sin fondo distintivo...) puede tener similitud
+# visual alta con imágenes de referencia de MUCHOS sitios distintos de
+# España a la vez -- no porque la foto sea "de" ninguno de ellos en
+# particular, sino porque no tiene ningún rasgo que la ancle a un lugar
+# concreto. En ese caso, aunque una provincia gane la votación por mayoría
+# simple, esa "victoria" no significa nada: sería tan válida cualquier otra
+# de las provincias representadas entre los vecinos. 300 km es un punto de
+# partida razonable (aprox. el orden de magnitud de una comunidad autónoma
+# grande), no una cifra derivada de ningún estudio -- ajustable si en la
+# práctica resulta demasiado (o poco) permisivo.
+_MAX_NEIGHBOR_SPREAD_KM = 300.0
+_MIN_NEIGHBORS_WITH_COORDS_FOR_SPREAD_CHECK = 3
 
 # Carga perezosa: el modelo/índice solo se cargan la primera vez que se usan,
 # para no penalizar el arranque de la app cuando este módulo no se necesita.
@@ -45,6 +72,98 @@ class ImageLocationEstimate:
     # están las imágenes de referencia más parecidas.
     lat: float | None = None
     lon: float | None = None
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    from math import atan2, cos, radians, sin, sqrt
+
+    r = 6371.0
+    p1, p2 = radians(lat1), radians(lat2)
+    dphi = radians(lat2 - lat1)
+    dlambda = radians(lon2 - lon1)
+    a = sin(dphi / 2) ** 2 + cos(p1) * cos(p2) * sin(dlambda / 2) ** 2
+    return 2 * r * atan2(sqrt(a), sqrt(1 - a))
+
+
+def _neighbor_spread_km(neighbor_rows) -> float | None:
+    """Distancia media de los vecinos (con coordenadas) a su centroide.
+    None si hay demasiado pocos vecinos con coordenadas para que la medida
+    signifique algo (en vez de arriesgarse a descartar una foto por falta
+    de datos, no por falta de rasgos distintivos)."""
+    valid = neighbor_rows.dropna(subset=["lat", "lon"])
+    if len(valid) < _MIN_NEIGHBORS_WITH_COORDS_FOR_SPREAD_CHECK:
+        return None
+
+    lats, lons = valid["lat"].tolist(), valid["lon"].tolist()
+    centroid_lat, centroid_lon = sum(lats) / len(lats), sum(lons) / len(lons)
+    distances = [_haversine_km(centroid_lat, centroid_lon, lat, lon) for lat, lon in zip(lats, lons)]
+    return sum(distances) / len(distances)
+
+
+def _extract_exif_gps(image) -> tuple[float, float] | None:
+    """Si la imagen tiene coordenadas GPS en su EXIF, las devuelve como
+    (lat, lon) en grados decimales. None si no hay EXIF de GPS o no se
+    puede leer.
+
+    AVISO IMPORTANTE (para la memoria): en la práctica esto casi nunca
+    encontrará nada en fotos descargadas de Instagram, porque Instagram --
+    como la inmensa mayoría de redes sociales -- elimina los metadatos EXIF
+    (incluido el GPS) de las imágenes al subirlas, por privacidad y para
+    reducir peso del fichero. Se implementa de todos modos porque: (a) es
+    gratis comprobarlo (una foto sin este EXIF simplemente sigue el camino
+    normal de geolocalización por contenido visual), (b) si por algún
+    motivo SÍ está presente, es la fuente más fiable posible -- GPS real
+    del dispositivo en el momento de la foto, no una estimación por
+    parecido visual --, y (c) deja de ser un caso muerto si en el futuro se
+    analiza otra plataforma que no limpie EXIF, o el usuario sube el
+    fichero original directamente en vez de la versión servida por Instagram.
+    """
+    try:
+        exif = image.getexif()
+        gps_ifd = exif.get_ifd(0x8825)  # GPSInfo
+        if not gps_ifd:
+            return None
+
+        lat_dms, lat_ref = gps_ifd.get(2), gps_ifd.get(1)
+        lon_dms, lon_ref = gps_ifd.get(4), gps_ifd.get(3)
+        if not lat_dms or not lon_dms or not lat_ref or not lon_ref:
+            return None
+
+        def _dms_to_decimal(dms, ref) -> float:
+            degrees, minutes, seconds = (float(v) for v in dms)
+            decimal = degrees + minutes / 60 + seconds / 3600
+            return -decimal if ref in ("S", "W") else decimal
+
+        return _dms_to_decimal(lat_dms, lat_ref), _dms_to_decimal(lon_dms, lon_ref)
+    except Exception:
+        # EXIF corrupto/con forma inesperada: se trata igual que "no hay
+        # GPS", nunca se rompe el análisis por esto.
+        return None
+
+
+def _estimate_from_exact_coordinates(lat: float, lon: float) -> ImageLocationEstimate:
+    """La foto trae coordenadas GPS reales (ver _extract_exif_gps): en vez
+    de gastar cómputo en el modelo DINOv2 para ADIVINAR la ubicación por
+    parecido visual, se busca directamente la región conocida más cercana a
+    esas coordenadas exactas en los metadatos del índice ya cargado. La
+    confianza se marca al máximo porque no es una estimación -- es la
+    ubicación real que la propia foto llevaba."""
+    distances = _index_meta.apply(
+        lambda row: _haversine_km(lat, lon, row["lat"], row["lon"])
+        if row["lat"] == row["lat"] and row["lon"] == row["lon"]  # descarta NaN
+        else float("inf"),
+        axis=1,
+    )
+    nearest = _index_meta.iloc[distances.idxmin()]
+
+    return ImageLocationEstimate(
+        province=nearest["region"],
+        confidence=1.0,
+        k_neighbors=0,  # no aplica: no hubo votación, es la coordenada real
+        mean_similarity=1.0,
+        lat=round(lat, 4),
+        lon=round(lon, 4),
+    )
 
 
 def _geolocation_available() -> bool:
@@ -127,6 +246,14 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
         # así que se degrada devolviendo None en vez de tumbar el análisis.
         return None
 
+    # Si la foto ya trae su ubicación real en el EXIF, se usa directamente
+    # y NO se analiza con el modelo (ver _extract_exif_gps: en la práctica
+    # esto rara vez ocurre con fotos de Instagram, pero cuando ocurre es
+    # más fiable que cualquier estimación visual, y más barato).
+    gps = _extract_exif_gps(image)
+    if gps is not None:
+        return _estimate_from_exact_coordinates(*gps)
+
     import torch
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -144,6 +271,15 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
     similarities, indices = similarities[0], indices[0]
 
     neighbor_rows = _index_meta.iloc[indices]
+
+    # Foto no representativa (ver _MAX_NEIGHBOR_SPREAD_KM más arriba): sus
+    # vecinos más parecidos están repartidos por medio país, así que
+    # cualquier provincia "ganadora" sería arbitraria -- se descarta en vez
+    # de dar una ubicación que parecería más segura de lo que realmente es.
+    spread = _neighbor_spread_km(neighbor_rows)
+    if spread is not None and spread > _MAX_NEIGHBOR_SPREAD_KM:
+        return None
+
     # "region" en OSV-5M es lo más parecido a provincia/comunidad autónoma
     # dentro de sus metadatos; ajusta esta columna si tu metadata.csv usa
     # otro nombre tras inspeccionar la fila de ejemplo del script de descarga.

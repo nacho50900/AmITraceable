@@ -63,6 +63,11 @@ export interface ExposureReport {
   privacy_score: PrivacyScore;
   recommendations: string[];
   population_narrowing: PopulationEstimate[];
+  // Nº de personas en España que comparten, EN CONJUNTO, todos los rasgos
+  // encadenables detectados (sexo + edad + ubicación + estudios +
+  // ocupación) -- no el porcentaje de un rasgo aislado. null si no se pudo
+  // estimar ningún rasgo encadenable. Ver k_anonymity.py::final_remaining_population().
+  remaining_population_all_traits: number | null;
   image_location_points: ImageLocationPoint[];
   // false si el índice de geolocalización no está construido en este
   // servidor (o la plataforma no es Instagram) -- distinto de "se
