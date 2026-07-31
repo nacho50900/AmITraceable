@@ -484,44 +484,38 @@ class TestGenerateReportProgress:
         assert "Generando el informe final..." in events
 
     @pytest.mark.asyncio
-    async def test_emits_visible_confirmation_when_bio_is_received(self, monkeypatch):
-        """Para poder comprobar a simple vista (no solo confiando en el
-        código) que la biografía del perfil llega hasta el pipeline."""
-        events = []
+    async def test_uses_already_launched_geolocation_task_instead_of_calling_again(self, monkeypatch):
+        """Cubre el paralelismo introducido en analysis_router._build_report:
+        si ya se lanzó la geolocalización en segundo plano ANTES de llamar a
+        generate_report (asyncio.create_task), este debe recoger ESE
+        resultado con un simple `await`, no volver a invocar
+        estimate_locations_for_posts (que sería procesar las fotos dos
+        veces, o -- peor -- en serie, deshaciendo el paralelismo)."""
+        import asyncio
 
-        async def on_progress(stage, counts):
-            events.append(stage)
+        calls = 0
 
-        async def _no_images(*args, **kwargs):
-            return geolocation.GeolocationOutcome(index_available=False, results=[])
+        async def _fake_estimate(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[("https://x/1", geolocation.ImageLocationEstimate(
+                    province="madrid", confidence=0.9, k_neighbors=15, mean_similarity=0.5,
+                ))],
+            )
 
-        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _no_images)
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
 
-        await generate_report(
-            "instagram", "user", [_post(platform="instagram")], _fingerprint(), [], _score(),
-            progress_callback=on_progress, bio="Enfermera en León",
+        task = asyncio.create_task(_fake_estimate())
+        report = await generate_report(
+            "instagram", "user", [_post(platform="instagram", media_url="https://img/1")],
+            _fingerprint(), [], _score(),
+            geolocation_task=task,
         )
 
-        assert any("Biografía" in stage and "17 caracteres" in stage for stage in events)
-
-    @pytest.mark.asyncio
-    async def test_emits_visible_warning_when_bio_is_missing(self, monkeypatch):
-        events = []
-
-        async def on_progress(stage, counts):
-            events.append(stage)
-
-        async def _no_images(*args, **kwargs):
-            return geolocation.GeolocationOutcome(index_available=False, results=[])
-
-        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _no_images)
-
-        await generate_report(
-            "instagram", "user", [_post(platform="instagram")], _fingerprint(), [], _score(),
-            progress_callback=on_progress, bio=None,
-        )
-
-        assert any("No se ha recibido ninguna biografía" in stage for stage in events)
+        assert calls == 1  # solo la llamada de la propia tarea, generate_report no repite la suya
+        assert len(report.image_location_points) == 1
 
 
 class TestBuildRecommendations:

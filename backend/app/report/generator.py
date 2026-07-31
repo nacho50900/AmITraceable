@@ -4,6 +4,7 @@ y accionables a partir del score y los atributos inferidos.
 """
 from datetime import datetime, timezone
 
+import asyncio
 import unicodedata
 
 from app.config import settings
@@ -189,19 +190,16 @@ async def generate_report(
     progress_callback: ProgressCallback | None = None,
     bio: str | None = None,
     full_name: str | None = None,
+    # Tarea de geolocalización de imágenes ya lanzada en segundo plano por
+    # el llamador (ver analysis_router._build_report), para que el análisis
+    # de fotos -- lo que más tarda de todo el pipeline -- corra en PARALELO
+    # con el resto (fingerprint, atributos, IA) desde el principio, en vez
+    # de esperar a que todo lo demás termine para empezar con las fotos.
+    # Si no se pasa (p. ej. tests que llaman a generate_report
+    # directamente), se crea aquí mismo como antes -- sin cambio de
+    # comportamiento para quien no use este parámetro.
+    geolocation_task: "asyncio.Task | None" = None,
 ) -> ExposureReport:
-    # Confirmación VISIBLE (no solo en logs) de que la biografía del perfil
-    # ha llegado hasta aquí y se va a analizar -- aparece como paso más en
-    # la pantalla de progreso en vivo (ver /api/analyze/{platform}/stream),
-    # así que se puede comprobar a simple vista en cada análisis real, sin
-    # tener que confiar a ciegas en que el dato se propagó correctamente
-    # desde InstagramClient.fetch_profile().
-    if bio:
-        await emit_progress(progress_callback, f"Biografía del perfil recibida ({len(bio)} caracteres). Analizando...")
-    else:
-        await emit_progress(
-            progress_callback, "No se ha recibido ninguna biografía pública de este perfil."
-        )
 
     # La biografía se trata como una publicación más de cara a las regex de
     # autodeclaración (mismo criterio que un post/comentario, solo que sin
@@ -262,9 +260,17 @@ async def generate_report(
     image_location_points: list[ImageLocationPoint] = []
     geolocation_available = False
     if platform == "instagram":
-        from app.vision.geolocation import estimate_locations_for_posts
+        if geolocation_task is not None:
+            # Ya se lanzó en segundo plano al principio del pipeline (ver
+            # analysis_router._build_report) -- aquí solo se recoge el
+            # resultado, corriendo en paralelo con todo lo anterior
+            # (fingerprint, atributos, autodeclaraciones con IA) en vez de
+            # esperar a que termine todo eso para empezar con las fotos.
+            geo_outcome = await geolocation_task
+        else:
+            from app.vision.geolocation import estimate_locations_for_posts
 
-        geo_outcome = await estimate_locations_for_posts(posts, progress_callback=progress_callback)
+            geo_outcome = await estimate_locations_for_posts(posts, progress_callback=progress_callback)
         geolocation_available = geo_outcome.index_available
         image_location_points = [
             ImageLocationPoint(

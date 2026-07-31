@@ -135,24 +135,53 @@ describe('Dashboard', () => {
     });
   });
 
-  test('fase de análisis de fotos: muestra el contador x/TOTAL y no la duplica en completadas', async () => {
+  test('fase de fotos (track paralelo): contador en vivo, no se duplica, y pasa a completada al llegar al total', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
     mockStream([
       { done: false, stage: 'Leyendo publicaciones...' },
-      { done: false, stage: 'Analizando fotos...', photos_analyzed: 1, total_photos: 3 },
-      { done: false, stage: 'Analizando fotos...', photos_analyzed: 2, total_photos: 3 },
-      { done: false, stage: 'Analizando fotos...', photos_analyzed: 3, total_photos: 3 },
+      { done: false, stage: 'Analizando fotos...', photos_analyzed: 1, total_photos: 3, track: 'fotos' },
+      { done: false, stage: 'Detectando atributos personales...' },
+      { done: false, stage: 'Analizando fotos...', photos_analyzed: 2, total_photos: 3, track: 'fotos' },
+      { done: false, stage: 'Analizando fotos...', photos_analyzed: 3, total_photos: 3, track: 'fotos' },
     ]);
     renderDashboard();
 
     await waitFor(() => {
-      // "Leyendo publicaciones..." ya completada; la fase de fotos, en
-      // curso, se muestra una sola vez con el contador más reciente -- no
-      // una línea por cada emisión repetida del mismo nombre de fase.
+      // "Leyendo publicaciones..." queda completada al llegar la siguiente
+      // fase GENERAL ("Detectando atributos..."). La fase de fotos, al
+      // correr en su propio track en paralelo, no interfiere con esa
+      // transición -- y al llegar a 3/3 pasa de "en curso" a "completada"
+      // en su propia línea, sin duplicarse.
       expect(screen.getByText('Leyendo publicaciones...')).toBeInTheDocument();
-      expect(screen.getByText('Analizando fotos (3/3)...')).toBeInTheDocument();
-      expect(screen.queryAllByText(/Analizando fotos/)).toHaveLength(1);
+      expect(screen.getByText('Fotos analizadas (3/3)')).toBeInTheDocument();
+      expect(screen.queryAllByText(/fotos/i)).toHaveLength(1);
     });
+  });
+
+  test('el listado revela las fases completadas de una en una, no todas de golpe', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([
+      { done: false, stage: 'Conectando con la plataforma...' },
+      { done: false, stage: 'Leyendo publicaciones...' },
+      { done: false, stage: 'Analizando tu forma de escribir...' },
+    ]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Conectando con la plataforma...')).toBeInTheDocument();
+    });
+    // Justo cuando aparece la primera fase completada, la siguiente
+    // TODAVÍA no debe estar en pantalla -- se revelan de una en una, con
+    // un hueco mínimo entre cada aparición (≥200ms), no todas a la vez
+    // aunque el backend las haya emitido en ráfaga.
+    expect(screen.queryByText('Leyendo publicaciones...')).not.toBeInTheDocument();
+
+    await waitFor(
+      () => {
+        expect(screen.getByText('Leyendo publicaciones...')).toBeInTheDocument();
+      },
+      { timeout: 1000 }
+    );
   });
 
   test('error durante el análisis: muestra el mensaje y el botón de volver', async () => {

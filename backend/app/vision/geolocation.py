@@ -236,6 +236,19 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
                 if estimate is not None:
                     results.append((post.permalink, estimate))
 
-            await emit_progress(progress_callback, "Analizando fotos...", photos_analyzed=i, total_photos=total)
+            await emit_progress(
+                progress_callback,
+                "Analizando fotos...",
+                photos_analyzed=i,
+                total_photos=total,
+                # Desde que este análisis corre en PARALELO con el resto
+                # del pipeline (ver analysis_router._build_report), sus
+                # eventos pueden intercalarse con los de fingerprint/
+                # atributos/IA en el mismo stream SSE. `track` le permite
+                # al frontend mostrarlo como su propia línea independiente
+                # en vez de mezclarlo con la fase "actual" del resto del
+                # análisis.
+                track="fotos",
+            )
 
     return GeolocationOutcome(index_available=index_available, results=results)

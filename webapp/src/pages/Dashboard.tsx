@@ -14,18 +14,31 @@ function readPlatform(): Platform {
   return value === 'instagram' ? 'instagram' : 'reddit';
 }
 
-// Algunas fases emiten contadores parciales además del texto (p. ej. el
-// análisis de fotos emite photos_analyzed/total_photos en cada foto
-// procesada, ver app/vision/geolocation.py). Cuando esos contadores están
-// presentes se añaden al texto de la fase ("Analizando fotos (3/10)...");
-// el resto de fases se muestran tal cual las manda el backend.
-function formatStageLabel(stage: string, counts: Record<string, unknown>): string {
+// Duración del ciclo de rotación del spinner, DEBE coincidir con
+// `animation: spinner-rotate 0.8s` en index.css.
+const SPINNER_PERIOD_MS = 800;
+
+// Cada spinner (el grande de cabecera, el de la fase general en curso, el
+// de fotos) aparece en un instante distinto -- si cada uno arrancase su
+// animación CSS en el momento en que se monta, girarían desincronizados
+// entre sí. Para que todos giren A LA VEZ, se ancla cada uno al mismo
+// reloj global (independiente de cuándo se monte) con un
+// `animation-delay` negativo: "empieza como si ya llevara X ms girando".
+function syncedSpinnerStyle(): React.CSSProperties {
+  return { animationDelay: `${-(Date.now() % SPINNER_PERIOD_MS)}ms` };
+}
+
+// La línea de fotos es la única con contador -- se muestra siempre igual
+// tanto si sigue en curso ("Analizando fotos (3/10)...") como cuando ya
+// terminó ("Fotos analizadas (10/10)"), a partir de photos_analyzed/
+// total_photos (ver app/vision/geolocation.py).
+function formatPhotosLabel(counts: Record<string, unknown>, done: boolean): string {
   const analyzed = counts.photos_analyzed;
   const total = counts.total_photos;
-  if (typeof analyzed === 'number' && typeof total === 'number' && total > 0) {
-    return `${stage.replace(/\.\.\.$/, '')} (${analyzed}/${total})...`;
+  if (typeof analyzed !== 'number' || typeof total !== 'number') {
+    return done ? 'Fotos analizadas' : 'Analizando fotos...';
   }
-  return stage;
+  return done ? `Fotos analizadas (${analyzed}/${total})` : `Analizando fotos (${analyzed}/${total})...`;
 }
 
 const Dashboard: React.FC = () => {
@@ -39,7 +52,15 @@ const Dashboard: React.FC = () => {
   // por el backend, ver app/progress.py y analysis_router.py).
   const [completedStages, setCompletedStages] = useState<string[]>([]);
   const [currentStage, setCurrentStage] = useState<string | null>(null);
-  const [currentCounts, setCurrentCounts] = useState<Record<string, unknown>>({});
+  // El análisis de fotos corre en PARALELO con el resto del pipeline desde
+  // el principio (ver analysis_router._build_report), así que sus eventos
+  // (marcados con track:"fotos", ver app/vision/geolocation.py) se
+  // muestran en su propia línea independiente, no mezclados con la fase
+  // "general" en curso -- si no, al intercalarse en el mismo stream SSE,
+  // una foto a medio analizar se marcaría por error como fase "completada"
+  // cada vez que llegara un evento distinto del pipeline general.
+  const [photosCounts, setPhotosCounts] = useState<Record<string, unknown> | null>(null);
+  const [photosDone, setPhotosDone] = useState(false);
   const navigate = useNavigate();
   const stopStreamRef = useRef<(() => void) | null>(null);
   // Ref auxiliar para poder leer la fase "actual" dentro del callback del
@@ -47,6 +68,28 @@ const Dashboard: React.FC = () => {
   // que meter currentStage como dependencia del useEffect y re-suscribirse
   // al stream en cada cambio de fase).
   const currentStageRef = useRef<string | null>(null);
+  // Cola de líneas ya completadas pendientes de PINTAR, más el temporizador
+  // que las va sacando de una en una con un mínimo de 500ms entre cada
+  // aparición -- así, aunque varios eventos lleguen del backend casi a la
+  // vez, el listado no salta de golpe (más legible para seguir en vivo).
+  const revealQueueRef = useRef<string[]>([]);
+  const revealingRef = useRef(false);
+
+  const enqueueCompleted = (stage: string) => {
+    revealQueueRef.current.push(stage);
+    if (revealingRef.current) return;
+    revealingRef.current = true;
+    const step = () => {
+      const next = revealQueueRef.current.shift();
+      if (next === undefined) {
+        revealingRef.current = false;
+        return;
+      }
+      setCompletedStages((prev) => [...prev, next]);
+      setTimeout(step, 500);
+    };
+    step();
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -65,19 +108,29 @@ const Dashboard: React.FC = () => {
           const counts: Record<string, unknown> = { ...event };
           delete counts.done;
           delete counts.stage;
+          delete counts.track;
           const { stage } = event;
+
+          if (event.track === 'fotos') {
+            setPhotosCounts(counts);
+            const analyzed = counts.photos_analyzed;
+            const total = counts.total_photos;
+            setPhotosDone(
+              typeof analyzed === 'number' && typeof total === 'number' && analyzed >= total && total > 0
+            );
+            return;
+          }
+
           const previousStage = currentStageRef.current;
           currentStageRef.current = stage;
           // Solo se marca como "completada" cuando la fase cambia de
           // verdad -- una misma fase puede repetirse varias veces seguidas
-          // (p. ej. una emisión por cada foto analizada) y en ese caso debe
-          // seguir mostrándose como la fase EN CURSO, no duplicarse en la
-          // lista de completadas.
+          // y en ese caso debe seguir mostrándose como la fase EN CURSO, no
+          // duplicarse en la lista de completadas.
           if (previousStage && previousStage !== stage) {
-            setCompletedStages((prev) => [...prev, previousStage]);
+            enqueueCompleted(previousStage);
           }
           setCurrentStage(stage);
-          setCurrentCounts(counts);
           return;
         }
 
@@ -94,7 +147,6 @@ const Dashboard: React.FC = () => {
       cancelled = true;
       stopStreamRef.current?.();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [platform, navigate]);
 
   const handleLogout = async () => {
@@ -112,23 +164,35 @@ const Dashboard: React.FC = () => {
       <div className="page">
         <div className="progress-screen">
           <p className="progress-heading">
-            <span className="spinner" aria-hidden="true" />
+            <span className="spinner" style={syncedSpinnerStyle()} aria-hidden="true" />
             Analizando tu actividad pública en {platformLabel}…
           </p>
-          <ul className="progress-list">
-            {completedStages.map((stage, i) => (
-              <li key={`${stage}-${i}`} className="progress-done">
-                <span className="progress-icon progress-icon-done" aria-hidden="true">✓</span>
-                {stage}
-              </li>
-            ))}
-            {currentStage && (
-              <li className="progress-current">
-                <span className="spinner spinner-sm" aria-hidden="true" />
-                {formatStageLabel(currentStage, currentCounts)}
-              </li>
-            )}
-          </ul>
+          <div className="progress-frame">
+            <ul className="progress-list">
+              {completedStages.map((stage, i) => (
+                <li key={`${stage}-${i}`} className="progress-done">
+                  <span className="progress-icon progress-icon-done" aria-hidden="true">✓</span>
+                  {stage}
+                </li>
+              ))}
+              {currentStage && (
+                <li className="progress-current">
+                  <span className="spinner spinner-sm" style={syncedSpinnerStyle()} aria-hidden="true" />
+                  {currentStage}
+                </li>
+              )}
+              {photosCounts && (
+                <li className={photosDone ? 'progress-done' : 'progress-current'}>
+                  {photosDone ? (
+                    <span className="progress-icon progress-icon-done" aria-hidden="true">✓</span>
+                  ) : (
+                    <span className="spinner spinner-sm" style={syncedSpinnerStyle()} aria-hidden="true" />
+                  )}
+                  {formatPhotosLabel(photosCounts, photosDone)}
+                </li>
+              )}
+            </ul>
+          </div>
         </div>
       </div>
     );

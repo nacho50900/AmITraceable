@@ -597,6 +597,13 @@ body {
   to { transform: rotate(360deg); }
 }
 
+.progress-frame {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .progress-list {
   list-style: none;
   margin: 0;
@@ -610,6 +617,10 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* "tabulado": cada línea del listado va indentada respecto al marco que
+     la contiene, para que se lea como un desglose de la cabecera de arriba,
+     no como texto al mismo nivel. */
+  padding-left: 24px;
   color: var(--text-dim);
   font-size: 14px;
 }

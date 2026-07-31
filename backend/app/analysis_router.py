@@ -71,6 +71,22 @@ async def _build_report(profile: SocialProfile, progress_callback: ProgressCallb
             detail="No se encontró actividad pública suficiente para analizar",
         )
 
+    # El análisis de fotos (geolocalización vía DINOv2+FAISS) es, con
+    # diferencia, lo que más tarda de todo el pipeline -- se compara cada
+    # foto una a una contra el índice. Se lanza como tarea en segundo plano
+    # AQUÍ, lo antes posible, para que corra en PARALELO con el resto del
+    # análisis (fingerprint, atributos, autodeclaraciones con IA) en vez de
+    # esperar a que todo eso termine para empezar con las fotos de una en
+    # una. El resultado se recoge más adelante, dentro de generate_report,
+    # justo cuando hace falta (ver el parámetro `geolocation_task`).
+    geolocation_task: asyncio.Task | None = None
+    if profile.platform == "instagram":
+        from app.vision.geolocation import estimate_locations_for_posts
+
+        geolocation_task = asyncio.create_task(
+            estimate_locations_for_posts(profile.posts, progress_callback=progress_callback)
+        )
+
     await emit_progress(progress_callback, "Analizando tu forma de escribir...")
     fingerprint = build_fingerprint(profile.posts)
 
@@ -90,6 +106,7 @@ async def _build_report(profile: SocialProfile, progress_callback: ProgressCallb
         progress_callback=progress_callback,
         bio=profile.bio,
         full_name=profile.full_name,
+        geolocation_task=geolocation_task,
     )
 
 

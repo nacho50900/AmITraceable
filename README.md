@@ -121,7 +121,7 @@ SPA creada con [Vite](https://vitejs.dev/) y [React](https://react.dev/) en Type
 ### Backend Python/FastAPI (`backend/`)
 
 - `app/auth/reddit_oauth.py`, `app/auth/instagram_oauth.py` — OAuth 2.0 con cada plataforma.
-- `app/auth/dynamic_origin.py` — deriva el `redirect_uri` de Instagram y el destino de la redirección final del Host de cada petición cuando no hay un valor fijo en `.env` (pensado para túneles de Cloudflare, cuya URL cambia en cada reinicio).
+- `app/auth/dynamic_origin.py` — deriva el `redirect_uri` de Instagram y el destino de la redirección final del Host de cada petición cuando no hay un valor fijo en `.env` (pensado para túneles HTTPS tipo ngrok, cuya URL cambia en cada reinicio; ver nota más abajo sobre por qué no usar Cloudflare Quick Tunnel).
 - `app/reddit_client.py`, `app/instagram_client.py` — extracción de posts/comentarios/publicaciones públicas, normalizados a un modelo común (`SocialPost`).
 - `app/nlp/fingerprint.py` — huella de escritura (longitud de frase, vocabulario, emojis, patrón horario, keywords TF-IDF, idioma).
 - `app/nlp/attribute_inference.py` — inferencia explicable de atributos (ubicación, ocupación, rutina) a partir de comunidades/hashtags.
@@ -211,21 +211,40 @@ Ver `backend/.env.example` para la lista completa comentada. Resumen:
 
 **Nota sobre Instagram y HTTPS en local:** la API de Instagram (Business
 Login) exige que `redirect_uri` sea HTTPS, incluso en desarrollo. Para
-probarlo en local sin dominio propio, usa un túnel de Cloudflare apuntando
-a la **webapp** (puerto 8080), no al backend directamente -- la webapp
-lleva su propio nginx que hace de proxy hacia el backend bajo el mismo
-origen (ver `webapp/nginx.conf`), así que un único túnel sirve para todo:
+probarlo en local sin dominio propio, usa **ngrok** apuntando a la
+**webapp** (puerto 8080), no al backend directamente -- la webapp lleva
+su propio nginx que hace de proxy hacia el backend bajo el mismo origen
+(ver `webapp/nginx.conf`), así que un único túnel sirve para todo:
 
 ```bash
-cloudflared tunnel --url http://localhost:8080
+ngrok http 8080
 ```
 
+(requiere cuenta gratuita en https://ngrok.com y `ngrok config add-authtoken <token>` una vez).
+
+⚠️ **No usar `cloudflared tunnel --url ...` (Cloudflare Quick Tunnel)**:
+el edge de `trycloudflare.com` bufferiza por completo las respuestas
+`text/event-stream`, así que el streaming SSE de `/api/analyze/{platform}/stream`
+(la pantalla de carga con el listado de fases) nunca llega en tiempo real
+al navegador -- todos los eventos se reciben de golpe justo cuando el
+análisis termina, y se ve solo "Analizando tu actividad pública en
+X..." sin el listado de fases mientras carga. Es un problema conocido y
+documentado del propio Cloudflare (no del backend: las cabeceras
+`text/event-stream` y `X-Accel-Buffering: no` ya se mandan bien). Un
+*named tunnel* de Cloudflare (con dominio propio) sí respetaría el
+streaming, pero para desarrollo local sin dominio, ngrok funciona
+correctamente sin ese problema.
+
 Con `INSTAGRAM_REDIRECT_URI` y `FRONTEND_ORIGIN` vacías en `.env` (valor
-por defecto), lo único que hay que hacer con la URL `https://xxx.trycloudflare.com`
+por defecto), lo único que hay que hacer con la URL `https://xxx.ngrok-free.app`
 que te dé cada vez es darla de alta en la app de Meta Developers (con el
 path `/auth/instagram/callback`) -- eso sigue siendo manual, Meta no tiene
 API para gestionar esa lista. Todo lo demás (`.env`, reconstruir imágenes,
 reiniciar `uvicorn`) se adapta solo en cada reinicio del túnel.
+
+La primera vez que abras la URL de ngrok en el navegador, el plan
+gratuito muestra una página intermedia de aviso ("You are about to
+visit...") -- solo hay que darle a "Visit Site", no es un error.
 
 ### Scripts de geolocalización por imagen (opcional)
 

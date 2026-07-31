@@ -298,8 +298,8 @@ class TestEstimateLocationsForPosts:
         assert outcome.results[1][1].confidence == 0.1
 
         assert progress_events == [
-            ("Analizando fotos...", {"photos_analyzed": 1, "total_photos": 2}),
-            ("Analizando fotos...", {"photos_analyzed": 2, "total_photos": 2}),
+            ("Analizando fotos...", {"photos_analyzed": 1, "total_photos": 2, "track": "fotos"}),
+            ("Analizando fotos...", {"photos_analyzed": 2, "total_photos": 2, "track": "fotos"}),
         ]
 
     @pytest.mark.asyncio
