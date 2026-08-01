@@ -524,7 +524,7 @@ body {
 .pictogram-lg .pictogram-percent {
   font-size: 40px;
   font-weight: 700;
-  color: var(--text);
+  color: var(--turquoise);
   min-width: unset;
 }
 
