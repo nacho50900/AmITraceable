@@ -51,6 +51,11 @@ export interface ImageLocationPoint {
   confidence: number;
   lat: number | null;
   lon: number | null;
+  // false si los vecinos más parecidos de la foto están repartidos por una
+  // zona demasiado amplia como para que la estimación sea fiable -- no se
+  // pinta en el mapa, se muestra aparte en un apartado de "imágenes no
+  // representativas" (ver LocationMap.tsx).
+  representative: boolean;
 }
 
 export interface ExposureReport {

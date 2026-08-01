@@ -112,6 +112,13 @@ class ImageLocationPoint(BaseModel):
     confidence: float  # 0-1, proporción de vecinos del índice que coincidieron
     lat: float | None
     lon: float | None
+    # False cuando los vecinos más parecidos de la foto están repartidos por
+    # una zona demasiado amplia (ver ImageLocationEstimate.representative en
+    # app/vision/geolocation.py) -- la estimación es real, pero no fiable
+    # como para representarla en el mapa. El frontend la muestra aparte, en
+    # un apartado de "imágenes no representativas" con solo el enlace a la
+    # publicación, sin pintarla como punto en el mapa.
+    representative: bool = True
 
 
 class ExposureReport(BaseModel):

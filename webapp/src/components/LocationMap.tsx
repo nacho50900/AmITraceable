@@ -41,6 +41,15 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
     );
   }
 
+  // Las fotos no representativas (vecinos más parecidos repartidos por una
+  // zona demasiado amplia, ver ImageLocationEstimate.representative en
+  // app/vision/geolocation.py) NO se pintan en el mapa ni en la lista
+  // principal -- aparecen aparte, más abajo, solo con el enlace a la
+  // publicación, para no sugerir una ubicación fiable que en realidad no
+  // lo es.
+  const representativePoints = points.filter((p) => p.representative);
+  const nonRepresentativePoints = points.filter((p) => !p.representative);
+
   if (points.length === 0) {
     return (
       <p className="note">
@@ -50,7 +59,7 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
     );
   }
 
-  const mappablePoints = points.filter((p) => p.lat !== null && p.lon !== null);
+  const mappablePoints = representativePoints.filter((p) => p.lat !== null && p.lon !== null);
   const center: [number, number] =
     mappablePoints.length > 0
       ? [
@@ -61,6 +70,13 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
 
   return (
     <>
+      {representativePoints.length === 0 && (
+        <p className="note">
+          Ninguna de tus fotos analizadas fue lo bastante representativa de un lugar concreto como
+          para estimar una ubicación fiable.
+        </p>
+      )}
+
       {mappablePoints.length > 0 && (
         <MapContainer
           center={center}
@@ -106,25 +122,50 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
         </MapContainer>
       )}
 
-      <p className="note">
-        Cada foto se ha comparado contra un índice de imágenes de referencia de España; el
-        resultado es una similitud visual aproximada, no una ubicación exacta. Se muestran{' '}
-        <strong>todas</strong> las fotos analizadas, incluidas las de confianza baja.
-      </p>
+      {representativePoints.length > 0 && (
+        <>
+          <p className="note">
+            Cada foto se ha comparado contra un índice de imágenes de referencia de España; el
+            resultado es una similitud visual aproximada, no una ubicación exacta. Se muestran{' '}
+            <strong>todas</strong> las fotos con una estimación representativa de un lugar
+            concreto, incluidas las de confianza baja.
+          </p>
 
-      <ul className="image-location-list">
-        {points.map((point) => (
-          <li key={point.permalink}>
-            <a href={point.permalink} target="_blank" rel="noreferrer">
-              Ver publicación
-            </a>
-            <span>
-              {point.province} — confianza {Math.round(point.confidence * 100)}%
-              {point.lat === null && ' (sin coordenadas para el mapa)'}
-            </span>
-          </li>
-        ))}
-      </ul>
+          <ul className="image-location-list">
+            {representativePoints.map((point) => (
+              <li key={point.permalink}>
+                <a href={point.permalink} target="_blank" rel="noreferrer">
+                  Ver publicación
+                </a>
+                <span>
+                  {point.province} — confianza {Math.round(point.confidence * 100)}%
+                  {point.lat === null && ' (sin coordenadas para el mapa)'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {nonRepresentativePoints.length > 0 && (
+        <>
+          <h3>Imágenes No Representativas</h3>
+          <p className="note">
+            Estas fotos se analizaron, pero sus vecinos más parecidos en el índice están
+            repartidos por una zona demasiado amplia como para asignarles una ubicación fiable --
+            no se muestran en el mapa ni cuentan para estimar tu residencia.
+          </p>
+          <ul className="image-location-list">
+            {nonRepresentativePoints.map((point) => (
+              <li key={point.permalink}>
+                <a href={point.permalink} target="_blank" rel="noreferrer">
+                  Ver publicación
+                </a>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </>
   );
 };

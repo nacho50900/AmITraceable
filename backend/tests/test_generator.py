@@ -163,12 +163,43 @@ class TestGenerateReportPlatformBranching:
         # Sigue en el mapa, con su confianza real, sin filtrar:
         assert len(report.image_location_points) == 2
         assert report.image_location_points[0].confidence == 0.9
+        # Y el campo `representative` se propaga tal cual al informe público
+        # -- es el frontend quien decide con él qué pintar en el mapa y qué
+        # mostrar en el apartado de "Imágenes No Representativas" (ver
+        # LocationMap.tsx).
+        assert report.image_location_points[0].representative is False
+        assert report.image_location_points[1].representative is False
 
         # Pero no cuenta para afirmar una provincia/comunidad de residencia,
         # ni siquiera con dos fotos de alta confianza que cumplirían el
         # umbral de consenso si fueran representativas:
         location_steps = [s for s in report.population_narrowing if s.category == "ubicacion"]
         assert location_steps == []
+
+    @pytest.mark.asyncio
+    async def test_representative_photo_propagates_representative_true(self, monkeypatch):
+        async def _fake_estimate(posts, progress_callback=None):
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[
+                    (
+                        "https://ig/1",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.9, k_neighbors=15, mean_similarity=0.7,
+                            lat=40.4, lon=-3.7, representative=True,
+                        ),
+                    ),
+                ],
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+
+        report = await generate_report(
+            "instagram", "user", [_post(platform="instagram", media_url="https://cdn/1.jpg")],
+            _fingerprint(), [], _score(),
+        )
+
+        assert report.image_location_points[0].representative is True
 
     @pytest.mark.asyncio
     async def test_single_high_confidence_photo_is_not_enough_on_its_own(self, monkeypatch):

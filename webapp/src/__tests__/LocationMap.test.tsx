@@ -38,6 +38,7 @@ function makePoint(overrides: Partial<ImageLocationPoint> = {}): ImageLocationPo
     confidence: 0.6,
     lat: 40.41,
     lon: -3.7,
+    representative: true,
     ...overrides,
   };
 }
@@ -179,5 +180,56 @@ describe('LocationMap', () => {
   test('con puntos válidos: muestra la nota explicativa sobre similitud aproximada', () => {
     render(<LocationMap points={[makePoint()]} platform="instagram" available={true} />);
     expect(screen.getByText(/similitud visual aproximada/i)).toBeInTheDocument();
+  });
+
+  test('foto no representativa: no aparece en el mapa ni en la lista principal', () => {
+    const points = [makePoint({ representative: false, permalink: 'https://instagram.com/p/no-rep' })];
+    render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    expect(screen.queryByTestId('map-container')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('circle-marker')).not.toBeInTheDocument();
+  });
+
+  test('foto no representativa: aparece en el apartado "Imágenes No Representativas" con enlace a la publicación', () => {
+    const points = [makePoint({ representative: false, permalink: 'https://instagram.com/p/no-rep' })];
+    render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    expect(screen.getByText('Imágenes No Representativas')).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Ver publicación' });
+    expect(link).toHaveAttribute('href', 'https://instagram.com/p/no-rep');
+  });
+
+  test('mezcla de representativas y no representativas: cada una en su sitio, sin duplicarse', () => {
+    const points = [
+      makePoint({ permalink: 'https://instagram.com/p/rep', representative: true }),
+      makePoint({ permalink: 'https://instagram.com/p/no-rep', representative: false }),
+    ];
+    render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    expect(screen.getAllByTestId('circle-marker')).toHaveLength(1);
+    const [mainList, nonRepresentativeList] = screen.getAllByRole('list');
+    expect(within(mainList).getAllByRole('link', { name: 'Ver publicación' })).toHaveLength(1);
+    expect(within(mainList).getByRole('link')).toHaveAttribute('href', 'https://instagram.com/p/rep');
+    expect(within(nonRepresentativeList).getAllByRole('link', { name: 'Ver publicación' })).toHaveLength(1);
+    expect(within(nonRepresentativeList).getByRole('link')).toHaveAttribute(
+      'href',
+      'https://instagram.com/p/no-rep',
+    );
+  });
+
+  test('sin apartado de no representativas cuando todas las fotos son representativas', () => {
+    render(<LocationMap points={[makePoint()]} platform="instagram" available={true} />);
+    expect(screen.queryByText('Imágenes No Representativas')).not.toBeInTheDocument();
+  });
+
+  test('todas las fotos analizadas son no representativas: no se muestra mapa ni lista principal, solo el aviso y el apartado aparte', () => {
+    const points = [makePoint({ representative: false })];
+    render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    expect(screen.queryByTestId('map-container')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Ninguna de tus fotos analizadas fue lo bastante representativa/),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Imágenes No Representativas')).toBeInTheDocument();
   });
 });

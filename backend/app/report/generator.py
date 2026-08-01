@@ -321,6 +321,7 @@ async def _apply_image_geolocation(
             confidence=estimate.confidence,
             lat=estimate.lat,
             lon=estimate.lon,
+            representative=estimate.representative,
         )
         for permalink, estimate in geo_outcome.results
     ]
