@@ -108,8 +108,8 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
 
       <p className="note">
         Cada foto se ha comparado contra un índice de imágenes de referencia de España; el
-        resultado es una similitud visual aproximada, no una ubicación exacta. Se muestran
-        <strong> todas</strong> las fotos analizadas, incluidas las de confianza baja.
+        resultado es una similitud visual aproximada, no una ubicación exacta. Se muestran{' '}
+        <strong>todas</strong> las fotos analizadas, incluidas las de confianza baja.
       </p>
 
       <ul className="image-location-list">

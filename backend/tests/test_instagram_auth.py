@@ -172,6 +172,7 @@ class TestDynamicRedirectUriFallback:
 
         # httpx/TestClient siempre manda algún Host, así que forzamos el caso
         # límite llamando directamente a la función auxiliar.
+        from fastapi import HTTPException
         from starlette.requests import Request
 
         from app.auth.instagram_oauth import _redirect_uri
@@ -179,7 +180,7 @@ class TestDynamicRedirectUriFallback:
         scope = {"type": "http", "headers": []}
         request = Request(scope)
 
-        with pytest.raises(Exception):
+        with pytest.raises(HTTPException, match="No se pudo determinar el origen"):
             _redirect_uri(request)
 
 

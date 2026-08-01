@@ -242,42 +242,55 @@ def _set_normalized(
         _set_evidence(findings, field, evidence_map)
 
 
+def _match_place(raw: object, distribution: dict) -> str | None:
+    """Busca `raw` (texto libre, p.ej. "Vivo en Las Palmas") como subcadena
+    de alguna clave de `distribution` (municipio o provincia). None si
+    `raw` no es un string usable o no hay coincidencia."""
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    candidate = _strip_accents(raw.strip().lower())
+    return next((k for k in distribution if k in candidate), None)
+
+
+def _set_comunidad_autonoma(findings: DemographicFindings, ccaa_raw: object, evidence_map: dict) -> None:
+    """Procesa el campo 'comunidad_autonoma' del modelo (ver _SYSTEM_PROMPT):
+    solo se usa cuando el texto no dio ya municipio/provincia concreta. Si
+    la comunidad tiene una sola provincia, no hay ambigüedad y se guarda
+    como provincia (más específico); si tiene varias, se guarda a nivel de
+    comunidad autónoma."""
+    if not isinstance(ccaa_raw, str) or not ccaa_raw.strip():
+        return
+
+    ccaa = resolve_autonomous_community(ccaa_raw)
+    if ccaa is None:
+        return
+
+    provinces = AUTONOMOUS_COMMUNITY_PROVINCES[ccaa]
+    if len(provinces) == 1:
+        findings.provincia = provinces[0]
+        _set_evidence(findings, "provincia", evidence_map)
+    else:
+        findings.comunidad_autonoma = ccaa
+        _set_evidence(findings, "comunidad_autonoma", evidence_map)
+
+
 def _set_location(findings: DemographicFindings, parsed: dict, evidence_map: dict) -> None:
     # Municipio primero (más específico), igual que en demographic_extraction.py.
-    municipio_raw = parsed.get("municipio")
-    if isinstance(municipio_raw, str) and municipio_raw.strip():
-        candidate = _strip_accents(municipio_raw.strip().lower())
-        matched = next((k for k in MUNICIPALITY_POPULATION if k in candidate), None)
-        if matched:
-            findings.municipio = matched
-            _set_evidence(findings, "municipio", evidence_map)
-            return
+    municipio = _match_place(parsed.get("municipio"), MUNICIPALITY_POPULATION)
+    if municipio:
+        findings.municipio = municipio
+        _set_evidence(findings, "municipio", evidence_map)
+        return
 
-    provincia_raw = parsed.get("provincia")
-    if isinstance(provincia_raw, str) and provincia_raw.strip():
-        candidate = _strip_accents(provincia_raw.strip().lower())
-        matched = next((k for k in PROVINCE_POPULATION if k in candidate), None)
-        if matched:
-            findings.provincia = matched
-            _set_evidence(findings, "provincia", evidence_map)
-            return
+    provincia = _match_place(parsed.get("provincia"), PROVINCE_POPULATION)
+    if provincia:
+        findings.provincia = provincia
+        _set_evidence(findings, "provincia", evidence_map)
+        return
 
     # Ninguna coincidencia de municipio/provincia: puede que el modelo haya
-    # devuelto una comunidad autónoma COMPLETA en su propio campo (ver
-    # 'comunidad_autonoma' en _SYSTEM_PROMPT). Si esa comunidad tiene una
-    # sola provincia, no hay ambigüedad y se usa esa provincia directamente
-    # (más específico); si tiene varias, se guarda a nivel de comunidad.
-    ccaa_raw = parsed.get("comunidad_autonoma")
-    if isinstance(ccaa_raw, str) and ccaa_raw.strip():
-        ccaa = resolve_autonomous_community(ccaa_raw)
-        if ccaa is not None:
-            provinces = AUTONOMOUS_COMMUNITY_PROVINCES[ccaa]
-            if len(provinces) == 1:
-                findings.provincia = provinces[0]
-                _set_evidence(findings, "provincia", evidence_map)
-            else:
-                findings.comunidad_autonoma = ccaa
-                _set_evidence(findings, "comunidad_autonoma", evidence_map)
+    # devuelto una comunidad autónoma COMPLETA en su propio campo.
+    _set_comunidad_autonoma(findings, parsed.get("comunidad_autonoma"), evidence_map)
 
 
 def _to_findings(parsed: dict) -> DemographicFindings:

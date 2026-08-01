@@ -86,6 +86,18 @@ def _build_age_distribution_1y() -> dict[int, float]:
 AGE_DISTRIBUTION_1Y = _build_age_distribution_1y()
 
 
+# Claves canónicas de las comunidades autónomas cuyo nombre se repite
+# muchas veces a lo largo de este fichero (como clave de provincia -- cuando
+# coincide -- de comunidad, de nombre legible y de múltiples alias). Se
+# definen como constantes en vez de repetir el literal (SonarCloud:
+# "Define a constant instead of duplicating this literal").
+_CCAA_LA_RIOJA = "la rioja"
+_CCAA_CASTILLA_Y_LEON = "castilla y leon"
+_CCAA_CASTILLA_LA_MANCHA = "castilla la mancha"
+_CCAA_COMUNIDAD_VALENCIANA = "comunidad valenciana"
+_CCAA_PAIS_VASCO = "pais vasco"
+
+
 # Población por provincia (aprox. 2024, INE - Estadística Continua de
 # Población). Cubre una selección representativa; añade más si tu análisis
 # lo necesita. Claves en minúsculas, sin tildes para facilitar el matching.
@@ -125,7 +137,7 @@ PROVINCE_POPULATION = {
     "burgos": 355_000,
     "caceres": 385_000,
     "salamanca": 336_000,
-    "la rioja": 320_000,
+    _CCAA_LA_RIOJA: 320_000,
     "lugo": 327_000,
     "orense": 305_000,
     "albacete": 385_000,
@@ -190,17 +202,17 @@ AUTONOMOUS_COMMUNITY_PROVINCES: dict[str, list[str]] = {
     "baleares": ["baleares"],
     "canarias": ["las palmas", "santa cruz de tenerife"],
     "cantabria": ["cantabria"],
-    "castilla y leon": ["valladolid", "leon", "burgos", "salamanca", "zamora", "avila", "palencia", "segovia", "soria"],
-    "castilla la mancha": ["toledo", "ciudad real", "albacete", "guadalajara", "cuenca"],
+    _CCAA_CASTILLA_Y_LEON: ["valladolid", "leon", "burgos", "salamanca", "zamora", "avila", "palencia", "segovia", "soria"],
+    _CCAA_CASTILLA_LA_MANCHA: ["toledo", "ciudad real", "albacete", "guadalajara", "cuenca"],
     "cataluna": ["barcelona", "tarragona", "gerona", "lerida"],
-    "comunidad valenciana": ["valencia", "alicante", "castellon"],
+    _CCAA_COMUNIDAD_VALENCIANA: ["valencia", "alicante", "castellon"],
     "extremadura": ["badajoz", "caceres"],
     "galicia": ["a coruna", "pontevedra", "lugo", "orense"],
     "madrid": ["madrid"],
     "murcia": ["murcia"],
     "navarra": ["navarra"],
-    "pais vasco": ["vizcaya", "guipuzcoa", "alava"],
-    "la rioja": ["la rioja"],
+    _CCAA_PAIS_VASCO: ["vizcaya", "guipuzcoa", "alava"],
+    _CCAA_LA_RIOJA: [_CCAA_LA_RIOJA],
     "ceuta": ["ceuta"],
     "melilla": ["melilla"],
 }
@@ -214,17 +226,17 @@ AUTONOMOUS_COMMUNITY_DISPLAY_NAMES: dict[str, str] = {
     "baleares": "Islas Baleares",
     "canarias": "Canarias",
     "cantabria": "Cantabria",
-    "castilla y leon": "Castilla y León",
-    "castilla la mancha": "Castilla-La Mancha",
+    _CCAA_CASTILLA_Y_LEON: "Castilla y León",
+    _CCAA_CASTILLA_LA_MANCHA: "Castilla-La Mancha",
     "cataluna": "Cataluña",
-    "comunidad valenciana": "Comunidad Valenciana",
+    _CCAA_COMUNIDAD_VALENCIANA: "Comunidad Valenciana",
     "extremadura": "Extremadura",
     "galicia": "Galicia",
     "madrid": "Comunidad de Madrid",
     "murcia": "Región de Murcia",
     "navarra": "Comunidad Foral de Navarra",
-    "pais vasco": "País Vasco",
-    "la rioja": "La Rioja",
+    _CCAA_PAIS_VASCO: "País Vasco",
+    _CCAA_LA_RIOJA: "La Rioja",
     "ceuta": "Ceuta",
     "melilla": "Melilla",
 }
@@ -249,20 +261,20 @@ _AUTONOMOUS_COMMUNITY_ALIASES: dict[str, str] = {
     "islas canarias": "canarias",
     "canary islands": "canarias",
     "cantabria": "cantabria",
-    "castilla y leon": "castilla y leon",
-    "castilla-y-leon": "castilla y leon",
-    "castile and leon": "castilla y leon",
-    "castille and leon": "castilla y leon",
-    "castilla la mancha": "castilla la mancha",
-    "castilla-la mancha": "castilla la mancha",
-    "castile-la mancha": "castilla la mancha",
+    _CCAA_CASTILLA_Y_LEON: _CCAA_CASTILLA_Y_LEON,
+    "castilla-y-leon": _CCAA_CASTILLA_Y_LEON,
+    "castile and leon": _CCAA_CASTILLA_Y_LEON,
+    "castille and leon": _CCAA_CASTILLA_Y_LEON,
+    _CCAA_CASTILLA_LA_MANCHA: _CCAA_CASTILLA_LA_MANCHA,
+    "castilla-la mancha": _CCAA_CASTILLA_LA_MANCHA,
+    "castile-la mancha": _CCAA_CASTILLA_LA_MANCHA,
     "cataluna": "cataluna",
     "catalunya": "cataluna",
     "catalonia": "cataluna",
-    "comunidad valenciana": "comunidad valenciana",
-    "comunitat valenciana": "comunidad valenciana",
-    "valencian community": "comunidad valenciana",
-    "region of valencia": "comunidad valenciana",
+    _CCAA_COMUNIDAD_VALENCIANA: _CCAA_COMUNIDAD_VALENCIANA,
+    "comunitat valenciana": _CCAA_COMUNIDAD_VALENCIANA,
+    "valencian community": _CCAA_COMUNIDAD_VALENCIANA,
+    "region of valencia": _CCAA_COMUNIDAD_VALENCIANA,
     "extremadura": "extremadura",
     "galicia": "galicia",
     "madrid": "madrid",
@@ -275,11 +287,11 @@ _AUTONOMOUS_COMMUNITY_ALIASES: dict[str, str] = {
     "navarra": "navarra",
     "comunidad foral de navarra": "navarra",
     "navarre": "navarra",
-    "pais vasco": "pais vasco",
-    "euskadi": "pais vasco",
-    "basque country": "pais vasco",
-    "la rioja": "la rioja",
-    "rioja": "la rioja",
+    _CCAA_PAIS_VASCO: _CCAA_PAIS_VASCO,
+    "euskadi": _CCAA_PAIS_VASCO,
+    "basque country": _CCAA_PAIS_VASCO,
+    _CCAA_LA_RIOJA: _CCAA_LA_RIOJA,
+    "rioja": _CCAA_LA_RIOJA,
     "ceuta": "ceuta",
     "melilla": "melilla",
 }

@@ -99,44 +99,14 @@ class _HomeRegionCandidate:
         self.permalinks = permalinks
 
 
-def _infer_home_region(
-    # `object` en vez del tipo real de geolocation.py a propósito: ese
-    # módulo tiene dependencias opcionales (torch/faiss) que NUNCA deben
-    # importarse incondicionalmente a nivel de módulo (ver su propio
-    # docstring) -- aquí solo se necesita "algo con .province/.confidence".
+def _filter_and_resolve_estimates(
     results: list[tuple[str, object]],
     travel_permalinks: set[str],
-) -> _HomeRegionCandidate | None:
-    """Decide si hay consenso suficiente entre varias fotos para dar por
-    buena una comunidad autónoma (o provincia) como residencia habitual.
-
-    Pasos:
-    1. Se descartan las fotos marcadas como "de viaje" (`travel_permalinks`,
-       ver travel_detection.py y el campo "fotos_de_viaje" de la IA): una
-       foto de vacaciones en Roma no debe contar como señal de dónde vive
-       la persona, por muy alta que sea su confianza de geolocalización.
-    2. Se descartan las fotos cuya región no se reconoce (`_resolve_region`
-       devuelve None), y las marcadas como no representativas (dispersión
-       geográfica excesiva entre sus vecinos más parecidos, ver
-       `ImageLocationEstimate.representative` en app/vision/geolocation.py)
-       -- SOLO para esta conclusión de residencia: siguen apareciendo en
-       `image_location_points` con su confianza real, lo único que no
-       hacen es contar aquí.
-    3. Se agrupan las fotos restantes por COMUNIDAD AUTÓNOMA (usando
-       PROVINCE_TO_CCAA cuando una foto resolvió a provincia concreta), no
-       por provincia exacta -- así varias fotos de distintas provincias de
-       una misma comunidad (o mezclando nombre de provincia con nombre de
-       comunidad) siguen sumando señal de la misma zona.
-    4. Cada grupo se acepta solo si cumple HIGH_CONFIDENCE_MIN_PHOTOS a
-       HIGH_CONFIDENCE, o MODERATE_CONFIDENCE_MIN_PHOTOS a
-       MODERATE_CONFIDENCE (ver constantes arriba).
-    5. Si varios grupos cumplen (raro), gana el que tenga más fotos de
-       señal válida; en empate, el de mayor confianza media.
-    6. Dentro del grupo ganador, si TODAS las fotos que cuentan señalan la
-       misma provincia concreta, se usa esa provincia (más específico);
-       si no, se usa el nivel de comunidad autónoma.
-    """
-    resolved: list[tuple[str, str, str, float]] = []  # permalink, nivel, clave, confianza
+) -> list[tuple[str, str, str, float]]:
+    """Paso 1-2 de `_infer_home_region`: descarta fotos de viaje, no
+    representativas, o cuya región no se reconoce; para el resto, devuelve
+    (permalink, nivel, clave, confianza)."""
+    resolved: list[tuple[str, str, str, float]] = []
     for permalink, estimate in results:
         if permalink in travel_permalinks:
             continue
@@ -147,16 +117,30 @@ def _infer_home_region(
             continue
         level, key = region
         resolved.append((permalink, level, key, estimate.confidence))
+    return resolved
 
-    if not resolved:
-        return None
 
+def _group_by_ccaa(
+    resolved: list[tuple[str, str, str, float]],
+) -> dict[str, list[tuple[str, str, str, float]]]:
+    """Paso 3 de `_infer_home_region`: agrupa por comunidad autónoma
+    (usando PROVINCE_TO_CCAA cuando una foto resolvió a provincia
+    concreta), para que fotos de distintas provincias de una misma
+    comunidad sumen señal juntas."""
     groups: dict[str, list[tuple[str, str, str, float]]] = {}
     for item in resolved:
         _, level, key, _ = item
         ccaa = key if level == "comunidad_autonoma" else PROVINCE_TO_CCAA.get(key, key)
         groups.setdefault(ccaa, []).append(item)
+    return groups
 
+
+def _qualifying_groups(
+    groups: dict[str, list[tuple[str, str, str, float]]],
+) -> list[tuple[list[tuple[str, str, str, float]], float]]:
+    """Paso 4 de `_infer_home_region`: se queda solo con los grupos que
+    cumplen el umbral de consenso (HIGH_CONFIDENCE*/MODERATE_CONFIDENCE*),
+    junto a su confianza media."""
     candidates: list[tuple[list[tuple[str, str, str, float]], float]] = []
     for items in groups.values():
         high = [i for i in items if i[3] > HIGH_CONFIDENCE]
@@ -166,25 +150,192 @@ def _infer_home_region(
             continue
         avg_confidence = sum(i[3] for i in moderate) / len(moderate)
         candidates.append((moderate, avg_confidence))
+    return candidates
 
+
+def _pick_specificity(winning_items: list[tuple[str, str, str, float]]) -> tuple[str, str]:
+    """Paso 6 de `_infer_home_region`: dentro del grupo ganador, si TODAS
+    las fotos que cuentan señalan la misma provincia concreta, se usa esa
+    provincia (más específico); si no, el nivel de comunidad autónoma."""
+    provinces_in_group = {key for _, level, key, _ in winning_items if level == "provincia"}
+    if len(provinces_in_group) == 1:
+        return "provincia", next(iter(provinces_in_group))
+
+    # Mezcla de provincias distintas (o alguna a nivel de comunidad
+    # directamente): no se puede ser más específico que la comunidad.
+    _, _, any_key, _ = winning_items[0]
+    ccaa_key = any_key if any_key in AUTONOMOUS_COMMUNITY_PROVINCES else PROVINCE_TO_CCAA[any_key]
+    return "comunidad_autonoma", ccaa_key
+
+
+def _infer_home_region(
+    # `object` en vez del tipo real de geolocation.py a propósito: ese
+    # módulo tiene dependencias opcionales (torch/faiss) que NUNCA deben
+    # importarse incondicionalmente a nivel de módulo (ver su propio
+    # docstring) -- aquí solo se necesita "algo con .province/.confidence".
+    results: list[tuple[str, object]],
+    travel_permalinks: set[str],
+) -> _HomeRegionCandidate | None:
+    """Decide si hay consenso suficiente entre varias fotos para dar por
+    buena una comunidad autónoma (o provincia) como residencia habitual.
+    Orquesta los pasos 1-6 (ver los docstrings de cada helper):
+
+    1-2. `_filter_and_resolve_estimates`: descarta fotos de viaje, no
+         representativas (dispersión geográfica excesiva entre sus vecinos
+         más parecidos, ver `ImageLocationEstimate.representative` en
+         app/vision/geolocation.py) o sin región reconocible -- SOLO para
+         esta conclusión de residencia: siguen apareciendo en
+         `image_location_points` con su confianza real.
+    3.   `_group_by_ccaa`: agrupa las fotos restantes por comunidad autónoma.
+    4.   `_qualifying_groups`: filtra los grupos con consenso suficiente.
+    5.   Si varios grupos cumplen (raro), gana el que tenga más fotos de
+         señal válida; en empate, el de mayor confianza media.
+    6.   `_pick_specificity`: decide provincia vs. comunidad autónoma.
+    """
+    resolved = _filter_and_resolve_estimates(results, travel_permalinks)
+    if not resolved:
+        return None
+
+    groups = _group_by_ccaa(resolved)
+    candidates = _qualifying_groups(groups)
     if not candidates:
         return None
 
     candidates.sort(key=lambda pair: (len(pair[0]), pair[1]), reverse=True)
     winning_items, _ = candidates[0]
 
-    provinces_in_group = {key for _, level, key, _ in winning_items if level == "provincia"}
-    if len(provinces_in_group) == 1:
-        level, key = "provincia", next(iter(provinces_in_group))
-    else:
-        # Mezcla de provincias distintas (o alguna a nivel de comunidad
-        # directamente): no se puede ser más específico que la comunidad.
-        _, _, any_key, _ = winning_items[0]
-        ccaa_key = any_key if any_key in AUTONOMOUS_COMMUNITY_PROVINCES else PROVINCE_TO_CCAA[any_key]
-        level, key = "comunidad_autonoma", ccaa_key
-
+    level, key = _pick_specificity(winning_items)
     permalinks = [permalink for permalink, *_ in winning_items]
     return _HomeRegionCandidate(level=level, key=key, permalinks=permalinks)
+
+
+def _posts_with_bio_pseudo_post(platform: str, posts: list[SocialPost], bio: str | None) -> list[SocialPost]:
+    """La biografía se trata como una publicación más de cara a las regex
+    de autodeclaración (mismo criterio que un post/comentario, solo que sin
+    permalink real -- se usa "bio" como identificador de evidencia). Así
+    "estudiante de enfermería" en la bio se detecta con el mismo código
+    que si estuviera en un post, sin duplicar lógica de detección."""
+    if not bio:
+        return posts
+    bio_pseudo_post = SocialPost(
+        id="bio",
+        platform=platform,
+        type="bio",
+        group="sin_etiqueta",
+        tags=[],
+        text=bio,
+        created_utc=datetime.now(tz=timezone.utc),
+        score=0,
+        permalink="bio",
+    )
+    return [bio_pseudo_post, *posts]
+
+
+async def _apply_ai_findings(
+    demographic_findings: DemographicFindings,
+    travel_permalinks: set[str],
+    posts: list[SocialPost],
+    username: str,
+    full_name: str | None,
+    bio: str | None,
+    progress_callback: ProgressCallback | None,
+) -> tuple[DemographicFindings, set[str]]:
+    """Extracción de autodeclaraciones con IA: complementa las regex (que
+    solo cubren un vocabulario fijo) leyendo el texto -- y también el
+    nombre público de la cuenta, que sirve como señal débil de sexo -- de
+    forma más flexible. Se ejecuta automáticamente en cada análisis, sin
+    ningún botón. Ver docstring de app/nlp/ai_attribute_extraction.py para
+    el razonamiento RGPD. Módulo opcional/best-effort: sin MISTRAL_API_KEY,
+    o si la llamada falla, esto no aporta nada y el informe se sigue
+    generando solo con lo detectado por regex (devuelve los mismos
+    `demographic_findings`/`travel_permalinks` de entrada, sin tocar)."""
+    if not settings.mistral_api_key:
+        return demographic_findings, travel_permalinks
+
+    await emit_progress(progress_callback, "Buscando autodeclaraciones con IA...")
+    ai_findings = await extract_demographics_with_ai(posts, username=username, full_name=full_name, bio=bio)
+    demographic_findings = merge_findings(demographic_findings, ai_findings)
+    # La IA también señala fotos de viaje/vacaciones en el mismo pase (campo
+    # "fotos_de_viaje" del prompt) -- se UNE con lo que ya haya detectado la
+    # regex de travel_detection.py, nunca lo sustituye.
+    return demographic_findings, travel_permalinks | ai_findings.travel_permalinks
+
+
+def _apply_home_candidate(demographic_findings: DemographicFindings, home_candidate: "_HomeRegionCandidate") -> None:
+    """Vuelca el resultado de `_infer_home_region` en `demographic_findings`,
+    al nivel (provincia o comunidad autónoma) que haya resultado."""
+    if home_candidate.level == "provincia":
+        demographic_findings.provincia = home_candidate.key
+        demographic_findings.evidence.setdefault("provincia", []).extend(home_candidate.permalinks)
+        demographic_findings.source["provincia"] = "imagen"
+    else:
+        demographic_findings.comunidad_autonoma = home_candidate.key
+        demographic_findings.evidence.setdefault("comunidad_autonoma", []).extend(home_candidate.permalinks)
+        demographic_findings.source["comunidad_autonoma"] = "imagen"
+
+
+async def _apply_image_geolocation(
+    platform: str,
+    posts: list[SocialPost],
+    demographic_findings: DemographicFindings,
+    travel_permalinks: set[str],
+    geolocation_task: "asyncio.Task | None",
+    progress_callback: ProgressCallback | None,
+) -> tuple[list[ImageLocationPoint], bool]:
+    """Geolocalización por imagen: solo se usa como ubicación PARA EL
+    CÁLCULO DE POBLACIÓN si el texto no dio ya una provincia/municipio/
+    comunidad explícita (la autodeclaración en texto es más fiable), y solo
+    si hay CONSENSO entre varias fotos de la misma comunidad autónoma -- ver
+    `_infer_home_region` y las constantes HIGH_CONFIDENCE*/
+    MODERATE_CONFIDENCE* al principio de este módulo. Las fotos marcadas
+    como "de viaje" (travel_permalinks) nunca cuentan para esto. Pero TODAS
+    las estimaciones por imagen (de viaje, baja confianza, etc.) se
+    devuelven igualmente para `image_location_points`, así el frontend
+    puede mostrar cada foto analizada con su confianza real -- no solo las
+    que "cuentan" para inferir dónde vive la persona. Muta
+    `demographic_findings` in place si hay consenso.
+
+    Módulo opcional/best-effort: si el índice FAISS no está construido (ver
+    app/vision/geolocation.py), el segundo valor devuelto (disponibilidad)
+    queda a False y el resto del informe sigue generándose con normalidad.
+    Si `platform` no es "instagram", no hace nada (no hay fotos que analizar)."""
+    if platform != "instagram":
+        return [], False
+
+    if geolocation_task is not None:
+        # Ya se lanzó en segundo plano al principio del pipeline (ver
+        # analysis_router._build_report) -- aquí solo se recoge el
+        # resultado, corriendo en paralelo con todo lo anterior
+        # (fingerprint, atributos, autodeclaraciones con IA) en vez de
+        # esperar a que termine todo eso para empezar con las fotos.
+        geo_outcome = await geolocation_task
+    else:
+        from app.vision.geolocation import estimate_locations_for_posts
+
+        geo_outcome = await estimate_locations_for_posts(posts, progress_callback=progress_callback)
+
+    image_location_points = [
+        ImageLocationPoint(
+            permalink=permalink,
+            province=estimate.province,
+            confidence=estimate.confidence,
+            lat=estimate.lat,
+            lon=estimate.lon,
+        )
+        for permalink, estimate in geo_outcome.results
+    ]
+
+    has_location = (
+        demographic_findings.provincia is not None
+        or demographic_findings.municipio is not None
+        or demographic_findings.comunidad_autonoma is not None
+    )
+    if not has_location:
+        home_candidate = _infer_home_region(geo_outcome.results, travel_permalinks)
+        if home_candidate is not None:
+            _apply_home_candidate(demographic_findings, home_candidate)
+
+    return image_location_points, geo_outcome.index_available
 
 
 async def generate_report(
@@ -208,106 +359,17 @@ async def generate_report(
     geolocation_task: "asyncio.Task | None" = None,
 ) -> ExposureReport:
 
-    # La biografía se trata como una publicación más de cara a las regex de
-    # autodeclaración (mismo criterio que un post/comentario, solo que sin
-    # permalink real -- se usa "bio" como identificador de evidencia). Así
-    # "estudiante de enfermería" en la bio se detecta con el mismo código
-    # que si estuviera en un post, sin duplicar lógica de detección.
-    posts_for_demographics = posts
-    if bio:
-        bio_pseudo_post = SocialPost(
-            id="bio",
-            platform=platform,
-            type="bio",
-            group="sin_etiqueta",
-            tags=[],
-            text=bio,
-            created_utc=datetime.now(tz=timezone.utc),
-            score=0,
-            permalink="bio",
-        )
-        posts_for_demographics = [bio_pseudo_post, *posts]
-
+    posts_for_demographics = _posts_with_bio_pseudo_post(platform, posts, bio)
     demographic_findings = extract_demographics(posts_for_demographics)
     travel_permalinks = detect_travel_permalinks(posts)
 
-    # Extracción de autodeclaraciones con IA: complementa las regex (que
-    # solo cubren un vocabulario fijo) leyendo el texto -- y también el
-    # nombre público de la cuenta, que sirve como señal débil de sexo -- de
-    # forma más flexible. Se ejecuta automáticamente en cada análisis, sin
-    # ningún botón. Ver docstring de app/nlp/ai_attribute_extraction.py
-    # para el razonamiento RGPD. Módulo opcional/best-effort: sin
-    # MISTRAL_API_KEY, o si la llamada falla, esto no aporta nada y el
-    # informe se sigue generando solo con lo detectado por regex.
-    if settings.mistral_api_key:
-        await emit_progress(progress_callback, "Buscando autodeclaraciones con IA...")
-        ai_findings = await extract_demographics_with_ai(
-            posts, username=username, full_name=full_name, bio=bio
-        )
-        demographic_findings = merge_findings(demographic_findings, ai_findings)
-        # La IA también señala fotos de viaje/vacaciones en el mismo pase
-        # (campo "fotos_de_viaje" del prompt) -- se UNE con lo que ya haya
-        # detectado la regex de travel_detection.py, nunca lo sustituye.
-        travel_permalinks |= ai_findings.travel_permalinks
+    demographic_findings, travel_permalinks = await _apply_ai_findings(
+        demographic_findings, travel_permalinks, posts, username, full_name, bio, progress_callback
+    )
 
-    # Geolocalización por imagen: solo se usa como ubicación PARA EL CÁLCULO
-    # DE POBLACIÓN si el texto no dio ya una provincia/municipio explícita
-    # (la autodeclaración en texto es más fiable), y solo si hay CONSENSO
-    # entre varias fotos de la misma comunidad autónoma -- ver
-    # `_infer_home_region` y las constantes HIGH_CONFIDENCE*/
-    # MODERATE_CONFIDENCE* al principio de este módulo. Las fotos marcadas
-    # como "de viaje" (travel_permalinks) nunca cuentan para esto. Pero
-    # TODAS las estimaciones por imagen (de viaje, baja confianza, etc.) se
-    # guardan igualmente en `image_location_points`, para que el frontend
-    # pueda mostrar cada foto analizada con su confianza real -- no solo
-    # las que "cuentan" para inferir dónde vive la persona.
-    # Módulo opcional/best-effort: si el índice FAISS no está construido
-    # (ver app/vision/geolocation.py), `geolocation_available` queda a
-    # False y el resto del informe sigue generándose con normalidad.
-    image_location_points: list[ImageLocationPoint] = []
-    geolocation_available = False
-    if platform == "instagram":
-        if geolocation_task is not None:
-            # Ya se lanzó en segundo plano al principio del pipeline (ver
-            # analysis_router._build_report) -- aquí solo se recoge el
-            # resultado, corriendo en paralelo con todo lo anterior
-            # (fingerprint, atributos, autodeclaraciones con IA) en vez de
-            # esperar a que termine todo eso para empezar con las fotos.
-            geo_outcome = await geolocation_task
-        else:
-            from app.vision.geolocation import estimate_locations_for_posts
-
-            geo_outcome = await estimate_locations_for_posts(posts, progress_callback=progress_callback)
-        geolocation_available = geo_outcome.index_available
-        image_location_points = [
-            ImageLocationPoint(
-                permalink=permalink,
-                province=estimate.province,
-                confidence=estimate.confidence,
-                lat=estimate.lat,
-                lon=estimate.lon,
-            )
-            for permalink, estimate in geo_outcome.results
-        ]
-
-        has_location = (
-            demographic_findings.provincia is not None
-            or demographic_findings.municipio is not None
-            or demographic_findings.comunidad_autonoma is not None
-        )
-        if not has_location:
-            home_candidate = _infer_home_region(geo_outcome.results, travel_permalinks)
-            if home_candidate is not None:
-                if home_candidate.level == "provincia":
-                    demographic_findings.provincia = home_candidate.key
-                    demographic_findings.evidence.setdefault("provincia", []).extend(home_candidate.permalinks)
-                    demographic_findings.source["provincia"] = "imagen"
-                else:
-                    demographic_findings.comunidad_autonoma = home_candidate.key
-                    demographic_findings.evidence.setdefault("comunidad_autonoma", []).extend(
-                        home_candidate.permalinks
-                    )
-                    demographic_findings.source["comunidad_autonoma"] = "imagen"
+    image_location_points, geolocation_available = await _apply_image_geolocation(
+        platform, posts, demographic_findings, travel_permalinks, geolocation_task, progress_callback
+    )
 
     await emit_progress(progress_callback, "Generando el informe final...")
 

@@ -160,9 +160,11 @@ def _estimate_from_exact_coordinates(lat: float, lon: float) -> ImageLocationEst
     esas coordenadas exactas en los metadatos del índice ya cargado. La
     confianza se marca al máximo porque no es una estimación -- es la
     ubicación real que la propia foto llevaba."""
+    import pandas as pd
+
     distances = _index_meta.apply(
         lambda row: _haversine_km(lat, lon, row["lat"], row["lon"])
-        if row["lat"] == row["lat"] and row["lon"] == row["lon"]  # descarta NaN
+        if pd.notna(row["lat"]) and pd.notna(row["lon"])
         else float("inf"),
         axis=1,
     )
