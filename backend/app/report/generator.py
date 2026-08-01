@@ -116,7 +116,12 @@ def _infer_home_region(
        foto de vacaciones en Roma no debe contar como señal de dónde vive
        la persona, por muy alta que sea su confianza de geolocalización.
     2. Se descartan las fotos cuya región no se reconoce (`_resolve_region`
-       devuelve None).
+       devuelve None), y las marcadas como no representativas (dispersión
+       geográfica excesiva entre sus vecinos más parecidos, ver
+       `ImageLocationEstimate.representative` en app/vision/geolocation.py)
+       -- SOLO para esta conclusión de residencia: siguen apareciendo en
+       `image_location_points` con su confianza real, lo único que no
+       hacen es contar aquí.
     3. Se agrupan las fotos restantes por COMUNIDAD AUTÓNOMA (usando
        PROVINCE_TO_CCAA cuando una foto resolvió a provincia concreta), no
        por provincia exacta -- así varias fotos de distintas provincias de
@@ -134,6 +139,8 @@ def _infer_home_region(
     resolved: list[tuple[str, str, str, float]] = []  # permalink, nivel, clave, confianza
     for permalink, estimate in results:
         if permalink in travel_permalinks:
+            continue
+        if not getattr(estimate, "representative", True):
             continue
         region = _resolve_region(estimate.province)
         if region is None:

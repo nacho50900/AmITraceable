@@ -22,7 +22,7 @@ describe('PopulationPictogram', () => {
     const images = container.querySelectorAll('img');
 
     expect(images).toHaveLength(2);
-    expect(images[0]).toHaveAttribute('src', '/monigote-selected.png');
+    expect(images[0]).toHaveAttribute('src', '/monigote_selected.png');
     expect(images[1]).toHaveAttribute('src', '/monigote.png');
   });
 
@@ -31,7 +31,7 @@ describe('PopulationPictogram', () => {
     const images = container.querySelectorAll('img');
 
     expect(images).toHaveLength(10);
-    expect(images[0]).toHaveAttribute('src', '/monigote-selected.png');
+    expect(images[0]).toHaveAttribute('src', '/monigote_selected.png');
     expect(Array.from(images).slice(1).every((img) => img.getAttribute('src') === '/monigote.png')).toBe(true);
     expect(screen.getByText('10%')).toBeInTheDocument();
   });
@@ -41,7 +41,7 @@ describe('PopulationPictogram', () => {
     const images = container.querySelectorAll('img');
 
     expect(images).toHaveLength(1);
-    expect(images[0]).toHaveAttribute('src', '/monigote-selected.png');
+    expect(images[0]).toHaveAttribute('src', '/monigote_selected.png');
     expect(screen.getByText('de 170.000')).toBeInTheDocument();
   });
 

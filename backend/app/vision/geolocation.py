@@ -16,15 +16,17 @@ Requiere que ya exista el índice generado por scripts/build_faiss_index.py
 devuelve None en vez de fallar, para que el resto del análisis pueda seguir
 funcionando sin este módulo (es opcional/best-effort, no crítico).
 
-También devuelve None (foto descartada, no analizada) cuando la foto no
-tiene contenido suficientemente distintivo como para geolocalizarla con
-algún sentido -- p.ej. una foto donde solo se ve el mar y la espalda de
-alguien puede parecerse, visualmente, a imágenes de referencia de medio
-litoral español a la vez. Ver `_neighbor_spread_km` /
-`_MAX_NEIGHBOR_SPREAD_KM`: si los vecinos más parecidos están repartidos
-por una zona demasiado amplia, ninguna provincia "ganadora" sería
-significativa, así que se descarta en vez de mostrar una ubicación que
-parecería más fiable de lo que en realidad es.
+También marca como no representativa (campo `representative=False`, no
+descarta) una estimación cuando la foto no tiene contenido suficientemente
+distintivo como para geolocalizarla con algún sentido -- p.ej. una foto
+donde solo se ve el mar y la espalda de alguien puede parecerse,
+visualmente, a imágenes de referencia de medio litoral español a la vez.
+Ver `_neighbor_spread_km` / `_MAX_NEIGHBOR_SPREAD_KM`: si los vecinos más
+parecidos están repartidos por una zona demasiado amplia, ninguna
+provincia "ganadora" sería significativa como CONCLUSIÓN de residencia
+(ver `_infer_home_region` en report/generator.py, que filtra por este
+campo) -- pero la estimación sigue siendo información real y se sigue
+mostrando en el mapa con su confianza real, no se oculta.
 """
 from collections import Counter
 from dataclasses import dataclass
@@ -72,6 +74,16 @@ class ImageLocationEstimate:
     # están las imágenes de referencia más parecidas.
     lat: float | None = None
     lon: float | None = None
+    # False cuando los k vecinos más parecidos están repartidos por una zona
+    # demasiado amplia (ver _MAX_NEIGHBOR_SPREAD_KM) -- la foto NO es
+    # representativa de un lugar concreto, así que esta estimación no debe
+    # usarse para AFIRMAR una provincia/comunidad de residencia (ver
+    # `_infer_home_region` en report/generator.py, que filtra por este
+    # campo). Sigue siendo una estimación real con su confianza real, y
+    # sigue mostrándose en el mapa -- lo único que no debe hacer es decidir
+    # por sí sola (ni en grupo con otras igual de dispersas) la conclusión
+    # de dónde vive la persona.
+    representative: bool = True
 
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -272,14 +284,6 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
 
     neighbor_rows = _index_meta.iloc[indices]
 
-    # Foto no representativa (ver _MAX_NEIGHBOR_SPREAD_KM más arriba): sus
-    # vecinos más parecidos están repartidos por medio país, así que
-    # cualquier provincia "ganadora" sería arbitraria -- se descarta en vez
-    # de dar una ubicación que parecería más segura de lo que realmente es.
-    spread = _neighbor_spread_km(neighbor_rows)
-    if spread is not None and spread > _MAX_NEIGHBOR_SPREAD_KM:
-        return None
-
     # "region" en OSV-5M es lo más parecido a provincia/comunidad autónoma
     # dentro de sus metadatos; ajusta esta columna si tu metadata.csv usa
     # otro nombre tras inspeccionar la fila de ejemplo del script de descarga.
@@ -295,6 +299,17 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
     lat = float(matching["lat"].mean()) if "lat" in matching and not matching["lat"].isna().all() else None
     lon = float(matching["lon"].mean()) if "lon" in matching and not matching["lon"].isna().all() else None
 
+    # Foto no representativa (ver _MAX_NEIGHBOR_SPREAD_KM más arriba): sus
+    # vecinos más parecidos están repartidos por medio país, así que
+    # cualquier provincia "ganadora" sería arbitraria. NO se descarta la
+    # estimación entera (eso la haría desaparecer también del mapa, donde
+    # es información legítima: "esto es lo más parecido que encontramos,
+    # aunque poco fiable") -- se marca `representative=False` para que
+    # `_infer_home_region` la excluya de la conclusión de residencia, sin
+    # dejar de mostrarla con su confianza real en `image_location_points`.
+    spread = _neighbor_spread_km(neighbor_rows)
+    representative = spread is None or spread <= _MAX_NEIGHBOR_SPREAD_KM
+
     return ImageLocationEstimate(
         province=top_province,
         confidence=round(votes / k, 2),
@@ -302,6 +317,7 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
         mean_similarity=round(float(np.mean(similarities)), 3),
         lat=round(lat, 4) if lat is not None else None,
         lon=round(lon, 4) if lon is not None else None,
+        representative=representative,
     )
 
 

@@ -202,11 +202,16 @@ class TestEstimateLocationFromImage:
         assert result.lat is None
         assert result.lon is None
 
-    def test_discards_non_representative_photo_when_neighbors_are_geographically_scattered(self, monkeypatch):
+    def test_marks_non_representative_instead_of_discarding_when_neighbors_are_geographically_scattered(self, monkeypatch):
         """Caso motivador: una foto de solo mar/cielo/primer plano puede
         parecerse visualmente a imágenes de referencia de puntos muy
         alejados entre sí (Galicia, Cádiz, Baleares, Barcelona...). Ninguna
-        provincia "ganadora" sería significativa ahí -- debe descartarse."""
+        provincia "ganadora" sería significativa ahí para AFIRMAR una
+        residencia -- pero sigue siendo información real que debe seguir
+        apareciendo en el mapa (image_location_points) con su confianza
+        real, así que NO se descarta (no devuelve None): se marca
+        `representative=False` para que solo `_infer_home_region`
+        (report/generator.py) la excluya de la conclusión de residencia."""
         meta = pd.DataFrame(
             {
                 "id": ["1", "2", "3", "4"],
@@ -219,7 +224,11 @@ class TestEstimateLocationFromImage:
         _install_fake_index(monkeypatch, meta, search_indices=[0, 1, 2, 3])
         _install_fake_embedding(monkeypatch)
 
-        assert geolocation.estimate_location_from_image(_FakeImage(), k=4) is None
+        result = geolocation.estimate_location_from_image(_FakeImage(), k=4)
+
+        assert result is not None
+        assert result.representative is False
+        assert result.province == "Galicia"  # sigue siendo la ganadora por votos, solo que no fiable
 
     def test_does_not_discard_when_too_few_neighbors_have_coordinates(self, monkeypatch):
         """Con menos de _MIN_NEIGHBORS_WITH_COORDS_FOR_SPREAD_CHECK vecinos

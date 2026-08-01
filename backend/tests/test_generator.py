@@ -123,6 +123,54 @@ class TestGenerateReportPlatformBranching:
         assert set(location_steps[0].evidence) == {"https://ig/1", "https://ig/2"}
 
     @pytest.mark.asyncio
+    async def test_non_representative_photo_still_shows_on_map_but_not_used_for_residence(self, monkeypatch):
+        """Una foto marcada como no representativa (dispersión geográfica
+        excesiva entre sus vecinos, ver ImageLocationEstimate.representative
+        en app/vision/geolocation.py) debe seguir apareciendo en
+        image_location_points con su confianza real -- el usuario debe
+        poder ver que esa foto se analizó, aunque sea poco fiable -- pero
+        NO debe poder decidir, ni siquiera junto con otra foto igual de
+        dispersa, la conclusión de dónde vive la persona."""
+
+        async def _fake_estimate(posts, progress_callback=None):
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[
+                    (
+                        "https://ig/1",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.9, k_neighbors=15, mean_similarity=0.7,
+                            lat=40.4, lon=-3.7, representative=False,
+                        ),
+                    ),
+                    (
+                        "https://ig/2",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.85, k_neighbors=15, mean_similarity=0.7,
+                            lat=40.4, lon=-3.7, representative=False,
+                        ),
+                    ),
+                ],
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+
+        report = await generate_report(
+            "instagram", "user", [_post(platform="instagram", media_url="https://cdn/1.jpg")],
+            _fingerprint(), [], _score(),
+        )
+
+        # Sigue en el mapa, con su confianza real, sin filtrar:
+        assert len(report.image_location_points) == 2
+        assert report.image_location_points[0].confidence == 0.9
+
+        # Pero no cuenta para afirmar una provincia/comunidad de residencia,
+        # ni siquiera con dos fotos de alta confianza que cumplirían el
+        # umbral de consenso si fueran representativas:
+        location_steps = [s for s in report.population_narrowing if s.category == "ubicacion"]
+        assert location_steps == []
+
+    @pytest.mark.asyncio
     async def test_single_high_confidence_photo_is_not_enough_on_its_own(self, monkeypatch):
         """Antes bastaba UNA foto con >=40% de confianza. Ahora, ni siquiera
         una sola foto con 95% de confianza es suficiente por sí sola: hace

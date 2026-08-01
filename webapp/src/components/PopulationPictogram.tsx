@@ -61,7 +61,7 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({
         aria-label={`Aproximadamente ${percentLabel} de la población: 1 de cada ${populationLabel} personas`}
       >
         <img
-          src="/monigote-selected.png"
+          src="/monigote_selected.png"
           alt=""
           className="pictogram-figure"
           style={{ width: compactSize, height: compactSize }}
@@ -84,7 +84,7 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({
         {Array.from({ length: totalFigures }, (_, i) => (
           <img
             key={i}
-            src={i === 0 ? '/monigote-selected.png' : '/monigote.png'}
+            src={i === 0 ? '/monigote_selected.png' : '/monigote.png'}
             alt=""
             className="pictogram-figure"
             style={{ width: figureSize, height: figureSize }}
