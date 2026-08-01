@@ -82,10 +82,14 @@ backend/app/
 │   ├── fingerprint.py              - Módulo 2: fingerprinting de escritura
 │   ├── attribute_inference.py      - Inferencia de atributos por comunidad/hashtag
 │   ├── demographic_extraction.py   - Declaraciones explícitas en texto (edad, sexo,
-│   │                                  ubicación, estudios, ocupación, universidad, empresa),
-│   │                                  por regex
-│   └── ai_attribute_extraction.py  - Lo mismo, vía IA (Mistral, opcional) -- complementa
-│                                      a la regex, nunca la sustituye
+│   │                                  ubicación -- municipio/provincia/comunidad autónoma --,
+│   │                                  estudios, ocupación, universidad, empresa), por regex
+│   ├── ai_attribute_extraction.py  - Lo mismo, vía IA (Mistral, opcional) -- complementa
+│   │                                  a la regex, nunca la sustituye; también marca fotos
+│   │                                  "de viaje" (ver travel_detection.py)
+│   └── travel_detection.py         - Detección por regex de publicaciones "de viaje/
+│                                      vacaciones", para excluirlas de la inferencia de
+│                                      residencia por imagen (red de seguridad sin IA)
 ├── data/
 │   └── ine_reference.py       - Tablas de distribución poblacional (INE)
 ├── scoring/
@@ -220,6 +224,14 @@ forma indirecta a partir de en qué comunidades participa). Alimenta el
 estimador de k-anonimato. Se ejecuta siempre primero, y tiene prioridad
 sobre lo que encuentre `ai_attribute_extraction.py` para el mismo campo.
 
+La ubicación se detecta con jerarquía municipio > provincia > comunidad
+autónoma: si el texto da un municipio o provincia exacta del INE, se usa
+esa (más específico); si solo da el nombre de una comunidad autónoma
+completa ("vivo en Canarias", "vivo en Andalucía"), sin poder elegir
+provincia, se guarda a nivel de comunidad -- salvo que esa comunidad
+tenga una única provincia (Asturias, Madrid, Murcia...), en cuyo caso no
+hay ambigüedad y se resuelve directamente a esa provincia.
+
 Ubicación::
 `backend/app/nlp/demographic_extraction.py`.
 
@@ -239,7 +251,16 @@ en el JSON del modelo), marcada con una procedencia distinta
 qué categoría del INE pertenece un valor: solo propone el texto libre,
 que se normaliza contra las tablas de `ine_reference.py` igual que hace
 la regex, para que un valor alucinado simplemente no encuentre
-coincidencia en vez de colar una estimación de población falsa.
+coincidencia en vez de colar una estimación de población falsa. Al igual
+que la regex, detecta comunidad autónoma completa como campo aparte
+(`comunidad_autonoma`) cuando no hay municipio/provincia concreta.
+
+En el mismo pase (sin llamada adicional al modelo), también marca qué
+publicaciones tienen pinta de ser "de viaje/vacaciones" (campo
+`fotos_de_viaje` del JSON) -- señal que usa `report/generator.py` para
+no confundir "dónde fue tomada esta foto" con "dónde vive esta persona"
+al combinarlo con la geolocalización de imagen (ver
+`nlp/travel_detection.py`, su equivalente por regex).
 
 Interfaces::
 `extract_demographics_with_ai(posts, username, full_name, bio)`,
@@ -247,6 +268,26 @@ Interfaces::
 
 Ubicación::
 `backend/app/nlp/ai_attribute_extraction.py`.
+
+==== `nlp/travel_detection.py`
+
+Propósito/Responsabilidad::
+Detección por regex (determinista, gratuita, sin IA) de publicaciones
+cuyo texto indica que la persona está de viaje/vacaciones/de paso por un
+sitio ("de viaje en Roma", "unos días en la playa"). Es la red de
+seguridad de `ai_attribute_extraction.py` (campo `fotos_de_viaje`):
+funciona siempre, incluso sin `MISTRAL_API_KEY`. Las dos fuentes se UNEN,
+nunca se sustituyen -- un falso positivo aquí (excluir una foto que sí es
+de casa) es mucho menos grave que un falso negativo (usar una foto de
+vacaciones para "inferir" dónde vive la persona), así que ambas listas se
+combinan sin más criterio que "si cualquiera de las dos lo marca, se
+excluye".
+
+Interfaces::
+`detect_travel_permalinks(posts) -> set[str]`.
+
+Ubicación::
+`backend/app/nlp/travel_detection.py`.
 
 ==== `scoring/k_anonymity.py`
 
@@ -260,6 +301,23 @@ con la población restante, nivel de riesgo, fuente (texto / imagen / ia
 que el frontend pueda representarla visualmente sin conocer esa
 constante).
 
+El paso de ubicación tiene tres niveles de granularidad, de más a menos
+específico: municipio > provincia > **comunidad autónoma**. El tercer
+nivel existe porque tanto la geolocalización por imagen (a veces solo
+identifica la comunidad, no una provincia concreta -- p. ej. Canarias)
+como una autodeclaración de texto tipo "vivo en Andalucía" no permiten
+elegir una sola provincia sin inventar información; usa
+`CCAA_POPULATION` (`ine_reference.py`), calculada sumando la población
+de las provincias de cada comunidad.
+
+`final_remaining_population(steps)` calcula, aparte, la población que
+comparte TODOS los rasgos encadenables a la vez (sexo + edad + ubicación
++ estudios + ocupación combinados, no uno aislado) -- es el número que
+se muestra al final del informe ("En España hay X personas que comparten
+tus rasgos"). Se queda con el `remaining_population` del último escalón
+encadenable que sí se pudo estimar, aprovechando que cada escalón ya
+lleva el acumulado de los anteriores.
+
 Ubicación::
 `backend/app/scoring/k_anonymity.py`, tablas en
 `backend/app/data/ine_reference.py`.
@@ -267,17 +325,39 @@ Ubicación::
 ==== `vision/geolocation.py` (opcional)
 
 Propósito/Responsabilidad::
-Estima la provincia más probable de una foto de Instagram por similitud
-visual (DINOv2 + FAISS) contra un índice de imágenes georreferenciadas
-de España (ver <<section-concepts>>). Módulo *best-effort*: devuelve
-TODAS las estimaciones que consigue calcular, con su confianza real, sin
-filtrar por ningún umbral -- ese filtrado (para decidir si algo es lo
+Estima la provincia (o, si la foto trae GPS real en su EXIF, la usa
+directamente) más probable de una foto de Instagram por similitud visual
+(DINOv2 + FAISS) contra un índice de imágenes georreferenciadas de
+España (ver <<section-concepts>>). Módulo *best-effort*: devuelve TODAS
+las estimaciones que consigue calcular, con su confianza real, sin
+ocultar ninguna por umbral -- ese filtrado (para decidir si algo es lo
 bastante fiable para alimentar el cálculo de k-anonimato) es
 responsabilidad de `report/generator.py`, no de este módulo. Expone
 además un flag independiente (`índice disponible`) para que el frontend
 pueda distinguir "el índice no está construido, o faltan sus
 dependencias" de "se analizaron fotos pero ninguna dio resultado
 fiable" -- nunca se muestran los dos mensajes a la vez.
+
+Dos comportamientos añadidos sobre la estimación por similitud visual
+pura:
+
+* **Atajo por GPS real (EXIF)**: si la foto trae coordenadas GPS en su
+  EXIF, se usan directamente (se busca la región conocida más cercana a
+  esas coordenadas) y NO se llama al modelo -- más barato y más fiable
+  que cualquier estimación visual. En la práctica esto rara vez ocurre
+  con fotos de Instagram, porque la plataforma elimina el EXIF al subir
+  las imágenes; se implementa igualmente porque es gratis comprobarlo y
+  deja de ser un caso muerto si se analiza otra fuente que sí conserve
+  metadatos.
+* **Fotos "no representativas"**: si los k vecinos más parecidos están
+  geográficamente muy dispersos (media > 300 km entre ellos), la foto se
+  marca con `representative=False` en vez de asignarle una provincia sin
+  más -- una foto genérica (solo mar, solo cielo, un primer plano sin
+  fondo distintivo...) puede parecerse visualmente a imágenes de
+  referencia de medio país a la vez, así que ninguna provincia
+  "ganadora" por mayoría simple sería significativa. La estimación
+  sigue devolviéndose (con su confianza real, para el mapa), pero
+  `report/generator.py` la excluye de la conclusión de residencia.
 
 Las dependencias pesadas (`torch`, `faiss`, `transformers`) están en
 `requirements-vision.txt`, no en `requirements.txt`: no son solo para
@@ -332,6 +412,31 @@ recomendaciones generadas a partir de los umbrales del score. Las
 recomendaciones se siguen calculando aquí igual que antes, pero ya no se
 muestran como sección propia en el dashboard -- se usan como insumo del
 análisis con IA (`ai_analysis.py`).
+
+Aquí vive la decisión de CUÁNDO una geolocalización por imagen es lo
+bastante fiable como para asumir residencia habitual (`_infer_home_region`):
+antes bastaba una sola foto por encima de un umbral bajo (40% de
+confianza), lo cual era demasiado alegre para un dato tan sensible. Ahora
+exige consenso entre varias fotos de la MISMA comunidad autónoma:
+
+* al menos 2 fotos con más del 80% de confianza (`HIGH_CONFIDENCE*`), o
+* al menos 4 fotos con más del 60% (`MODERATE_CONFIDENCE*`, "muchas fotos
+  aunque ninguna destaque individualmente").
+
+Antes de contar votos se descartan las fotos marcadas como "de viaje"
+(`nlp/travel_detection.py` + campo `fotos_de_viaje` de la IA) y las no
+representativas (`ImageLocationEstimate.representative == False`, ver
+`vision/geolocation.py`) -- ninguna de las dos cuenta como señal de
+residencia, aunque ambas se siguen mostrando en el mapa con su confianza
+real. Los umbrales (2/80%, 4/60%) son una primera propuesta razonable,
+no una cifra derivada de ningún estudio; son constantes fácilmente
+ajustables si en la práctica resultan demasiado (o poco) exigentes.
+
+La jerarquía de fiabilidad para la ubicación final es: municipio > provincia
+(texto/IA) > comunidad autónoma (texto/IA) > comunidad autónoma/provincia
+por consenso de fotos. Es decir, si el texto ya dice "vivo en Canarias",
+el consenso de fotos nunca lo pisa, por muy fuerte que sea la señal
+fotográfica hacia otra zona.
 
 Ubicación::
 `backend/app/report/generator.py`.
@@ -390,10 +495,19 @@ Ubicación::
 Propósito/Responsabilidad::
 Dispara el análisis vía streaming SSE (`api.analyzeStream`, `EventSource`
 nativo) mostrando una pantalla de progreso en vivo con las fases reales
-del pipeline, y renderiza el informe completo: score global con
-desglose, qué se puede inferir sobre ti (estrechamiento de población con
-pictograma visual, con su fuente y evidencia), mapa/lista de ubicaciones
-estimadas por foto, gráfico de actividad horaria, perfil de escritura,
+del pipeline (incluida una confirmación explícita de si se ha recibido
+biografía del perfil y cuántos caracteres, para poder comprobar a simple
+vista que el dato llega -- no solo confiar en el código), y renderiza el
+informe completo: score global con desglose, qué se puede inferir sobre
+ti (estrechamiento de población con pictograma visual, con su fuente y
+evidencia, más el número absoluto de personas que comparten TODOS los
+rasgos detectados combinados -- "En España hay X personas que comparten
+tus rasgos", destacado en turquesa, calculado por
+`k_anonymity.py::final_remaining_population()`), mapa/lista de
+ubicaciones estimadas por foto (con un aviso explícito si hubo fotos
+analizadas pero ninguna dio suficiente confianza para estimar la
+comunidad autónoma de residencia -- independiente de si el texto sí dio
+una ubicación), gráfico de actividad horaria, perfil de escritura,
 veredicto y conclusiones generadas por IA (automático, sin botón), y
 botón de descarga del informe en JSON. La sección de atributos inferidos
 que existía como bloque propio se retiró (solapaba con la de

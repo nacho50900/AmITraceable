@@ -23,12 +23,22 @@ ifndef::imagesdir[:imagesdir: ../images]
 * **Excepción consciente y documentada — fotos para geolocalización**: el
   módulo opcional de geolocalización por imagen (`app/vision/geolocation.py`)
   descarga cada foto de Instagram **en memoria, de forma transitoria**,
-  solo para extraer un embedding visual; la imagen se descarta
-  inmediatamente después y nunca se escribe a disco ni se persiste en
-  ningún sitio. Es una excepción real al principio original de "no se
-  descargan imágenes" (documentada explícitamente en el docstring de
-  `instagram_client.py`), pero coherente con el resto del diseño
-  stateless: sigue sin haber persistencia de ningún tipo.
+  solo para extraer un embedding visual (o, si la foto trae GPS real en
+  su EXIF, para leer esas coordenadas exactas -- ver más abajo); la
+  imagen se descarta inmediatamente después y nunca se escribe a disco ni
+  se persiste en ningún sitio. Es una excepción real al principio
+  original de "no se descargan imágenes" (documentada explícitamente en
+  el docstring de `instagram_client.py`), pero coherente con el resto del
+  diseño stateless: sigue sin haber persistencia de ningún tipo.
+** El caso del EXIF merece su propia mención: si está presente, es un
+   dato bastante MÁS preciso que la estimación por similitud visual (GPS
+   real del dispositivo, no una aproximación) -- pero también más
+   sensible. En la práctica esto rara vez ocurre con fotos servidas por
+   Instagram (la plataforma elimina el EXIF, incluido el GPS, al subir
+   las imágenes), así que el caso de uso dominante sigue siendo la
+   estimación visual aproximada; se documenta igualmente porque, si
+   alguna vez SÍ hay EXIF, el dato que se procesa (aunque no se persista)
+   es cualitativamente distinto de una estimación.
 * **Excepción consciente y documentada — extracción de atributos con IA**:
   a diferencia del análisis del informe con IA (que solo envía agregados
   ya generados), `nlp/ai_attribute_extraction.py` envía TEXTO CRUDO
@@ -139,23 +149,41 @@ ingeniería (sintetizar y servir 49M filas) es desproporcionado para el
 alcance de un TFG.
 
 En su lugar, el módulo multiplica en cadena **proporciones agregadas del
-INE** (tablas de distribución por sexo, edad, provincia/municipio,
-estudios, ocupación en `data/ine_reference.py`), asumiendo independencia
-estadística entre atributos salvo que exista una tabla cruzada real. Es
-matemáticamente equivalente a "cuántas filas quedarían" en una tabla de
-microdatos si esas variables fueran independientes, y es la aproximación
-estándar en estudios de riesgo de reidentificación cuando no se dispone
-de microdatos individuales. La limitación (asumir independencia cuando en
-la realidad hay correlación entre, por ejemplo, edad y provincia) queda
-documentada explícitamente en el docstring del módulo y se marca en el
-propio informe ("estimación aproximada, no un recuento exacto").
+INE** (tablas de distribución por sexo, edad, provincia/municipio/
+comunidad autónoma, estudios, ocupación en `data/ine_reference.py`),
+asumiendo independencia estadística entre atributos salvo que exista una
+tabla cruzada real. Es matemáticamente equivalente a "cuántas filas
+quedarían" en una tabla de microdatos si esas variables fueran
+independientes, y es la aproximación estándar en estudios de riesgo de
+reidentificación cuando no se dispone de microdatos individuales. La
+limitación (asumir independencia cuando en la realidad hay correlación
+entre, por ejemplo, edad y provincia) queda documentada explícitamente en
+el docstring del módulo y se marca en el propio informe ("estimación
+aproximada, no un recuento exacto").
+
+La ubicación tiene tres niveles de granularidad -- municipio, provincia y
+comunidad autónoma, de más a menos específico -- porque no toda
+autodeclaración o estimación por imagen permite identificar una provincia
+concreta (p. ej. "vivo en Canarias" nombra la comunidad, que tiene dos
+provincias; no hay forma honesta de elegir una sin inventar información).
+La población de cada comunidad autónoma se deriva sumando la de sus
+provincias, no como una segunda cifra hardcodeada que pudiera
+desincronizarse.
 
 Cada paso de la cascada expone también la proporción resultante sobre el
 total de España (`remaining_population / TOTAL_POPULATION_ES`), ya
 calculada en el backend, precisamente para que el frontend no tenga que
 conocer ni duplicar esa constante al representarla visualmente (ver
 `PopulationPictogram.tsx`, un monigote turquesa por cada porción de
-población frente al resto en negro).
+población frente al resto en negro). Además del pictograma por atributo,
+el informe muestra un número absoluto final -- "en España hay X personas
+que comparten tus rasgos" -- que es la intersección de TODOS los rasgos
+encadenables detectados a la vez (sexo + edad + ubicación + estudios +
+ocupación), no el porcentaje de uno aislado. Se calcula quedándose con el
+`remaining_population` del último escalón de la cadena que sí se pudo
+estimar (`final_remaining_population()`): un escalón "no estimable" es un
+no-op sobre el acumulado, no lo resetea, así que basta con el último
+válido para tener el resultado final de toda la cadena.
 
 === Geolocalización de fotos por similitud visual (módulo opcional)
 
@@ -203,9 +231,38 @@ Decisiones de diseño relevantes:
   Instagram. La caché de los pesos del modelo se persiste en un volumen
   para no repetir esa descarga en cada reinicio del contenedor.
 * **Prioridad del texto sobre la imagen**: si el propio usuario ya
-  declaró su ubicación explícitamente en el texto, esa autodeclaración
-  tiene prioridad sobre la estimación visual (más fiable), que solo se
+  declaró su ubicación explícitamente en el texto (municipio, provincia,
+  o incluso solo la comunidad autónoma completa: "vivo en Canarias"), esa
+  autodeclaración tiene prioridad sobre la estimación visual, que solo se
   usa como último recurso.
+* **Atajo por GPS real (EXIF), cuando existe**: antes de gastar cómputo
+  en el modelo, se comprueba si la foto trae coordenadas GPS en su propio
+  EXIF -- si las trae, se usan directamente (más fiable y más barato que
+  estimar por parecido visual) y no se llama al modelo. En la práctica
+  esto rara vez sucede con fotos servidas por Instagram, que elimina el
+  EXIF al subir las imágenes; se implementa igualmente porque es gratis
+  comprobarlo y no depende de que la plataforma cambie ese
+  comportamiento.
+* **Fotos "no representativas" se descartan de la conclusión, no de la
+  vista**: si los vecinos más parecidos de una foto (en el índice) están
+  geográficamente muy dispersos entre sí (media > 300 km), la foto se
+  marca como no representativa en vez de asignarle una provincia por
+  mayoría simple sin sentido -- una foto donde solo se ve el mar o un
+  primer plano sin fondo puede parecerse visualmente a medio litoral
+  español a la vez, y ninguna provincia "ganadora" ahí sería
+  significativa. La estimación se sigue mostrando en el mapa con su
+  confianza real (transparencia); lo único que no hace es contar para
+  decidir dónde vive la persona.
+* **Consenso entre varias fotos, no una sola, para asumir residencia**:
+  una única foto por encima de un umbral de confianza ya no basta (antes
+  sí, con un umbral bajo del 40%, demasiado alegre para un dato tan
+  sensible). Ahora hace falta consenso de VARIAS fotos de la misma
+  comunidad autónoma: al menos 2 con más del 80% de confianza, o al
+  menos 4 con más del 60%. Las fotos identificadas como "de viaje"
+  (`nlp/travel_detection.py`, más el mismo criterio aplicado por la IA)
+  quedan excluidas de este cómputo: una foto con el pie "De viaje en
+  Roma" no debe contar como señal de dónde vive la persona, por muy alta
+  que sea su confianza de geolocalización.
 
 === Análisis del informe con IA (módulo opcional)
 

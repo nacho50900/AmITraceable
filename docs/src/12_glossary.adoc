@@ -103,6 +103,23 @@ ifndef::imagesdir[:imagesdir: ../images]
   georreferenciadas de todo el mundo, usado (filtrado solo a España)
   como base del índice de geolocalización de este proyecto.
 
+| Comunidad autónoma
+| División administrativa española de primer nivel (17 comunidades + 2
+  ciudades autónomas), un escalón por encima de la provincia. En este
+  proyecto es el nivel de ubicación que se usa cuando ni el texto ni la
+  imagen permiten identificar una provincia concreta sin inventar
+  información (p. ej. "vivo en Canarias", que agrupa las provincias de
+  Las Palmas y Santa Cruz de Tenerife) -- ver `data/ine_reference.py` y
+  ADR-9.
+
+| EXIF
+| Metadatos incrustados en un archivo de imagen (fecha, modelo de
+  cámara, y opcionalmente coordenadas GPS) en el momento de tomar la
+  foto. En este proyecto se comprueba como atajo antes de estimar la
+  ubicación por similitud visual (ver `vision/geolocation.py`), aunque
+  en la práctica casi nunca está presente en fotos servidas por
+  Instagram, que elimina el EXIF al subir las imágenes.
+
 | LLM (Large Language Model)
 | Modelo de lenguaje de gran escala. En este proyecto, Mistral AI se usa
   automáticamente (sin acción explícita del usuario) para dos funciones

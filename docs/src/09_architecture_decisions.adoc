@@ -168,17 +168,21 @@ arte publicado solo acierta la calle/1km ~26-29% de las veces).
 *Decisión*: DINOv2 (extracción de embeddings) + FAISS (búsqueda de
 vecinos más cercanos) contra un índice construido únicamente con
 imágenes de España (subconjunto filtrado del dataset público OSV-5M), y
-la predicción se agrega a nivel de **provincia**, no de coordenadas
-exactas.
+la predicción se agrega a nivel de **provincia** cuando es posible; si
+solo se puede identificar la comunidad autónoma (varias provincias
+posibles, sin forma honesta de elegir una) se usa ese nivel intermedio en
+vez de forzar una provincia concreta o perder el dato por completo -- ver
+ADR-16 para los requisitos de consenso antes de aceptar cualquiera de los
+dos niveles como residencia habitual.
 
 *Consecuencias*: (+) índice manejable en recursos de un TFG (varios GB
 en vez de un dataset mundial); (+) mayor precisión relativa al competir
 en un espacio de búsqueda más pequeño; (+) la granularidad de provincia
-coincide con la que ya usa el módulo de k-anonimato, integrándose de
-forma natural en el resto del informe; (-) no compite en precisión con
-herramientas comerciales que sí tienen infraestructura e índices
-mundiales propietarios — limitación reconocida y documentada, no
-ocultada.
+(o comunidad autónoma, cuando aplica) coincide con la que ya usa el
+módulo de k-anonimato, integrándose de forma natural en el resto del
+informe; (-) no compite en precisión con herramientas comerciales que sí
+tienen infraestructura e índices mundiales propietarios — limitación
+reconocida y documentada, no ocultada.
 
 === ADR-10: Mistral AI como proveedor de análisis con IA, por jurisdicción
 
@@ -363,3 +367,47 @@ vuelve a descargar en cada reinicio del contenedor; (-) activar
 geolocalización añade varios minutos a la primera construcción de la
 imagen (descarga de `torch`), mitigado con timeouts/reintentos más
 generosos en `pip` para conexiones lentas.
+
+=== ADR-16: Consenso entre varias fotos, y exclusión de fotos de viaje, antes de asumir residencia por imagen
+
+*Contexto*: la primera versión aceptaba la conclusión de residencia con
+una sola foto por encima de un umbral de confianza bajo (40%). En la
+práctica esto era demasiado permisivo para un dato tan sensible: (a) una
+sola foto genérica (solo mar, solo cielo, un primer plano sin fondo
+distintivo) puede coincidir por casualidad con un umbral bajo sin que el
+contenido diga nada real sobre dónde vive la persona, y (b) una foto de
+vacaciones/viaje con confianza alta indica dónde ESTUVO la persona en ese
+momento, no dónde VIVE.
+
+*Alternativas consideradas*: mantener un único umbral fijo más alto para
+una sola foto (más simple, pero sigue sin distinguir "una foto puntual
+casualmente segura" de "señal real y repetida"); pedir confirmación
+manual al usuario antes de aceptar una ubicación por imagen (más preciso,
+pero rompe el flujo 100% automático del resto del análisis y añade
+fricción de UI fuera del alcance de este TFG).
+
+*Decisión*: exigir consenso entre varias fotos de la MISMA comunidad
+autónoma antes de aceptar una conclusión de residencia: al menos 2 fotos
+con más del 80% de confianza, o al menos 4 con más del 60%
+(`HIGH_CONFIDENCE*`/`MODERATE_CONFIDENCE*` en `report/generator.py`).
+Antes de contar, se excluyen las fotos marcadas como "de viaje"
+(detectadas por regex en `nlp/travel_detection.py` y, en el mismo pase,
+por IA vía el campo `fotos_de_viaje` del prompt de
+`ai_attribute_extraction.py` -- las dos fuentes se UNEN, nunca se
+sustituyen) y las marcadas como no representativas por
+`vision/geolocation.py` (vecinos más parecidos geográficamente
+dispersos, ver ADR-9).
+
+*Consecuencias*: (+) reduce sustancialmente los falsos positivos de
+residencia por imagen, el tipo de error más dañino en una herramienta que
+se presenta como educativa/defensiva; (+) las fotos de viaje dejan de
+contaminar la conclusión, incluso con confianza de geolocalización
+altísima; (-) los umbrales concretos (2/80%, 4/60%) son una primera
+propuesta razonable, no una cifra derivada de un estudio -- quedan como
+constantes explícitas y fácilmente ajustables si en la práctica resultan
+demasiado (o poco) exigentes, en vez de un "número mágico" enterrado en
+la lógica; (-) cuentas con pocas fotos de Instagram probablemente nunca
+alcancen el consenso necesario, así que la geolocalización por imagen se
+queda sin usarse en la práctica para esos casos -- comportamiento
+correcto y esperado (mejor "no estimable" que una conclusión poco
+fiable), no un fallo.
