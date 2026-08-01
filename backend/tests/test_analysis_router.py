@@ -17,6 +17,7 @@ from app import analysis_router
 from app.ai_analysis import AiAnalysisUnavailable
 from app.main import app
 from app.models.schemas import ExposureReport, PrivacyScore, SocialPost, SocialProfile, WritingFingerprint
+from app.vision import geolocation
 
 client = TestClient(app, base_url="https://testserver")
 
@@ -231,3 +232,52 @@ class TestAiSummaryEndpoint:
     def test_malformed_body_returns_422(self):
         resp = client.post("/api/analyze/ai-summary", json={"not": "a valid report"})
         assert resp.status_code == 422
+
+
+class TestGeolocationRunsConcurrentlyFromTheStart:
+    """Regresión directa: crear la tarea con `asyncio.create_task` no basta
+    por sí solo -- si nunca se cede el control explícitamente, TODO el
+    trabajo síncrono de _build_report (fingerprint, atributos, score) se
+    ejecutaría antes de que la tarea de fotos llegara a arrancar de
+    verdad (asyncio es cooperativo y de un solo hilo: una tarea "creada"
+    no avanza hasta que el código que la creó cede el control), y el
+    paralelismo "desde el principio" sería solo de nombre. Ver el
+    `await asyncio.sleep(0)` añadido en analysis_router._build_report justo
+    después de crear la tarea."""
+
+    @pytest.mark.asyncio
+    async def test_photo_task_gets_a_real_turn_before_synchronous_stages_finish(self, monkeypatch):
+        order = []
+
+        async def _fake_estimate_locations(posts, progress_callback=None):
+            order.append("geo:started")
+            return geolocation.GeolocationOutcome(index_available=True, results=[])
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate_locations)
+
+        real_build_fingerprint = analysis_router.build_fingerprint
+
+        def _tracking_build_fingerprint(posts):
+            order.append("fingerprint:done")
+            return WritingFingerprint(
+                avg_sentence_length=0, vocabulary_richness=0, emoji_usage_rate=0,
+                avg_posts_per_hour={}, top_groups=[], top_keywords=[], detected_language="es",
+            )
+
+        monkeypatch.setattr(analysis_router, "build_fingerprint", _tracking_build_fingerprint)
+
+        posts = [
+            SocialPost(
+                id="p1", platform="instagram", type="image", group="viajes", tags=["viajes"],
+                text="Foto de viaje", created_utc=datetime(2025, 1, 1, tzinfo=timezone.utc),
+                score=1, permalink="https://ig/1", media_url="https://cdn.fake/1.jpg",
+            )
+        ]
+        profile = SocialProfile(platform="instagram", username="fake_user", posts=posts)
+
+        await analysis_router._build_report(profile)
+
+        # La tarea de fotos debe haber tenido su primer turno de ejecución
+        # ANTES de que el trabajo síncrono del resto del pipeline termine
+        # -- no solo haberse "creado" sin más.
+        assert order == ["geo:started", "fingerprint:done"]

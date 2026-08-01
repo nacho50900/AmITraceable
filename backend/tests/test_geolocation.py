@@ -7,6 +7,7 @@ para ejercer toda la lógica de negocio (votación de vecinos, centroide,
 degradación best-effort) sin dependencias externas pesadas.
 """
 from collections import namedtuple
+import asyncio
 import sys
 from types import SimpleNamespace
 
@@ -408,6 +409,58 @@ class TestEstimateLocationsForPosts:
             ("Analizando fotos...", {"photos_analyzed": 1, "total_photos": 2, "track": "fotos"}),
             ("Analizando fotos...", {"photos_analyzed": 2, "total_photos": 2, "track": "fotos"}),
         ]
+
+    @pytest.mark.asyncio
+    async def test_model_inference_does_not_block_the_event_loop(self, monkeypatch, respx_mock):
+        """Regresión: `estimate_location_from_image` es síncrona y hace
+        trabajo de CPU real (la pasada del modelo) -- llamarla directamente
+        bloquearía el hilo único del event loop mientras dura, impidiendo
+        que CUALQUIER otra tarea (incluida la llamada a Mistral que corre
+        en paralelo, ver analysis_router._build_report) avance mientras
+        tanto. Se simula con un `time.sleep` (bloqueante de verdad, a
+        diferencia de `asyncio.sleep`) dentro de la función "de modelo", y
+        se comprueba que otra tarea concurrente sí progresa durante ese
+        rato -- solo es posible si `estimate_locations_for_posts` la manda
+        a un hilo aparte (`asyncio.to_thread`) en vez de llamarla en línea."""
+        import time
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+
+        Post = namedtuple("Post", ["type", "media_url", "permalink"])
+        posts = [Post(type="image", media_url="https://cdn.fake/1.jpg", permalink="https://ig/1")]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        def _blocking_estimate(image, k=15):
+            time.sleep(0.2)  # bloqueante de verdad -- simula la pasada del modelo
+            return geolocation.ImageLocationEstimate(
+                province="Madrid", confidence=0.9, k_neighbors=15, mean_similarity=0.8
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_location_from_image", _blocking_estimate)
+
+        other_task_progress = []
+
+        async def _other_concurrent_work():
+            for _ in range(4):
+                await asyncio.sleep(0.05)
+                other_task_progress.append(1)
+
+        other_task = asyncio.create_task(_other_concurrent_work())
+
+        await geolocation.estimate_locations_for_posts(posts)
+        await other_task
+
+        # Si la inferencia hubiera bloqueado el event loop, esta tarea
+        # concurrente no habría podido avanzar nada mientras tanto.
+        assert sum(other_task_progress) >= 2
 
     @pytest.mark.asyncio
     async def test_skips_image_that_fails_to_download_without_aborting(self, monkeypatch, respx_mock):

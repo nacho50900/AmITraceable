@@ -86,6 +86,16 @@ async def _build_report(profile: SocialProfile, progress_callback: ProgressCallb
         geolocation_task = asyncio.create_task(
             estimate_locations_for_posts(profile.posts, progress_callback=progress_callback)
         )
+        # `asyncio.create_task` solo PROGRAMA la tarea -- no le cede el
+        # control de verdad. El resto de este bloque (build_fingerprint,
+        # infer_attributes, compute_score) es código SÍNCRONO que no hace
+        # ningún `await` real, así que sin este `sleep(0)` el event loop no
+        # tendría ninguna oportunidad de arrancar la tarea de fotos hasta
+        # que este bloque síncrono termine del todo -- el análisis de
+        # imágenes "empezaría en paralelo" solo de nombre, no en la
+        # práctica. Este yield explícito le da a la tarea su primer turno
+        # real (arranca la descarga de la primera foto) antes de seguir.
+        await asyncio.sleep(0)
 
     await emit_progress(progress_callback, "Analizando tu forma de escribir...")
     fingerprint = build_fingerprint(profile.posts)

@@ -18,16 +18,6 @@ function readPlatform(): Platform {
 // `animation: spinner-rotate 0.8s` en index.css.
 const SPINNER_PERIOD_MS = 800;
 
-// Cada spinner (el grande de cabecera, el de la fase general en curso, el
-// de fotos) aparece en un instante distinto -- si cada uno arrancase su
-// animación CSS en el momento en que se monta, girarían desincronizados
-// entre sí. Para que todos giren A LA VEZ, se ancla cada uno al mismo
-// reloj global (independiente de cuándo se monte) con un
-// `animation-delay` negativo: "empieza como si ya llevara X ms girando".
-function syncedSpinnerStyle(): React.CSSProperties {
-  return { animationDelay: `${-(Date.now() % SPINNER_PERIOD_MS)}ms` };
-}
-
 // La línea de fotos es la única con contador -- se muestra siempre igual
 // tanto si sigue en curso ("Analizando fotos (3/10)...") como cuando ya
 // terminó ("Fotos analizadas (10/10)"), a partir de photos_analyzed/
@@ -74,6 +64,17 @@ const Dashboard: React.FC = () => {
   // vez, el listado no salta de golpe (más legible para seguir en vivo).
   const revealQueueRef = useRef<string[]>([]);
   const revealingRef = useRef(false);
+  // Desfase de la animación de TODOS los spinners de esta pantalla (el de
+  // cabecera INCLUIDO), calculado UNA SOLA VEZ al montar el componente, no
+  // en cada render: ancla la rotación al reloj real ("empieza como si ya
+  // llevara X ms girando"), para que los tres giren A LA VEZ. Si se
+  // recalculase en cada render (con cada evento del stream, como ocurría
+  // antes de este fix), el navegador reiniciaría la fase de la animación
+  // cada vez y nunca llegarían a verse sincronizados entre sí -- el
+  // inicializador perezoso de useState es la única forma "pura" de
+  // ejecutar esto una sola vez.
+  const [spinnerDelay] = useState(() => `${-(Date.now() % SPINNER_PERIOD_MS)}ms`);
+  const spinnerStyle: React.CSSProperties = { animationDelay: spinnerDelay };
 
   const enqueueCompleted = (stage: string) => {
     revealQueueRef.current.push(stage);
@@ -164,7 +165,7 @@ const Dashboard: React.FC = () => {
       <div className="page">
         <div className="progress-screen">
           <p className="progress-heading">
-            <span className="spinner" style={syncedSpinnerStyle()} aria-hidden="true" />
+            <span className="spinner" style={spinnerStyle} aria-hidden="true" />
             Analizando tu actividad pública en {platformLabel}…
           </p>
           <div className="progress-frame">
@@ -177,7 +178,7 @@ const Dashboard: React.FC = () => {
               ))}
               {currentStage && (
                 <li className="progress-current">
-                  <span className="spinner spinner-sm" style={syncedSpinnerStyle()} aria-hidden="true" />
+                  <span className="spinner spinner-sm" style={spinnerStyle} aria-hidden="true" />
                   {currentStage}
                 </li>
               )}
@@ -186,7 +187,7 @@ const Dashboard: React.FC = () => {
                   {photosDone ? (
                     <span className="progress-icon progress-icon-done" aria-hidden="true">✓</span>
                   ) : (
-                    <span className="spinner spinner-sm" style={syncedSpinnerStyle()} aria-hidden="true" />
+                    <span className="spinner spinner-sm" style={spinnerStyle} aria-hidden="true" />
                   )}
                   {formatPhotosLabel(photosCounts, photosDone)}
                 </li>

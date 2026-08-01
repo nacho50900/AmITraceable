@@ -28,6 +28,7 @@ provincia "ganadora" sería significativa como CONCLUSIÓN de residencia
 campo) -- pero la estimación sigue siendo información real y se sigue
 mostrando en el mapa con su confianza real, no se oculta.
 """
+import asyncio
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -385,7 +386,17 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
                 image = None  # imagen no descargable/decodificable: se omite, no se aborta el análisis
 
             if image is not None:
-                estimate = estimate_location_from_image(image)
+                # `estimate_location_from_image` es SÍNCRONA y hace trabajo
+                # de CPU real (la pasada hacia delante del modelo DINOv2) --
+                # llamarla directamente bloquearía el hilo único del event
+                # loop durante ese rato, y con él, CUALQUIER otra tarea que
+                # dependa de ese mismo loop (incluida la llamada a Mistral
+                # de app/nlp/ai_attribute_extraction.py, que en teoría corre
+                # en paralelo con este análisis -- ver
+                # analysis_router._build_report). `asyncio.to_thread` la
+                # manda a un hilo aparte para que sí puedan solaparse de
+                # verdad, no solo turnarse una tras otra en el mismo hilo.
+                estimate = await asyncio.to_thread(estimate_location_from_image, image)
                 # `image` sale de scope tras este bloque y se descarta (nunca se escribe a disco)
                 if estimate is not None:
                     results.append((post.permalink, estimate))
