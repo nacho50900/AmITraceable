@@ -387,6 +387,7 @@ describe('Dashboard', () => {
               source: 'imagen',
               note: null,
               proportion: 0.045,
+              reduction_percent: null,
             },
           ],
         }),
