@@ -1,4 +1,7 @@
+import pytest
+
 from app.nlp.demographic_extraction import DemographicFindings
+from app.data.ine_reference import MARITAL_STATUS_DISTRIBUTION, TOTAL_POPULATION_ES
 from app.scoring.k_anonymity import (
     PopulationNarrowingStep,
     _risk_level,
@@ -44,6 +47,49 @@ class TestEstimatePopulationNarrowing:
         assert step.risk_level == "bajo"
         assert step.source == "texto"
         assert step.evidence == ["https://x/1"]
+        # 1 - 0.508 (proporción INE de mujeres) = 49.2% de reducción
+        # respecto al total de España (es el primer escalón de la cadena).
+        assert step.reduction_percent == 49.2
+
+    def test_reduction_percent_is_relative_to_previous_step_not_to_the_total(self):
+        """El segundo escalón debe reducir respecto a lo que quedaba TRAS
+        el primero, no respecto a la población total de España desde
+        cero -- por eso no se puede derivar de `proportion` sin más."""
+        findings = DemographicFindings(sexo="mujer", edad=24)
+
+        steps = estimate_population_narrowing(findings)
+
+        sexo_step = next(s for s in steps if s.category == "sexo")
+        edad_step = next(s for s in steps if s.category == "edad")
+
+        # El % de reducción de la edad, aplicado sobre lo que quedaba tras
+        # el sexo, debe coincidir con la caída real observada entre ambos
+        # escalones -- no con lo que reduciría la edad sobre el total.
+        observed_drop = 1 - (edad_step.remaining_population / sexo_step.remaining_population)
+        assert edad_step.reduction_percent == round(observed_drop * 100, 1)
+
+    def test_reduction_percent_is_none_when_value_is_not_in_reference_tables(self):
+        findings = DemographicFindings(estudios="una_carrera_que_no_existe")
+
+        steps = estimate_population_narrowing(findings)
+
+        assert steps[0].reduction_percent is None
+
+    def test_reduction_percent_is_none_for_standalone_steps(self):
+        findings = DemographicFindings(universidad="Salamanca", empresa="Acme")
+
+        steps = estimate_population_narrowing(findings)
+
+        for step in steps:
+            assert step.reduction_percent is None
+
+    def test_reduction_percent_present_for_location_step(self):
+        findings = DemographicFindings(provincia="madrid")
+
+        steps = estimate_population_narrowing(findings)
+
+        assert steps[0].reduction_percent is not None
+        assert 0 <= steps[0].reduction_percent <= 100
 
     def test_edad_narrows_population_further_than_sexo_alone(self):
         only_sexo = DemographicFindings(sexo="mujer")
@@ -244,3 +290,86 @@ class TestFinalRemainingPopulation:
 
         sexo_step = next(s for s in steps if s.category == "sexo")
         assert final_remaining_population(steps) == sexo_step.remaining_population
+
+
+class TestEstadoCivilStep:
+    """El paso pedido explícitamente: la inferencia simbólica de IA sobre
+    el estado civil (soltero/con_pareja/casado) debe aparecer en la tabla
+    de estrechamiento y afectar al porcentaje, no quedarse solo en
+    inferred_attributes."""
+
+    def test_casado_produces_a_step_that_narrows_population(self):
+        findings = DemographicFindings(
+            estado_civil="casado", evidence={"estado_civil": ["bio"]}, source={"estado_civil": "ia_simbolica"}
+        )
+
+        steps = estimate_population_narrowing(findings)
+
+        assert len(steps) == 1
+        step = steps[0]
+        assert step.category == "estado_civil"
+        assert step.attribute_label == "Casado/a"
+        assert step.remaining_population is not None
+        assert step.remaining_population > 0
+        assert step.remaining_population < TOTAL_POPULATION_ES  # de verdad estrecha, no es un no-op
+        assert step.source == "ia_simbolica"
+        assert step.evidence == ["bio"]
+        assert "simbólico" in step.note.lower()
+
+    def test_con_pareja_and_soltero_and_viudo_also_produce_a_step(self):
+        for value, expected_label in [
+            ("con_pareja", "Tiene pareja (sin estar casado/a)"),
+            ("soltero", "Soltero/a (sin pareja actualmente)"),
+            ("viudo", "Viudo/a"),
+        ]:
+            steps = estimate_population_narrowing(DemographicFindings(estado_civil=value))
+            assert len(steps) == 1
+            assert steps[0].attribute_label == expected_label
+            assert steps[0].remaining_population is not None
+
+    def test_none_produces_no_step(self):
+        """Si la IA no encontró ninguna señal en ningún sentido, no debe
+        inventarse un paso -- a diferencia de sexo/edad, que siempre están
+        presentes en un texto autodeclarado, aquí el valor por defecto (sin
+        señal) es genuinamente 'no lo sé' ('desconocido'), no una de las
+        tres categorías por defecto."""
+        findings = DemographicFindings(estado_civil=None)
+
+        steps = estimate_population_narrowing(findings)
+
+        assert steps == []
+
+    def test_the_three_categories_sum_to_the_total_population(self):
+        """Las proporciones de MARITAL_STATUS_DISTRIBUTION deben sumar 1.0
+        -- si no, alguna combinación de casado/con_pareja/soltero contaría
+        a la misma persona dos veces, o a nadie."""
+        total = sum(MARITAL_STATUS_DISTRIBUTION.values())
+        assert total == pytest.approx(1.0)
+
+    def test_participates_in_the_chain_after_other_traits(self):
+        """Debe estrechar MÁS que sexo solo, no sustituirlo ni ser
+        independiente de él -- es un paso más de la misma cadena."""
+        only_sexo = DemographicFindings(sexo="mujer")
+        with_relacion = DemographicFindings(sexo="mujer", estado_civil="casado")
+
+        pop_sexo_only = estimate_population_narrowing(only_sexo)[-1].remaining_population
+        pop_with_relacion = estimate_population_narrowing(with_relacion)[-1].remaining_population
+
+        assert pop_with_relacion < pop_sexo_only
+
+    def test_counts_towards_final_remaining_population(self):
+        """Es una categoría ENCADENABLE (_CHAINED_CATEGORIES): debe poder
+        ser, ella sola, el último escalón que determine
+        final_remaining_population -- justo lo que pedía 'que afecte al
+        porcentaje', no que se quede fuera del cálculo combinado."""
+        findings = DemographicFindings(estado_civil="casado")
+        steps = estimate_population_narrowing(findings)
+
+        assert final_remaining_population(steps) == steps[0].remaining_population
+
+    def test_reduction_percent_present(self):
+        findings = DemographicFindings(estado_civil="casado")
+        steps = estimate_population_narrowing(findings)
+
+        assert steps[0].reduction_percent is not None
+        assert 0 <= steps[0].reduction_percent <= 100

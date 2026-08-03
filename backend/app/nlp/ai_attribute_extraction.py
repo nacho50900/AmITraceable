@@ -60,6 +60,26 @@ tomada esta foto" con "dónde vive esta persona" al combinar geolocalización
 de imagen con inferencia de residencia -- ver
 app/nlp/travel_detection.py (su equivalente por regex, que actúa como red
 de seguridad cuando no hay IA disponible) y `DemographicFindings.travel_permalinks`.
+
+Un tercer tipo de campo, "inferencias_blandas", es cualitativamente
+distinto de los dos anteriores: aquí SÍ se le pide al modelo que razone
+sobre contenido SIMBÓLICO O INDIRECTO (emojis, fechas sueltas, estilo de
+escritura) en vez de solo detectar declaraciones literales -- p. ej. una
+biografía como "18/05/20🧡👸✨" no dice "tengo pareja" en ningún sitio, pero
+un lector humano razonablemente infiere que es un aniversario y que
+probablemente la persona tiene pareja. Cada inferencia lleva su propia
+`confianza` (0-1, deliberadamente moderada: es una suposición, no un
+hecho) y se guarda en `DemographicFindings.soft_inferences` como
+`InferredAttribute`, NO como un campo más de autodeclaración -- no
+participa en `merge_findings` ni en el estimador de k-anonimato
+(`scoring/k_anonymity.py`, que exige una autodeclaración explícita para
+narrowear población): se añade directamente a la lista general de
+"atributos inferidos" del informe (ver `report/generator.py`), igual que
+las inferencias indirectas por hashtags/comunidades de
+`attribute_inference.py`, pero basada en razonamiento del LLM en vez de
+coincidencia de palabras clave. Se pide en la MISMA llamada a Mistral que
+el resto de este módulo (un único mensaje, no una segunda petición aparte)
+para no duplicar coste ni latencia.
 """
 import json
 import logging
@@ -75,7 +95,7 @@ from app.data.ine_reference import (
     STUDIES_DISTRIBUTION,
     resolve_autonomous_community,
 )
-from app.models.schemas import SocialPost
+from app.models.schemas import InferredAttribute, SocialPost
 from app.nlp.demographic_extraction import DemographicFindings, _strip_accents
 
 logger = logging.getLogger(__name__)
@@ -84,11 +104,20 @@ MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
 
 # Campos "simples" (valor libre, sin normalizar contra una tabla del INE).
 _FREE_TEXT_FIELDS = ("universidad", "empresa")
+# Tope defensivo de inferencias blandas aceptadas por respuesta, aunque el
+# prompt ya pide un máximo de 5 -- por si el modelo no lo respeta al pie de
+# la letra, no se toma "gratis" lo que devuelva de más.
+_MAX_SOFT_INFERENCES = 5
 # Todos los campos que puede rellenar este módulo, en el mismo orden que
 # `DemographicFindings`, usado por `merge_findings`.
 _ALL_FIELDS = (
     "sexo", "edad", "provincia", "municipio", "comunidad_autonoma",
     "estudios", "ocupacion", "universidad", "empresa",
+    # A diferencia de los anteriores (autodeclaraciones explícitas que la
+    # regex TAMBIÉN podría detectar), este SOLO lo rellena la IA -- pero
+    # reutiliza el mismo mecanismo de merge (copiar si regex_findings lo
+    # tiene a None, que siempre será el caso) para no duplicar lógica.
+    "estado_civil",
 )
 
 _SYSTEM_PROMPT = (
@@ -104,6 +133,9 @@ _SYSTEM_PROMPT = (
     '"ocupacion": <string>|null, "universidad": <string>|null, "empresa": <string>|null, '
     '"sexo_por_nombre": "hombre"|"mujer"|null, '
     '"fotos_de_viaje": [<identificador_de_publicacion>, ...], '
+    '"estado_civil": "soltero"|"con_pareja"|"casado"|"viudo"|null, '
+    '"inferencias_blandas": [{"categoria": <string>, "valor": <string>, "confianza": <0-1>, '
+    '"evidencia": <identificador_de_publicacion_o_bio>}, ...], '
     '"evidence": {"<nombre_de_campo>": "<identificador_de_publicacion_o_bio>"}}\n'
     "Usa null si no hay una declaración explícita y clara para ese campo. No inventes "
     "datos que no estén literalmente en el texto. El campo 'evidence' debe indicar, para "
@@ -124,7 +156,40 @@ _SYSTEM_PROMPT = (
     "'De viaje en Roma', 'Unos días en la playa', 'Visitando a mi prima en Londres'). El "
     "objetivo es señalar publicaciones que NO deben usarse para deducir dónde vive la "
     "persona habitualmente, aunque la foto en sí esté geolocalizada con confianza. Si un "
-    "texto no da ninguna pista de viaje/vacaciones, NO lo incluyas en esa lista."
+    "texto no da ninguna pista de viaje/vacaciones, NO lo incluyas en esa lista.\n"
+    "'inferencias_blandas' es DISTINTO de todo lo anterior: aquí SÍ debes razonar, como lo "
+    "haría una persona observadora, sobre contenido SIMBÓLICO O INDIRECTO -- combinaciones "
+    "de emojis, fechas sueltas, estilo de escritura, jerga -- que sugieran algo sobre la vida "
+    "de la persona sin decirlo explícitamente. Ejemplo: una biografía que sea solo "
+    "'18/05/20🧡👸✨' sugiere que esa fecha es un aniversario (de pareja, o de otro tipo "
+    "importante para la persona) y que probablemente tiene pareja -- razónalo igual que lo "
+    "haría un humano leyendo el perfil. Cada elemento debe tener: 'categoria' (una etiqueta "
+    "corta en español, p. ej. 'relacion_sentimental', 'tiene_mascota', 'afición'), 'valor' "
+    "(una frase breve explicando la inferencia y en qué te basas, p. ej. 'Posible relación de "
+    "pareja: la biografía solo contiene una fecha con emojis de corazón y corona, un patrón "
+    "típico de aniversario'), 'confianza' (un número entre 0 y 1 que refleje que esto es una "
+    "SUPOSICIÓN, no un hecho -- usa valores moderados, entre 0.3 y 0.7, casi nunca por encima "
+    "de 0.7 salvo que la señal sea muy clara) y 'evidencia' (el identificador de la "
+    "publicación o 'bio' en que te basas). Incluye como máximo 5 inferencias, solo las que "
+    "tengan un anclaje textual/simbólico real -- ante la duda, no la incluyas. Devuelve una "
+    "lista vacía si no encuentras ninguna señal de este tipo.\n"
+    "'estado_civil' usa el MISMO tipo de razonamiento simbólico que "
+    "'inferencias_blandas' (no busques una autodeclaración explícita como 'estoy casado', "
+    "sino indicios indirectos), pero distingue tres categorías -- no te quedes en un simple "
+    "sí/no:\n"
+    "- 'casado': indicios de matrimonio o convivencia formal como pareja estable -- "
+    "menciones a 'mi marido/esposa/mujer', anillo de boda visible en fotos, fecha "
+    "acompañada de palabras como 'boda' o 'aniversario de boda'.\n"
+    "- 'con_pareja': indicios de una relación de pareja SIN que quede claro que estén "
+    "casados -- menciones a 'mi novio/novia/pareja', fecha con emojis románticos (corazón, "
+    "corona, anillo) sin mención de boda, fotos recurrentes con la misma persona en "
+    "contexto romántico.\n"
+    "- 'soltero': indicios de estar SIN pareja actualmente -- declaraciones tipo 'soltera y "
+    "feliz', menciones a estar buscando pareja, o similar.\n"
+    "- 'viudo': indicios de que la pareja/cónyuge ha fallecido -- menciones a 'mi difunto "
+    "marido/esposa', 'en memoria de', luto explícito por una pareja.\n"
+    "- null: no hay ninguna señal en ningún sentido. Ante la duda entre dos categorías, o "
+    "si la señal es débil, usa null antes que adivinar."
 )
 
 
@@ -201,7 +266,11 @@ async def _call_mistral(prompt_text: str) -> dict:
         ],
         "temperature": 0.0,
         "response_format": {"type": "json_object"},
-        "max_tokens": 500,
+        # Subido de 500 a 800: el nuevo campo "inferencias_blandas" (hasta
+        # 5 elementos con categoría/valor/confianza/evidencia cada uno)
+        # necesita más espacio en la respuesta que los campos anteriores,
+        # todos ellos mucho más cortos (strings sueltos o null).
+        "max_tokens": 800,
     }
     headers = {"Authorization": f"Bearer {settings.mistral_api_key}"}
 
@@ -293,6 +362,49 @@ def _set_location(findings: DemographicFindings, parsed: dict, evidence_map: dic
     _set_comunidad_autonoma(findings, parsed.get("comunidad_autonoma"), evidence_map)
 
 
+def _parse_soft_inferences(parsed: dict) -> list[InferredAttribute]:
+    """Valida y convierte el campo 'inferencias_blandas' del modelo (ver
+    _SYSTEM_PROMPT) en InferredAttribute. A diferencia del resto de este
+    módulo, aquí NO se normaliza contra ninguna tabla del INE -- son
+    categorías libres, no alimentan k_anonymity.py, así que no hay riesgo
+    de que una alucinación del modelo cuele un número de población falso
+    (el peor caso es una fila de más en la lista de "atributos inferidos"
+    del informe, no un cálculo erróneo)."""
+    raw = parsed.get("inferencias_blandas")
+    if not isinstance(raw, list):
+        return []
+
+    result = []
+    for item in raw[:_MAX_SOFT_INFERENCES]:
+        if not isinstance(item, dict):
+            continue
+        categoria = item.get("categoria")
+        valor = item.get("valor")
+        if not isinstance(categoria, str) or not categoria.strip():
+            continue
+        if not isinstance(valor, str) or not valor.strip():
+            continue
+
+        confianza = item.get("confianza")
+        if isinstance(confianza, (int, float)) and not isinstance(confianza, bool):
+            confianza = max(0.0, min(1.0, float(confianza)))
+        else:
+            confianza = 0.5  # el modelo no dio un número usable; valor moderado por defecto
+
+        evidencia = item.get("evidencia")
+        evidence = [evidencia] if isinstance(evidencia, str) and evidencia.strip() else []
+
+        result.append(
+            InferredAttribute(
+                category=categoria.strip(),
+                value=valor.strip(),
+                confidence=confianza,
+                evidence=evidence,
+            )
+        )
+    return result
+
+
 def _to_findings(parsed: dict) -> DemographicFindings:
     if not isinstance(parsed, dict):
         return DemographicFindings()
@@ -332,6 +444,22 @@ def _to_findings(parsed: dict) -> DemographicFindings:
     fotos_de_viaje = parsed.get("fotos_de_viaje")
     if isinstance(fotos_de_viaje, list):
         findings.travel_permalinks = {p for p in fotos_de_viaje if isinstance(p, str) and p.strip()}
+
+    estado_civil_raw = parsed.get("estado_civil")
+    if isinstance(estado_civil_raw, str) and estado_civil_raw in ("soltero", "con_pareja", "casado", "viudo"):
+        findings.estado_civil = estado_civil_raw
+        permalink = evidence_map.get("estado_civil") if isinstance(evidence_map, dict) else None
+        findings.evidence.setdefault("estado_civil", [])
+        if isinstance(permalink, str) and permalink:
+            findings.evidence["estado_civil"].append(permalink)
+        # NUNCA "ia" a secas: es una inferencia simbólica/indirecta (ver
+        # docstring del campo en DemographicFindings), categóricamente
+        # menos fiable que una autodeclaración explícita detectada por IA
+        # en el resto de este módulo -- k_anonymity.py usa esta distinción
+        # para añadir una nota de fiabilidad menor en el informe.
+        findings.source["estado_civil"] = "ia_simbolica"
+
+    findings.soft_inferences = _parse_soft_inferences(parsed)
 
     return findings
 

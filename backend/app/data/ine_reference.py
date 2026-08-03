@@ -33,6 +33,34 @@ SEX_DISTRIBUTION = {
     "mujer": 0.508,
 }
 
+# Estado civil (simplificado a 4 categorías, ver DemographicFindings.estado_civil).
+# No es una tabla del INE tal cual -- se DERIVA combinando dos fuentes
+# reales del INE que miden cosas distintas:
+#   1. Censo Anual de Población 2024 (INE, nota de prensa de dic. 2025):
+#      estado civil LEGAL a 1 de enero de 2024 -- soltero 34,9%, casado
+#      45,8%, divorciado/separado 7,8%, viudo 7,0%.
+#   2. ECEPOV 2021 (INE): ~70% de la población de 16+ años "tiene pareja"
+#      en sentido amplio (no solo matrimonio).
+# "casado" y "viudo" se toman directamente de (1) -- son categorías legales
+# inequívocas, no hace falta derivarlas. "con_pareja" (pareja sin estar
+# casado/a: parejas de hecho, relaciones sin convivencia legal...) se
+# deriva como la diferencia entre "tiene pareja en sentido amplio" (2) y
+# "casado" (1): 0.70 - 0.458 = 0.242. "soltero" aquí NO es el "soltero"
+# legal de (1) -- es "sin pareja actualmente" en sentido amplio: el
+# complementario de (2) menos "viudo", 1 - 0.70 - 0.07 = 0.23 (se resta
+# "viudo" aparte para no contar dos veces a quien enviudó y no tiene pareja
+# nueva; el resto -- solteros legales sin pareja y divorciados/separados
+# actualmente sin pareja -- queda aquí). Es una aproximación deliberada,
+# más basta que el resto de tablas de este fichero, documentada así por no
+# existir una única encuesta pública que desglose exactamente estas 4
+# categorías a la vez.
+MARITAL_STATUS_DISTRIBUTION = {
+    "casado": 0.458,
+    "con_pareja": 0.242,
+    "soltero": 0.230,
+    "viudo": 0.070,
+}
+
 # Distribución de edad en tramos de 5 años, proporción sobre el total.
 # Pirámide poblacional aproximada de España (envejecida, con menos peso en
 # tramos jóvenes). Suma ~1.0.

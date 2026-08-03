@@ -329,3 +329,220 @@ class TestMergeFindings:
 
         assert merged.sexo == "mujer"
         assert merged.source["sexo"] == "ia_nombre"
+
+
+class TestSoftInferences:
+    """Inferencias BLANDAS (emojis, fechas, señales simbólicas) -- ver el
+    ejemplo del aniversario en _SYSTEM_PROMPT. Van en su propia lista
+    (`DemographicFindings.soft_inferences`), no en los campos de
+    autodeclaración explícita."""
+
+    @pytest.mark.asyncio
+    async def test_parses_a_valid_soft_inference(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(
+                    inferencias_blandas=[
+                        {
+                            "categoria": "relacion_sentimental",
+                            "valor": "Posible relación de pareja: la bio es solo una fecha con emojis de corazón",
+                            "confianza": 0.6,
+                            "evidencia": "bio",
+                        }
+                    ]
+                ),
+            )
+        )
+
+        findings = await extract_demographics_with_ai(
+            [_post("hola")], username="ana", bio="18/05/20🧡👸✨"
+        )
+
+        assert len(findings.soft_inferences) == 1
+        inferred = findings.soft_inferences[0]
+        assert inferred.category == "relacion_sentimental"
+        assert "pareja" in inferred.value.lower()
+        assert inferred.confidence == 0.6
+        assert inferred.evidence == ["bio"]
+
+    @pytest.mark.asyncio
+    async def test_missing_field_is_empty_list(self, monkeypatch, respx_mock):
+        """Compatibilidad con respuestas de antes de este cambio (o un
+        modelo que omita el campo): no debe romper, simplemente no hay
+        inferencias blandas."""
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content()))
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.soft_inferences == []
+
+    @pytest.mark.asyncio
+    async def test_entry_without_categoria_or_valor_is_skipped(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(
+                    inferencias_blandas=[
+                        {"categoria": "", "valor": "algo", "confianza": 0.5},
+                        {"categoria": "algo", "valor": "", "confianza": 0.5},
+                        {"valor": "sin categoria", "confianza": 0.5},
+                        "no es ni siquiera un dict",
+                    ]
+                ),
+            )
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.soft_inferences == []
+
+    @pytest.mark.asyncio
+    async def test_confidence_out_of_range_is_clamped(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(
+                    inferencias_blandas=[
+                        {"categoria": "a", "valor": "va sobre 1.5", "confianza": 1.5},
+                        {"categoria": "b", "valor": "va bajo 0", "confianza": -3},
+                    ]
+                ),
+            )
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.soft_inferences[0].confidence == 1.0
+        assert findings.soft_inferences[1].confidence == 0.0
+
+    @pytest.mark.asyncio
+    async def test_missing_or_invalid_confidence_defaults_to_moderate_value(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(
+                    inferencias_blandas=[{"categoria": "a", "valor": "sin numero de confianza"}]
+                ),
+            )
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.soft_inferences[0].confidence == 0.5
+
+    @pytest.mark.asyncio
+    async def test_missing_evidence_defaults_to_empty_list_not_a_crash(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(inferencias_blandas=[{"categoria": "a", "valor": "sin evidencia"}]),
+            )
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.soft_inferences[0].evidence == []
+
+    @pytest.mark.asyncio
+    async def test_caps_at_five_even_if_model_returns_more(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        many = [{"categoria": f"cat{i}", "valor": f"valor{i}", "confianza": 0.5} for i in range(9)]
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(inferencias_blandas=many))
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert len(findings.soft_inferences) == 5
+
+    @pytest.mark.asyncio
+    async def test_not_a_list_is_ignored_without_crashing(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(inferencias_blandas="no es una lista"))
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.soft_inferences == []
+
+
+class TestEstadoCivil:
+    """A diferencia de 'inferencias_blandas' (lista libre, solo va a
+    inferred_attributes), 'estado_civil' es un campo dedicado con 3
+    categorías (soltero/con_pareja/casado) que SÍ participa en el
+    estimador de k-anonimato -- ver k_anonymity.py."""
+
+    @pytest.mark.asyncio
+    async def test_casado_is_parsed_with_ia_simbolica_source(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(estado_civil="casado", evidence={"estado_civil": "bio"}),
+            )
+        )
+
+        findings = await extract_demographics_with_ai(
+            [_post("hola")], username="x", bio="Mi marido y yo 💍"
+        )
+
+        assert findings.estado_civil == "casado"
+        assert findings.evidence["estado_civil"] == ["bio"]
+        # Nunca "ia" a secas: es una inferencia simbólica, no una
+        # autodeclaración explícita -- la distinción importa para el
+        # informe (ver k_anonymity.py -> nota de fiabilidad menor).
+        assert findings.source["estado_civil"] == "ia_simbolica"
+
+    @pytest.mark.asyncio
+    async def test_con_pareja_and_soltero_and_viudo_are_parsed_too_not_just_casado(self, monkeypatch, respx_mock):
+        for value in ("con_pareja", "soltero", "viudo"):
+            respx_mock.post(MISTRAL_URL).mock(
+                return_value=httpx.Response(200, json=_mock_content(estado_civil=value))
+            )
+            monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+
+            findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+            assert findings.estado_civil == value
+
+    @pytest.mark.asyncio
+    async def test_missing_field_stays_none(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content()))
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.estado_civil is None
+        assert "estado_civil" not in findings.source
+
+    @pytest.mark.asyncio
+    async def test_value_outside_the_three_categories_is_ignored_without_crashing(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(estado_civil="tal vez"))
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.estado_civil is None
+
+    def test_merge_findings_propagates_it_from_ai_to_regex_findings(self):
+        regex_findings = DemographicFindings()
+        ai_findings = DemographicFindings(
+            estado_civil="casado",
+            evidence={"estado_civil": ["bio"]},
+            source={"estado_civil": "ia_simbolica"},
+        )
+
+        merged = merge_findings(regex_findings, ai_findings)
+
+        assert merged.estado_civil == "casado"
+        assert merged.source["estado_civil"] == "ia_simbolica"

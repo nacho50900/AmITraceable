@@ -39,6 +39,7 @@ from app.data.ine_reference import (
     MUNICIPALITY_POPULATION,
     OCCUPATION_DISTRIBUTION,
     PROVINCE_POPULATION,
+    MARITAL_STATUS_DISTRIBUTION,
     SEX_DISTRIBUTION,
     STUDIES_DISTRIBUTION,
     TOTAL_POPULATION_ES,
@@ -64,12 +65,20 @@ class PopulationNarrowingStep:
     # pictograma de población, ver PopulationPictogram.tsx). None si remaining_population
     # también lo es.
     proportion: float | None = None
+    # % que ESTE rasgo concreto ha reducido la población respecto al
+    # escalón ANTERIOR de la cadena (no respecto al total de España desde
+    # cero) -- p.ej. si antes de este paso quedaban 20M de personas
+    # compatibles y este rasgo las deja en 10M, reduction_percent = 50.0.
+    # None en pasos "no estimables" (no hay proporción que aplicar) y en
+    # los standalone (universidad/empresa), donde no hay una proporción
+    # nacional de referencia con la que calcularlo.
+    reduction_percent: float | None = None
 
 
 # Categorías que participan en la cadena de estrechamiento (mismo criterio
 # que _CHAINED_STEPS, ver más abajo -- se define aquí arriba porque
 # `final_remaining_population` la necesita y así queda cerca de donde se usa).
-_CHAINED_CATEGORIES = {"sexo", "edad", "ubicacion", "estudios", "ocupacion"}
+_CHAINED_CATEGORIES = {"sexo", "edad", "ubicacion", "estudios", "ocupacion", "estado_civil"}
 
 
 def final_remaining_population(steps: list[PopulationNarrowingStep]) -> int | None:
@@ -142,6 +151,11 @@ def _apply_proportion(
         source=source,
         note=note,
         proportion=new_remaining / TOTAL_POPULATION_ES,
+        # `proportion` (el parámetro, no el campo del step) YA ES el factor
+        # marginal de este rasgo por sí solo -- new_remaining/remaining --
+        # así que la reducción respecto al escalón anterior es 1 menos ese
+        # factor, sin falta de recalcular nada.
+        reduction_percent=round((1 - proportion) * 100, 1),
     )
 
 
@@ -164,6 +178,32 @@ def _step_sexo(findings: DemographicFindings, remaining: float) -> tuple[float, 
         findings.evidence.get("sexo", []),
         source=source,
         note=note,
+    )
+
+
+_ESTADO_CIVIL_LABELS = {
+    "casado": "Casado/a",
+    "con_pareja": "Tiene pareja (sin estar casado/a)",
+    "soltero": "Soltero/a (sin pareja actualmente)",
+    "viudo": "Viudo/a",
+}
+
+
+def _step_relacion(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
+    if findings.estado_civil is None:
+        return remaining, None
+    return _apply_proportion(
+        remaining,
+        MARITAL_STATUS_DISTRIBUTION.get(findings.estado_civil),
+        _ESTADO_CIVIL_LABELS[findings.estado_civil],
+        "estado_civil",
+        findings.evidence.get("estado_civil", []),
+        source=findings.source.get("estado_civil", "ia_simbolica"),
+        note=(
+            "Inferido por IA a partir de contenido simbólico o indirecto (emojis, fechas, "
+            "menciones recurrentes...), no de una autodeclaración explícita: fiabilidad menor "
+            "que el resto de rasgos de esta lista."
+        ),
     )
 
 
@@ -253,6 +293,10 @@ def _step_location(findings: DemographicFindings, remaining: float) -> tuple[flo
         evidence=evidence,
         source=source,
         note=_location_note(source),
+        # new_remaining / remaining = population / TOTAL_POPULATION_ES (se
+        # simplifica el factor remaining/TOTAL_POPULATION_ES de ambos
+        # lados) -- es el factor marginal de esta ubicación por sí sola.
+        reduction_percent=round((1 - population / TOTAL_POPULATION_ES) * 100, 1),
     )
 
 
@@ -317,7 +361,14 @@ def _step_empresa(findings: DemographicFindings) -> PopulationNarrowingStep | No
 # Pasos que estrechan `remaining` en cadena, en este orden concreto (el
 # orden importa: cada paso condiciona al siguiente, ver docstring del
 # módulo sobre la asunción de independencia).
-_CHAINED_STEPS = (_step_sexo, _step_edad, _step_location, _step_estudios, _step_ocupacion)
+_CHAINED_STEPS = (
+    _step_sexo, _step_edad, _step_location, _step_estudios, _step_ocupacion,
+    # Al final: es la señal menos fiable de la cadena (inferencia simbólica
+    # por IA, no autodeclaración -- ver docstring de
+    # DemographicFindings.estado_civil), así que refina lo que ya se haya
+    # estrechado con rasgos más sólidos, en vez de condicionarlos.
+    _step_relacion,
+)
 
 # Pasos independientes de `remaining`, que no participan en la cadena de
 # estrechamiento (no hay tabla de proporción nacional para ellos).

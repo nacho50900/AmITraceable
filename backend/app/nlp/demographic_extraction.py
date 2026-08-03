@@ -27,7 +27,7 @@ from app.data.ine_reference import (
     STUDIES_DISTRIBUTION,
     resolve_autonomous_community_in_text,
 )
-from app.models.schemas import SocialPost
+from app.models.schemas import InferredAttribute, SocialPost
 
 
 def _strip_accents(text: str) -> str:
@@ -69,6 +69,24 @@ class DemographicFindings:
     ocupacion: str | None = None
     universidad: str | None = None
     empresa: str | None = None
+    # Estado civil / relación de pareja. A diferencia de sexo/edad/ubicación
+    # (autodeclaraciones EXPLÍCITAS), este campo SOLO lo rellena la IA
+    # razonando sobre contenido simbólico/indirecto (emojis, fechas, estilo
+    # de escritura -- p. ej. una bio "18/05/20🧡👸✨" sugiere un aniversario
+    # de pareja; "mi marido y yo" sugiere matrimonio; "mi difunto marido"
+    # sugiere viudedad). Valores: "soltero" | "con_pareja" (pareja sin
+    # estar casado/a) | "casado" | "viudo" | None (sin señal en ningún
+    # sentido -- "desconocido", no "soltero" por defecto). Se
+    # eleva a campo propio (en vez de vivir solo en `soft_inferences`)
+    # porque SÍ debe participar en el estimador de k-anonimato
+    # (scoring/k_anonymity.py -> MARITAL_STATUS_DISTRIBUTION), a petición
+    # explícita: que aparezca en la tabla de "qué se puede inferir sobre
+    # ti" y afecte al porcentaje de población restante, no solo en la
+    # lista genérica de atributos inferidos. Se marca con
+    # `source["estado_civil"] = "ia_simbolica"` (nunca "texto" ni "ia" a
+    # secas) para que el informe deje claro que es una inferencia
+    # simbólica de fiabilidad menor, no una autodeclaración.
+    estado_civil: str | None = None
     # permalinks de los posts que dispararon cada detección, para trazabilidad
     evidence: dict[str, list[str]] = field(default_factory=dict)
     # procedencia de cada dato detectado: "texto" (autodeclaración escrita,
@@ -76,6 +94,22 @@ class DemographicFindings:
     # se rellena explícitamente cuando algo viene de imagen; lo que viene de
     # este módulo es siempre "texto".
     source: dict[str, str] = field(default_factory=dict)
+    # Inferencias BLANDAS detectadas por IA a partir de contenido simbólico
+    # o indirecto (emojis, fechas, estilo de escritura...) -- p. ej.
+    # "18/05/20🧡👸✨" en la biografía sugiriendo el aniversario de una
+    # relación de pareja. A diferencia de TODO lo demás en esta clase, esto
+    # NO es una autodeclaración explícita ni un dato del INE con el que
+    # estrechar población: son señales probabilísticas de baja certeza, con
+    # su propia confianza (0-1), pensadas para la lista general de
+    # "atributos inferidos" del informe (`InferredAttribute`,
+    # `report.inferred_attributes`), no para el estimador de k-anonimato.
+    # Vive aquí (y no en un objeto de retorno aparte) por la misma razón
+    # pragmática que `travel_permalinks`: sale de la MISMA llamada a
+    # Mistral que rellena el resto de este dataclass (ver
+    # app/nlp/ai_attribute_extraction.py), y así se evita una segunda
+    # llamada a la IA solo para esto. No participa en `merge_findings` (no
+    # es un campo INE): report/generator.py lo lee directamente.
+    soft_inferences: list[InferredAttribute] = field(default_factory=list)
 
 
 _AGE_RE = re.compile(r"\b(?:tengo|con)\s+(\d{1,2})\s+años\b|\b(\d{1,2})\s+años\b", re.I)

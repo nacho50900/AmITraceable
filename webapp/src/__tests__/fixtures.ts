@@ -50,6 +50,7 @@ export function makeExposureReport(overrides: Partial<ExposureReport> = {}): Exp
         source: 'texto',
         note: null,
         proportion: 0.508,
+        reduction_percent: 49.2,
       },
     ],
     remaining_population_all_traits: 24957175,

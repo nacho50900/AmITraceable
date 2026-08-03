@@ -575,6 +575,19 @@ body {
   flex-wrap: wrap;
 }
 
+.reduction-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--turquoise);
+  background: rgba(45, 212, 191, 0.12);
+  border: 1px solid rgba(45, 212, 191, 0.35);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+
 .population-step-visual {
   margin-top: 14px;
   padding-top: 14px;
@@ -603,11 +616,13 @@ body {
   border-top-color: var(--accent);
   border-radius: 50%;
   flex-shrink: 0;
-  animation: spinner-rotate 0.8s linear infinite;
-}
-
-@keyframes spinner-rotate {
-  to { transform: rotate(360deg); }
+  /* Rotación controlada desde JS (Dashboard.tsx), NO con `animation` de
+     CSS: un único requestAnimationFrame compartido escribe `transform` en
+     todos los .spinner presentes en cada fotograma, para que giren
+     exactamente a la vez sin importar cuándo entró cada uno en el DOM --
+     con `animation-delay` cada elemento cuenta el desfase desde su propio
+     momento de montaje, así que nunca quedan realmente sincronizados entre
+     sí aunque compartan el mismo valor de delay. */
 }
 
 .progress-frame {

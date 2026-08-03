@@ -270,7 +270,7 @@ class TestGeolocationRunsConcurrentlyFromTheStart:
             SocialPost(
                 id="p1", platform="instagram", type="image", group="viajes", tags=["viajes"],
                 text="Foto de viaje", created_utc=datetime(2025, 1, 1, tzinfo=timezone.utc),
-                score=1, permalink="https://ig/1", media_url="https://cdn.fake/1.jpg",
+                score=1, permalink="https://ig/1", media_urls=["https://cdn.fake/1.jpg"],
             )
         ]
         profile = SocialProfile(platform="instagram", username="fake_user", posts=posts)

@@ -14,8 +14,7 @@ function readPlatform(): Platform {
   return value === 'instagram' ? 'instagram' : 'reddit';
 }
 
-// Duración del ciclo de rotación del spinner, DEBE coincidir con
-// `animation: spinner-rotate 0.8s` en index.css.
+// Duración del ciclo de rotación del spinner, en ms.
 const SPINNER_PERIOD_MS = 800;
 
 // La línea de fotos es la única con contador -- se muestra siempre igual
@@ -64,17 +63,12 @@ const Dashboard: React.FC = () => {
   // vez, el listado no salta de golpe (más legible para seguir en vivo).
   const revealQueueRef = useRef<string[]>([]);
   const revealingRef = useRef(false);
-  // Desfase de la animación de TODOS los spinners de esta pantalla (el de
-  // cabecera INCLUIDO), calculado UNA SOLA VEZ al montar el componente, no
-  // en cada render: ancla la rotación al reloj real ("empieza como si ya
-  // llevara X ms girando"), para que los tres giren A LA VEZ. Si se
-  // recalculase en cada render (con cada evento del stream, como ocurría
-  // antes de este fix), el navegador reiniciaría la fase de la animación
-  // cada vez y nunca llegarían a verse sincronizados entre sí -- el
-  // inicializador perezoso de useState es la única forma "pura" de
-  // ejecutar esto una sola vez.
-  const [spinnerDelay] = useState(() => `${-(Date.now() % SPINNER_PERIOD_MS)}ms`);
-  const spinnerStyle: React.CSSProperties = { animationDelay: spinnerDelay };
+  // Contenedor de la pantalla de carga: se usa para localizar TODOS los
+  // spinners que haya dentro (cabecera, fase en curso, fotos) y girarlos
+  // todos a la vez -- ver el useEffect de más abajo. No se guarda una
+  // referencia a cada spinner por separado porque la fase en curso y la de
+  // fotos aparecen y desaparecen del DOM según avanza el análisis.
+  const progressScreenRef = useRef<HTMLDivElement>(null);
 
   const enqueueCompleted = (stage: string) => {
     revealQueueRef.current.push(stage);
@@ -150,6 +144,36 @@ const Dashboard: React.FC = () => {
     };
   }, [platform, navigate]);
 
+  // Gira TODOS los spinners de la pantalla de carga a la vez, de verdad:
+  // en vez de fiarse de que el `animation-delay` de CSS los deje en fase
+  // (no lo hace -- cada elemento cuenta ese desfase desde el momento en
+  // que ÉL MISMO se monta en el DOM, no desde un reloj compartido, así que
+  // el de cabecera, el de la fase en curso y el de fotos -- que aparecen
+  // en instantes distintos -- acaban desincronizados aunque compartan el
+  // mismo valor de delay), se calcula el ángulo a partir de un único
+  // cronómetro (arrancado una vez, al montar el componente) y se aplica
+  // como `transform: rotate(...)` a TODOS los `.spinner` presentes en cada
+  // fotograma. Como todos leen el mismo reloj en el mismo instante, es
+  // imposible que se desincronicen entre sí, sin importar cuándo entró
+  // cada uno en el DOM.
+  useEffect(() => {
+    if (!loading) return;
+    const start = performance.now();
+    let frameId: number;
+
+    const tick = () => {
+      const elapsed = performance.now() - start;
+      const angle = ((elapsed % SPINNER_PERIOD_MS) / SPINNER_PERIOD_MS) * 360;
+      progressScreenRef.current?.querySelectorAll<HTMLElement>('.spinner').forEach((el) => {
+        el.style.transform = `rotate(${angle}deg)`;
+      });
+      frameId = requestAnimationFrame(tick);
+    };
+    frameId = requestAnimationFrame(tick);
+
+    return () => cancelAnimationFrame(frameId);
+  }, [loading]);
+
   const handleLogout = async () => {
     await api.logout(platform);
     navigate('/');
@@ -163,9 +187,9 @@ const Dashboard: React.FC = () => {
   if (loading) {
     return (
       <div className="page">
-        <div className="progress-screen">
+        <div className="progress-screen" ref={progressScreenRef}>
           <p className="progress-heading">
-            <span className="spinner" style={spinnerStyle} aria-hidden="true" />
+            <span className="spinner" aria-hidden="true" />
             Analizando tu actividad pública en {platformLabel}…
           </p>
           <div className="progress-frame">
@@ -178,7 +202,7 @@ const Dashboard: React.FC = () => {
               ))}
               {currentStage && (
                 <li className="progress-current">
-                  <span className="spinner spinner-sm" style={spinnerStyle} aria-hidden="true" />
+                  <span className="spinner spinner-sm" aria-hidden="true" />
                   {currentStage}
                 </li>
               )}
@@ -187,7 +211,7 @@ const Dashboard: React.FC = () => {
                   {photosDone ? (
                     <span className="progress-icon progress-icon-done" aria-hidden="true">✓</span>
                   ) : (
-                    <span className="spinner spinner-sm" style={spinnerStyle} aria-hidden="true" />
+                    <span className="spinner spinner-sm" aria-hidden="true" />
                   )}
                   {formatPhotosLabel(photosCounts, photosDone)}
                 </li>

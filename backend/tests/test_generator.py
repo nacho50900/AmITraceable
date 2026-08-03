@@ -8,7 +8,7 @@ from app.report.generator import _build_recommendations, generate_report
 from app.vision import geolocation
 
 
-def _post(i: int = 1, platform="reddit", media_url=None, post_type="post", permalink: str | None = None, text: str | None = None) -> SocialPost:
+def _post(i: int = 1, platform="reddit", media_urls=None, post_type="post", permalink: str | None = None, text: str | None = None) -> SocialPost:
     return SocialPost(
         id=str(i),
         platform=platform,
@@ -19,7 +19,7 @@ def _post(i: int = 1, platform="reddit", media_url=None, post_type="post", perma
         created_utc=datetime(2025, 1, 1, hour=12, tzinfo=timezone.utc),
         score=1,
         permalink=permalink if permalink is not None else f"https://x/{i}",
-        media_url=media_url,
+        media_urls=media_urls if media_urls is not None else [],
     )
 
 
@@ -111,7 +111,7 @@ class TestGenerateReportPlatformBranching:
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
 
         report = await generate_report(
-            "instagram", "user", [_post(platform="instagram", media_url="https://cdn/1.jpg")],
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://cdn/1.jpg"])],
             _fingerprint(), [], _score(),
         )
 
@@ -156,7 +156,7 @@ class TestGenerateReportPlatformBranching:
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
 
         report = await generate_report(
-            "instagram", "user", [_post(platform="instagram", media_url="https://cdn/1.jpg")],
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://cdn/1.jpg"])],
             _fingerprint(), [], _score(),
         )
 
@@ -195,7 +195,7 @@ class TestGenerateReportPlatformBranching:
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
 
         report = await generate_report(
-            "instagram", "user", [_post(platform="instagram", media_url="https://cdn/1.jpg")],
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://cdn/1.jpg"])],
             _fingerprint(), [], _score(),
         )
 
@@ -223,7 +223,7 @@ class TestGenerateReportPlatformBranching:
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
 
         report = await generate_report(
-            "instagram", "user", [_post(platform="instagram", media_url="https://cdn/1.jpg")],
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://cdn/1.jpg"])],
             _fingerprint(), [], _score(),
         )
 
@@ -253,7 +253,7 @@ class TestGenerateReportPlatformBranching:
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
 
         report = await generate_report(
-            "instagram", "user", [_post(platform="instagram", media_url="https://cdn/1.jpg")],
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://cdn/1.jpg"])],
             _fingerprint(), [], _score(),
         )
 
@@ -283,7 +283,7 @@ class TestGenerateReportPlatformBranching:
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
 
         report = await generate_report(
-            "instagram", "user", [_post(platform="instagram", media_url="https://cdn/1.jpg")],
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://cdn/1.jpg"])],
             _fingerprint(), [], _score(),
         )
 
@@ -318,8 +318,8 @@ class TestGenerateReportPlatformBranching:
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
 
         posts = [
-            _post(platform="instagram", media_url="https://cdn/1.jpg", permalink="https://ig/1", text="De viaje en Madrid, qué pasada"),
-            _post(platform="instagram", media_url="https://cdn/2.jpg", permalink="https://ig/2", text="Otra vez por Madrid"),
+            _post(platform="instagram", media_urls=["https://cdn/1.jpg"], permalink="https://ig/1", text="De viaje en Madrid, qué pasada"),
+            _post(platform="instagram", media_urls=["https://cdn/2.jpg"], permalink="https://ig/2", text="Otra vez por Madrid"),
         ]
 
         report = await generate_report("instagram", "user", posts, _fingerprint(), [], _score())
@@ -362,7 +362,7 @@ class TestGenerateReportPlatformBranching:
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
 
         report = await generate_report(
-            "instagram", "user", [_post(platform="instagram", media_url="https://cdn/1.jpg")],
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://cdn/1.jpg"])],
             _fingerprint(), [], _score(),
         )
 
@@ -403,7 +403,7 @@ class TestGenerateReportPlatformBranching:
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
 
         report = await generate_report(
-            "instagram", "user", [_post(platform="instagram", media_url="https://cdn/1.jpg")],
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://cdn/1.jpg"])],
             _fingerprint(), [], _score(),
         )
 
@@ -442,7 +442,7 @@ class TestGenerateReportPlatformBranching:
         text_post = SocialPost(
             id="text1", platform="instagram", type="image", group="sin_etiqueta", tags=[],
             text="Vivo en Canarias, cerca del mar", created_utc=datetime.now(timezone.utc), score=1,
-            permalink="https://ig/text", media_url="https://cdn/1.jpg",
+            permalink="https://ig/text", media_urls=["https://cdn/1.jpg"],
         )
 
         report = await generate_report("instagram", "user", [text_post], _fingerprint(), [], _score())
@@ -472,7 +472,7 @@ class TestGenerateReportPlatformBranching:
         text_post = SocialPost(
             id="text1", platform="instagram", type="image", group="sin_etiqueta", tags=[],
             text="Vivo en León y me encanta", created_utc=datetime.now(timezone.utc), score=1,
-            permalink="https://ig/text", media_url="https://cdn/1.jpg",
+            permalink="https://ig/text", media_urls=["https://cdn/1.jpg"],
         )
 
         report = await generate_report("instagram", "user", [text_post], _fingerprint(), [], _score())
@@ -507,7 +507,7 @@ class TestGenerateReportPlatformBranching:
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
 
         report = await generate_report(
-            "instagram", "user", [_post(platform="instagram", media_url="https://cdn/1.jpg")],
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://cdn/1.jpg"])],
             _fingerprint(), [], _score(),
         )
 
@@ -524,7 +524,7 @@ class TestGenerateReportPlatformBranching:
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_unavailable)
 
         report = await generate_report(
-            "instagram", "user", [_post(platform="instagram", media_url="https://cdn/1.jpg")],
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://cdn/1.jpg"])],
             _fingerprint(), [], _score(),
         )
 
@@ -603,7 +603,7 @@ class TestGenerateReportProgress:
 
         task = asyncio.create_task(_fake_estimate())
         report = await generate_report(
-            "instagram", "user", [_post(platform="instagram", media_url="https://img/1")],
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://img/1"])],
             _fingerprint(), [], _score(),
             geolocation_task=task,
         )
@@ -655,3 +655,88 @@ class TestBuildRecommendations:
             _score(geolocation_risk=50, inferable_data_risk=60, deanonymization_ease=70),
         )
         assert len(recs) == 5  # las 4 condiciones de riesgo + la de ocupación
+
+
+class TestSoftInferencesReachTheReport:
+    @pytest.mark.asyncio
+    async def test_ai_soft_inferences_are_appended_to_inferred_attributes(self, monkeypatch):
+        """Cubre el caso motivador: una bio tipo '18/05/20🧡👸✨' no es una
+        autodeclaración explícita (no la detectan ni las regex ni el resto
+        del prompt de IA), pero sí debe poder llegar como inferencia blanda
+        hasta la lista general de atributos inferidos del informe."""
+        from app.config import settings
+        from app.nlp.demographic_extraction import DemographicFindings
+
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+
+        async def _fake_ai_extraction(posts, username, full_name=None, bio=None):
+            findings = DemographicFindings()
+            findings.soft_inferences = [
+                InferredAttribute(
+                    category="relacion_sentimental",
+                    value="Posible relación de pareja (fecha con emojis de corazón en la bio)",
+                    confidence=0.6,
+                    evidence=["bio"],
+                )
+            ]
+            return findings
+
+        monkeypatch.setattr(generator, "extract_demographics_with_ai", _fake_ai_extraction)
+
+        regex_attribute = InferredAttribute(category="ubicacion", value="x", confidence=0.5, evidence=[])
+        report = await generate_report(
+            "instagram", "user", [_post(platform="instagram")], _fingerprint(),
+            [regex_attribute], _score(), bio="18/05/20🧡👸✨",
+        )
+
+        categories = [a.category for a in report.inferred_attributes]
+        assert "ubicacion" in categories  # lo de regex se conserva
+        assert "relacion_sentimental" in categories  # y se añade lo de la IA
+        soft = next(a for a in report.inferred_attributes if a.category == "relacion_sentimental")
+        assert soft.confidence == 0.6
+        assert "pareja" in soft.value.lower()
+
+    @pytest.mark.asyncio
+    async def test_without_mistral_api_key_no_soft_inferences_are_added(self, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "mistral_api_key", None)
+
+        report = await generate_report(
+            "instagram", "user", [_post(platform="instagram")], _fingerprint(), [], _score(),
+        )
+
+        assert report.inferred_attributes == []
+
+    @pytest.mark.asyncio
+    async def test_ai_estado_civil_reaches_population_narrowing_not_just_inferred_attributes(self, monkeypatch):
+        """El caso pedido explícitamente: a diferencia de las inferencias
+        blandas de categoría libre (que solo van a inferred_attributes),
+        estado_civil debe aparecer en la tabla de estrechamiento del
+        informe y afectar al porcentaje de población restante."""
+        from app.config import settings
+        from app.nlp.demographic_extraction import DemographicFindings
+
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+
+        async def _fake_ai_extraction(posts, username, full_name=None, bio=None):
+            return DemographicFindings(
+                estado_civil="casado",
+                evidence={"estado_civil": ["bio"]},
+                source={"estado_civil": "ia_simbolica"},
+            )
+
+        monkeypatch.setattr(generator, "extract_demographics_with_ai", _fake_ai_extraction)
+
+        report = await generate_report(
+            "instagram", "user", [_post(platform="instagram")], _fingerprint(), [], _score(),
+            bio="Mi marido y yo 💍",
+        )
+
+        relacion_steps = [s for s in report.population_narrowing if s.category == "estado_civil"]
+        assert len(relacion_steps) == 1
+        assert relacion_steps[0].remaining_population is not None
+        assert relacion_steps[0].source == "ia_simbolica"
+        # Y también cuenta para el número combinado de "personas que
+        # comparten tus rasgos" (ver k_anonymity.py::final_remaining_population).
+        assert report.remaining_population_all_traits == relacion_steps[0].remaining_population

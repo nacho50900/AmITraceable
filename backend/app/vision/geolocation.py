@@ -326,13 +326,16 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
 
 async def estimate_locations_for_posts(posts: list, progress_callback=None) -> GeolocationOutcome:
     """
-    Orquestación de alto nivel: para cada SocialPost de tipo imagen que
-    tenga `media_url`, descarga la imagen EN MEMORIA (nunca a disco),
-    extrae el embedding, consulta el índice, y descarta la imagen
-    inmediatamente. Devuelve TODAS las estimaciones que se pudieron
-    calcular (con su confianza real, sin filtrar), junto al permalink del
-    post que la generó -- el filtrado por umbral de fiabilidad, si hace
-    falta, lo hace el llamador (ver `report/generator.py`).
+    Orquestación de alto nivel: para CADA foto de CADA SocialPost de tipo
+    imagen (todas las de un carrusel, no solo la primera -- ver
+    `media_urls` en app/models/schemas.py e InstagramClient), descarga la
+    imagen EN MEMORIA (nunca a disco), extrae el embedding, consulta el
+    índice, y descarta la imagen inmediatamente. Devuelve TODAS las
+    estimaciones que se pudieron calcular (con su confianza real, sin
+    filtrar), junto al permalink de la publicación que la generó -- una
+    publicación con varias fotos puede aportar varias estimaciones con el
+    MISMO permalink; el filtrado por umbral de fiabilidad, si hace falta,
+    lo hace el llamador (ver `report/generator.py`).
 
     Se ejecuta en segundo plano de forma best-effort: si el índice no
     existe (no se ha corrido scripts/build_faiss_index.py) o falla la
@@ -354,10 +357,17 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
     index_available = _geolocation_available()
 
     results: list[tuple[str, ImageLocationEstimate]] = []
-    candidate_posts = [
-        p for p in posts if getattr(p, "media_url", None) and p.type in ("image", "carousel_album")
+    # Una entrada por FOTO, no por publicación: un carrusel con 5 fotos
+    # aporta 5 entradas aquí, todas con el mismo permalink (el de la
+    # publicación) -- así se analizan TODAS las fotos, no solo la primera.
+    # Ver InstagramClient._extract_media_urls().
+    photo_units = [
+        (post.permalink, url)
+        for post in posts
+        if post.type in ("image", "carousel_album")
+        for url in (getattr(post, "media_urls", None) or [])
     ]
-    total = len(candidate_posts)
+    total = len(photo_units)
 
     if total == 0 or not index_available:
         return GeolocationOutcome(index_available=index_available, results=results)
@@ -377,9 +387,9 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
         return GeolocationOutcome(index_available=False, results=results)
 
     async with httpx.AsyncClient(timeout=10.0) as client:
-        for i, post in enumerate(candidate_posts, start=1):
+        for i, (permalink, media_url) in enumerate(photo_units, start=1):
             try:
-                resp = await client.get(post.media_url)
+                resp = await client.get(media_url)
                 resp.raise_for_status()
                 image = Image.open(io.BytesIO(resp.content))
             except Exception:
@@ -399,7 +409,7 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
                 estimate = await asyncio.to_thread(estimate_location_from_image, image)
                 # `image` sale de scope tras este bloque y se descarta (nunca se escribe a disco)
                 if estimate is not None:
-                    results.append((post.permalink, estimate))
+                    results.append((permalink, estimate))
 
             await emit_progress(
                 progress_callback,

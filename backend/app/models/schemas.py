@@ -38,15 +38,20 @@ class SocialPost(BaseModel):
     created_utc: datetime
     score: int
     permalink: str
-    # URL directa a la imagen/vídeo (solo Instagram; None en Reddit). Se usa
+    # URLs directas a CADA foto de la publicación (solo Instagram; vacío en
+    # Reddit). En una publicación normal es una sola imagen; en un carrusel
+    # (media_type "carousel_album") puede haber varias, y se analizan
+    # TODAS, no solo la primera -- ver InstagramClient._normalize(). Se usa
     # ÚNICAMENTE para el módulo opcional de geolocalización por imagen
-    # (app/vision/geolocation.py): la imagen se descarga en memoria de forma
-    # transitoria para extraer un embedding y se descarta acto seguido, sin
-    # persistirse en disco ni en base de datos (coherente con el diseño
-    # stateless del resto del proyecto, aunque supone una excepción
-    # consciente al principio original de "no se descargan imágenes" -- ver
-    # nota actualizada en instagram_client.py).
-    media_url: str | None = None
+    # (app/vision/geolocation.py): cada imagen se descarga en memoria de
+    # forma transitoria para extraer un embedding y se descarta acto
+    # seguido, sin persistirse en disco ni en base de datos (coherente con
+    # el diseño stateless del resto del proyecto, aunque supone una
+    # excepción consciente al principio original de "no se descargan
+    # imágenes" -- ver nota actualizada en instagram_client.py). Los vídeos
+    # de un carrusel se excluyen (no son analizables por el modelo de
+    # geolocalización, que solo procesa imágenes).
+    media_urls: list[str] = []
 
 
 class SocialProfile(BaseModel):
@@ -104,6 +109,11 @@ class PopulationEstimate(BaseModel):
     # remaining_population / TOTAL_POPULATION_ES -- ya calculado en el backend para
     # que el frontend no tenga que conocer esa constante (pictograma de población).
     proportion: float | None = None
+    # % que este rasgo concreto ha reducido la población respecto al
+    # escalón ANTERIOR de la cadena de estrechamiento (no respecto al total
+    # de España) -- ver scoring/k_anonymity.py. None en pasos no estimables
+    # y en los standalone (universidad/empresa).
+    reduction_percent: float | None = None
 
 
 class ImageLocationPoint(BaseModel):

@@ -5,8 +5,9 @@ API ("Business Login for Instagram").
 Principio de minimización (RGPD), ACTUALIZADO: originalmente este módulo no
 pedía ni descargaba imágenes/vídeos, solo metadatos textuales. Desde la
 incorporación del módulo opcional de geolocalización por imagen
-(app/vision/geolocation.py), se pide también `media_url` y se descarga la
-imagen en memoria de forma transitoria SOLO para extraer un embedding
+(app/vision/geolocation.py), se piden también las URLs de imagen (incluidas
+TODAS las de un carrusel, no solo la primera -- ver `children` más abajo) y
+se descargan en memoria de forma transitoria SOLO para extraer un embedding
 DINOv2; la imagen nunca se guarda en disco ni en base de datos, y se
 descarta inmediatamente tras el cálculo (coherente con el diseño stateless
 del resto del proyecto). Se documenta aquí como cambio consciente de
@@ -21,9 +22,15 @@ comentarios. Mapeo concreto para Instagram:
   contenido de Instagram.
 - `score` <- `like_count + comments_count` (proxy de engagement), ya que
   Instagram no tiene un equivalente al voto neto de Reddit.
-- `media_url` <- URL directa de la imagen, usada solo por el módulo de
-  geolocalización (ver arriba). None si Instagram no la expone para ese
-  media (p.ej. algunos vídeos).
+- `media_urls` <- URLs directas a CADA foto de la publicación, usadas solo
+  por el módulo de geolocalización (ver arriba). Para una imagen suelta es
+  una lista de un elemento; para un carrusel (`media_type` =
+  "CAROUSEL_ALBUM"), la API de Instagram NO devuelve `media_url` útil en el
+  propio item de nivel superior -- hay que pedir el campo `children` para
+  obtener la URL de cada foto individual del carrusel, ver `_normalize()`.
+  Los vídeos (sueltos o dentro de un carrusel) se excluyen: el modelo de
+  geolocalización solo procesa imágenes. Lista vacía si no hay ninguna foto
+  analizable en la publicación.
 """
 import re
 from datetime import datetime
@@ -92,7 +99,14 @@ class InstagramClient:
         posts: list[SocialPost] = []
         url = f"/{self._ig_user_id}/media"
         params = {
-            "fields": "id,caption,timestamp,media_type,media_url,permalink,like_count,comments_count",
+            "fields": (
+                "id,caption,timestamp,media_type,media_url,permalink,like_count,comments_count,"
+                # `children` solo aplica a media_type="CAROUSEL_ALBUM": sin
+                # pedirlo explícitamente, la API no devuelve las fotos
+                # individuales del carrusel, solo el item "contenedor" (cuyo
+                # propio `media_url` no es fiable/útil para geolocalizar).
+                "children{media_url,media_type}"
+            ),
             "access_token": self._access_token,
             "limit": min(limit, 100),
         }
@@ -114,6 +128,28 @@ class InstagramClient:
             params = {}  # ya van incluidos en next_url
 
         return posts[:limit]
+
+    @staticmethod
+    def _extract_media_urls(item: dict) -> list[str]:
+        """Todas las URLs de foto analizables de una publicación. En un
+        carrusel, la API solo expone las fotos individuales bajo el campo
+        `children` (pedido explícitamente en `_fetch_media`); el propio
+        item de nivel superior no trae una `media_url` que sirva para
+        geolocalizar cada foto por separado. Se excluyen los vídeos (el
+        modelo de geolocalización solo procesa imágenes)."""
+        if item.get("media_type") == "CAROUSEL_ALBUM":
+            children = (item.get("children") or {}).get("data", [])
+            return [
+                child["media_url"]
+                for child in children
+                if child.get("media_type") == "IMAGE" and child.get("media_url")
+            ]
+
+        if item.get("media_type") == "VIDEO":
+            return []
+
+        media_url = item.get("media_url")
+        return [media_url] if media_url else []
 
     @staticmethod
     def _normalize(item: dict) -> SocialPost:
@@ -138,5 +174,5 @@ class InstagramClient:
             created_utc=datetime.fromisoformat(item["timestamp"]),
             score=like_count + comments_count,
             permalink=item.get("permalink", ""),
-            media_url=item.get("media_url"),
+            media_urls=InstagramClient._extract_media_urls(item),
         )

@@ -340,9 +340,49 @@ class TestGeolocationAvailable:
 
 class TestEstimateLocationsForPosts:
     @pytest.mark.asyncio
+    async def test_analyzes_every_photo_of_a_multi_photo_post_not_just_the_first(self, monkeypatch, respx_mock):
+        """El caso pedido: un carrusel con varias fotos debe analizarlas
+        TODAS, no solo la primera -- todas comparten el mismo permalink (es
+        la misma publicación), pero cada una aporta su propia estimación."""
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [
+            Post(
+                type="carousel_album",
+                media_urls=["https://cdn.fake/c1.jpg", "https://cdn.fake/c2.jpg", "https://cdn.fake/c3.jpg"],
+                permalink="https://ig/carousel",
+            ),
+        ]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        for i in (1, 2, 3):
+            respx_mock.get(f"https://cdn.fake/c{i}.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        monkeypatch.setattr(
+            geolocation,
+            "estimate_location_from_image",
+            lambda image, k=15: geolocation.ImageLocationEstimate(
+                province="Madrid", confidence=0.7, k_neighbors=15, mean_similarity=0.6
+            ),
+        )
+
+        outcome = await geolocation.estimate_locations_for_posts(posts)
+
+        assert len(outcome.results) == 3
+        assert all(permalink == "https://ig/carousel" for permalink, _ in outcome.results)
+
+    @pytest.mark.asyncio
     async def test_no_candidate_posts_returns_empty_without_network_calls(self):
-        Post = namedtuple("Post", ["type", "media_url", "permalink"])
-        posts = [Post(type="text", media_url=None, permalink="https://x/1")]
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="text", media_urls=[], permalink="https://x/1")]
 
         outcome = await geolocation.estimate_locations_for_posts(posts)
 
@@ -357,10 +397,10 @@ class TestEstimateLocationsForPosts:
 
         monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
 
-        Post = namedtuple("Post", ["type", "media_url", "permalink"])
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
         posts = [
-            Post(type="image", media_url="https://cdn.fake/1.jpg", permalink="https://ig/1"),
-            Post(type="image", media_url="https://cdn.fake/2.jpg", permalink="https://ig/2"),
+            Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1"),
+            Post(type="image", media_urls=["https://cdn.fake/2.jpg"], permalink="https://ig/2"),
         ]
 
         tiny_jpeg = bytes.fromhex(
@@ -427,8 +467,8 @@ class TestEstimateLocationsForPosts:
 
         monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
 
-        Post = namedtuple("Post", ["type", "media_url", "permalink"])
-        posts = [Post(type="image", media_url="https://cdn.fake/1.jpg", permalink="https://ig/1")]
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]
 
         tiny_jpeg = bytes.fromhex(
             "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
@@ -468,8 +508,8 @@ class TestEstimateLocationsForPosts:
 
         monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
 
-        Post = namedtuple("Post", ["type", "media_url", "permalink"])
-        posts = [Post(type="image", media_url="https://cdn.fake/broken.jpg", permalink="https://ig/1")]
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/broken.jpg"], permalink="https://ig/1")]
 
         respx_mock.get("https://cdn.fake/broken.jpg").mock(return_value=httpx.Response(500))
 
@@ -483,8 +523,8 @@ class TestEstimateLocationsForPosts:
         distingue explícitamente de 'se procesaron fotos pero sin resultado'."""
         monkeypatch.setattr(geolocation, "_geolocation_available", lambda: False)
 
-        Post = namedtuple("Post", ["type", "media_url", "permalink"])
-        posts = [Post(type="image", media_url="https://cdn.fake/1.jpg", permalink="https://ig/1")]
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]
 
         outcome = await geolocation.estimate_locations_for_posts(posts)
 

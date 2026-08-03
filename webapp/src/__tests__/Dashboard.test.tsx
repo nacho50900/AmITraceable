@@ -158,6 +158,36 @@ describe('Dashboard', () => {
     });
   });
 
+  test('todos los spinners visibles giran sincronizados (mismo transform en todo momento)', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([
+      { done: false, stage: 'Leyendo publicaciones...' },
+      { done: false, stage: 'Analizando fotos...', photos_analyzed: 1, total_photos: 3, track: 'fotos' },
+    ]);
+    const { container } = renderDashboard();
+
+    // Esperar a que la fase en curso y la línea de fotos hayan aparecido
+    // (se montan en instantes DISTINTOS al spinner de cabecera, que es
+    // justo el escenario que antes se desincronizaba).
+    await waitFor(() => {
+      expect(container.querySelectorAll('.spinner').length).toBe(3);
+    });
+
+    // Dar tiempo a que el requestAnimationFrame compartido pinte al menos
+    // un par de fotogramas.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const transforms = Array.from(container.querySelectorAll<HTMLElement>('.spinner')).map(
+      (el) => el.style.transform,
+    );
+    expect(transforms).toHaveLength(3);
+    // Los tres deben tener EXACTAMENTE el mismo ángulo en este instante --
+    // si estuvieran desincronizados (cada uno con su propio desfase),
+    // estos valores diferirían.
+    expect(new Set(transforms).size).toBe(1);
+    expect(transforms[0]).toMatch(/^rotate\(/);
+  });
+
   test('el listado revela las fases completadas de una en una, no todas de golpe', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
     mockStream([

@@ -14,6 +14,7 @@ function makeStep(overrides: Partial<PopulationEstimate> = {}): PopulationEstima
     source: 'texto',
     note: null,
     proportion: 24_957_175 / 49_128_297,
+    reduction_percent: 49.2,
     ...overrides,
   };
 }
@@ -94,6 +95,11 @@ describe('PopulationNarrowingTable', () => {
     expect(screen.getByText(/estimación por el nombre público/)).toBeInTheDocument();
   });
 
+  test('fuente "ia_simbolica" muestra el icono y etiqueta correctos', () => {
+    render(<PopulationNarrowingTable steps={[makeStep({ source: 'ia_simbolica', category: 'estado_civil', attribute_label: 'Casado/a' })]} />);
+    expect(screen.getByText(/🤖 IA \(simbólico\)/)).toBeInTheDocument();
+  });
+
   test('sin filas de fuente "imagen": la nota final NO menciona las fotos', () => {
     render(<PopulationNarrowingTable steps={[makeStep({ source: 'texto' })]} />);
     expect(screen.queryByText(/análisis visual de tus fotos/)).not.toBeInTheDocument();
@@ -107,5 +113,15 @@ describe('PopulationNarrowingTable', () => {
   test('siempre muestra la nota general de estimación aproximada del INE', () => {
     render(<PopulationNarrowingTable steps={[makeStep()]} />);
     expect(screen.getByText(/distribuciones agregadas del INE/)).toBeInTheDocument();
+  });
+
+  test('reduction_percent presente: muestra el badge con el porcentaje de reducción', () => {
+    render(<PopulationNarrowingTable steps={[makeStep({ reduction_percent: 49.2 })]} />);
+    expect(screen.getByText('-49.2%')).toBeInTheDocument();
+  });
+
+  test('reduction_percent null (paso no estimable): no muestra el badge de reducción', () => {
+    render(<PopulationNarrowingTable steps={[makeStep({ reduction_percent: null })]} />);
+    expect(screen.queryByText(/^-.*%$/)).not.toBeInTheDocument();
   });
 });

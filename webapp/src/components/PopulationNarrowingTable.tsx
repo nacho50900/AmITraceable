@@ -27,6 +27,7 @@ const SOURCE_LABELS: Record<string, string> = {
   imagen: 'Imagen',
   ia: 'IA (texto)',
   ia_nombre: 'IA (nombre)',
+  ia_simbolica: 'IA (simbólico)',
 };
 
 const SOURCE_ICONS: Record<string, string> = {
@@ -34,6 +35,7 @@ const SOURCE_ICONS: Record<string, string> = {
   imagen: '📷',
   ia: '🤖',
   ia_nombre: '🤖',
+  ia_simbolica: '🤖',
 };
 
 const SOURCE_TITLES: Record<string, string> = {
@@ -42,6 +44,8 @@ const SOURCE_TITLES: Record<string, string> = {
   ia: 'Detectado por un modelo de IA en texto/biografía que escribiste tú mismo/a',
   ia_nombre:
     'Estimado por convención cultural del nombre público de tu cuenta, no por algo que hayas escrito -- fiabilidad menor',
+  ia_simbolica:
+    'Inferido por IA a partir de contenido simbólico o indirecto (emojis, fechas, menciones recurrentes...), no de una autodeclaración explícita -- fiabilidad menor',
 };
 
 function formatPopulation(value: number | null): string {
@@ -68,6 +72,14 @@ const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({ ste
             <div className="population-step-header">
               <strong>{step.attribute_label}</strong>
               <div className="population-step-badges">
+                {step.reduction_percent !== null && (
+                  <span
+                    className="reduction-badge"
+                    title="Porcentaje de la población que quedaba tras el rasgo anterior de la cadena que este rasgo, por sí solo, deja fuera."
+                  >
+                    -{step.reduction_percent}%
+                  </span>
+                )}
                 <span
                   className="risk-pill"
                   style={{ background: RISK_COLORS[step.risk_level], color: '#fff' }}

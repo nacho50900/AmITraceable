@@ -239,7 +239,7 @@ async def _apply_ai_findings(
     full_name: str | None,
     bio: str | None,
     progress_callback: ProgressCallback | None,
-) -> tuple[DemographicFindings, set[str]]:
+) -> tuple[DemographicFindings, set[str], list[InferredAttribute]]:
     """Extracción de autodeclaraciones con IA: complementa las regex (que
     solo cubren un vocabulario fijo) leyendo el texto -- y también el
     nombre público de la cuenta, que sirve como señal débil de sexo -- de
@@ -248,17 +248,19 @@ async def _apply_ai_findings(
     el razonamiento RGPD. Módulo opcional/best-effort: sin MISTRAL_API_KEY,
     o si la llamada falla, esto no aporta nada y el informe se sigue
     generando solo con lo detectado por regex (devuelve los mismos
-    `demographic_findings`/`travel_permalinks` de entrada, sin tocar)."""
+    `demographic_findings`/`travel_permalinks` de entrada, sin tocar, y
+    ninguna inferencia blanda)."""
     if not settings.mistral_api_key:
-        return demographic_findings, travel_permalinks
+        return demographic_findings, travel_permalinks, []
 
     await emit_progress(progress_callback, "Buscando autodeclaraciones con IA...")
     ai_findings = await extract_demographics_with_ai(posts, username=username, full_name=full_name, bio=bio)
+    soft_inferences = ai_findings.soft_inferences
     demographic_findings = merge_findings(demographic_findings, ai_findings)
     # La IA también señala fotos de viaje/vacaciones en el mismo pase (campo
     # "fotos_de_viaje" del prompt) -- se UNE con lo que ya haya detectado la
     # regex de travel_detection.py, nunca lo sustituye.
-    return demographic_findings, travel_permalinks | ai_findings.travel_permalinks
+    return demographic_findings, travel_permalinks | ai_findings.travel_permalinks, soft_inferences
 
 
 def _apply_home_candidate(demographic_findings: DemographicFindings, home_candidate: "_HomeRegionCandidate") -> None:
@@ -364,9 +366,16 @@ async def generate_report(
     demographic_findings = extract_demographics(posts_for_demographics)
     travel_permalinks = detect_travel_permalinks(posts)
 
-    demographic_findings, travel_permalinks = await _apply_ai_findings(
+    demographic_findings, travel_permalinks, soft_inferences = await _apply_ai_findings(
         demographic_findings, travel_permalinks, posts, username, full_name, bio, progress_callback
     )
+    # Las inferencias blandas (emojis, fechas, señales simbólicas -- ver
+    # app/nlp/ai_attribute_extraction.py) se añaden a la lista general de
+    # atributos inferidos, junto a las que ya detectó infer_attributes()
+    # por regex (hashtags/comunidades). Se AÑADEN, no sustituyen: el
+    # parámetro `inferred_attributes` sigue siendo el que ya se calculó (y
+    # ya alimentó compute_score) en analysis_router._build_report.
+    inferred_attributes = [*inferred_attributes, *soft_inferences]
 
     image_location_points, geolocation_available = await _apply_image_geolocation(
         platform, posts, demographic_findings, travel_permalinks, geolocation_task, progress_callback
@@ -385,6 +394,7 @@ async def generate_report(
             source=step.source,
             note=step.note,
             proportion=step.proportion,
+            reduction_percent=step.reduction_percent,
         )
         for step in narrowing_steps
     ]

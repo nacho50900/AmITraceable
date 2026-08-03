@@ -37,12 +37,17 @@ export interface PopulationEstimate {
   remaining_population: number | null;
   risk_level: 'bajo' | 'medio' | 'alto' | 'critico' | 'no_estimable';
   evidence: string[];
-  source: 'texto' | 'imagen' | 'ia' | 'ia_nombre';
+  source: 'texto' | 'imagen' | 'ia' | 'ia_nombre' | 'ia_simbolica';
   note: string | null;
   // remaining_population / poblacion total de España, ya calculado en el
   // backend (ver app/scoring/k_anonymity.py) para no duplicar esa
   // constante aquí. null si remaining_population también lo es.
   proportion: number | null;
+  // % que ESTE rasgo concreto ha reducido la población respecto al
+  // escalón ANTERIOR de la cadena (no respecto al total de España) -- ver
+  // app/scoring/k_anonymity.py. null en pasos no estimables y en los
+  // standalone (universidad/empresa).
+  reduction_percent: number | null;
 }
 
 export interface ImageLocationPoint {
