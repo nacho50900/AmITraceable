@@ -55,7 +55,7 @@ export function makeExposureReport(overrides: Partial<ExposureReport> = {}): Exp
     ],
     remaining_population_all_traits: 24957175,
     image_location_points: [
-      { permalink: 'https://instagram.com/p/1', province: 'Madrid', confidence: 0.6, lat: 40.41, lon: -3.7, representative: true },
+      { permalink: 'https://instagram.com/p/1', province: 'Madrid', confidence: 0.6, lat: 40.41, lon: -3.7, representative: true, created_utc: '2024-06-15T10:00:00Z' },
     ],
     geolocation_available: true,
     ...overrides,

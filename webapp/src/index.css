@@ -705,3 +705,23 @@ body {
 .image-location-list a:hover {
   text-decoration: underline;
 }
+
+.image-location-details {
+  margin-top: 16px;
+}
+
+.image-location-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 4px 0;
+}
+
+.image-location-details summary:hover {
+  color: var(--accent);
+}
+
+.image-location-list-scroll {
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 4px;
+}

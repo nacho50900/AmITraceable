@@ -123,6 +123,48 @@ class TestGenerateReportPlatformBranching:
         assert set(location_steps[0].evidence) == {"https://ig/1", "https://ig/2"}
 
     @pytest.mark.asyncio
+    async def test_image_location_points_include_the_post_publication_date(self, monkeypatch):
+        async def _fake_estimate(posts, progress_callback=None):
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[
+                    (
+                        "https://ig/1",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.5, k_neighbors=15, mean_similarity=0.6
+                        ),
+                    ),
+                    (
+                        "https://ig/2",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.3, k_neighbors=15, mean_similarity=0.5
+                        ),
+                    ),
+                ],
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+
+        posts = [
+            SocialPost(
+                id="1", platform="instagram", type="image", group="sin_etiqueta", tags=[],
+                text="", created_utc=datetime(2024, 3, 5, 10, tzinfo=timezone.utc), score=1,
+                permalink="https://ig/1", media_urls=["https://cdn/1.jpg"],
+            ),
+            SocialPost(
+                id="2", platform="instagram", type="image", group="sin_etiqueta", tags=[],
+                text="", created_utc=datetime(2023, 11, 20, 18, tzinfo=timezone.utc), score=1,
+                permalink="https://ig/2", media_urls=["https://cdn/2.jpg"],
+            ),
+        ]
+
+        report = await generate_report("instagram", "user", posts, _fingerprint(), [], _score())
+
+        points_by_permalink = {p.permalink: p for p in report.image_location_points}
+        assert points_by_permalink["https://ig/1"].created_utc == datetime(2024, 3, 5, 10, tzinfo=timezone.utc)
+        assert points_by_permalink["https://ig/2"].created_utc == datetime(2023, 11, 20, 18, tzinfo=timezone.utc)
+
+    @pytest.mark.asyncio
     async def test_non_representative_photo_still_shows_on_map_but_not_used_for_residence(self, monkeypatch):
         """Una foto marcada como no representativa (dispersión geográfica
         excesiva entre sus vecinos, ver ImageLocationEstimate.representative

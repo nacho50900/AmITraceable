@@ -323,6 +323,7 @@ async def _apply_image_geolocation(
 
         geo_outcome = await estimate_locations_for_posts(posts, progress_callback=progress_callback)
 
+    post_dates_by_permalink = {post.permalink: post.created_utc for post in posts}
     image_location_points = [
         ImageLocationPoint(
             permalink=permalink,
@@ -331,6 +332,7 @@ async def _apply_image_geolocation(
             lat=estimate.lat,
             lon=estimate.lon,
             representative=estimate.representative,
+            created_utc=post_dates_by_permalink.get(permalink),
         )
         for permalink, estimate in geo_outcome.results
     ]

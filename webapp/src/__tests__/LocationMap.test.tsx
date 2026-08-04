@@ -39,6 +39,7 @@ function makePoint(overrides: Partial<ImageLocationPoint> = {}): ImageLocationPo
     lat: 40.41,
     lon: -3.7,
     representative: true,
+    created_utc: '2024-06-15T10:00:00Z',
     ...overrides,
   };
 }
@@ -194,7 +195,7 @@ describe('LocationMap', () => {
     const points = [makePoint({ representative: false, permalink: 'https://instagram.com/p/no-rep' })];
     render(<LocationMap points={points} platform="instagram" available={true} />);
 
-    expect(screen.getByText('Imágenes No Representativas')).toBeInTheDocument();
+    expect(screen.getByText(/Imágenes no representativas/i)).toBeInTheDocument();
     const link = screen.getByRole('link', { name: 'Ver publicación' });
     expect(link).toHaveAttribute('href', 'https://instagram.com/p/no-rep');
   });
@@ -219,7 +220,7 @@ describe('LocationMap', () => {
 
   test('sin apartado de no representativas cuando todas las fotos son representativas', () => {
     render(<LocationMap points={[makePoint()]} platform="instagram" available={true} />);
-    expect(screen.queryByText('Imágenes No Representativas')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Imágenes no representativas/i)).not.toBeInTheDocument();
   });
 
   test('todas las fotos analizadas son no representativas: no se muestra mapa ni lista principal, solo el aviso y el apartado aparte', () => {
@@ -230,6 +231,48 @@ describe('LocationMap', () => {
     expect(
       screen.getByText(/Ninguna de tus fotos analizadas fue lo bastante representativa/),
     ).toBeInTheDocument();
-    expect(screen.getByText('Imágenes No Representativas')).toBeInTheDocument();
+    expect(screen.getByText(/Imágenes no representativas/i)).toBeInTheDocument();
+  });
+
+  test('el apartado de no representativas muestra el número de fotos en el título del desplegable', () => {
+    const points = [
+      makePoint({ representative: false, permalink: 'https://instagram.com/p/1' }),
+      makePoint({ representative: false, permalink: 'https://instagram.com/p/2' }),
+      makePoint({ representative: false, permalink: 'https://instagram.com/p/3' }),
+    ];
+    render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    expect(screen.getByText('Imágenes no representativas (3)')).toBeInTheDocument();
+  });
+
+  test('el apartado de no representativas es un <details> desplegable (colapsado por defecto)', () => {
+    const points = [makePoint({ representative: false })];
+    const { container } = render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    const details = container.querySelector('details.image-location-details');
+    expect(details).toBeInTheDocument();
+    expect(details).not.toHaveAttribute('open');
+  });
+
+  test('cada foto (representativa o no) muestra su fecha de publicación', () => {
+    const points = [
+      makePoint({ permalink: 'https://instagram.com/p/rep', created_utc: '2024-06-15T10:00:00Z' }),
+      makePoint({
+        permalink: 'https://instagram.com/p/no-rep',
+        representative: false,
+        created_utc: '2023-01-02T10:00:00Z',
+      }),
+    ];
+    render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    expect(screen.getByText(/15 jun 2024/)).toBeInTheDocument();
+    expect(screen.getByText(/2 ene 2023/)).toBeInTheDocument();
+  });
+
+  test('fecha desconocida cuando created_utc es null, sin romper el resto de la fila', () => {
+    const points = [makePoint({ created_utc: null })];
+    render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    expect(screen.getByText(/fecha desconocida/)).toBeInTheDocument();
   });
 });

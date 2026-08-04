@@ -23,6 +23,11 @@ function confidenceColor(confidence: number): string {
   return '#3aa657'; // baja -> verde (menos preocupante)
 }
 
+function formatDate(isoDate: string | null): string {
+  if (!isoDate) return 'fecha desconocida';
+  return new Date(isoDate).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }) => {
   if (platform !== 'instagram') {
     return (
@@ -138,7 +143,8 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
                   Ver publicación
                 </a>
                 <span>
-                  {point.province} — confianza {Math.round(point.confidence * 100)}%
+                  {formatDate(point.created_utc)} — {point.province} — confianza{' '}
+                  {Math.round(point.confidence * 100)}%
                   {point.lat === null && ' (sin coordenadas para el mapa)'}
                 </span>
               </li>
@@ -148,23 +154,24 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
       )}
 
       {nonRepresentativePoints.length > 0 && (
-        <>
-          <h3>Imágenes No Representativas</h3>
+        <details className="image-location-details">
+          <summary>Imágenes no representativas ({nonRepresentativePoints.length})</summary>
           <p className="note">
             Estas fotos se analizaron, pero sus vecinos más parecidos en el índice están
             repartidos por una zona demasiado amplia como para asignarles una ubicación fiable --
             no se muestran en el mapa ni cuentan para estimar tu residencia.
           </p>
-          <ul className="image-location-list">
+          <ul className="image-location-list image-location-list-scroll">
             {nonRepresentativePoints.map((point) => (
               <li key={point.permalink}>
                 <a href={point.permalink} target="_blank" rel="noreferrer">
                   Ver publicación
                 </a>
+                <span>{formatDate(point.created_utc)}</span>
               </li>
             ))}
           </ul>
-        </>
+        </details>
       )}
     </>
   );

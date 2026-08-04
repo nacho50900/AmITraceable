@@ -129,6 +129,12 @@ class ImageLocationPoint(BaseModel):
     # un apartado de "imágenes no representativas" con solo el enlace a la
     # publicación, sin pintarla como punto en el mapa.
     representative: bool = True
+    # Fecha de la publicación (post.created_utc), para poder distinguir a
+    # simple vista fotos que si no fuera por esto se verían todas iguales en
+    # el listado (sobre todo las "no representativas", que solo muestran el
+    # enlace). None si por algún motivo no se pudo emparejar el permalink
+    # con su publicación original (no debería ocurrir en la práctica).
+    created_utc: datetime | None = None
 
 
 class ExposureReport(BaseModel):
