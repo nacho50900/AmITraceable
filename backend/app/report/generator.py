@@ -21,6 +21,7 @@ from app.data.ine_reference import (
     AUTONOMOUS_COMMUNITY_PROVINCES,
     PROVINCE_POPULATION,
     PROVINCE_TO_CCAA,
+    TOTAL_POPULATION_ES,
     resolve_autonomous_community,
 )
 from app.nlp.ai_attribute_extraction import extract_demographics_with_ai, merge_findings
@@ -425,6 +426,8 @@ async def generate_report(
         for step in narrowing_steps
     ]
 
+    remaining_all_traits = final_remaining_population(narrowing_steps)
+
     return ExposureReport(
         platform=platform,
         username=username,
@@ -435,7 +438,10 @@ async def generate_report(
         privacy_score=score,
         recommendations=_build_recommendations(fingerprint, inferred_attributes, score),
         population_narrowing=population_narrowing,
-        remaining_population_all_traits=final_remaining_population(narrowing_steps),
+        remaining_population_all_traits=remaining_all_traits,
+        remaining_population_all_traits_proportion=(
+            remaining_all_traits / TOTAL_POPULATION_ES if remaining_all_traits is not None else None
+        ),
         image_location_points=image_location_points,
         geolocation_available=geolocation_available,
     )

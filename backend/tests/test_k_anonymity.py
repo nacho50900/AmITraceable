@@ -1,7 +1,7 @@
 import pytest
 
 from app.nlp.demographic_extraction import DemographicFindings
-from app.data.ine_reference import MARITAL_STATUS_DISTRIBUTION, TOTAL_POPULATION_ES
+from app.data.ine_reference import MARITAL_STATUS_BY_SEX, MARITAL_STATUS_DISTRIBUTION, TOTAL_POPULATION_ES
 from app.scoring.k_anonymity import (
     PopulationNarrowingStep,
     _risk_level,
@@ -373,3 +373,36 @@ class TestEstadoCivilStep:
 
         assert steps[0].reduction_percent is not None
         assert 0 <= steps[0].reduction_percent <= 100
+
+    def test_uses_exact_cross_tab_when_sexo_is_already_known(self):
+        """Cuando también se conoce el sexo, debe usarse la proporción
+        EXACTA de esa combinación (MARITAL_STATUS_BY_SEX), no la marginal
+        (MARITAL_STATUS_DISTRIBUTION) -- son números distintos a propósito
+        en la tabla, así que dan un remaining_population distinto."""
+        only_estado_civil = estimate_population_narrowing(DemographicFindings(estado_civil="viudo"))
+        with_sexo = estimate_population_narrowing(DemographicFindings(sexo="mujer", estado_civil="viudo"))
+
+        estado_civil_step = next(s for s in with_sexo if s.category == "estado_civil")
+        sexo_step = next(s for s in with_sexo if s.category == "sexo")
+
+        # Población tras sexo+viudo (cruce exacto) = pop_mujeres * P(viudo|mujer)
+        expected = round(sexo_step.remaining_population * MARITAL_STATUS_BY_SEX["mujer"]["viudo"])
+        assert estado_civil_step.remaining_population == expected
+        # Y debe ser DISTINTO de aplicar la marginal sobre pop_mujeres (lo que
+        # se haría si no se usara la tabla cruzada), para confirmar que de
+        # verdad se está usando MARITAL_STATUS_BY_SEX y no MARITAL_STATUS_DISTRIBUTION.
+        marginal_equivalent = round(sexo_step.remaining_population * MARITAL_STATUS_DISTRIBUTION["viudo"])
+        assert estado_civil_step.remaining_population != marginal_equivalent
+        assert "EXACTO" in estado_civil_step.note
+
+    def test_falls_back_to_marginal_distribution_when_sexo_unknown(self):
+        findings = DemographicFindings(estado_civil="viudo")
+        steps = estimate_population_narrowing(findings)
+
+        expected = round(TOTAL_POPULATION_ES * MARITAL_STATUS_DISTRIBUTION["viudo"])
+        assert steps[0].remaining_population == expected
+        assert "EXACTO" not in steps[0].note
+
+    def test_marital_status_by_sex_sums_to_one_per_sex(self):
+        for sexo, distribution in MARITAL_STATUS_BY_SEX.items():
+            assert sum(distribution.values()) == pytest.approx(1.0), sexo

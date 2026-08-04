@@ -61,11 +61,6 @@ export interface ImageLocationPoint {
   // pinta en el mapa, se muestra aparte en un apartado de "imágenes no
   // representativas" (ver LocationMap.tsx).
   representative: boolean;
-  // Fecha de la publicación (ISO 8601), para poder distinguir las fotos del
-  // listado entre sí -- sobre todo las "no representativas", que si no
-  // fuera por esto se verían todas iguales (solo un enlace). null si no se
-  // pudo emparejar (no debería ocurrir en la práctica).
-  created_utc: string | null;
 }
 
 export interface ExposureReport {
@@ -83,6 +78,10 @@ export interface ExposureReport {
   // ocupación) -- no el porcentaje de un rasgo aislado. null si no se pudo
   // estimar ningún rasgo encadenable. Ver k_anonymity.py::final_remaining_population().
   remaining_population_all_traits: number | null;
+  // remaining_population_all_traits / población total de España, ya
+  // calculada en el backend -- para el único pictograma grande que resume
+  // toda la sección (ver PopulationNarrowingTable.tsx).
+  remaining_population_all_traits_proportion: number | null;
   image_location_points: ImageLocationPoint[];
   // false si el índice de geolocalización no está construido en este
   // servidor (o la plataforma no es Instagram) -- distinto de "se

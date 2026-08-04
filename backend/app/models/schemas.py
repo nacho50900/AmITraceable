@@ -157,6 +157,13 @@ class ExposureReport(BaseModel):
     # scoring/k_anonymity.py::final_remaining_population(). None si no se
     # pudo estimar ningún rasgo encadenable (no hay número que mostrar).
     remaining_population_all_traits: int | None = None
+    # remaining_population_all_traits / TOTAL_POPULATION_ES, ya calculado
+    # aquí (mismo criterio que PopulationEstimate.proportion) para que el
+    # frontend no tenga que conocer ni duplicar esa constante -- usado para
+    # el ÚNICO pictograma grande que resume "Qué se puede inferir sobre ti"
+    # (ver PopulationNarrowingTable.tsx / Dashboard.tsx). None si
+    # remaining_population_all_traits también lo es.
+    remaining_population_all_traits_proportion: float | None = None
     # Una estimación de ubicación por CADA foto analizada por
     # app/vision/geolocation.py (no solo la de mayor confianza, que es la
     # única que se usa para population_narrowing). Se usa para pintar el

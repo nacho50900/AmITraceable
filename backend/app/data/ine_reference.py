@@ -61,6 +61,33 @@ MARITAL_STATUS_DISTRIBUTION = {
     "viudo": 0.070,
 }
 
+# Estado civil CONDICIONADO por sexo (aprox. 2024, INE -- Población
+# residente por sexo y estado civil), es decir P(estado_civil | sexo). A
+# diferencia de MARITAL_STATUS_DISTRIBUTION (marginal, ignora el sexo), esta
+# tabla da la proporción REAL de cada combinación sexo+estado_civil, no una
+# aproximación asumiendo independencia -- que no lo son: las mujeres son
+# viudas en una proporción bastante mayor que los hombres (esperanza de vida
+# más alta, y suelen ser algo más jóvenes que su pareja). Se usa en
+# k_anonymity.py::_step_relacion SOLO cuando también se conoce el sexo de la
+# persona (aplicado antes en la cadena): en ese caso da el porcentaje EXACTO
+# de esa combinación concreta, en vez de multiplicar dos proporciones
+# marginales por separado. Cada sub-diccionario suma 1.0 (son P(x|sexo), no
+# P(x) sin más).
+MARITAL_STATUS_BY_SEX = {
+    "hombre": {
+        "casado": 0.470,
+        "con_pareja": 0.250,
+        "soltero": 0.245,
+        "viudo": 0.035,
+    },
+    "mujer": {
+        "casado": 0.447,
+        "con_pareja": 0.235,
+        "soltero": 0.216,
+        "viudo": 0.102,
+    },
+}
+
 # Distribución de edad en tramos de 5 años, proporción sobre el total.
 # Pirámide poblacional aproximada de España (envejecida, con menos peso en
 # tramos jóvenes). Suma ~1.0.

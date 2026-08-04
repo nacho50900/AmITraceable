@@ -588,10 +588,23 @@ body {
   padding: 2px 10px;
 }
 
-.population-step-visual {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px dashed var(--border);
+.population-combined-summary {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.population-combined-summary .trait-summary {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.population-combined-summary .pictogram-lg {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 /* Pantalla de progreso en vivo (Dashboard.tsx, vía SSE) */
@@ -704,24 +717,4 @@ body {
 
 .image-location-list a:hover {
   text-decoration: underline;
-}
-
-.image-location-details {
-  margin-top: 16px;
-}
-
-.image-location-details summary {
-  cursor: pointer;
-  font-weight: 600;
-  padding: 4px 0;
-}
-
-.image-location-details summary:hover {
-  color: var(--accent);
-}
-
-.image-location-list-scroll {
-  max-height: 400px;
-  overflow-y: auto;
-  padding-right: 4px;
 }

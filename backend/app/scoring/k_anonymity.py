@@ -36,10 +36,11 @@ from app.data.ine_reference import (
     AGE_DISTRIBUTION_1Y,
     AUTONOMOUS_COMMUNITY_DISPLAY_NAMES,
     CCAA_POPULATION,
+    MARITAL_STATUS_BY_SEX,
+    MARITAL_STATUS_DISTRIBUTION,
     MUNICIPALITY_POPULATION,
     OCCUPATION_DISTRIBUTION,
     PROVINCE_POPULATION,
-    MARITAL_STATUS_DISTRIBUTION,
     SEX_DISTRIBUTION,
     STUDIES_DISTRIBUTION,
     TOTAL_POPULATION_ES,
@@ -192,18 +193,40 @@ _ESTADO_CIVIL_LABELS = {
 def _step_relacion(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
     if findings.estado_civil is None:
         return remaining, None
+
+    # Si ya se conoce el sexo (se aplica antes en la cadena, ver
+    # _CHAINED_STEPS), se usa la proporción EXACTA de esa combinación
+    # concreta -- P(estado_civil | sexo), tabla real cruzada -- en vez de
+    # aproximar multiplicando dos proporciones marginales asumiendo
+    # independencia. Si no se conoce el sexo, se sigue usando la
+    # distribución marginal (sin distinguir sexo) como aproximación.
+    sex_distribution = MARITAL_STATUS_BY_SEX.get(findings.sexo)
+    exact = sex_distribution is not None
+    if exact:
+        proportion = sex_distribution.get(findings.estado_civil)
+    else:
+        proportion = MARITAL_STATUS_DISTRIBUTION.get(findings.estado_civil)
+
+    note = (
+        "Inferido por IA a partir de contenido simbólico o indirecto (emojis, fechas, "
+        "menciones recurrentes...), no de una autodeclaración explícita: fiabilidad menor "
+        "que el resto de rasgos de esta lista."
+    )
+    if exact:
+        note += (
+            " Al conocerse también el sexo, se usa el porcentaje EXACTO de esa combinación "
+            "concreta (estado civil condicionado a sexo, tabla real del INE), no una "
+            "aproximación multiplicando proporciones independientes."
+        )
+
     return _apply_proportion(
         remaining,
-        MARITAL_STATUS_DISTRIBUTION.get(findings.estado_civil),
+        proportion,
         _ESTADO_CIVIL_LABELS[findings.estado_civil],
         "estado_civil",
         findings.evidence.get("estado_civil", []),
         source=findings.source.get("estado_civil", "ia_simbolica"),
-        note=(
-            "Inferido por IA a partir de contenido simbólico o indirecto (emojis, fechas, "
-            "menciones recurrentes...), no de una autodeclaración explícita: fiabilidad menor "
-            "que el resto de rasgos de esta lista."
-        ),
+        note=note,
     )
 
 

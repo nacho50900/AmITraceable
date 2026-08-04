@@ -275,16 +275,11 @@ const Dashboard: React.FC = () => {
 
       <section className="card">
         <h2>Qué se puede inferir sobre ti</h2>
-        <PopulationNarrowingTable steps={report.population_narrowing} />
-        {report.remaining_population_all_traits !== null && (
-          <p className="trait-summary">
-            En España hay{' '}
-            <span className="trait-summary-number">
-              {report.remaining_population_all_traits.toLocaleString('es-ES')}
-            </span>{' '}
-            personas que comparten tus rasgos.
-          </p>
-        )}
+        <PopulationNarrowingTable
+          steps={report.population_narrowing}
+          remainingPopulationAllTraits={report.remaining_population_all_traits}
+          remainingPopulationAllTraitsProportion={report.remaining_population_all_traits_proportion}
+        />
       </section>
 
       <section className="card">

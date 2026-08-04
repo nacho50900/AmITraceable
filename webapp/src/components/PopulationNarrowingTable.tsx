@@ -4,6 +4,12 @@ import PopulationPictogram from './PopulationPictogram';
 
 interface PopulationNarrowingTableProps {
   steps: PopulationEstimate[];
+  // El ÚNICO pictograma grande de esta sección resume TODOS los rasgos
+  // combinados (no cada fila por separado, como antes) -- ver
+  // scoring/k_anonymity.py::final_remaining_population(). null si no se
+  // pudo estimar ningún rasgo encadenable.
+  remainingPopulationAllTraits: number | null;
+  remainingPopulationAllTraitsProportion: number | null;
 }
 
 const RISK_COLORS: Record<string, string> = {
@@ -53,7 +59,11 @@ function formatPopulation(value: number | null): string {
   return value.toLocaleString('es-ES');
 }
 
-const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({ steps }) => {
+const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({
+  steps,
+  remainingPopulationAllTraits,
+  remainingPopulationAllTraitsProportion,
+}) => {
   if (steps.length === 0) {
     return (
       <p className="note">
@@ -94,23 +104,34 @@ const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({ ste
 
             {step.note && <p className="note-inline">{step.note}</p>}
 
-            <div className="population-step-visual">
-              {step.proportion !== null && step.remaining_population !== null ? (
-                <PopulationPictogram
-                  proportion={step.proportion}
-                  remainingPopulation={step.remaining_population}
-                  size="large"
-                />
-              ) : (
-                <span className="population-fallback">{formatPopulation(step.remaining_population)}</span>
-              )}
-            </div>
+            <span className="population-fallback">{formatPopulation(step.remaining_population)}</span>
           </div>
         ))}
       </div>
+
+      {remainingPopulationAllTraits !== null && (
+        <div className="population-combined-summary">
+          <p className="trait-summary">
+            En España hay{' '}
+            <span className="trait-summary-number">
+              {remainingPopulationAllTraits.toLocaleString('es-ES')}
+            </span>{' '}
+            personas que comparten tus rasgos (todos los detectados, combinados a la vez: sexo,
+            edad, ubicación, estudios, ocupación, estado civil -- los que se hayan podido
+            estimar).
+          </p>
+          <PopulationPictogram
+            proportion={remainingPopulationAllTraitsProportion}
+            remainingPopulation={remainingPopulationAllTraits}
+            size="large"
+          />
+        </div>
+      )}
       <p className="note">
-        Estimación aproximada a partir de distribuciones agregadas del INE, asumiendo
-        independencia entre atributos. No es un recuento exacto de personas.
+        Estimación aproximada a partir de distribuciones agregadas del INE. Cuando existe una
+        tabla cruzada real (p. ej. estado civil según sexo), se usa esa proporción exacta; el
+        resto de combinaciones asume independencia entre atributos. No es un recuento exacto de
+        personas.
         {steps.some((s) => s.source === 'imagen') && (
           <>
             {' '}
