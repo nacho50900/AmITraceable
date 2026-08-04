@@ -37,21 +37,38 @@ de baja confianza, que es lo que se pide aquí.
 Se le hace UNA sola pregunta combinada por foto (no una petición de JSON
 estructurado con varias inferencias, como en la versión con Pixtral):
 modelos locales pequeños son mucho menos fiables generando JSON complejo
-bien formado que uno grande, así que se pide una respuesta en dos líneas
+bien formado que uno grande, así que se pide una respuesta en tres líneas
 con un formato fijo y se parsea como texto -- más robusto ante
 variaciones de formato que decodificar un JSON que podría no serlo.
 
 LÍMITE ÉTICO/LEGAL DELIBERADO (léase antes de tocar el prompt): el modelo
-NUNCA debe intentar identificar, nombrar, describir físicamente, ni
-inferir NADA sobre OTRAS personas que aparezcan en la foto -- ni su sexo,
-ni edad, ni nada. El consentimiento OAuth de este proyecto cubre
-únicamente a la cuenta analizada; generar cualquier dato sobre la
-identidad de un tercero que aparezca en su contenido público sería tratar
-datos personales de alguien que nunca dio su consentimiento, fuera del
-alcance legal de esta herramienta. Lo único que se extrae es una señal
-sobre la PROPIA cuenta analizada (p. ej. "aparece en actitud romántica con
-otra persona" -> indicio de que la cuenta analizada tiene pareja), nunca
-información sobre quién es esa otra persona.
+NUNCA debe intentar identificar, nombrar, o describir físicamente a
+NINGUNA persona que aparezca en la foto -- ni su sexo, ni edad, ni nada.
+El consentimiento OAuth de este proyecto cubre únicamente a la cuenta
+analizada; generar cualquier dato sobre la identidad de un tercero que
+aparezca en su contenido público sería tratar datos personales de alguien
+que nunca dio su consentimiento, fuera del alcance legal de esta
+herramienta.
+
+Matiz importante, detectado en revisión: el modelo NO tiene forma de saber
+cuál de las personas que aparecen en una foto es la propia cuenta
+analizada -- es una imagen suelta, sin ninguna referencia externa con la
+que comparar. "Persona principal" es una simplificación razonable para
+fotos con una sola persona (o ninguna), pero en una foto con VARIAS
+personas de protagonismo similar (p. ej. una pareja) es una ambigüedad
+real, no solo una cuestión de cómo esté redactado el prompt. Por eso el
+prompt pide explícitamente que el modelo declare cuántas personas
+identifica como protagonistas (campo PERSONAS): con una o ninguna, la
+señal de afición/actividad se atribuye a la cuenta analizada con
+normalidad (mismo supuesto que ya asume el resto del proyecto: que una
+autodeclaración en primera persona es sobre quien la escribe). Con varias
+personas, esa atribución dejaría de tener fundamento -- podría ser
+perfectamente la otra persona quien toca la guitarra de la foto, no la
+cuenta analizada -- así que la señal de afición se DESCARTA en ese caso
+(ver `_parse_inferences`). La señal de PAREJA, en cambio, no necesita
+resolver esta ambigüedad: da igual cuál de las dos personas sea la cuenta
+analizada, el mero hecho de que la cuenta publique una foto con contexto
+romántico ya es la señal, así que esa sí se mantiene con varias personas.
 
 Degradación: si `torch`/`transformers` no están instalados (dependencias
 opcionales, ver WITH_GEOLOCATION en el Dockerfile) o la inferencia falla
@@ -69,19 +86,20 @@ _MODEL_REVISION = "2025-06-21"  # fijado explícitamente, ver docstring del mode
 _model = None
 
 _QUERY = (
-    "Analiza esta imagen ÚNICAMENTE sobre la persona principal que la protagoniza -- nunca "
-    "sobre cualquier otra persona que también pueda aparecer en ella. Responde EXACTAMENTE "
-    "en este formato, dos líneas, sin nada más:\n"
+    "Analiza esta imagen. Responde EXACTAMENTE en este formato, tres líneas, sin nada más:\n"
+    "PERSONAS: <'ninguna' si no aparece ninguna persona, 'una' si aparece exactamente una "
+    "persona protagonista, o 'varias' si aparecen dos o más personas de protagonismo similar "
+    "(p. ej. una pareja, un grupo)>\n"
     "AFICION: <una afición, actividad, deporte, instrumento musical o fandom concreto que "
-    "sugiera la imagen sobre la persona principal, en pocas palabras, o la palabra 'ninguno' "
-    "si no hay nada específico>\n"
-    "PAREJA: <'si' si la persona principal aparece besando, abrazando románticamente, o "
-    "cogida de la mano con otra persona en un contexto de pareja, o 'no' en cualquier otro "
-    "caso>\n"
-    "No describas ni identifiques a ninguna otra persona que pueda aparecer en la imagen más "
-    "allá de si hay o no un contexto romántico con ella."
+    "sugiera la imagen, en pocas palabras, o la palabra 'ninguno' si no hay nada específico>\n"
+    "PAREJA: <'si' si la imagen muestra a dos personas besándose, en un abrazo claramente "
+    "romántico, o cogidas de la mano en un contexto de pareja, o 'no' en cualquier otro caso>\n"
+    "No describas ni identifiques físicamente a ninguna persona que aparezca en la imagen -- "
+    "ni su aspecto, ni su sexo, ni su edad -- más allá de contarlas y de si hay o no un "
+    "contexto romántico entre ellas."
 )
 
+_PERSONAS_RE = re.compile(r"PERSONAS:[ \t]*(\S+)", re.IGNORECASE)
 _AFICION_RE = re.compile(r"AFICION:[ \t]*(.+)", re.IGNORECASE)
 _PAREJA_RE = re.compile(r"PAREJA:[ \t]*(\S+)", re.IGNORECASE)
 
@@ -144,7 +162,25 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool]:
     return _parse_inferences(answer), _parse_pareja(answer)
 
 
+def _parse_personas(answer: str) -> str | None:
+    match = _PERSONAS_RE.search(answer)
+    if match is None:
+        return None
+    value = match.group(1).strip().lower().rstrip(".,;")
+    return value if value in ("ninguna", "una", "varias") else None
+
+
 def _parse_inferences(answer: str) -> list[InferredAttribute]:
+    # Con varias personas de protagonismo similar en la foto, no hay forma
+    # de saber si la afición/actividad detectada es de la cuenta analizada
+    # o de la otra persona -- ver docstring del módulo. Se descarta la
+    # señal en vez de arriesgarse a atribuirla a quien no toca. Si
+    # PERSONAS no se pudo parsear (formato inesperado), se prefiere
+    # también descartar por precaución antes que asumir que es seguro
+    # atribuirla.
+    if _parse_personas(answer) not in ("ninguna", "una"):
+        return []
+
     match = _AFICION_RE.search(answer)
     if match is None:
         return []
@@ -162,6 +198,10 @@ def _parse_inferences(answer: str) -> list[InferredAttribute]:
 
 
 def _parse_pareja(answer: str) -> bool:
+    # A diferencia de _parse_inferences, aquí SÍ es válida la señal con
+    # "varias" personas (de hecho es el caso típico: hacen falta al menos
+    # dos para un contexto romántico) -- no depende de resolver quién es
+    # la cuenta analizada, ver docstring del módulo.
     match = _PAREJA_RE.search(answer)
     if match is None:
         return False
