@@ -45,14 +45,21 @@ terceros.
    similitud visual (DINOv2 + FAISS) contra un índice de imágenes
    georreferenciadas de España, mostrando cada foto analizada con su
    confianza real (no solo las que superan un umbral) en un mapa y una
-   lista.
-6. Calcula un **score de privacidad** (0-100) con desglose por componente.
-7. Envía automáticamente el informe ya generado (incluidas las
+   lista. Las fotos cuyo pie indica que son de un viaje o vacaciones se
+   detectan y se excluyen del cálculo de dónde vives habitualmente (pero
+   se siguen mostrando igual en el mapa).
+6. **Analiza el contenido visual de tus fotos** (solo Instagram, opcional):
+   qué se ve en cada una -- objetos, actividades, aficiones, señales de
+   relación de pareja -- mediante un modelo de visión-lenguaje local
+   (Moondream2). A diferencia del punto anterior, esto no busca *dónde* se
+   tomó la foto sino *qué hay* en ella.
+7. Calcula un **score de privacidad** (0-100) con desglose por componente.
+8. Envía automáticamente el informe ya generado (incluidas las
    recomendaciones por reglas fijas, como insumo) a un modelo de IA
    (Mistral AI, tier gratuito) para obtener un **veredicto general** de una
    frase y conclusiones específicas y no obvias -- sin necesidad de pulsar
    ningún botón.
-8. Permite **descargar el informe completo en JSON** (portabilidad de
+9. Permite **descargar el informe completo en JSON** (portabilidad de
    datos, RGPD Art. 20).
 
 Todo el pipeline corre **en memoria durante la petición**: no hay base de
@@ -90,6 +97,15 @@ navegador.
   simplemente no aporta nada, sin romper el resto del análisis. Su
   precisión realista es a nivel de provincia, no de calle (ver benchmarks
   de reverse geolocation citados en los docstrings).
+- El análisis de contenido visual (`backend/app/vision/scene_analysis.py`,
+  Moondream2) es igualmente **opcional y best-effort**, y depende de las
+  mismas dependencias pesadas que la geolocalización (mismo
+  `requirements-vision.txt`, mismo `ARG WITH_GEOLOCATION` del
+  `Dockerfile`), aunque es arquitectónicamente distinto: no compara
+  similitud contra un índice, sino que "interpreta" cada foto vía VQA. A
+  diferencia del modelo de geolocalización, no se precarga en el arranque
+  del contenedor (ver `lifespan` en `app/main.py`), así que la primera
+  foto que se analiza en cada proceso es más lenta que las siguientes.
 - Las heurísticas de inferencia de atributos
   (`backend/app/nlp/attribute_inference.py`,
   `backend/app/nlp/demographic_extraction.py`) son deliberadamente simples
@@ -127,10 +143,12 @@ SPA creada con [Vite](https://vitejs.dev/) y [React](https://react.dev/) en Type
 - `app/nlp/attribute_inference.py` — inferencia explicable de atributos (ubicación, ocupación, rutina) a partir de comunidades/hashtags.
 - `app/nlp/demographic_extraction.py` — extracción de declaraciones explícitas en texto por regex (edad, sexo, ubicación, estudios, ocupación, universidad, empresa).
 - `app/nlp/ai_attribute_extraction.py` — la misma extracción, pero vía IA (Mistral, opcional): capta redacciones libres que la regex no reconoce, y una estimación aparte de sexo por nombre público de la cuenta (marcada con menor fiabilidad). Complementa a la regex, nunca la sustituye.
+- `app/nlp/travel_detection.py` — detección regex de menciones de "de viaje/vacaciones" en el pie de foto, para excluir esas publicaciones del cálculo de dónde vives habitualmente (ver `report/generator.py`). Complementa (no sustituye) a una detección equivalente vía IA en `ai_attribute_extraction.py`.
 - `app/data/ine_reference.py` — tablas de distribución poblacional (INE) usadas para el estrechamiento de población.
 - `app/scoring/k_anonymity.py` — motor de estimación de k-anonimato (estrechamiento de población en cascada), expone también la proporción ya calculada para el pictograma del frontend.
 - `app/scoring/privacy_score.py` — motor de scoring de privacidad (0-100).
 - `app/vision/geolocation.py` — geolocalización de fotos por similitud visual (DINOv2 + FAISS), opcional. Devuelve todas las estimaciones (con su confianza real) más un flag de si el índice está disponible, para poder distinguir "no hay índice" de "no hay resultados fiables".
+- `app/vision/scene_analysis.py` — análisis del contenido visual de cada foto (Moondream2, modelo de visión-lenguaje local vía `transformers`, ~1.8B parámetros): objetos, actividades, aficiones, señales de relación de pareja. Arquitectónicamente distinto de `geolocation.py` (que compara similitud visual contra un índice sin "entender" la foto). Opcional, mismas dependencias que la geolocalización.
 - `app/ai_analysis.py` — veredicto general + conclusiones sobre el informe vía Mistral AI, opcional; se dispara automáticamente, sin botón, y usa `recommendations` como insumo.
 - `app/progress.py` — callback de progreso compartido, usado por el endpoint de streaming.
 - `app/analysis_router.py` — endpoints de análisis (`/api/analyze/{platform}`, `/api/analyze/{platform}/stream`, `/api/analyze/ai-summary`).
@@ -155,17 +173,23 @@ docker-compose up --build
 Antes de levantarlo, crea `backend/.env` a partir de `backend/.env.example`
 (ver [variables de entorno](#variables-de-entorno) más abajo).
 
-**Geolocalización por imagen en Docker:** el `docker-compose.yml` trae
-`WITH_GEOLOCATION=true` por defecto, que instala `torch`/`faiss`/
-`transformers` en la imagen del backend (ver `requirements-vision.txt`,
-unos cientos de MB extra, con la build solo-CPU de PyTorch). Sin esto, el
-backend puede tener el índice FAISS perfectamente construido y montado y
-aun así reportar "no disponible" -- esas librerías hacen falta en el
-análisis, no solo para construir el índice. Si no vas a usar
-geolocalización, ponlo a `false` para una imagen más ligera. El modelo se
-precarga en el arranque del contenedor (no en el primer análisis) y su
-caché se persiste en `backend/data/hf_cache/` para no volver a
-descargarlo en cada reinicio.
+**Análisis de imagen en Docker (geolocalización + contenido visual):** el
+`docker-compose.yml` trae `WITH_GEOLOCATION=true` por defecto, que instala
+`torch`/`faiss`/`transformers`/`timm`/`einops`/`pyvips-binary` en la
+imagen del backend (ver `requirements-vision.txt`, varios cientos de MB
+extra, con la build solo-CPU de PyTorch). Pese al nombre del flag
+(heredado de cuando solo existía geolocalización), esas mismas
+dependencias son las que necesita también el análisis de contenido visual
+(`app/vision/scene_analysis.py`, Moondream2) -- no hay un flag
+independiente para activar solo una de las dos. Sin esto, el backend
+puede tener el índice FAISS perfectamente construido y montado y aun así
+reportar la geolocalización como "no disponible" -- esas librerías hacen
+falta en el análisis, no solo para construir el índice. Si no vas a usar
+ninguna de las dos funciones, ponlo a `false` para una imagen más ligera.
+El modelo de geolocalización se precarga en el arranque del contenedor
+(no en el primer análisis); Moondream2 se carga de forma perezosa en la
+primera foto que lo necesita. La caché de ambos se persiste en
+`backend/data/hf_cache/` para no volver a descargarlos en cada reinicio.
 
 ### Without Docker
 
@@ -264,6 +288,11 @@ python scripts/build_faiss_index.py --images data/osv5m_spain
 pequeño que el paquete de PyPI por defecto -- ver también el `ARG
 WITH_GEOLOCATION` del `Dockerfile` si vas a correr esto dentro de Docker.)
 
+El análisis de contenido visual (`app/vision/scene_analysis.py`,
+Moondream2) usa el mismo `requirements-vision.txt`, pero no necesita nada
+de lo anterior: no hay índice que construir ni dataset que descargar, se
+ejecuta directamente sobre cada foto.
+
 - `download_osv5m_spain.py` descarga solo las imágenes de España del
   dataset [OpenStreetView-5M](https://huggingface.co/datasets/osv5m/osv5m)
   (streaming shard a shard, con límite de disco configurable, reanudable
@@ -295,7 +324,7 @@ Estos datos/artefactos **no se versionan** en el repositorio (ver
 ### Backend (Python)
 
 - `uvicorn app.main:app --reload --port 3000` — arranca el backend en desarrollo.
-- `pytest` — tests unitarios (~153 tests, 1 se salta si no tienes instalado `requirements-vision.txt` en local).
+- `pytest` — tests unitarios (~260 tests, 1 se salta si no tienes instalado `requirements-vision.txt` en local).
 - `pytest --cov=app --cov-report=xml --cov-report=term` — tests con cobertura (genera `coverage.xml` para Sonar).
 
 ## Respecto a SonarQube
@@ -309,11 +338,13 @@ renovarse cada dos meses. Configuración en `sonar-project.properties`
 No incluido en el código, pero necesario antes de la defensa:
 
 1. Dataset de prueba con consentimiento (cuentas propias del equipo, alts
-   conocidos) para validar el módulo de inferencia de atributos y de
-   geolocalización por imagen.
+   conocidos) para validar el módulo de inferencia de atributos, el de
+   geolocalización por imagen y el de análisis de contenido visual
+   (aficiones/actividades/señales de pareja).
 2. Métricas: precisión de los atributos inferidos vs. verdad conocida, tasa
    de falsos positivos, precisión real del módulo de geolocalización sobre
-   fotos propias geoetiquetadas.
+   fotos propias geoetiquetadas, y precisión del análisis de contenido
+   visual sobre fotos propias etiquetadas manualmente.
 3. Comparativa de las ponderaciones del scoring (`_WEIGHTS` en
    `privacy_score.py`) y de la asunción de independencia del estrechamiento
    de población (`k_anonymity.py`) contra percepción subjetiva de usuarios
