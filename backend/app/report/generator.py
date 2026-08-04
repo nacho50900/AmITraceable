@@ -283,7 +283,7 @@ async def _apply_image_geolocation(
     travel_permalinks: set[str],
     geolocation_task: "asyncio.Task | None",
     progress_callback: ProgressCallback | None,
-) -> tuple[list[ImageLocationPoint], bool]:
+) -> tuple[list[ImageLocationPoint], bool, list[InferredAttribute]]:
     """Geolocalización por imagen: solo se usa como ubicación PARA EL
     CÁLCULO DE POBLACIÓN si el texto no dio ya una provincia/municipio/
     comunidad explícita (la autodeclaración en texto es más fiable), y solo
@@ -295,14 +295,21 @@ async def _apply_image_geolocation(
     devuelven igualmente para `image_location_points`, así el frontend
     puede mostrar cada foto analizada con su confianza real -- no solo las
     que "cuentan" para inferir dónde vive la persona. Muta
-    `demographic_findings` in place si hay consenso.
+    `demographic_findings` in place si hay consenso de ubicación, o si el
+    análisis de CONTENIDO visual (ver app/vision/scene_analysis.py)
+    detectó una señal de pareja y el texto no dio ninguna ya -- misma
+    lógica de "el texto explícito manda si lo hay" que con la ubicación.
+
+    También devuelve las inferencias de contenido visual (aficiones,
+    actividades) para que generate_report las añada a
+    `inferred_attributes`, igual que las inferencias blandas de texto.
 
     Módulo opcional/best-effort: si el índice FAISS no está construido (ver
     app/vision/geolocation.py), el segundo valor devuelto (disponibilidad)
     queda a False y el resto del informe sigue generándose con normalidad.
     Si `platform` no es "instagram", no hace nada (no hay fotos que analizar)."""
     if platform != "instagram":
-        return [], False
+        return [], False, []
 
     if geolocation_task is not None:
         # Ya se lanzó en segundo plano al principio del pipeline (ver
@@ -338,7 +345,19 @@ async def _apply_image_geolocation(
         if home_candidate is not None:
             _apply_home_candidate(demographic_findings, home_candidate)
 
-    return image_location_points, geo_outcome.index_available
+    # Igual criterio que con la ubicación: si el TEXTO (autodeclaración o
+    # razonamiento simbólico de ai_attribute_extraction.py) ya dio un
+    # estado civil, manda ese -- la imagen solo rellena el hueco si el
+    # texto no dijo nada. `source="imagen"` (no "ia_simbolica") para que
+    # quede claro en el informe de dónde viene esta inferencia en concreto.
+    if demographic_findings.estado_civil is None and geo_outcome.partner_signal_permalinks:
+        demographic_findings.estado_civil = "con_pareja"
+        demographic_findings.source["estado_civil"] = "imagen"
+        demographic_findings.evidence["estado_civil"] = list(geo_outcome.partner_signal_permalinks)
+
+    visual_inferences = [inferred for _, inferred in geo_outcome.visual_inferences]
+
+    return image_location_points, geo_outcome.index_available, visual_inferences
 
 
 async def generate_report(
@@ -377,9 +396,14 @@ async def generate_report(
     # ya alimentó compute_score) en analysis_router._build_report.
     inferred_attributes = [*inferred_attributes, *soft_inferences]
 
-    image_location_points, geolocation_available = await _apply_image_geolocation(
+    image_location_points, geolocation_available, visual_inferences = await _apply_image_geolocation(
         platform, posts, demographic_findings, travel_permalinks, geolocation_task, progress_callback
     )
+    # Igual que las inferencias blandas de texto: se AÑADEN a lo que ya
+    # había (regex + texto por IA), nunca lo sustituyen. Ver
+    # app/vision/scene_analysis.py para el prompt y el límite ético sobre
+    # no identificar a otras personas que aparezcan en las fotos.
+    inferred_attributes = [*inferred_attributes, *visual_inferences]
 
     await emit_progress(progress_callback, "Generando el informe final...")
 

@@ -380,6 +380,77 @@ class TestEstimateLocationsForPosts:
         assert all(permalink == "https://ig/carousel" for permalink, _ in outcome.results)
 
     @pytest.mark.asyncio
+    async def test_visual_content_analysis_runs_alongside_geolocation_on_the_same_image(self, monkeypatch, respx_mock):
+        """El caso pedido: el análisis de contenido visual (aficiones,
+        señal de pareja -- ver scene_analysis.py) debe ejecutarse sobre
+        cada foto, con el permalink correcto en la evidencia, sin
+        necesidad de una segunda descarga de la imagen."""
+        import httpx
+
+        from app.models.schemas import InferredAttribute
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        monkeypatch.setattr(
+            geolocation,
+            "estimate_location_from_image",
+            lambda image, k=15: None,  # no relevante para este test
+        )
+
+        def _fake_scene_analysis(image):
+            return (
+                [InferredAttribute(category="aficion", value="Fan del baloncesto", confidence=0.5, evidence=[])],
+                True,
+            )
+
+        monkeypatch.setattr(geolocation, "analyze_image_content", _fake_scene_analysis)
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        outcome = await geolocation.estimate_locations_for_posts(posts)
+
+        assert len(outcome.visual_inferences) == 1
+        permalink, inferred = outcome.visual_inferences[0]
+        assert permalink == "https://ig/1"
+        assert inferred.category == "aficion"
+        # geolocation.py debe rellenar la evidencia con el permalink --
+        # scene_analysis.py la deja vacía a propósito (no conoce el permalink).
+        assert inferred.evidence == ["https://ig/1"]
+        assert outcome.partner_signal_permalinks == {"https://ig/1"}
+
+    @pytest.mark.asyncio
+    async def test_no_pareja_signal_leaves_partner_signal_permalinks_empty(self, monkeypatch, respx_mock):
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        monkeypatch.setattr(geolocation, "estimate_location_from_image", lambda image, k=15: None)
+        monkeypatch.setattr(geolocation, "analyze_image_content", lambda image: ([], False))
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        outcome = await geolocation.estimate_locations_for_posts(posts)
+
+        assert outcome.visual_inferences == []
+        assert outcome.partner_signal_permalinks == set()
+
+    @pytest.mark.asyncio
     async def test_no_candidate_posts_returns_empty_without_network_calls(self):
         Post = namedtuple("Post", ["type", "media_urls", "permalink"])
         posts = [Post(type="text", media_urls=[], permalink="https://x/1")]

@@ -30,8 +30,11 @@ mostrando en el mapa con su confianza real, no se oculta.
 """
 import asyncio
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+from app.models.schemas import InferredAttribute
+from app.vision.scene_analysis import analyze_image_content
 
 import numpy as np
 
@@ -216,6 +219,17 @@ class GeolocationOutcome:
     # este módulo -- ver MIN_CONFIDENCE_FOR_POPULATION_NARROWING en
     # report/generator.py.
     results: list[tuple[str, ImageLocationEstimate]]
+    # Inferencias de CONTENIDO visual (aficiones, actividades -- ver
+    # app/vision/scene_analysis.py), una entrada por foto y hallazgo, con
+    # el permalink de la publicación que lo generó. Se calcula sobre la
+    # MISMA imagen ya descargada para geolocalización, sin descarga aparte.
+    visual_inferences: list[tuple[str, InferredAttribute]] = field(default_factory=list)
+    # Permalinks de fotos donde scene_analysis.py detectó a la persona en
+    # actitud romántica con otra persona (sin identificar a esa otra
+    # persona en ningún sentido -- ver docstring de scene_analysis.py).
+    # report/generator.py usa esto como señal de "estado_civil" con
+    # source="imagen" cuando el texto no dio ninguna señal por sí solo.
+    partner_signal_permalinks: set[str] = field(default_factory=set)
 
 
 def _lazy_load():
@@ -329,13 +343,17 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
     Orquestación de alto nivel: para CADA foto de CADA SocialPost de tipo
     imagen (todas las de un carrusel, no solo la primera -- ver
     `media_urls` en app/models/schemas.py e InstagramClient), descarga la
-    imagen EN MEMORIA (nunca a disco), extrae el embedding, consulta el
-    índice, y descarta la imagen inmediatamente. Devuelve TODAS las
-    estimaciones que se pudieron calcular (con su confianza real, sin
+    imagen EN MEMORIA (nunca a disco), y sobre ESA MISMA imagen ejecuta dos
+    análisis independientes en paralelo: geolocalización por similitud
+    (embedding DINOv2 + consulta al índice) y análisis de CONTENIDO visual
+    (aficiones/actividades/señal de pareja, ver app/vision/scene_analysis.py),
+    antes de descartar la imagen. Devuelve TODAS las estimaciones de
+    ubicación que se pudieron calcular (con su confianza real, sin
     filtrar), junto al permalink de la publicación que la generó -- una
     publicación con varias fotos puede aportar varias estimaciones con el
     MISMO permalink; el filtrado por umbral de fiabilidad, si hace falta,
-    lo hace el llamador (ver `report/generator.py`).
+    lo hace el llamador (ver `report/generator.py`). También devuelve las
+    inferencias de contenido visual y qué fotos dieron señal de pareja.
 
     Se ejecuta en segundo plano de forma best-effort: si el índice no
     existe (no se ha corrido scripts/build_faiss_index.py) o falla la
@@ -386,6 +404,9 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
         # servidor", que es justo lo que es.
         return GeolocationOutcome(index_available=False, results=results)
 
+    visual_inferences: list[tuple[str, InferredAttribute]] = []
+    partner_signal_permalinks: set[str] = set()
+
     async with httpx.AsyncClient(timeout=10.0) as client:
         for i, (permalink, media_url) in enumerate(photo_units, start=1):
             try:
@@ -396,20 +417,36 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
                 image = None  # imagen no descargable/decodificable: se omite, no se aborta el análisis
 
             if image is not None:
-                # `estimate_location_from_image` es SÍNCRONA y hace trabajo
-                # de CPU real (la pasada hacia delante del modelo DINOv2) --
-                # llamarla directamente bloquearía el hilo único del event
-                # loop durante ese rato, y con él, CUALQUIER otra tarea que
+                # Los dos análisis de esta foto son independientes entre sí
+                # (geolocalización por similitud vs. contenido visual con
+                # Moondream2, ver app/vision/scene_analysis.py) y se lanzan
+                # a la vez con asyncio.gather sobre la MISMA imagen ya
+                # descargada, para no pagar el coste de una segunda
+                # descarga ni serializar dos llamadas que no dependen la
+                # una de la otra.
+                #
+                # Ambas son SÍNCRONAS y hacen trabajo de CPU real (la
+                # pasada hacia delante de cada modelo) -- llamarlas
+                # directamente bloquearía el hilo único del event loop
+                # durante ese rato, y con él, CUALQUIER otra tarea que
                 # dependa de ese mismo loop (incluida la llamada a Mistral
-                # de app/nlp/ai_attribute_extraction.py, que en teoría corre
-                # en paralelo con este análisis -- ver
-                # analysis_router._build_report). `asyncio.to_thread` la
-                # manda a un hilo aparte para que sí puedan solaparse de
+                # de app/nlp/ai_attribute_extraction.py, que en teoría
+                # corre en paralelo con este análisis -- ver
+                # analysis_router._build_report). `asyncio.to_thread` las
+                # manda a hilos aparte para que sí puedan solaparse de
                 # verdad, no solo turnarse una tras otra en el mismo hilo.
-                estimate = await asyncio.to_thread(estimate_location_from_image, image)
+                estimate, (scene_inferences, indicio_pareja) = await asyncio.gather(
+                    asyncio.to_thread(estimate_location_from_image, image),
+                    asyncio.to_thread(analyze_image_content, image),
+                )
                 # `image` sale de scope tras este bloque y se descarta (nunca se escribe a disco)
                 if estimate is not None:
                     results.append((permalink, estimate))
+                for inferred in scene_inferences:
+                    inferred.evidence.append(permalink)
+                    visual_inferences.append((permalink, inferred))
+                if indicio_pareja:
+                    partner_signal_permalinks.add(permalink)
 
             await emit_progress(
                 progress_callback,
@@ -425,5 +462,12 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
                 # análisis.
                 track="fotos",
             )
+
+    return GeolocationOutcome(
+        index_available=index_available,
+        results=results,
+        visual_inferences=visual_inferences,
+        partner_signal_permalinks=partner_signal_permalinks,
+    )
 
     return GeolocationOutcome(index_available=index_available, results=results)

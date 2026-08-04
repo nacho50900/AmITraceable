@@ -17,3 +17,17 @@
 torch>=2.2,<3.0
 transformers>=4.40,<5.0
 faiss-cpu>=1.8,<2.0
+
+# Dependencias específicas de Moondream2 (app/vision/scene_analysis.py,
+# análisis de CONTENIDO visual -- aficiones/actividades/señales de pareja
+# en cada foto, distinto del embedding de similitud de arriba). `timm` y
+# `einops` los pide directamente el código del propio modelo
+# (trust_remote_code=True). `pyvips-binary` (versión estática, sin
+# depender de que el sistema tenga libvips instalado) lo empezaron a
+# requerir revisiones más recientes del modelo -- si al fijar
+# `_MODEL_REVISION` en scene_analysis.py se cambia a una revisión más
+# antigua, puede que ya no haga falta; verificar el error exacto de carga
+# si cambia.
+timm>=1.0,<2.0
+einops>=0.7,<1.0
+pyvips-binary>=8.14

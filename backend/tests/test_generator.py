@@ -740,3 +740,104 @@ class TestSoftInferencesReachTheReport:
         # Y también cuenta para el número combinado de "personas que
         # comparten tus rasgos" (ver k_anonymity.py::final_remaining_population).
         assert report.remaining_population_all_traits == relacion_steps[0].remaining_population
+
+
+class TestVisualAnalysisReachesTheReport:
+    """Cubre el análisis de CONTENIDO visual (aficiones/actividades/señal
+    de pareja detectadas en fotos con Moondream2, ver
+    app/vision/scene_analysis.py) llegando hasta el informe final."""
+
+    @pytest.mark.asyncio
+    async def test_visual_inferences_are_appended_to_inferred_attributes(self, monkeypatch):
+        async def _fake_estimate(posts, progress_callback=None):
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[],
+                visual_inferences=[
+                    (
+                        "https://ig/1",
+                        InferredAttribute(
+                            category="aficion",
+                            value="Posible afición/interés detectado en una foto: baloncesto",
+                            confidence=0.5,
+                            evidence=["https://ig/1"],
+                        ),
+                    )
+                ],
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+
+        regex_attribute = InferredAttribute(category="ubicacion", value="x", confidence=0.5, evidence=[])
+        report = await generate_report(
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://cdn/1.jpg"])],
+            _fingerprint(), [regex_attribute], _score(),
+        )
+
+        categories = [a.category for a in report.inferred_attributes]
+        assert "ubicacion" in categories  # lo anterior se conserva
+        assert "aficion" in categories  # y se añade lo visual
+        visual = next(a for a in report.inferred_attributes if a.category == "aficion")
+        assert "baloncesto" in visual.value.lower()
+
+    @pytest.mark.asyncio
+    async def test_partner_signal_from_image_sets_estado_civil_when_text_gave_none(self, monkeypatch):
+        """El caso motivador: una foto besando a alguien, sin que el texto
+        dijera nada sobre pareja -- debe rellenar estado_civil con
+        source='imagen', igual que la ubicación por imagen cuando el
+        texto no dio ninguna."""
+        async def _fake_estimate(posts, progress_callback=None):
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[],
+                partner_signal_permalinks={"https://ig/1"},
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+
+        report = await generate_report(
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://cdn/1.jpg"])],
+            _fingerprint(), [], _score(),
+        )
+
+        step = next(s for s in report.population_narrowing if s.category == "estado_civil")
+        assert step.attribute_label == "Tiene pareja (sin estar casado/a)"
+        assert step.source == "imagen"
+        assert step.evidence == ["https://ig/1"]
+
+    @pytest.mark.asyncio
+    async def test_partner_signal_from_image_does_not_override_text_estado_civil(self, monkeypatch):
+        """Igual criterio que con la ubicación: si el texto ya dio un
+        estado civil, la imagen NO lo pisa, aunque detecte una señal
+        distinta."""
+        from app.config import settings
+        from app.nlp.demographic_extraction import DemographicFindings
+
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+
+        async def _fake_ai_extraction(posts, username, full_name=None, bio=None):
+            return DemographicFindings(
+                estado_civil="soltero",
+                evidence={"estado_civil": ["bio"]},
+                source={"estado_civil": "ia_simbolica"},
+            )
+
+        monkeypatch.setattr(generator, "extract_demographics_with_ai", _fake_ai_extraction)
+
+        async def _fake_estimate(posts, progress_callback=None):
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[],
+                partner_signal_permalinks={"https://ig/1"},  # la foto sugeriría pareja, pero el texto manda
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+
+        report = await generate_report(
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://cdn/1.jpg"])],
+            _fingerprint(), [], _score(), bio="Soltera y feliz",
+        )
+
+        step = next(s for s in report.population_narrowing if s.category == "estado_civil")
+        assert step.attribute_label == "Soltero/a (sin pareja actualmente)"
+        assert step.source == "ia_simbolica"
