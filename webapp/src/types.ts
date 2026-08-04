@@ -61,6 +61,11 @@ export interface ImageLocationPoint {
   // pinta en el mapa, se muestra aparte en un apartado de "imágenes no
   // representativas" (ver LocationMap.tsx).
   representative: boolean;
+  // Fecha de la publicación (ISO 8601), para poder distinguir las fotos del
+  // listado entre sí -- sobre todo las "no representativas", que si no
+  // fuera por esto se verían todas iguales (solo un enlace). null si no se
+  // pudo emparejar (no debería ocurrir en la práctica).
+  created_utc: string | null;
 }
 
 export interface ExposureReport {
