@@ -546,7 +546,9 @@ class TestEstimateLocationsForPosts:
         assert outcome.results[1][1].confidence == 0.1
 
         assert progress_events == [
+            ("Geolocalizando fotos...", {"photos_analyzed": 1, "total_photos": 2, "track": "geolocalizacion"}),
             ("Analizando fotos...", {"photos_analyzed": 1, "total_photos": 2, "track": "fotos"}),
+            ("Geolocalizando fotos...", {"photos_analyzed": 2, "total_photos": 2, "track": "geolocalizacion"}),
             ("Analizando fotos...", {"photos_analyzed": 2, "total_photos": 2, "track": "fotos"}),
         ]
 

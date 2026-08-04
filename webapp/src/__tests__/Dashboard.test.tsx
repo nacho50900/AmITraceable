@@ -158,6 +158,52 @@ describe('Dashboard', () => {
     });
   });
 
+  test('fase de geolocalización (track distinto de "fotos"): su propia línea, con su propio contador', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([
+      { done: false, stage: 'Leyendo publicaciones...' },
+      {
+        done: false,
+        stage: 'Geolocalizando fotos...',
+        photos_analyzed: 1,
+        total_photos: 3,
+        track: 'geolocalizacion',
+      },
+      {
+        done: false,
+        stage: 'Geolocalizando fotos...',
+        photos_analyzed: 3,
+        total_photos: 3,
+        track: 'geolocalizacion',
+      },
+    ]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Fotos geolocalizadas (3/3)')).toBeInTheDocument();
+    });
+  });
+
+  test('geolocalización (DINOv2) y análisis de contenido (Moondream2) se muestran como DOS líneas independientes, sin mezclarse', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([
+      {
+        done: false,
+        stage: 'Geolocalizando fotos...',
+        photos_analyzed: 2,
+        total_photos: 5,
+        track: 'geolocalizacion',
+      },
+      { done: false, stage: 'Analizando fotos...', photos_analyzed: 2, total_photos: 5, track: 'fotos' },
+    ]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Geolocalizando fotos (2/5)...')).toBeInTheDocument();
+      expect(screen.getByText('Analizando fotos (2/5)...')).toBeInTheDocument();
+    });
+  });
+
   test('todos los spinners visibles giran sincronizados (mismo transform en todo momento)', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
     mockStream([

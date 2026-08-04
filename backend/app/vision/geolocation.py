@@ -460,6 +460,23 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
                 if description:
                     visual_descriptions[permalink] = description
 
+            # Dos líneas de progreso independientes para dos análisis
+            # distintos sobre la misma foto (ver el asyncio.gather más
+            # arriba): geolocalización por similitud visual (DINOv2) y
+            # análisis de contenido -- aficiones, pareja -- (Moondream2, ver
+            # scene_analysis.py). Avanzan siempre a la vez en el backend (se
+            # esperan juntas con gather), pero se muestran como dos líneas
+            # separadas en el frontend porque son dos modelos y dos
+            # propósitos distintos -- mezclarlas en una sola línea
+            # ("Analizando fotos...") no dejaba claro que se estaban
+            # haciendo dos cosas diferentes sobre cada foto.
+            await emit_progress(
+                progress_callback,
+                "Geolocalizando fotos...",
+                photos_analyzed=i,
+                total_photos=total,
+                track="geolocalizacion",
+            )
             await emit_progress(
                 progress_callback,
                 "Analizando fotos...",

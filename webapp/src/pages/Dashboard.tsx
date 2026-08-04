@@ -17,17 +17,25 @@ function readPlatform(): Platform {
 // Duración del ciclo de rotación del spinner, en ms.
 const SPINNER_PERIOD_MS = 800;
 
-// La línea de fotos es la única con contador -- se muestra siempre igual
-// tanto si sigue en curso ("Analizando fotos (3/10)...") como cuando ya
-// terminó ("Fotos analizadas (10/10)"), a partir de photos_analyzed/
-// total_photos (ver app/vision/geolocation.py).
-function formatPhotosLabel(counts: Record<string, unknown>, done: boolean): string {
+// Las líneas de fotos son las únicas con contador -- se muestran siempre
+// igual tanto si siguen en curso ("Analizando fotos (3/10)...") como cuando
+// ya terminaron ("Fotos analizadas (10/10)"), a partir de photos_analyzed/
+// total_photos (ver app/vision/geolocation.py). Hay DOS líneas de fotos
+// independientes -- geolocalización (DINOv2) y análisis de contenido
+// (Moondream2), dos modelos y dos propósitos sobre la misma foto -- así que
+// se parametriza el verbo/sustantivo en vez de duplicar la función.
+function formatPhotosLabel(
+  counts: Record<string, unknown>,
+  done: boolean,
+  verb: string,
+  doneLabel: string,
+): string {
   const analyzed = counts.photos_analyzed;
   const total = counts.total_photos;
   if (typeof analyzed !== 'number' || typeof total !== 'number') {
-    return done ? 'Fotos analizadas' : 'Analizando fotos...';
+    return done ? doneLabel : `${verb}...`;
   }
-  return done ? `Fotos analizadas (${analyzed}/${total})` : `Analizando fotos (${analyzed}/${total})...`;
+  return done ? `${doneLabel} (${analyzed}/${total})` : `${verb} (${analyzed}/${total})...`;
 }
 
 const Dashboard: React.FC = () => {
@@ -43,13 +51,20 @@ const Dashboard: React.FC = () => {
   const [currentStage, setCurrentStage] = useState<string | null>(null);
   // El análisis de fotos corre en PARALELO con el resto del pipeline desde
   // el principio (ver analysis_router._build_report), así que sus eventos
-  // (marcados con track:"fotos", ver app/vision/geolocation.py) se
-  // muestran en su propia línea independiente, no mezclados con la fase
+  // se muestran en su propia línea independiente, no mezclados con la fase
   // "general" en curso -- si no, al intercalarse en el mismo stream SSE,
   // una foto a medio analizar se marcaría por error como fase "completada"
-  // cada vez que llegara un evento distinto del pipeline general.
+  // cada vez que llegara un evento distinto del pipeline general. Son DOS
+  // líneas, no una: geolocalización por similitud visual (DINOv2,
+  // track:"geolocalizacion") y análisis de contenido -- aficiones, pareja
+  // -- (Moondream2, track:"fotos", ver app/vision/geolocation.py). Avanzan
+  // a la vez en el backend (se esperan juntas con asyncio.gather sobre la
+  // misma foto), pero son dos modelos y dos propósitos distintos, así que
+  // se muestran como dos líneas separadas.
   const [photosCounts, setPhotosCounts] = useState<Record<string, unknown> | null>(null);
   const [photosDone, setPhotosDone] = useState(false);
+  const [geoCounts, setGeoCounts] = useState<Record<string, unknown> | null>(null);
+  const [geoDone, setGeoDone] = useState(false);
   const navigate = useNavigate();
   const stopStreamRef = useRef<(() => void) | null>(null);
   // Ref auxiliar para poder leer la fase "actual" dentro del callback del
@@ -111,6 +126,16 @@ const Dashboard: React.FC = () => {
             const analyzed = counts.photos_analyzed;
             const total = counts.total_photos;
             setPhotosDone(
+              typeof analyzed === 'number' && typeof total === 'number' && analyzed >= total && total > 0
+            );
+            return;
+          }
+
+          if (event.track === 'geolocalizacion') {
+            setGeoCounts(counts);
+            const analyzed = counts.photos_analyzed;
+            const total = counts.total_photos;
+            setGeoDone(
               typeof analyzed === 'number' && typeof total === 'number' && analyzed >= total && total > 0
             );
             return;
@@ -206,6 +231,16 @@ const Dashboard: React.FC = () => {
                   {currentStage}
                 </li>
               )}
+              {geoCounts && (
+                <li className={geoDone ? 'progress-done' : 'progress-current'}>
+                  {geoDone ? (
+                    <span className="progress-icon progress-icon-done" aria-hidden="true">✓</span>
+                  ) : (
+                    <span className="spinner spinner-sm" aria-hidden="true" />
+                  )}
+                  {formatPhotosLabel(geoCounts, geoDone, 'Geolocalizando fotos', 'Fotos geolocalizadas')}
+                </li>
+              )}
               {photosCounts && (
                 <li className={photosDone ? 'progress-done' : 'progress-current'}>
                   {photosDone ? (
@@ -213,7 +248,7 @@ const Dashboard: React.FC = () => {
                   ) : (
                     <span className="spinner spinner-sm" aria-hidden="true" />
                   )}
-                  {formatPhotosLabel(photosCounts, photosDone)}
+                  {formatPhotosLabel(photosCounts, photosDone, 'Analizando fotos', 'Fotos analizadas')}
                 </li>
               )}
             </ul>
