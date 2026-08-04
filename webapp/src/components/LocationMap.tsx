@@ -139,14 +139,28 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
           <ul className="image-location-list">
             {representativePoints.map((point) => (
               <li key={point.permalink}>
-                <a href={point.permalink} target="_blank" rel="noreferrer">
-                  Ver publicación
-                </a>
-                <span>
-                  {formatDate(point.created_utc)} — {point.province} — confianza{' '}
-                  {Math.round(point.confidence * 100)}%
-                  {point.lat === null && ' (sin coordenadas para el mapa)'}
-                </span>
+                <details className="photo-details">
+                  <summary>
+                    <a
+                      href={point.permalink}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Ver publicación
+                    </a>
+                    <span>
+                      {formatDate(point.created_utc)} — {point.province} — confianza{' '}
+                      {Math.round(point.confidence * 100)}%
+                      {point.lat === null && ' (sin coordenadas para el mapa)'}
+                    </span>
+                  </summary>
+                  <p className="photo-visual-description">
+                    {point.visual_description
+                      ? point.visual_description
+                      : 'Sin descripción visual disponible para esta foto.'}
+                  </p>
+                </details>
               </li>
             ))}
           </ul>
@@ -164,10 +178,24 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
           <ul className="image-location-list image-location-list-scroll">
             {nonRepresentativePoints.map((point) => (
               <li key={point.permalink}>
-                <a href={point.permalink} target="_blank" rel="noreferrer">
-                  Ver publicación
-                </a>
-                <span>{formatDate(point.created_utc)}</span>
+                <details className="photo-details">
+                  <summary>
+                    <a
+                      href={point.permalink}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Ver publicación
+                    </a>
+                    <span>{formatDate(point.created_utc)}</span>
+                  </summary>
+                  <p className="photo-visual-description">
+                    {point.visual_description
+                      ? point.visual_description
+                      : 'Sin descripción visual disponible para esta foto.'}
+                  </p>
+                </details>
               </li>
             ))}
           </ul>

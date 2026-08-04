@@ -45,7 +45,7 @@ class TestAnalyzeImageContent:
             "PERSONAS: una\nAFICION: Posible fan de baloncesto, aparece jugando\nPAREJA: no",
         )
 
-        inferences, indicio_pareja = scene_analysis.analyze_image_content(object())
+        inferences, indicio_pareja, _ = scene_analysis.analyze_image_content(object())
 
         assert len(inferences) == 1
         assert inferences[0].category == "aficion"
@@ -60,7 +60,7 @@ class TestAnalyzeImageContent:
         atribuírselo."""
         _install_fake_model(monkeypatch, "PERSONAS: ninguna\nAFICION: vinilo de música visible\nPAREJA: no")
 
-        inferences, _ = scene_analysis.analyze_image_content(object())
+        inferences, _, _ = scene_analysis.analyze_image_content(object())
 
         assert len(inferences) == 1
 
@@ -74,7 +74,7 @@ class TestAnalyzeImageContent:
             monkeypatch, "PERSONAS: varias\nAFICION: toca la guitarra\nPAREJA: no"
         )
 
-        inferences, _ = scene_analysis.analyze_image_content(object())
+        inferences, _, _ = scene_analysis.analyze_image_content(object())
 
         assert inferences == []
 
@@ -84,7 +84,7 @@ class TestAnalyzeImageContent:
         personas es el caso típico para esta señal."""
         _install_fake_model(monkeypatch, "PERSONAS: varias\nAFICION: ninguno\nPAREJA: si")
 
-        inferences, indicio_pareja = scene_analysis.analyze_image_content(object())
+        inferences, indicio_pareja, _ = scene_analysis.analyze_image_content(object())
 
         assert inferences == []
         assert indicio_pareja is True
@@ -92,14 +92,14 @@ class TestAnalyzeImageContent:
     def test_unparseable_personas_value_discards_aficion_by_precaution(self, monkeypatch):
         _install_fake_model(monkeypatch, "PERSONAS: no lo sé\nAFICION: toca la guitarra\nPAREJA: no")
 
-        inferences, _ = scene_analysis.analyze_image_content(object())
+        inferences, _, _ = scene_analysis.analyze_image_content(object())
 
         assert inferences == []
 
     def test_missing_personas_line_discards_aficion_by_precaution(self, monkeypatch):
         _install_fake_model(monkeypatch, "AFICION: toca la guitarra\nPAREJA: no")
 
-        inferences, _ = scene_analysis.analyze_image_content(object())
+        inferences, _, _ = scene_analysis.analyze_image_content(object())
 
         assert inferences == []
 
@@ -107,14 +107,14 @@ class TestAnalyzeImageContent:
     def test_ninguno_variants_produce_no_inference(self, monkeypatch, negative_value):
         _install_fake_model(monkeypatch, f"PERSONAS: una\nAFICION: {negative_value}\nPAREJA: no")
 
-        inferences, _ = scene_analysis.analyze_image_content(object())
+        inferences, _, _ = scene_analysis.analyze_image_content(object())
 
         assert inferences == []
 
     def test_missing_aficion_line_is_ignored_without_crashing(self, monkeypatch):
         _install_fake_model(monkeypatch, "PERSONAS: una\nPAREJA: no")
 
-        inferences, indicio_pareja = scene_analysis.analyze_image_content(object())
+        inferences, indicio_pareja, _ = scene_analysis.analyze_image_content(object())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -122,7 +122,7 @@ class TestAnalyzeImageContent:
     def test_missing_pareja_line_defaults_to_false(self, monkeypatch):
         _install_fake_model(monkeypatch, "PERSONAS: una\nAFICION: toca la guitarra")
 
-        inferences, indicio_pareja = scene_analysis.analyze_image_content(object())
+        inferences, indicio_pareja, _ = scene_analysis.analyze_image_content(object())
 
         assert len(inferences) == 1
         assert indicio_pareja is False
@@ -130,7 +130,7 @@ class TestAnalyzeImageContent:
     def test_completely_unexpected_format_degrades_without_crashing(self, monkeypatch):
         _install_fake_model(monkeypatch, "esto no sigue el formato pedido en absoluto")
 
-        inferences, indicio_pareja = scene_analysis.analyze_image_content(object())
+        inferences, indicio_pareja, _ = scene_analysis.analyze_image_content(object())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -138,7 +138,7 @@ class TestAnalyzeImageContent:
     def test_dependencies_not_installed_returns_empty_without_crashing(self, monkeypatch):
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: False)
 
-        inferences, indicio_pareja = scene_analysis.analyze_image_content(object())
+        inferences, indicio_pareja, _ = scene_analysis.analyze_image_content(object())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -147,7 +147,7 @@ class TestAnalyzeImageContent:
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
         monkeypatch.setattr(scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _RaisingModel()))
 
-        inferences, indicio_pareja = scene_analysis.analyze_image_content(object())
+        inferences, indicio_pareja, _ = scene_analysis.analyze_image_content(object())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -163,6 +163,36 @@ class TestAnalyzeImageContent:
         query_lower = scene_analysis._QUERY.lower()
         assert "no describas ni identifiques" in query_lower
         assert "ninguna persona" in query_lower
+
+    def test_returns_the_raw_answer_as_description(self, monkeypatch):
+        raw_answer = "PERSONAS: una\nAFICION: Posible fan de baloncesto\nPAREJA: no"
+        _install_fake_model(monkeypatch, raw_answer)
+
+        _, _, description = scene_analysis.analyze_image_content(object())
+
+        assert description == raw_answer
+
+    def test_description_is_stripped_of_surrounding_whitespace(self, monkeypatch):
+        _install_fake_model(monkeypatch, "  \nPERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no\n  ")
+
+        _, _, description = scene_analysis.analyze_image_content(object())
+
+        assert description == "PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no"
+
+    def test_description_is_none_when_dependencies_not_installed(self, monkeypatch):
+        monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: False)
+
+        _, _, description = scene_analysis.analyze_image_content(object())
+
+        assert description is None
+
+    def test_description_is_none_when_model_raises(self, monkeypatch):
+        monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
+        monkeypatch.setattr(scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _RaisingModel()))
+
+        _, _, description = scene_analysis.analyze_image_content(object())
+
+        assert description is None
 
 
 class TestParsePersonas:

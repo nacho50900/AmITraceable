@@ -66,6 +66,11 @@ export interface ImageLocationPoint {
   // fuera por esto se verían todas iguales (solo un enlace). null si no se
   // pudo emparejar (no debería ocurrir en la práctica).
   created_utc: string | null;
+  // Respuesta cruda de Moondream2 sobre el contenido de la foto (ver
+  // app/vision/scene_analysis.py) -- las tres líneas PERSONAS/AFICION/
+  // PAREJA tal cual, no una redacción libre. null si el modelo no estaba
+  // disponible en el servidor, o la inferencia falló para esta foto.
+  visual_description: string | null;
 }
 
 export interface ExposureReport {

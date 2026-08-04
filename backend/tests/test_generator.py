@@ -165,6 +165,51 @@ class TestGenerateReportPlatformBranching:
         assert points_by_permalink["https://ig/2"].created_utc == datetime(2023, 11, 20, 18, tzinfo=timezone.utc)
 
     @pytest.mark.asyncio
+    async def test_image_location_points_include_the_visual_description(self, monkeypatch):
+        """La descripción cruda de Moondream2 (ver scene_analysis.py) debe
+        quedar en cada ImageLocationPoint -- de ahí se incluye sola en el
+        JSON del informe que ai_analysis.py le manda a la IA final, sin
+        necesitar ningún cambio en ese módulo."""
+
+        async def _fake_estimate(posts, progress_callback=None):
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[
+                    (
+                        "https://ig/1",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.5, k_neighbors=15, mean_similarity=0.6
+                        ),
+                    ),
+                    (
+                        "https://ig/2",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.3, k_neighbors=15, mean_similarity=0.5
+                        ),
+                    ),
+                ],
+                visual_descriptions={"https://ig/1": "PERSONAS: una\nAFICION: guitarra\nPAREJA: no"},
+                # https://ig/2 no tiene entrada: la foto se analizó pero
+                # Moondream2 no dio descripción (modelo no disponible, o
+                # falló solo para esa foto).
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+
+        posts = [
+            _post(i=1, platform="instagram", media_urls=["https://cdn/1.jpg"], permalink="https://ig/1"),
+            _post(i=2, platform="instagram", media_urls=["https://cdn/2.jpg"], permalink="https://ig/2"),
+        ]
+
+        report = await generate_report("instagram", "user", posts, _fingerprint(), [], _score())
+
+        points_by_permalink = {p.permalink: p for p in report.image_location_points}
+        assert points_by_permalink["https://ig/1"].visual_description == (
+            "PERSONAS: una\nAFICION: guitarra\nPAREJA: no"
+        )
+        assert points_by_permalink["https://ig/2"].visual_description is None
+
+    @pytest.mark.asyncio
     async def test_non_representative_photo_still_shows_on_map_but_not_used_for_residence(self, monkeypatch):
         """Una foto marcada como no representativa (dispersión geográfica
         excesiva entre sus vecinos, ver ImageLocationEstimate.representative

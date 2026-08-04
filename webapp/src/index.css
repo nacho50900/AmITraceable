@@ -701,13 +701,10 @@ body {
 }
 
 .image-location-list li {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
   font-size: 13px;
-  padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
+  overflow: hidden; /* recorta las esquinas del <details> interior */
 }
 
 .image-location-list a {
@@ -717,4 +714,53 @@ body {
 
 .image-location-list a:hover {
   text-decoration: underline;
+}
+
+/* Cada foto es un <details> propio: la fila (enlace + fecha/datos) es el
+   <summary>, y al desplegarlo se ve la descripción cruda de Moondream2
+   (ver scene_analysis.py). */
+.photo-details summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.photo-details summary:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.photo-visual-description {
+  margin: 0;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: pre-line; /* conserva los saltos de línea PERSONAS/AFICION/PAREJA */
+}
+
+/* Apartado "Imágenes no representativas": desplegable de sección (ver
+   LocationMap.tsx), colapsado por defecto. */
+.image-location-details {
+  margin-top: 16px;
+}
+
+.image-location-details > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 4px 0;
+}
+
+.image-location-details > summary:hover {
+  color: var(--accent);
+}
+
+/* Altura máxima con scroll cuando hay muchas fotos no representativas --
+   evita que la sección crezca sin límite y se coma toda la pantalla. */
+.image-location-list-scroll {
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 4px;
 }

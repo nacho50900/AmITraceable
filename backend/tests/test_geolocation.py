@@ -400,6 +400,7 @@ class TestEstimateLocationsForPosts:
             return (
                 [InferredAttribute(category="aficion", value="Fan del baloncesto", confidence=0.5, evidence=[])],
                 True,
+                "PERSONAS: una\nAFICION: Fan del baloncesto\nPAREJA: si",
             )
 
         monkeypatch.setattr(geolocation, "analyze_image_content", _fake_scene_analysis)
@@ -425,6 +426,7 @@ class TestEstimateLocationsForPosts:
         # scene_analysis.py la deja vacía a propósito (no conoce el permalink).
         assert inferred.evidence == ["https://ig/1"]
         assert outcome.partner_signal_permalinks == {"https://ig/1"}
+        assert outcome.visual_descriptions == {"https://ig/1": "PERSONAS: una\nAFICION: Fan del baloncesto\nPAREJA: si"}
 
     @pytest.mark.asyncio
     async def test_no_pareja_signal_leaves_partner_signal_permalinks_empty(self, monkeypatch, respx_mock):
@@ -432,7 +434,7 @@ class TestEstimateLocationsForPosts:
 
         monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
         monkeypatch.setattr(geolocation, "estimate_location_from_image", lambda image, k=15: None)
-        monkeypatch.setattr(geolocation, "analyze_image_content", lambda image: ([], False))
+        monkeypatch.setattr(geolocation, "analyze_image_content", lambda image: ([], False, None))
 
         Post = namedtuple("Post", ["type", "media_urls", "permalink"])
         posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]
@@ -449,6 +451,33 @@ class TestEstimateLocationsForPosts:
 
         assert outcome.visual_inferences == []
         assert outcome.partner_signal_permalinks == set()
+        assert outcome.visual_descriptions == {}
+
+    @pytest.mark.asyncio
+    async def test_no_description_when_scene_analysis_returns_none(self, monkeypatch, respx_mock):
+        """Sin descripción (modelo no disponible, o falló para esta foto en
+        concreto), el permalink simplemente no aparece en el diccionario --
+        no una entrada con valor None."""
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        monkeypatch.setattr(geolocation, "estimate_location_from_image", lambda image, k=15: None)
+        monkeypatch.setattr(geolocation, "analyze_image_content", lambda image: ([], False, None))
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        outcome = await geolocation.estimate_locations_for_posts(posts)
+
+        assert "https://ig/1" not in outcome.visual_descriptions
 
     @pytest.mark.asyncio
     async def test_no_candidate_posts_returns_empty_without_network_calls(self):

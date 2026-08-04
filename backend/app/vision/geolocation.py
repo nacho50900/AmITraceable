@@ -230,6 +230,15 @@ class GeolocationOutcome:
     # report/generator.py usa esto como señal de "estado_civil" con
     # source="imagen" cuando el texto no dio ninguna señal por sí solo.
     partner_signal_permalinks: set[str] = field(default_factory=set)
+    # Descripción CRUDA de Moondream2 (ver scene_analysis.py) para cada foto
+    # donde se pudo generar -- una por permalink, a diferencia de
+    # `visual_inferences` (que puede tener varias entradas, o ninguna, por
+    # foto). Se guarda tal cual porque: (a) se muestra en el frontend al
+    # desplegar cada foto ("qué vio la IA"), y (b) al formar parte de
+    # ImageLocationPoint, se incluye automáticamente en el JSON del informe
+    # que se le manda a ai_analysis.py para las conclusiones finales -- sin
+    # necesitar ningún cambio ahí, ya manda el informe completo tal cual.
+    visual_descriptions: dict[str, str] = field(default_factory=dict)
 
 
 def _lazy_load():
@@ -406,6 +415,7 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
 
     visual_inferences: list[tuple[str, InferredAttribute]] = []
     partner_signal_permalinks: set[str] = set()
+    visual_descriptions: dict[str, str] = {}
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         for i, (permalink, media_url) in enumerate(photo_units, start=1):
@@ -435,7 +445,7 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
                 # analysis_router._build_report). `asyncio.to_thread` las
                 # manda a hilos aparte para que sí puedan solaparse de
                 # verdad, no solo turnarse una tras otra en el mismo hilo.
-                estimate, (scene_inferences, indicio_pareja) = await asyncio.gather(
+                estimate, (scene_inferences, indicio_pareja, description) = await asyncio.gather(
                     asyncio.to_thread(estimate_location_from_image, image),
                     asyncio.to_thread(analyze_image_content, image),
                 )
@@ -447,6 +457,8 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
                     visual_inferences.append((permalink, inferred))
                 if indicio_pareja:
                     partner_signal_permalinks.add(permalink)
+                if description:
+                    visual_descriptions[permalink] = description
 
             await emit_progress(
                 progress_callback,
@@ -468,6 +480,5 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
         results=results,
         visual_inferences=visual_inferences,
         partner_signal_permalinks=partner_signal_permalinks,
+        visual_descriptions=visual_descriptions,
     )
-
-    return GeolocationOutcome(index_available=index_available, results=results)

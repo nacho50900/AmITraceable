@@ -135,6 +135,18 @@ class ImageLocationPoint(BaseModel):
     # enlace). None si por algún motivo no se pudo emparejar el permalink
     # con su publicación original (no debería ocurrir en la práctica).
     created_utc: datetime | None = None
+    # Respuesta cruda de Moondream2 sobre el CONTENIDO de la foto (ver
+    # app/vision/scene_analysis.py), no una redacción -- mismas tres líneas
+    # (PERSONAS/AFICION/PAREJA) que ya alimentan `inferred_attributes` y el
+    # estado civil, pero aquí visibles tal cual, foto por foto, para que el
+    # frontend las pueda mostrar al desplegar cada foto. None si el modelo
+    # no estaba disponible en este servidor, o la inferencia falló para
+    # esta foto en concreto (no bloquea el resto del análisis).
+    #
+    # Al formar parte de este modelo, se incluye automáticamente en el JSON
+    # completo del informe que ai_analysis.py le manda a Mistral para las
+    # conclusiones finales -- sin necesitar ningún cambio ahí.
+    visual_description: str | None = None
 
 
 class ExposureReport(BaseModel):

@@ -134,13 +134,22 @@ def _lazy_load():
     )
 
 
-def analyze_image_content(image) -> tuple[list[InferredAttribute], bool]:
-    """Devuelve (inferencias_visuales, indicio_pareja) para UNA foto ya
-    decodificada (PIL.Image, la misma que usa geolocation.py para el
+def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | None]:
+    """Devuelve (inferencias_visuales, indicio_pareja, descripcion) para UNA
+    foto ya decodificada (PIL.Image, la misma que usa geolocation.py para el
     embedding de DINOv2 -- no se descarga ni decodifica de nuevo). SÍNCRONA
     y con trabajo de CPU real (como `estimate_location_from_image`): quien
     llama debe envolverla en `asyncio.to_thread` para no bloquear el event
     loop, ver geolocation.py.
+
+    `descripcion` es la respuesta CRUDA del modelo (las tres líneas
+    PERSONAS/AFICION/PAREJA), no una redacción libre -- se devuelve tal
+    cual en vez de reformularla porque: (a) no hace falta un prompt ni un
+    parseo nuevos, y (b) es más transparente para quien vea el informe
+    (mismo criterio de "mostrar la evidencia real" que el resto del
+    proyecto) que una paráfrasis que podría no ser fiel. None si el modelo
+    no está disponible o la inferencia falla -- igual que los otros dos
+    valores devueltos.
 
     `evidence` de cada InferredAttribute se deja vacío deliberadamente --
     quien llama (geolocation.py) rellena el permalink de la publicación,
@@ -148,18 +157,18 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool]:
 
     Nunca lanza: cualquier fallo (dependencias no instaladas, modelo no
     descargable, respuesta con formato inesperado) se trata como "esta
-    foto no aportó nada" y devuelve ([], False), sin abortar el análisis
-    de las demás fotos."""
+    foto no aportó nada" y devuelve ([], False, None), sin abortar el
+    análisis de las demás fotos."""
     if not _scene_analysis_available():
-        return [], False
+        return [], False, None
 
     try:
         _lazy_load()
         answer = _model.query(image, _QUERY)["answer"]
     except Exception:
-        return [], False
+        return [], False, None
 
-    return _parse_inferences(answer), _parse_pareja(answer)
+    return _parse_inferences(answer), _parse_pareja(answer), answer.strip()
 
 
 def _parse_personas(answer: str) -> str | None:

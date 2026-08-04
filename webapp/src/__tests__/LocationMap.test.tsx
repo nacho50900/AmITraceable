@@ -40,6 +40,7 @@ function makePoint(overrides: Partial<ImageLocationPoint> = {}): ImageLocationPo
     lon: -3.7,
     representative: true,
     created_utc: '2024-06-15T10:00:00Z',
+    visual_description: 'PERSONAS: una\nAFICION: guitarra\nPAREJA: no',
     ...overrides,
   };
 }
@@ -274,5 +275,39 @@ describe('LocationMap', () => {
     render(<LocationMap points={points} platform="instagram" available={true} />);
 
     expect(screen.getByText(/fecha desconocida/)).toBeInTheDocument();
+  });
+
+  test('cada foto (representativa o no) es un <details> propio, colapsado por defecto', () => {
+    const points = [
+      makePoint({ permalink: 'https://instagram.com/p/rep' }),
+      makePoint({ permalink: 'https://instagram.com/p/no-rep', representative: false }),
+    ];
+    const { container } = render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    const photoDetails = container.querySelectorAll('details.photo-details');
+    expect(photoDetails).toHaveLength(2);
+    photoDetails.forEach((el) => expect(el).not.toHaveAttribute('open'));
+  });
+
+  test('al desplegar una foto se ve la descripción de Moondream2', () => {
+    const points = [makePoint({ visual_description: 'PERSONAS: una\nAFICION: baloncesto\nPAREJA: no' })];
+    render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    expect(screen.getByText(/AFICION: baloncesto/)).toBeInTheDocument();
+  });
+
+  test('sin descripción visual (null): muestra el aviso en vez de dejarlo vacío', () => {
+    const points = [makePoint({ visual_description: null })];
+    render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    expect(screen.getByText(/Sin descripción visual disponible/)).toBeInTheDocument();
+  });
+
+  test('el apartado de no representativas tiene la clase de scroll con altura máxima', () => {
+    const points = [makePoint({ representative: false })];
+    const { container } = render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    const scrollList = container.querySelector('.image-location-list.image-location-list-scroll');
+    expect(scrollList).toBeInTheDocument();
   });
 });
