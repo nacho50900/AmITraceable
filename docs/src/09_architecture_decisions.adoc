@@ -412,84 +412,71 @@ queda sin usarse en la práctica para esos casos -- comportamiento
 correcto y esperado (mejor "no estimable" que una conclusión poco
 fiable), no un fallo.
 
-=== ADR-17: Moondream2 local para analizar el contenido de las fotos, en vez de Mistral Pixtral
+=== ADR-17: Rechazo de reconocimiento facial y de clasificación de rasgos físicos/étnicos
 
-*Contexto*: se quería, además de geolocalizar cada foto, extraer señales
-sobre su contenido (aficiones, actividades, señal de pareja). El resto de
-funciones de IA del proyecto usan Mistral AI (ver ADR-10), que sí ofrece
-un modelo multimodal (Pixtral) capaz de analizar imágenes.
+*Contexto*: se planteó ampliar `vision/scene_analysis.py` para que,
+además de escena/objetos/aficiones/indicios de pareja (ver ADR-16 y el
+prompt del módulo), extrajera también color de piel, pelo y ojos de las
+personas que aparecen en las fotos, como señal adicional para acotar el
+k-anonimato -- misma lógica ya aplicada a atributos autodeclarados en
+texto. Junto con esto, se planteó identificar cuál de las personas de
+cada foto es la propia cuenta analizada, comparando contra la foto de
+perfil o, en su defecto, localizando a la persona que más se repite a lo
+largo de las publicaciones.
 
-*Alternativas consideradas*: Mistral Pixtral vía API, igual que el resto
-de integraciones de IA del proyecto (coherente con ADR-10, un único
-proveedor); un modelo de clasificación de imágenes clásico entrenado a
-medida (descartado: requeriría un dataset etiquetado de aficiones/
-actividades que no existe, desproporcionado para el alcance de un TFG).
+*Alternativas consideradas*: implementarlo igualmente, apoyándose en que
+los embeddings faciales necesarios no se persisten (coherente en
+apariencia con ADR-3) y en que la intención es defensiva/educativa,
+justo como el resto del proyecto.
 
-*Decisión*: Moondream2, un modelo de visión-lenguaje (VQA) pequeño
-(~1.8B parámetros) ejecutado localmente vía `transformers`, con el mismo
-patrón de dependencia opcional que ya usa `geolocation.py`
-(`requirements-vision.txt`, `--build-arg WITH_GEOLOCATION=true`).
+*Decisión*: no implementar ninguna de las dos cosas. `scene_analysis.py`
+se mantiene deliberadamente acotado a objetos/escena/aficiones/indicios
+de pareja -- nunca a la descripción física de las personas que aparecen
+ni a su identificación entre fotos.
 
-*Justificación*: a diferencia de las otras dos integraciones con Mistral
-(`ai_analysis.py` sobre el informe ya agregado, `ai_attribute_extraction.py`
-sobre texto/bio), este análisis necesita una llamada POR FOTO, no una por
-informe -- una cuenta con varias decenas de fotos analizadas agotaría el
-tier gratuito de Mistral en un único análisis. Un modelo local, en
-cambio, no tiene límite de peticiones por minuto una vez cargado, y
-además mantiene la imagen dentro del propio servidor en vez de enviarla a
-un tercero -- coherente con el principio de minimización de datos del
-resto del proyecto (aunque las fotos de Instagram sean públicas, seguir
-minimizando dónde viajan sigue siendo la postura por defecto de este
-proyecto).
+*Justificación*: a diferencia de otras decisiones de alcance de este
+proyecto, esta no es solo una cuestión de prudencia o de coste/beneficio
+para un TFG -- tiene dos problemas de fondo independientes entre sí:
 
-*Consecuencias*: (+) sin límite de tasa por foto, ni coste por llamada;
-(+) la imagen no sale del servidor; (+) reutiliza el mismo patrón de
-dependencia opcional, build-arg y degradación que ya existía para
-`geolocation.py`, sin inventar uno nuevo; (-) modelo bastante menos capaz
-que Pixtral en tareas VQA abiertas, mitigado limitando la tarea a una
-pregunta cerrada de formato fijo en vez de una descripción libre; (-)
-Moondream2 se carga con `trust_remote_code=True` (código Python propio
-del modelo, no solo pesos) -- superficie de confianza real que merece
-mencionarse explícitamente en la memoria, aunque el modelo y su revisión
-(`_MODEL_REVISION`, fijada explícitamente en el código) provengan de un
-repositorio público de Hugging Face con uso extendido; (-) no se precarga
-en el arranque del contenedor como el modelo de geolocalización (ver
-ADR-15), así que la primera foto de cada proceso paga el coste de carga.
+- *Categoría especial de datos (art. 9.1 RGPD)*: color de piel, pelo y
+  ojos usados con fin de acotar/identificar encajan como datos relativos
+  al origen racial/étnico y datos biométricos. El consentimiento OAuth de
+  este proyecto cubre que el usuario analice su propia actividad pública,
+  pero no constituye base legal para que el sistema clasifique rasgos
+  raciales o biométricos de nadie con ese fin -- es exactamente el tipo
+  de tratamiento que el RGPD trata con más cautela, no menos. Y el
+  argumento de "no se persiste" (que sí es válido para justificar ADR-3)
+  no se traslada aquí: el art. 4.2 define "tratamiento" como cualquier
+  operación sobre datos personales, automatizada o no, *se persista o no
+  el resultado*. Que un embedding facial se calcule solo en memoria y se
+  descarte al momento no cambia que el tratamiento de un dato de
+  categoría especial ya ocurrió.
+- *Terceros sin consentimiento*: determinar "cuál de las personas de la
+  foto es el usuario" -- ya sea por comparación con la foto de perfil o
+  por frecuencia de aparición -- exige procesar la cara de **todas** las
+  personas presentes en cada foto para poder distinguir/descartar, no
+  solo la del usuario: detección de rostro + embedding + comparación o
+  clustering entre fotos, es decir, reconocimiento facial de terceros
+  (acompañantes, amigos, desconocidos de fondo) que nunca dieron su
+  consentimiento vía OAuth ni de ninguna otra forma. El consentimiento
+  del titular de la cuenta -- la pieza que sostiene el argumentario RGPD
+  de todo el resto del proyecto (ver ADR-5) -- no se extiende a las demás
+  personas que aparecen en su contenido.
 
-=== ADR-18: Descartar la señal de afición (no la de pareja) cuando una foto tiene varias personas
+Como razón adicional, ya de calidad de la señal y no de legalidad: los
+VLM son conocidos por ser poco fiables e inconsistentes clasificando
+tono de piel (varía con iluminación, balance de blancos, ángulo de la
+cámara), así que alimentar esa señal al k-anonimato daría una falsa
+sensación de precisión sobre una estimación ya de por sí aproximada (ver
+ADR-8).
 
-*Contexto*: el modelo de análisis de contenido (ADR-17) no tiene ninguna
-referencia externa con la que saber cuál de las personas de una foto es
-la cuenta analizada -- es una imagen suelta. Asumir que la "persona
-principal" es siempre la cuenta analizada es razonable con una sola
-persona (o ninguna), pero deja de serlo con varias personas de
-protagonismo similar (p. ej. una pareja, un grupo).
-
-*Alternativas consideradas*: mantener la señal de afición igualmente,
-asumiendo que la persona detectada como "principal" por el modelo es
-casi siempre la cuenta analizada (descartado: sin verificación posible,
-atribuir una afición a la persona equivocada -- p. ej. "toca la guitarra"
-cuando en realidad la toca su pareja, no la cuenta analizada -- es un
-error de un tipo distinto y más grave que simplemente no detectar nada);
-descartar directamente cualquier foto con varias personas antes de
-analizarla (descartado: perdería también la señal de pareja, que sí es
-válida en ese mismo escenario).
-
-*Decisión*: el prompt exige que el modelo declare cuántas personas
-protagonizan la foto (`PERSONAS: ninguna/una/varias`). Con una persona o
-ninguna, la señal de afición se atribuye a la cuenta analizada con
-normalidad. Con varias, la señal de afición se descarta
-(`_parse_inferences`, `vision/scene_analysis.py`) pero la señal de pareja
-se conserva, porque no depende de resolver esa ambigüedad -- el mero
-hecho de que la cuenta publique una foto con contexto romántico ya es la
-señal, sin importar cuál de las dos personas sea.
-
-*Consecuencias*: (+) evita atribuir aficiones ajenas a la cuenta
-analizada en el escenario más común de ambigüedad (fotos en pareja o en
-grupo); (+) no sacrifica la señal de pareja, que es precisamente más
-frecuente en fotos con varias personas; (-) el sistema pierde alguna
-señal de afición real en fotos de pareja/grupo donde sí sería correcto
-atribuirla a la cuenta analizada -- compromiso aceptado a favor de evitar
-falsos positivos, mismo criterio que ADR-16 aplica a la geolocalización
-por imagen.
+*Consecuencias*: (+) el argumentario RGPD del proyecto se mantiene
+consistente en toda la memoria, sin una excepción que lo contradiga
+justo en el módulo pensado para concienciar sobre exposición de datos;
+(+) evita el riesgo reputacional y legal de distribuir, aunque sea como
+TFG, una herramienta que haga perfilado racial o reconocimiento facial de
+terceros sin su consentimiento; (-) el k-anonimato por imagen se queda
+sin una señal que, en la práctica, sí podría acotar algo más la
+población estimada -- aceptado como límite de alcance, igual que la
+correlación entre plataformas en ADR-1.
 

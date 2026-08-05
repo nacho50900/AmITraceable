@@ -106,6 +106,39 @@ navegador.
   diferencia del modelo de geolocalización, no se precarga en el arranque
   del contenedor (ver `lifespan` en `app/main.py`), así que la primera
   foto que se analiza en cada proceso es más lenta que las siguientes.
+- **Exclusión de alcance deliberada: no se hace reconocimiento facial ni se
+  clasifican rasgos físicos/étnicos (color de piel, pelo, ojos) de ninguna
+  persona que aparezca en las fotos, incluida la propia cuenta analizada.**
+  Se consideró añadirlo a `scene_analysis.py` como señal adicional para
+  acotar el k-anonimato (misma lógica que ya se aplica a atributos
+  autodeclarados en texto), pero se descartó por dos motivos, no solo uno:
+  - **Encaja en el art. 9.1 RGPD** (categoría especial de datos: origen
+    racial/étnico, datos biométricos con fin de identificación). El
+    consentimiento OAuth de este proyecto cubre que el usuario analice su
+    propia actividad pública, pero no constituye base legal para que el
+    sistema clasifique rasgos raciales o biométricos de nadie con el fin
+    de perfilar/acotar una búsqueda -- es exactamente el tipo de
+    tratamiento que el RGPD trata con más cautela, no menos, y además el
+    art. 4.2 define "tratamiento" de forma explícita como cualquier
+    operación sobre datos personales *se persista o no el resultado*: que
+    algo no se guarde no significa que no se haya procesado.
+  - Determinar "cuál de las personas de la foto es el usuario" (por
+    comparación con la foto de perfil o por frecuencia de aparición) exige
+    procesar la cara de **todas** las personas presentes para poder
+    distinguir/descartar, no solo la del usuario -- típicamente detección
+    de rostro + embedding + comparación/clustering entre fotos, es decir,
+    reconocimiento facial de terceros (acompañantes, amigos, desconocidos
+    de fondo) que nunca dieron su consentimiento vía OAuth ni de ninguna
+    otra forma. El consentimiento del titular de la cuenta no se extiende
+    a las demás personas que aparecen en su contenido.
+  A esto se suma, ya como razón secundaria de calidad de la señal (no de
+  legalidad): los VLM son conocidos por ser poco fiables e inconsistentes
+  clasificando tono de piel (varía con iluminación, balance de blancos,
+  ángulo de la cámara), así que alimentar esa señal al k-anonimato daría
+  una falsa sensación de precisión sobre una estimación ya de por sí poco
+  fiable. El prompt de `scene_analysis.py` se mantiene deliberadamente
+  acotado a objetos/escena/aficiones/indicios de pareja -- nunca a la
+  descripción física de las personas que aparecen.
 - Las heurísticas de inferencia de atributos
   (`backend/app/nlp/attribute_inference.py`,
   `backend/app/nlp/demographic_extraction.py`) son deliberadamente simples
