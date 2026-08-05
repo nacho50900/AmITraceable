@@ -412,7 +412,51 @@ queda sin usarse en la práctica para esos casos -- comportamiento
 correcto y esperado (mejor "no estimable" que una conclusión poco
 fiable), no un fallo.
 
-=== ADR-17: Rechazo de reconocimiento facial y de clasificación de rasgos físicos/étnicos
+=== ADR-17: Moondream2 local para analizar el contenido de las fotos, en vez de Mistral Pixtral
+
+*Contexto*: se quería, además de geolocalizar cada foto, extraer señales
+sobre su contenido (aficiones, actividades, señal de pareja). El resto de
+funciones de IA del proyecto usan Mistral AI (ver ADR-10), que sí ofrece
+un modelo multimodal (Pixtral) capaz de analizar imágenes.
+
+*Alternativas consideradas*: Mistral Pixtral vía API, igual que el resto
+de integraciones de IA del proyecto (coherente con ADR-10, un único
+proveedor); un modelo de clasificación de imágenes clásico entrenado a
+medida (descartado: requeriría un dataset etiquetado de aficiones/
+actividades que no existe, desproporcionado para el alcance de un TFG).
+
+*Decisión*: Moondream2, un modelo de visión-lenguaje (VQA) pequeño
+(~1.8B parámetros) ejecutado localmente vía `transformers`, con el mismo
+patrón de dependencia opcional que ya usa `geolocation.py`
+(`requirements-vision.txt`, `--build-arg WITH_GEOLOCATION=true`).
+
+*Justificación*: a diferencia de las otras dos integraciones con Mistral
+(`ai_analysis.py` sobre el informe ya agregado, `ai_attribute_extraction.py`
+sobre texto/bio), este análisis necesita una llamada POR FOTO, no una por
+informe -- una cuenta con varias decenas de fotos analizadas agotaría el
+tier gratuito de Mistral en un único análisis. Un modelo local, en
+cambio, no tiene límite de peticiones por minuto una vez cargado, y
+además mantiene la imagen dentro del propio servidor en vez de enviarla a
+un tercero -- coherente con el principio de minimización de datos del
+resto del proyecto (aunque las fotos de Instagram sean públicas, seguir
+minimizando dónde viajan sigue siendo la postura por defecto de este
+proyecto).
+
+*Consecuencias*: (+) sin límite de tasa por foto, ni coste por llamada;
+(+) la imagen no sale del servidor; (+) reutiliza el mismo patrón de
+dependencia opcional, build-arg y degradación que ya existía para
+`geolocation.py`, sin inventar uno nuevo; (-) modelo bastante menos capaz
+que Pixtral en tareas VQA abiertas, mitigado limitando la tarea a una
+pregunta cerrada de formato fijo en vez de una descripción libre; (-)
+Moondream2 se carga con `trust_remote_code=True` (código Python propio
+del modelo, no solo pesos) -- superficie de confianza real que merece
+mencionarse explícitamente en la memoria, aunque el modelo y su revisión
+(`_MODEL_REVISION`, fijada explícitamente en el código) provengan de un
+repositorio público de Hugging Face con uso extendido; (-) no se precarga
+en el arranque del contenedor como el modelo de geolocalización (ver
+ADR-15), así que la primera foto de cada proceso paga el coste de carga.
+
+=== ADR-18: Rechazo de reconocimiento facial y de clasificación de rasgos físicos/étnicos
 
 *Contexto*: se planteó ampliar `vision/scene_analysis.py` para que,
 además de escena/objetos/aficiones/indicios de pareja (ver ADR-16 y el
