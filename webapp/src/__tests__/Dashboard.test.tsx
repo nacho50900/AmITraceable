@@ -391,6 +391,31 @@ describe('Dashboard', () => {
     });
   });
 
+  test('muestra la foto de perfil en el título cuando el informe trae avatar_url', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([
+      { done: true, report: makeExposureReport({ username: 'usuario_prueba', avatar_url: 'https://cdn.fake/avatar.jpg' }) },
+    ]);
+    renderDashboard();
+
+    await waitFor(() => {
+      const avatar = screen.getByAltText('Foto de perfil de usuario_prueba');
+      expect(avatar).toBeInTheDocument();
+      expect(avatar).toHaveAttribute('src', 'https://cdn.fake/avatar.jpg');
+    });
+  });
+
+  test('no muestra ninguna imagen en el título cuando avatar_url es null', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([{ done: true, report: makeExposureReport({ username: 'usuario_prueba', avatar_url: null }) }]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/usuario_prueba/)).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('img', { name: /Foto de perfil/ })).not.toBeInTheDocument();
+  });
+
   test('la sección de población usa el título "Qué se puede inferir sobre ti", sin una segunda sección redundante', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
     mockStream([{ done: true, report: makeExposureReport() }]);

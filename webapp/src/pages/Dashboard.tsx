@@ -283,9 +283,26 @@ const Dashboard: React.FC = () => {
   return (
     <div className="page dashboard">
       <header className="dashboard-header">
-        <h1>
-          Informe de exposición de {usernamePrefix}
-          {report.username} <span className="platform-tag">({platformLabel})</span>
+        <h1 className="dashboard-title">
+          {report.avatar_url && (
+            <img
+              src={report.avatar_url}
+              alt={`Foto de perfil de ${report.username}`}
+              className="dashboard-avatar"
+              // Las URLs de foto de perfil de Reddit/Instagram pueden llevar
+              // tokens firmados con expiración, o el usuario puede no tener
+              // avatar personalizado a pesar de que el campo venga presente
+              // -- si la carga falla, se oculta en vez de mostrar el icono
+              // roto del navegador; el título sigue siendo legible sin ella.
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
+          )}
+          <span>
+            Informe de exposición de {usernamePrefix}
+            {report.username} <span className="platform-tag">({platformLabel})</span>
+          </span>
         </h1>
         <div className="dashboard-header-actions">
           <DownloadReportButton report={report} />

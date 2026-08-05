@@ -59,6 +59,7 @@ export function makeExposureReport(overrides: Partial<ExposureReport> = {}): Exp
       { permalink: 'https://instagram.com/p/1', province: 'Madrid', confidence: 0.6, lat: 40.41, lon: -3.7, representative: true, created_utc: '2024-06-15T10:00:00Z', visual_description: 'PERSONAS: una\nAFICION: guitarra\nPAREJA: no' },
     ],
     geolocation_available: true,
+    avatar_url: null,
     ...overrides,
   };
 }

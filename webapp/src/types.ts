@@ -97,6 +97,12 @@ export interface ExposureReport {
   // servidor (o la plataforma no es Instagram) -- distinto de "se
   // analizaron fotos pero ninguna dio resultado fiable".
   geolocation_available: boolean;
+  // URL pública de la foto de perfil de la cuenta (Reddit: icon_img,
+  // Instagram: profile_picture_url) -- null si la plataforma no la expone
+  // o el usuario no tiene una personalizada. Solo la URL: el navegador la
+  // carga directamente del CDN de la plataforma, nunca pasa por este
+  // backend ni se persiste.
+  avatar_url: string | null;
 }
 
 // Eventos que llegan por /api/analyze/{platform}/stream (Server-Sent Events).

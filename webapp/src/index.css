@@ -323,6 +323,18 @@ body {
 .dashboard-header h1 {
   font-size: 24px;
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboard-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  flex-shrink: 0; /* nunca se aplasta si el nombre de usuario es largo */
 }
 
 .meta {
@@ -702,9 +714,7 @@ body {
 
 .image-location-list li {
   font-size: 13px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden; /* recorta las esquinas del <details> interior */
+  flex-shrink: 0; /* nunca se comprime dentro del contenedor con scroll (.image-location-list-scroll) */
 }
 
 .image-location-list a {
@@ -718,14 +728,40 @@ body {
 
 /* Cada foto es un <details> propio: la fila (enlace + fecha/datos) es el
    <summary>, y al desplegarlo se ve la descripción cruda de Moondream2
-   (ver scene_analysis.py). */
+   (ver scene_analysis.py). El borde/radio va en el propio <details>, no en
+   el <li>: así el recorte de esquinas nunca puede recortar contenido
+   (ver nota sobre min-width más abajo -- ese era el bug real). */
+.photo-details {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
 .photo-details summary {
   display: flex;
+  flex-wrap: wrap; /* si no cabe en una línea, la fecha/datos bajan a otra en vez de desbordarse y recortarse */
   justify-content: space-between;
-  align-items: center;
-  gap: 12px;
+  align-items: baseline;
+  gap: 4px 12px;
   padding: 6px 10px;
   cursor: pointer;
+}
+
+/* Bug real de por qué se "cortaba" la palabra/fecha: por defecto, un
+   elemento flex tiene min-width:auto (= el ancho de su contenido SIN
+   wrap), así que nunca se encogía ni hacía wrap -- simplemente se salía
+   del contenedor y el overflow:hidden de arriba lo recortaba en silencio.
+   min-width: 0 permite que el texto sí se ajuste/rompa dentro del espacio
+   disponible. */
+.photo-details summary a {
+  flex-shrink: 0;
+}
+
+.photo-details summary span {
+  min-width: 0;
+  flex: 1 1 auto;
+  text-align: right;
+  word-break: break-word;
 }
 
 .photo-details summary:hover {
