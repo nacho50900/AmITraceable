@@ -67,6 +67,12 @@ class SocialProfile(BaseModel):
     # procedencia distinta ("ia_nombre") y menor fiabilidad que una
     # autodeclaración explícita en texto.
     full_name: str | None = None
+    # URL pública de la foto de perfil (si la plataforma la expone). Solo
+    # se guarda la URL, nunca la imagen en sí -- coherente con "no hay
+    # persistencia" del resto del proyecto: el navegador la carga
+    # directamente desde el CDN de la plataforma, este backend no la
+    # descarga ni la reenvía.
+    avatar_url: str | None = None
     posts: list[SocialPost]
 
 
@@ -188,3 +194,7 @@ class ExposureReport(BaseModel):
     # caso ("la función no está disponible aquí") de "se analizaron fotos
     # pero ninguna dio una estimación fiable" -- son mensajes distintos.
     geolocation_available: bool = False
+    # Foto de perfil pública de la cuenta analizada (si la plataforma la
+    # expone), para identificar visualmente de quién es el informe en el
+    # título del dashboard. Solo la URL -- ver nota en SocialProfile.
+    avatar_url: str | None = None

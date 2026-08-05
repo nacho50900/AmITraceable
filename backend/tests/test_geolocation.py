@@ -605,6 +605,57 @@ class TestEstimateLocationsForPosts:
         assert sum(other_task_progress) >= 2
 
     @pytest.mark.asyncio
+    async def test_multiple_photos_are_analyzed_concurrently_not_one_at_a_time(self, monkeypatch, respx_mock):
+        """Regresión: con `Settings.photo_analysis_concurrency >= 2`, la foto
+        2 debe empezar a analizarse con los modelos SIN esperar a que la
+        foto 1 termine del todo -- si no, el tiempo total sería la suma de
+        ambas (procesamiento estrictamente secuencial), en vez de
+        aproximarse al tiempo de la más lenta (procesamiento solapado).
+        Se simula con dos pasadas de modelo bloqueantes de la misma
+        duración y se comprueba que el tiempo total es sensiblemente menor
+        que la suma de las dos, no solo mayor que la de una sola."""
+        import time
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        monkeypatch.setattr(geolocation.settings, "photo_analysis_concurrency", 2)
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [
+            Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1"),
+            Post(type="image", media_urls=["https://cdn.fake/2.jpg"], permalink="https://ig/2"),
+        ]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+        respx_mock.get("https://cdn.fake/2.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        _SLEEP = 0.2
+
+        def _blocking_estimate(image, k=15):
+            time.sleep(_SLEEP)  # bloqueante de verdad -- simula la pasada del modelo
+            return geolocation.ImageLocationEstimate(
+                province="Madrid", confidence=0.9, k_neighbors=15, mean_similarity=0.8
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_location_from_image", _blocking_estimate)
+
+        start = time.monotonic()
+        outcome = await geolocation.estimate_locations_for_posts(posts)
+        elapsed = time.monotonic() - start
+
+        assert len(outcome.results) == 2
+        # Secuencial habría tardado >= 2 * _SLEEP; solapado, sensiblemente
+        # menos -- el margen (1.5x en vez de 2x) deja hueco para el propio
+        # overhead de hilos/red sin que el test sea inestable.
+        assert elapsed < _SLEEP * 1.5
+
+    @pytest.mark.asyncio
     async def test_skips_image_that_fails_to_download_without_aborting(self, monkeypatch, respx_mock):
         import httpx
 

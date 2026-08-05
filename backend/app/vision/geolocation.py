@@ -33,6 +33,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.config import settings
 from app.models.schemas import InferredAttribute
 from app.vision.scene_analysis import analyze_image_content
 
@@ -417,48 +418,79 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
     partner_signal_permalinks: set[str] = set()
     visual_descriptions: dict[str, str] = {}
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        for i, (permalink, media_url) in enumerate(photo_units, start=1):
+    async def _download_image(client, semaphore, media_url):
+        # La descarga (I/O de red) es un recurso totalmente distinto de la
+        # CPU que usan los dos modelos más abajo -- solaparla con el
+        # análisis de otras fotos reduce el tiempo total, sin competir por
+        # los mismos núcleos que usa torch.
+        async with semaphore:
             try:
                 resp = await client.get(media_url)
                 resp.raise_for_status()
-                image = Image.open(io.BytesIO(resp.content))
+                return Image.open(io.BytesIO(resp.content))
             except Exception:
-                image = None  # imagen no descargable/decodificable: se omite, no se aborta el análisis
+                return None  # imagen no descargable/decodificable: se omite, no se aborta el análisis
 
-            if image is not None:
-                # Los dos análisis de esta foto son independientes entre sí
-                # (geolocalización por similitud vs. contenido visual con
-                # Moondream2, ver app/vision/scene_analysis.py) y se lanzan
-                # a la vez con asyncio.gather sobre la MISMA imagen ya
-                # descargada, para no pagar el coste de una segunda
-                # descarga ni serializar dos llamadas que no dependen la
-                # una de la otra.
-                #
-                # Ambas son SÍNCRONAS y hacen trabajo de CPU real (la
-                # pasada hacia delante de cada modelo) -- llamarlas
-                # directamente bloquearía el hilo único del event loop
-                # durante ese rato, y con él, CUALQUIER otra tarea que
-                # dependa de ese mismo loop (incluida la llamada a Mistral
-                # de app/nlp/ai_attribute_extraction.py, que en teoría
-                # corre en paralelo con este análisis -- ver
-                # analysis_router._build_report). `asyncio.to_thread` las
-                # manda a hilos aparte para que sí puedan solaparse de
-                # verdad, no solo turnarse una tras otra en el mismo hilo.
-                estimate, (scene_inferences, indicio_pareja, description) = await asyncio.gather(
-                    asyncio.to_thread(estimate_location_from_image, image),
-                    asyncio.to_thread(analyze_image_content, image),
-                )
-                # `image` sale de scope tras este bloque y se descarta (nunca se escribe a disco)
-                if estimate is not None:
-                    results.append((permalink, estimate))
-                for inferred in scene_inferences:
-                    inferred.evidence.append(permalink)
-                    visual_inferences.append((permalink, inferred))
-                if indicio_pareja:
-                    partner_signal_permalinks.add(permalink)
-                if description:
-                    visual_descriptions[permalink] = description
+    async def _process_photo(client, download_semaphore, analysis_semaphore, media_url):
+        """Descarga UNA foto y, si se pudo, la analiza con los dos modelos.
+        Devuelve (image_or_None, estimate_or_None, scene_inferences,
+        indicio_pareja, description_or_None). Pensada para lanzarse como
+        tarea independiente por foto (ver más abajo): así varias fotos
+        pueden estar en distintas etapas (descargando / en cola para
+        analizar / analizando) a la vez."""
+        image = await _download_image(client, download_semaphore, media_url)
+        if image is None:
+            return None, None, [], False, None
+
+        # `analysis_semaphore` (ver Settings.photo_analysis_concurrency)
+        # acota cuántas fotos ocupan a la vez los modelos de visión --
+        # DINOv2 es rápido pero Moondream2 es lento (generación
+        # autoregresiva), así que sin este límite de concurrencia el
+        # núcleo que usaría DINOv2 para la siguiente foto se quedaría
+        # ocioso mientras Moondream2 termina la actual. Se deja como
+        # configurable porque el punto óptimo depende de cuántos núcleos
+        # tenga la máquina que lo ejecute.
+        async with analysis_semaphore:
+            estimate, (scene_inferences, indicio_pareja, description) = await asyncio.gather(
+                asyncio.to_thread(estimate_location_from_image, image),
+                asyncio.to_thread(analyze_image_content, image),
+            )
+        # `image` sale de scope tras este bloque y se descarta (nunca se escribe a disco)
+        return image, estimate, scene_inferences, indicio_pareja, description
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        # Se lanza YA el pipeline completo (descarga + análisis) de TODAS
+        # las fotos como tareas independientes, acotadas por dos límites
+        # de concurrencia distintos: uno para las descargas (por no
+        # golpear de golpe el CDN de Instagram) y otro para cuántas fotos
+        # ocupan a la vez los modelos de visión (ver
+        # Settings.photo_analysis_concurrency). Se sigue consumiendo el
+        # resultado de cada tarea EN EL ORDEN ORIGINAL de las fotos (no en
+        # el orden en que terminan) para que `results` y los eventos de
+        # progreso salgan deterministas -- pero como las tareas ya están
+        # todas en marcha de fondo, para cuando toca esperar a la foto i,
+        # normalmente ya lleva un rato avanzando (o incluso ha terminado),
+        # en vez de empezar recién en ese momento.
+        _MAX_CONCURRENT_DOWNLOADS = 4
+        download_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_DOWNLOADS)
+        analysis_semaphore = asyncio.Semaphore(max(1, settings.photo_analysis_concurrency))
+        photo_tasks = [
+            asyncio.create_task(_process_photo(client, download_semaphore, analysis_semaphore, media_url))
+            for _permalink, media_url in photo_units
+        ]
+
+        for i, (permalink, _media_url) in enumerate(photo_units, start=1):
+            _image, estimate, scene_inferences, indicio_pareja, description = await photo_tasks[i - 1]
+
+            if estimate is not None:
+                results.append((permalink, estimate))
+            for inferred in scene_inferences:
+                inferred.evidence.append(permalink)
+                visual_inferences.append((permalink, inferred))
+            if indicio_pareja:
+                partner_signal_permalinks.add(permalink)
+            if description:
+                visual_descriptions[permalink] = description
 
             # Dos líneas de progreso independientes para dos análisis
             # distintos sobre la misma foto (ver el asyncio.gather más

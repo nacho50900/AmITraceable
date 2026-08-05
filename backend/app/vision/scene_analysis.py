@@ -76,9 +76,12 @@ por cualquier motivo, esta foto simplemente no aporta nada -- nunca aborta
 el análisis del resto de fotos ni del resto del pipeline (best-effort, ver
 `analyze_image_content`, que nunca lanza).
 """
+import logging
 import re
 
 from app.models.schemas import InferredAttribute
+
+logger = logging.getLogger(__name__)
 
 _MODEL_NAME = "vikhyatk/moondream2"
 _MODEL_REVISION = "2025-06-21"  # fijado explícitamente, ver docstring del modelo en HuggingFace
@@ -160,12 +163,28 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
     foto no aportó nada" y devuelve ([], False, None), sin abortar el
     análisis de las demás fotos."""
     if not _scene_analysis_available():
+        # Causa más habitual: no se ha instalado requirements-vision.txt
+        # (o, tras el commit que añadió esta función, faltan sus deps
+        # nuevas -- timm/einops/pyvips-binary -- que no se comprueban aquí
+        # porque solo hacen falta dentro de from_pretrained(), no al
+        # importar torch/transformers).
+        logger.warning(
+            "Análisis de contenido visual no disponible: torch/transformers no instalados"
+        )
         return [], False, None
 
     try:
         _lazy_load()
         answer = _model.query(image, _QUERY)["answer"]
-    except Exception:
+    except Exception as exc:
+        # Motivo típico si torch/transformers SÍ están instalados: faltan
+        # las dependencias que el propio código de Moondream2 pide vía
+        # trust_remote_code=True (timm, einops, pyvips-binary -- ver
+        # requirements-vision.txt) o un fallo de red al descargar el
+        # modelo la primera vez. Se loguea para poder diagnosticarlo sin
+        # tener que quitar el try/except (este módulo es best-effort y no
+        # debe abortar el análisis de las demás fotos).
+        logger.warning("Análisis de contenido visual falló para una foto: %s", exc)
         return [], False, None
 
     return _parse_inferences(answer), _parse_pareja(answer), answer.strip()

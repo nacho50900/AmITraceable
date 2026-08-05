@@ -65,12 +65,15 @@ class InstagramClient:
             account_created_utc=None,
             bio=me.get("biography"),
             full_name=me.get("name"),
+            avatar_url=me.get("profile_picture_url"),
             posts=media_items,
         )
 
     async def _get_me(self, client: httpx.AsyncClient) -> dict:
-        """Pide también `name` y `biography`, usados por la extracción de
-        atributos con IA (ver app/nlp/ai_attribute_extraction.py).
+        """Pide también `name`, `biography` y `profile_picture_url`, usados
+        respectivamente por la extracción de atributos con IA (ver
+        app/nlp/ai_attribute_extraction.py) y por el título del dashboard
+        (foto de perfil).
 
         OJO (pendiente de confirmar en el panel de Meta): a diferencia del
         Graph API vía Página de Facebook, donde estos campos están
@@ -81,11 +84,15 @@ class InstagramClient:
         haber cambiado. Por eso se reintenta sin ellos si Meta devuelve 400
         (campo no soportado), en vez de romper el login por un campo
         opcional. TODO: verificar en el panel de la app si `name`/
-        `biography` llegan realmente poblados para tu cuenta de prueba.
+        `biography`/`profile_picture_url` llegan realmente poblados para tu
+        cuenta de prueba.
         """
         resp = await client.get(
             "/me",
-            params={"fields": "user_id,username,name,biography", "access_token": self._access_token},
+            params={
+                "fields": "user_id,username,name,biography,profile_picture_url",
+                "access_token": self._access_token,
+            },
         )
         if resp.status_code == 400:
             resp = await client.get(

@@ -374,6 +374,7 @@ async def generate_report(
     progress_callback: ProgressCallback | None = None,
     bio: str | None = None,
     full_name: str | None = None,
+    avatar_url: str | None = None,
     # Tarea de geolocalización de imágenes ya lanzada en segundo plano por
     # el llamador (ver analysis_router._build_report), para que el análisis
     # de fotos -- lo que más tarda de todo el pipeline -- corra en PARALELO
@@ -445,6 +446,7 @@ async def generate_report(
         ),
         image_location_points=image_location_points,
         geolocation_available=geolocation_available,
+        avatar_url=avatar_url,
     )
 
 

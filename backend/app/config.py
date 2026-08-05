@@ -51,5 +51,17 @@ class Settings(BaseSettings):
     max_comments: int = 300
     max_media: int = 200
 
+    # Nº de fotos que se analizan EN PARALELO con los modelos de visión
+    # (DINOv2 + Moondream2, ver app/vision/geolocation.py). DINOv2 es
+    # rápido (solo un embedding) pero Moondream2 es lento (generación
+    # autoregresiva) -- con concurrencia 1, mientras Moondream2 trabaja en
+    # una foto, el núcleo que habría usado DINOv2 para la siguiente queda
+    # ocioso. Subir esto aprovecha esos huecos, a costa de más RAM (cada
+    # foto en vuelo mantiene su propia pasada de Moondream2 en memoria) y
+    # de competir más por los mismos núcleos -- 2 es un punto de partida
+    # razonable para una CPU de pocos núcleos; en un servidor con más
+    # núcleos puede subirse.
+    photo_analysis_concurrency: int = 2
+
 
 settings = Settings()

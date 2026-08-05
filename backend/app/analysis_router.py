@@ -116,6 +116,7 @@ async def _build_report(profile: SocialProfile, progress_callback: ProgressCallb
         progress_callback=progress_callback,
         bio=profile.bio,
         full_name=profile.full_name,
+        avatar_url=profile.avatar_url,
         geolocation_task=geolocation_task,
     )
 

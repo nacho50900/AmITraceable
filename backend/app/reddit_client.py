@@ -3,8 +3,13 @@ Extracción de datos públicos del usuario autenticado vía API oficial de Reddi
 
 Principio de minimización (RGPD): solo se piden los campos necesarios para
 el análisis (texto, subreddit, timestamp, score, permalink). No se descargan
-imágenes, IPs, emails ni ningún dato que Reddit no expone públicamente.
+imágenes, IPs, emails ni ningún dato que Reddit no expone públicamente. La
+única excepción es la URL de la foto de perfil (`icon_img`), que se guarda
+como URL para que el navegador la cargue directamente del CDN de Reddit --
+igual que ya se hace con las fotos de Instagram para geolocalización, este
+backend nunca descarga ni persiste la imagen en sí.
 """
+import html
 from datetime import datetime, timezone
 
 import httpx
@@ -43,8 +48,20 @@ class RedditClient:
             username=me["name"],
             account_created_utc=datetime.fromtimestamp(me["created_utc"], tz=timezone.utc),
             bio=me.get("subreddit", {}).get("public_description") or None,
+            avatar_url=self._extract_avatar_url(me),
             posts=posts + comments,
         )
+
+    @staticmethod
+    def _extract_avatar_url(me: dict) -> str | None:
+        # Reddit devuelve `icon_img` con entidades HTML escapadas en la
+        # query string (p. ej. "?width=256&amp;height=256..."), heredado
+        # de cuando este campo se pensaba para incrustarse en HTML
+        # directamente -- hay que desescaparlo o la URL queda rota. Cadena
+        # vacía (perfil sin avatar personalizado) se trata igual que
+        # ausencia del campo.
+        icon_img = me.get("icon_img")
+        return html.unescape(icon_img) if icon_img else None
 
     async def _get_me(self, client: httpx.AsyncClient) -> dict:
         resp = await client.get("/api/v1/me")
