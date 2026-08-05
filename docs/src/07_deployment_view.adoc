@@ -82,9 +82,11 @@ Mapeo de bloques a infraestructura::
 | Backend FastAPI completo (todos los módulos descritos en
   <<section-building-block-view>>). Construido con
   `--build-arg WITH_GEOLOCATION=true` por defecto en `docker-compose.yml`
-  (instala `torch`/`faiss`/`transformers`, ver `requirements-vision.txt`)
-  para que la geolocalización por imagen funcione de verdad, no solo el
-  resto del análisis. Monta dos volúmenes: el índice FAISS
+  (instala `torch`/`faiss`/`transformers`/`timm`/`einops`/`pyvips-binary`,
+  ver `requirements-vision.txt`) para que tanto la geolocalización como el
+  análisis de contenido visual de fotos funcionen de verdad -- pese al
+  nombre heredado del flag, ya no activa solo la geolocalización (ver
+  ADR-17). Monta dos volúmenes: el índice FAISS
   (`./backend/data`) y la caché de modelos de Hugging Face
   (`./backend/data/hf_cache`, para no volver a descargar el modelo en
   cada reinicio).

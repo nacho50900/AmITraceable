@@ -29,7 +29,10 @@ ifndef::imagesdir[:imagesdir: ../images]
   se persiste en ningún sitio. Es una excepción real al principio
   original de "no se descargan imágenes" (documentada explícitamente en
   el docstring de `instagram_client.py`), pero coherente con el resto del
-  diseño stateless: sigue sin haber persistencia de ningún tipo.
+  diseño stateless: sigue sin haber persistencia de ningún tipo. El
+  análisis de contenido visual (`app/vision/scene_analysis.py`, ver más
+  abajo) NO añade una segunda descarga: reutiliza la misma imagen en
+  memoria que `geolocation.py` ya descargó para su propio análisis.
 ** El caso del EXIF merece su propia mención: si está presente, es un
    dato bastante MÁS preciso que la estimación por similitud visual (GPS
    real del dispositivo, no una aproximación) -- pero también más
@@ -79,6 +82,13 @@ pertenece un valor -- solo propone texto libre, que se normaliza contra
 las mismas tablas que usan las regex, así que una alucinación del modelo
 simplemente no encuentra coincidencia en vez de colar una estimación de
 población falsa.
+
+Las aficiones/actividades detectadas por `vision/scene_analysis.py`
+siguen el mismo contrato: se exponen como `InferredAttribute` normales,
+con su propio `confidence` y `evidence` (el permalink de la foto en
+concreto), en vez de un campo aparte sin trazabilidad. La única
+diferencia respecto a las inferencias de texto es la fuente de la
+evidencia (una imagen, no un enlace a texto), no el principio de fondo.
 
 === Modelo de dominio multiplataforma
 
@@ -263,6 +273,67 @@ Decisiones de diseño relevantes:
   quedan excluidas de este cómputo: una foto con el pie "De viaje en
   Roma" no debe contar como señal de dónde vive la persona, por muy alta
   que sea su confianza de geolocalización.
+
+=== Análisis de contenido visual de fotos (módulo opcional)
+
+`vision/scene_analysis.py` analiza qué HAY en cada foto de Instagram --
+objetos, actividades, aficiones, señal de pareja -- a diferencia de
+`geolocation.py`, que estima DÓNDE se tomó. Usa Moondream2, un modelo de
+visión-lenguaje (VQA) pequeño (~1.8B parámetros) que corre localmente vía
+`transformers`, sin llamar a ningún servicio externo.
+
+Decisiones de diseño relevantes:
+
+* **Modelo local, no una API externa de terceros**: a diferencia de
+  `ai_analysis.py` y `ai_attribute_extraction.py` (Mistral AI), este
+  análisis corre en el propio servidor. Se valoró usar Mistral Pixtral
+  (multimodal, mismo proveedor que el resto del proyecto) pero se
+  descartó por el volumen de llamadas que requiere -- una por cada foto
+  analizada, no una por informe -- frente al límite del tier gratuito;
+  ver ADR-17.
+* **Una sola pregunta combinada, formato de texto fijo, no JSON**: los
+  modelos VQA locales pequeños son mucho menos fiables generando JSON
+  bien formado que uno grande, así que se pide una respuesta de tres
+  líneas fijas (`PERSONAS`/`AFICION`/`PAREJA`) y se parsea como texto --
+  más robusto ante variaciones de formato que decodificar un JSON que
+  podría no serlo.
+* **Límite ético/legal deliberado**: el modelo nunca identifica, nombra,
+  ni describe físicamente a ninguna persona de la foto -- el
+  consentimiento OAuth de este proyecto cubre solo a la cuenta
+  analizada. Solo se extraen señales sobre la PROPIA cuenta (p. ej.
+  "aparece en actitud romántica" -> indicio de pareja), nunca
+  información sobre la identidad de un tercero.
+* **Atribución descartada cuando hay varias personas en la foto**: el
+  modelo no puede saber cuál de las personas de una foto es la cuenta
+  analizada. Con una persona (o ninguna), la señal de afición se atribuye
+  con normalidad; con varias de protagonismo similar (p. ej. una pareja),
+  esa atribución dejaría de tener fundamento y la señal de afición se
+  descarta -- podría ser la otra persona quien practica esa afición, no
+  la cuenta analizada. La señal de pareja no tiene este problema (da
+  igual cuál de las dos personas sea la cuenta analizada, la señal es la
+  misma) y se mantiene; ver ADR-18.
+* **Comparte descarga con `geolocation.py`, no la duplica**: no se llama
+  por separado desde `report/generator.py` -- lo invoca
+  `vision/geolocation.py` por cada foto, reutilizando la misma imagen que
+  ya descargó para su propio análisis. Sus resultados viajan como campos
+  extra de `GeolocationOutcome` (`visual_inferences`,
+  `partner_signal_permalinks`).
+* **Mismas dependencias que la geolocalización, mismo build-arg**:
+  `torch`/`transformers` (más `timm`/`einops`/`pyvips-binary`) viven en
+  el mismo `requirements-vision.txt`, instalado con el mismo
+  `--build-arg WITH_GEOLOCATION=true` -- no hay un flag independiente
+  para activar solo uno de los dos módulos.
+* **Carga perezosa, a diferencia de la geolocalización**: el modelo de
+  geolocalización se precarga en el `lifespan` del contenedor; Moondream2
+  no -- se carga en la primera foto que lo necesita, así que esa primera
+  foto de cada proceso es más lenta que las siguientes.
+* **Alimenta dos sitios distintos del informe**: las aficiones/actividades
+  se añaden a `inferred_attributes` como `InferredAttribute` normales
+  (con su `confidence`/`evidence`, igual que las inferencias de texto);
+  la señal de pareja, en cambio, alimenta `estado_civil`
+  (`scoring/k_anonymity.py` -> tabla de estrechamiento de población), y
+  solo si el texto no dio ya un estado civil (`ai_attribute_extraction.py`
+  tiene prioridad, ver <<section-design-decisions>>).
 
 === Análisis del informe con IA (módulo opcional)
 

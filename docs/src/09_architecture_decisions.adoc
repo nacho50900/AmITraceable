@@ -411,3 +411,85 @@ alcancen el consenso necesario, así que la geolocalización por imagen se
 queda sin usarse en la práctica para esos casos -- comportamiento
 correcto y esperado (mejor "no estimable" que una conclusión poco
 fiable), no un fallo.
+
+=== ADR-17: Moondream2 local para analizar el contenido de las fotos, en vez de Mistral Pixtral
+
+*Contexto*: se quería, además de geolocalizar cada foto, extraer señales
+sobre su contenido (aficiones, actividades, señal de pareja). El resto de
+funciones de IA del proyecto usan Mistral AI (ver ADR-10), que sí ofrece
+un modelo multimodal (Pixtral) capaz de analizar imágenes.
+
+*Alternativas consideradas*: Mistral Pixtral vía API, igual que el resto
+de integraciones de IA del proyecto (coherente con ADR-10, un único
+proveedor); un modelo de clasificación de imágenes clásico entrenado a
+medida (descartado: requeriría un dataset etiquetado de aficiones/
+actividades que no existe, desproporcionado para el alcance de un TFG).
+
+*Decisión*: Moondream2, un modelo de visión-lenguaje (VQA) pequeño
+(~1.8B parámetros) ejecutado localmente vía `transformers`, con el mismo
+patrón de dependencia opcional que ya usa `geolocation.py`
+(`requirements-vision.txt`, `--build-arg WITH_GEOLOCATION=true`).
+
+*Justificación*: a diferencia de las otras dos integraciones con Mistral
+(`ai_analysis.py` sobre el informe ya agregado, `ai_attribute_extraction.py`
+sobre texto/bio), este análisis necesita una llamada POR FOTO, no una por
+informe -- una cuenta con varias decenas de fotos analizadas agotaría el
+tier gratuito de Mistral en un único análisis. Un modelo local, en
+cambio, no tiene límite de peticiones por minuto una vez cargado, y
+además mantiene la imagen dentro del propio servidor en vez de enviarla a
+un tercero -- coherente con el principio de minimización de datos del
+resto del proyecto (aunque las fotos de Instagram sean públicas, seguir
+minimizando dónde viajan sigue siendo la postura por defecto de este
+proyecto).
+
+*Consecuencias*: (+) sin límite de tasa por foto, ni coste por llamada;
+(+) la imagen no sale del servidor; (+) reutiliza el mismo patrón de
+dependencia opcional, build-arg y degradación que ya existía para
+`geolocation.py`, sin inventar uno nuevo; (-) modelo bastante menos capaz
+que Pixtral en tareas VQA abiertas, mitigado limitando la tarea a una
+pregunta cerrada de formato fijo en vez de una descripción libre; (-)
+Moondream2 se carga con `trust_remote_code=True` (código Python propio
+del modelo, no solo pesos) -- superficie de confianza real que merece
+mencionarse explícitamente en la memoria, aunque el modelo y su revisión
+(`_MODEL_REVISION`, fijada explícitamente en el código) provengan de un
+repositorio público de Hugging Face con uso extendido; (-) no se precarga
+en el arranque del contenedor como el modelo de geolocalización (ver
+ADR-15), así que la primera foto de cada proceso paga el coste de carga.
+
+=== ADR-18: Descartar la señal de afición (no la de pareja) cuando una foto tiene varias personas
+
+*Contexto*: el modelo de análisis de contenido (ADR-17) no tiene ninguna
+referencia externa con la que saber cuál de las personas de una foto es
+la cuenta analizada -- es una imagen suelta. Asumir que la "persona
+principal" es siempre la cuenta analizada es razonable con una sola
+persona (o ninguna), pero deja de serlo con varias personas de
+protagonismo similar (p. ej. una pareja, un grupo).
+
+*Alternativas consideradas*: mantener la señal de afición igualmente,
+asumiendo que la persona detectada como "principal" por el modelo es
+casi siempre la cuenta analizada (descartado: sin verificación posible,
+atribuir una afición a la persona equivocada -- p. ej. "toca la guitarra"
+cuando en realidad la toca su pareja, no la cuenta analizada -- es un
+error de un tipo distinto y más grave que simplemente no detectar nada);
+descartar directamente cualquier foto con varias personas antes de
+analizarla (descartado: perdería también la señal de pareja, que sí es
+válida en ese mismo escenario).
+
+*Decisión*: el prompt exige que el modelo declare cuántas personas
+protagonizan la foto (`PERSONAS: ninguna/una/varias`). Con una persona o
+ninguna, la señal de afición se atribuye a la cuenta analizada con
+normalidad. Con varias, la señal de afición se descarta
+(`_parse_inferences`, `vision/scene_analysis.py`) pero la señal de pareja
+se conserva, porque no depende de resolver esa ambigüedad -- el mero
+hecho de que la cuenta publique una foto con contexto romántico ya es la
+señal, sin importar cuál de las dos personas sea.
+
+*Consecuencias*: (+) evita atribuir aficiones ajenas a la cuenta
+analizada en el escenario más común de ambigüedad (fotos en pareja o en
+grupo); (+) no sacrifica la señal de pareja, que es precisamente más
+frecuente en fotos con varias personas; (-) el sistema pierde alguna
+señal de afición real en fotos de pareja/grupo donde sí sería correcto
+atribuirla a la cuenta analizada -- compromiso aceptado a favor de evitar
+falsos positivos, mismo criterio que ADR-16 aplica a la geolocalización
+por imagen.
+

@@ -81,6 +81,7 @@ participant "nlp.demographic_extraction\n(regex)" as Regex
 participant "nlp.ai_attribute_extraction\n(Mistral, opcional)" as AiAttr
 participant "scoring.k_anonymity" as KAnon
 participant "vision.geolocation\n(solo Instagram, opcional)" as Geo
+participant "vision.scene_analysis\n(opcional)" as Scene
 
 FE -> Router: GET /api/analyze/{platform}/stream
 Router -> Router: busca factory de la plataforma en el diccionario
@@ -107,9 +108,15 @@ Report -> KAnon: estimate_population_narrowing(findings combinados)
 KAnon --> Report: [PopulationEstimate] (con proportion ya calculada)
 alt platform == "instagram"
   Report -> Geo: estimate_locations_for_posts(posts, progress_callback)
+  loop por cada foto (incluidas todas las de un carrusel)
+    Geo -> Geo: descarga la foto (en memoria, transitoria)
+    Geo -> Scene: analyze_image_content(image)
+    Scene --> Geo: afición/actividad + señal de pareja (o nada)
+  end
   Geo --> Report: SSE: "Analizando fotos..." (progreso, N/M)
-  Geo --> Report: GeolocationOutcome(index_available, [todas las estimaciones])
+  Geo --> Report: GeolocationOutcome(index_available, estimaciones,\nvisual_inferences, partner_signal_permalinks)
   Report -> Report: solo las de confianza >= umbral alimentan KAnon;\ntodas se guardan en image_location_points
+  Report -> Report: visual_inferences -> inferred_attributes;\npartner_signal -> estado_civil (solo si el texto no dio ya uno)
 end
 Report --> Router: ExposureReport
 Router --> FE: SSE final: {"done": true, "report": {...}}

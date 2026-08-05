@@ -92,6 +92,19 @@ ifndef::imagesdir[:imagesdir: ../images]
   representar cada foto antes de buscar las más parecidas en el índice
   de referencia.
 
+| VQA (Visual Question Answering)
+| Tarea de visión-lenguaje en la que un modelo responde en texto a una
+  pregunta sobre el contenido de una imagen. Usada en este proyecto
+  (`vision/scene_analysis.py`) para extraer aficiones, actividades y
+  señal de pareja de cada foto -- a diferencia de DINOv2, que no
+  "entiende" el contenido, solo compara similitud visual.
+
+| Moondream2
+| Modelo de visión-lenguaje (VQA) pequeño (~1.8B parámetros), ejecutado
+  localmente vía `transformers` en este proyecto para analizar el
+  contenido de las fotos de Instagram, sin llamar a ningún servicio
+  externo (ver ADR-17).
+
 | FAISS (Facebook AI Similarity Search)
 | Librería para búsqueda eficiente de vecinos más cercanos entre
   vectores de alta dimensión. Usada para encontrar, dado el *embedding*

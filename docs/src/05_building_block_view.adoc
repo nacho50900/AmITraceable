@@ -96,7 +96,11 @@ backend/app/
 │   ├── privacy_score.py       - Módulo 4: motor de scoring
 │   └── k_anonymity.py         - Estimación de k-anonimato (estrechamiento de población)
 ├── vision/
-│   └── geolocation.py         - Geolocalización de fotos por similitud visual (opcional)
+│   ├── geolocation.py         - Geolocalización de fotos por similitud visual (opcional);
+│   │                             internamente también invoca scene_analysis.py por cada
+│   │                             foto (comparte la misma descarga, no la repite)
+│   └── scene_analysis.py      - Análisis del CONTENIDO visual de cada foto (Moondream2,
+│                                 opcional): aficiones, actividades, señal de pareja
 └── report/
     └── generator.py           - Módulo 5: informe (recomendaciones incluidas, pero ya no
                                   mostradas como sección propia -- ver ai_analysis.py)
@@ -156,6 +160,13 @@ Extraer los datos públicos de la cuenta autenticada y normalizarlos al
 modelo genérico `SocialProfile`/`SocialPost`. Aplica el principio de
 minimización de datos: solo se piden los campos necesarios para el
 análisis.
+
+En Instagram, un post tipo carrusel (`CAROUSEL_ALBUM`) puede traer varias
+imágenes; `instagram_client.py` pide explícitamente el campo `children`
+de la API y extrae TODAS las imágenes del carrusel, no solo la primera
+-- así `vision/geolocation.py` y `vision/scene_analysis.py` analizan cada
+imagen del carrusel por separado, en vez de perder la información de las
+demás.
 
 Interfaces::
 Clase `RedditClient`/`InstagramClient` con método asíncrono
@@ -232,6 +243,16 @@ provincia, se guarda a nivel de comunidad -- salvo que esa comunidad
 tenga una única provincia (Asturias, Madrid, Murcia...), en cuyo caso no
 hay ambigüedad y se resuelve directamente a esa provincia.
 
+El `DemographicFindings` que produce este módulo también reserva un
+campo `estado_civil` (soltero/con_pareja/casado/viudo), pero a
+diferencia del resto de campos de esta clase, la propia regex NUNCA lo
+rellena: no hay una autodeclaración explícita equivalente a "tengo 24
+años" para el estado civil que valga la pena cazar por regex. Lo
+rellenan `ai_attribute_extraction.py` (razonamiento simbólico sobre
+texto) o `report/generator.py` (señal de pareja detectada en fotos, ver
+`vision/scene_analysis.py`) -- este módulo solo define el campo para que
+ambos tengan un sitio común donde escribirlo.
+
 Ubicación::
 `backend/app/nlp/demographic_extraction.py`.
 
@@ -261,6 +282,18 @@ publicaciones tienen pinta de ser "de viaje/vacaciones" (campo
 no confundir "dónde fue tomada esta foto" con "dónde vive esta persona"
 al combinarlo con la geolocalización de imagen (ver
 `nlp/travel_detection.py`, su equivalente por regex).
+
+También, en el mismo pase, propone un `estado_civil` (soltero /
+con_pareja / casado / viudo) razonando sobre contenido simbólico o
+indirecto del texto -- nunca una autodeclaración explícita como las de
+`demographic_extraction.py` -- por ejemplo, una bio con fecha y emojis de
+pareja, o una publicación que mencione "mi marido". Se marca con
+`source["estado_civil"] = "ia_simbolica"` (nunca `"texto"` ni `"ia"` a
+secas) para que el informe deje claro que es una inferencia de fiabilidad
+menor que una autodeclaración real. Si ni el texto ni este razonamiento
+simbólico dan nada, `report/generator.py` todavía puede rellenar el
+mismo campo a partir de una señal de pareja detectada en fotos (ver
+`vision/scene_analysis.py`), con `source = "imagen"` en ese caso.
 
 Interfaces::
 `extract_demographics_with_ai(posts, username, full_name, bio)`,
@@ -297,9 +330,13 @@ población en España comparte esa combinación de características (ver
 <<section-concepts>>, "Estimación de k-anonimato sin base de datos
 sintética"). Devuelve una cascada de pasos (`PopulationNarrowingStep`)
 con la población restante, nivel de riesgo, fuente (texto / imagen / ia
-/ ia_nombre) y la proporción ya calculada sobre el total de España (para
-que el frontend pueda representarla visualmente sin conocer esa
-constante).
+/ ia_nombre / ia_simbolica) y la proporción ya calculada sobre el total
+de España (para que el frontend pueda representarla visualmente sin
+conocer esa constante). Cada paso incluye además `reduction_percent`
+-- cuánto reduce ESE rasgo concreto la población restante respecto al
+paso anterior de la cadena (no el porcentaje acumulado desde el
+principio) -- que la tabla de estrechamiento de población muestra junto
+a cada fila.
 
 El paso de ubicación tiene tres niveles de granularidad, de más a menos
 específico: municipio > provincia > **comunidad autónoma**. El tercer
@@ -359,6 +396,19 @@ pura:
   sigue devolviéndose (con su confianza real, para el mapa), pero
   `report/generator.py` la excluye de la conclusión de residencia.
 
+Además de la geolocalización en sí, este módulo es quien invoca
+`vision/scene_analysis.py` (`analyze_image_content`) por cada foto: al
+ser quien ya descarga la imagen para calcular su embedding, lanza ambos
+análisis (geolocalización + contenido visual) sobre la misma descarga en
+vez de que un segundo módulo tuviera que volver a pedirla. El resultado
+de `scene_analysis.py` viaja como dos campos extra de
+`GeolocationOutcome`: `visual_inferences` (aficiones/actividades, una
+por foto y hallazgo, para sumarse a `inferred_attributes` en el informe)
+y `partner_signal_permalinks` (permalinks donde se detectó una señal de
+pareja, que `report/generator.py` usa para rellenar `estado_civil` si el
+texto no dijo nada ya). Ver `vision/scene_analysis.py` para el detalle de
+ese análisis.
+
 Las dependencias pesadas (`torch`, `faiss`, `transformers`) están en
 `requirements-vision.txt`, no en `requirements.txt`: no son solo para
 poder construir el índice (`scripts/build_faiss_index.py`), también hacen
@@ -375,6 +425,67 @@ GeolocationOutcome`, llamado desde `report/generator.py` solo cuando
 Ubicación::
 `backend/app/vision/geolocation.py`, scripts de preparación del índice en
 `backend/scripts/`.
+
+==== `vision/scene_analysis.py` (opcional)
+
+Propósito/Responsabilidad::
+Analiza el CONTENIDO visual de cada foto de Instagram -- no *dónde* se
+tomó (eso es `geolocation.py`), sino *qué hay* en ella -- mediante
+Moondream2, un modelo de visión-lenguaje (VQA) pequeño (~1.8B parámetros)
+que se ejecuta localmente vía `transformers`. Se le hace UNA sola
+pregunta combinada por foto, con una respuesta de formato fijo en tres
+líneas (`PERSONAS`, `AFICION`, `PAREJA`) que se parsea como texto plano
+en vez de pedir JSON estructurado -- los modelos locales pequeños son
+mucho menos fiables generando JSON complejo bien formado que uno grande,
+así que un formato de líneas fijas es más robusto ante variaciones.
+
+Límite ético/legal deliberado::
+El modelo nunca debe identificar, nombrar, ni describir físicamente a
+NINGUNA persona de la foto -- el consentimiento OAuth de este proyecto
+cubre solo a la cuenta analizada; generar datos sobre la identidad de un
+tercero sería tratar datos personales de alguien que nunca dio su
+consentimiento. Lo único que se extrae son señales sobre la PROPIA cuenta
+analizada (p. ej. "aparece en actitud romántica" -> indicio de que la
+cuenta tiene pareja), nunca información sobre quién es la otra persona.
+
+Ambigüedad de varias personas en la misma foto::
+El modelo no tiene forma de saber cuál de las personas de una foto es la
+cuenta analizada -- es una imagen suelta, sin ninguna referencia externa
+con la que comparar. Por eso el prompt pide explícitamente que declare
+cuántas personas identifica como protagonistas (campo `PERSONAS`): con
+una o ninguna, la señal de afición/actividad se atribuye a la cuenta
+analizada con normalidad (mismo supuesto que ya asume el resto del
+proyecto: que una autodeclaración en primera persona es sobre quien la
+escribe). Con varias personas de protagonismo similar (p. ej. una
+pareja), esa atribución dejaría de tener fundamento -- podría ser la otra
+persona quien toca la guitarra de la foto, no la cuenta analizada -- así
+que la señal de AFICIÓN se descarta en ese caso (`_parse_inferences`). La
+señal de PAREJA, en cambio, no necesita resolver esa ambigüedad: da igual
+cuál de las dos personas sea la cuenta analizada, el mero hecho de que la
+cuenta publique una foto con contexto romántico ya es la señal, así que
+esa sí se mantiene con varias personas.
+
+Integración con el resto del pipeline::
+No se llama directamente desde `report/generator.py`: la invoca
+`vision/geolocation.py` por cada foto (ver más arriba), que ya descarga
+la imagen para su propio análisis y evita así una segunda descarga. Sus
+resultados viajan en `GeolocationOutcome.visual_inferences` (aficiones,
+como `InferredAttribute` normales, con su `confidence`/`evidence` igual
+que las inferencias de texto) y `GeolocationOutcome.partner_signal_permalinks`
+(que `report/generator.py` usa para rellenar `estado_civil = "con_pareja"`,
+`source = "imagen"`, solo si el texto no dio ya un estado civil).
+
+Degradación::
+Igual que `geolocation.py`: si `torch`/`transformers` no están instalados
+o la inferencia falla para una foto concreta, esa foto simplemente no
+aporta señal (no rompe el resto del análisis). A diferencia del modelo de
+geolocalización, Moondream2 NO se precarga en el `lifespan` del
+contenedor (ver `main.py`) -- se carga de forma perezosa en la primera
+foto que lo necesita, así que esa primera foto de cada proceso es más
+lenta que las siguientes.
+
+Ubicación::
+`backend/app/vision/scene_analysis.py`.
 
 ==== `ai_analysis.py` (opcional)
 
@@ -437,6 +548,16 @@ La jerarquía de fiabilidad para la ubicación final es: municipio > provincia
 por consenso de fotos. Es decir, si el texto ya dice "vivo en Canarias",
 el consenso de fotos nunca lo pisa, por muy fuerte que sea la señal
 fotográfica hacia otra zona.
+
+El mismo criterio de "el texto manda si lo hay" se aplica a `estado_civil`:
+si `ai_attribute_extraction.py` ya propuso uno por razonamiento simbólico
+sobre el texto (`source = "ia_simbolica"`), ese se queda. Solo si el texto
+no dio nada, y `vision/geolocation.py` devolvió al menos un
+`partner_signal_permalinks` (señal de pareja detectada por
+`vision/scene_analysis.py` en alguna foto), se rellena aquí con
+`estado_civil = "con_pareja"` y `source = "imagen"` -- para que el
+informe deje claro que, en ese caso concreto, la señal viene de una foto
+y no de algo que la persona haya escrito.
 
 Ubicación::
 `backend/app/report/generator.py`.
