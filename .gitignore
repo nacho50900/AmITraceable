@@ -31,3 +31,6 @@ backend/scripts/_completed_shards.txt
 graphify-out/cost.json
 graphify-out/cache/
 .claude/settings.json
+
+# Backups con fecha que graphify crea automáticamente al sobrescribir etiquetas curadas
+graphify-out/20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
