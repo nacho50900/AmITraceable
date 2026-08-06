@@ -75,10 +75,27 @@ navegador.
   k-anonimato, geolocalización por imagen, scoring y el informe (ver
   `backend/app/`).
 - `docs/` — documentación de arquitectura Arc42.
-- `graphify-out/` — grafo de conocimiento del código (generado con
-  [Graphify](https://github.com/Graphify-Labs/graphify)) que Claude Code consulta en vez
-  de releer archivos sueltos. Ver [`GRAPHIFY_SETUP.md`](GRAPHIFY_SETUP.md) para instalarlo
-  al cambiar de equipo.
+- `graphify-out/` — grafo de conocimiento del código, ver sección "Graphify" más abajo.
+
+## Graphify (grafo de conocimiento del código)
+
+El repo tiene un grafo generado con [Graphify](https://github.com/Graphify-Labs/graphify)
+(`graphify-out/`) que **Claude Code** consulta automáticamente en vez de releer archivos
+sueltos, ahorrando tokens. Solo funciona así de forma automática dentro de Claude Code
+(usa hooks internos de esa herramienta) — en un chat normal de Claude no hay ahorro
+automático salvo que se le pida explícitamente consultar el grafo por terminal.
+
+Al clonar en un equipo nuevo, ejecutar una vez (regeneran configuración local, no se versiona):
+
+```bash
+uv tool install graphifyy          # o: pipx install graphifyy — evitar "pip" a secas
+graphify claude install --project  # regenera .claude/settings.json con la ruta de este PC
+graphify hook install              # auto-actualiza el grafo tras cada commit
+```
+
+`graphify-out/` (grafo, informe, visualización) sí se versiona; `.claude/settings.json`,
+`graphify-out/cache/`, `graphify-out/cost.json` y las carpetas de backup con fecha
+(`graphify-out/20YY-MM-DD/`) no, porque son específicos de cada máquina — ver `.gitignore`.
 
 ## ⚠️ Alcance y limitaciones (importante para la memoria del TFG)
 
