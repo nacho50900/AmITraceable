@@ -22,12 +22,20 @@ faiss-cpu>=1.8,<2.0
 # análisis de CONTENIDO visual -- aficiones/actividades/señales de pareja
 # en cada foto, distinto del embedding de similitud de arriba). `timm` y
 # `einops` los pide directamente el código del propio modelo
-# (trust_remote_code=True). `pyvips-binary` (versión estática, sin
-# depender de que el sistema tenga libvips instalado) lo empezaron a
-# requerir revisiones más recientes del modelo -- si al fijar
-# `_MODEL_REVISION` en scene_analysis.py se cambia a una revisión más
-# antigua, puede que ya no haga falta; verificar el error exacto de carga
-# si cambia.
+# (trust_remote_code=True). `accelerate` lo exige `transformers` en
+# cuanto se pasa `device_map=...` a `from_pretrained()` (ver _lazy_load
+# en scene_analysis.py) -- sin él, from_pretrained() lanza ImportError
+# aunque torch/transformers estén instalados. `pyvips` es el binding
+# Python que importa el propio modelo; por sí solo requeriría tener
+# libvips instalado a nivel de sistema operativo, así que se instala
+# junto a `pyvips-binary` (versión estática, precompilada) para evitar
+# esa dependencia del SO -- deben declararse los DOS paquetes, uno no
+# sustituye al otro. Estas cuatro dependencias las exigen revisiones
+# recientes del modelo -- si al fijar `_MODEL_REVISION` en
+# scene_analysis.py se cambia a una revisión más antigua, puede que
+# alguna ya no haga falta; verificar el error exacto de carga si cambia.
 timm>=1.0,<2.0
 einops>=0.7,<1.0
+accelerate>=0.32,<1.0
 pyvips-binary>=8.14
+pyvips>=2.2,<3.0

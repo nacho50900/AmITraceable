@@ -36,12 +36,17 @@ from app.data.ine_reference import (
     AGE_DISTRIBUTION_1Y,
     AUTONOMOUS_COMMUNITY_DISPLAY_NAMES,
     CCAA_POPULATION,
+    HOUSEHOLD_TYPE_DISTRIBUTION,
+    LANGUAGE_BY_CCAA,
     MARITAL_STATUS_BY_SEX,
     MARITAL_STATUS_DISTRIBUTION,
     MUNICIPALITY_POPULATION,
+    NATIONALITY_DISTRIBUTION,
     OCCUPATION_DISTRIBUTION,
     PROVINCE_POPULATION,
+    PROVINCE_TO_CCAA,
     SEX_DISTRIBUTION,
+    SITUACION_LABORAL_DISTRIBUTION,
     STUDIES_DISTRIBUTION,
     TOTAL_POPULATION_ES,
 )
@@ -79,7 +84,10 @@ class PopulationNarrowingStep:
 # Categorías que participan en la cadena de estrechamiento (mismo criterio
 # que _CHAINED_STEPS, ver más abajo -- se define aquí arriba porque
 # `final_remaining_population` la necesita y así queda cerca de donde se usa).
-_CHAINED_CATEGORIES = {"sexo", "edad", "ubicacion", "estudios", "ocupacion", "estado_civil"}
+_CHAINED_CATEGORIES = {
+    "sexo", "edad", "ubicacion", "estudios", "ocupacion", "estado_civil",
+    "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
+}
 
 
 def final_remaining_population(steps: list[PopulationNarrowingStep]) -> int | None:
@@ -185,6 +193,7 @@ def _step_sexo(findings: DemographicFindings, remaining: float) -> tuple[float, 
 _ESTADO_CIVIL_LABELS = {
     "casado": "Casado/a",
     "con_pareja": "Tiene pareja (sin estar casado/a)",
+    "divorciado": "Divorciado/a o separado/a",
     "soltero": "Soltero/a (sin pareja actualmente)",
     "viudo": "Viudo/a",
 }
@@ -349,6 +358,133 @@ def _step_ocupacion(findings: DemographicFindings, remaining: float) -> tuple[fl
     )
 
 
+_NATIONALITY_LABELS = {
+    "espanola": "Nacionalidad: española",
+    "extranjera": "Nacionalidad: extranjera",
+}
+
+
+def _step_nacionalidad(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
+    if not findings.nacionalidad:
+        return remaining, None
+    return _apply_proportion(
+        remaining,
+        NATIONALITY_DISTRIBUTION.get(findings.nacionalidad),
+        _NATIONALITY_LABELS[findings.nacionalidad],
+        "nacionalidad",
+        findings.evidence.get("nacionalidad", []),
+        source=findings.source.get("nacionalidad", "texto"),
+    )
+
+
+_SITUACION_LABORAL_LABELS = {
+    "activo": "Situación laboral: trabaja actualmente",
+    "parado": "Situación laboral: en desempleo",
+    "jubilado": "Situación laboral: jubilado/a o pensionista",
+    "estudiante": "Situación laboral: estudiante",
+    "otro_inactivo": "Situación laboral: inactivo/a (labores del hogar u otra situación)",
+}
+
+
+def _step_situacion_laboral(
+    findings: DemographicFindings, remaining: float
+) -> tuple[float, PopulationNarrowingStep | None]:
+    if not findings.situacion_laboral:
+        return remaining, None
+    return _apply_proportion(
+        remaining,
+        SITUACION_LABORAL_DISTRIBUTION.get(findings.situacion_laboral),
+        _SITUACION_LABORAL_LABELS[findings.situacion_laboral],
+        "situacion_laboral",
+        findings.evidence.get("situacion_laboral", []),
+        source=findings.source.get("situacion_laboral", "texto"),
+        note="Distinto del sector profesional (ocupación): aquí es si la persona trabaja, "
+             "busca trabajo, está jubilada o estudia.",
+    )
+
+
+_HOUSEHOLD_LABELS = {
+    "unipersonal": "Tipo de hogar: vive solo/a",
+    "pareja_sin_hijos": "Tipo de hogar: vive en pareja, sin hijos en el hogar",
+    "pareja_con_hijos": "Tipo de hogar: vive en pareja, con hijos en el hogar",
+    "monoparental": "Tipo de hogar: familia monoparental (un solo progenitor con hijos)",
+}
+
+
+def _step_tipo_hogar(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
+    if not findings.tipo_hogar:
+        return remaining, None
+    return _apply_proportion(
+        remaining,
+        HOUSEHOLD_TYPE_DISTRIBUTION.get(findings.tipo_hogar),
+        _HOUSEHOLD_LABELS[findings.tipo_hogar],
+        "tipo_hogar",
+        findings.evidence.get("tipo_hogar", []),
+        source=findings.source.get("tipo_hogar", "texto"),
+        note="Proporción de HOGARES del INE usada como aproximación de la proporción de "
+             "personas (ver ine_reference.py) -- misma limitación ya asumida para ubicación.",
+    )
+
+
+_LANGUAGE_LABELS = {
+    "catalan": "Lengua materna/habitual: catalán",
+    "euskera": "Lengua materna/habitual: euskera",
+    "gallego": "Lengua materna/habitual: gallego",
+    "valenciano": "Lengua materna/habitual: valenciano",
+}
+
+
+def _resolve_ccaa_for_language(findings: DemographicFindings) -> str | None:
+    """La tabla LANGUAGE_BY_CCAA está condicionada a la comunidad autónoma
+    (ver ine_reference.py) -- hace falta resolverla aunque el paso de
+    ubicación haya detectado provincia/municipio en vez de la comunidad
+    directamente. No hay mapeo municipio->provincia en este MVP (ver
+    ine_reference.py), así que solo se resuelve desde comunidad_autonoma o
+    provincia; si solo se conoce el municipio, esta señal no se aplica."""
+    if findings.comunidad_autonoma:
+        return findings.comunidad_autonoma
+    if findings.provincia:
+        return PROVINCE_TO_CCAA.get(findings.provincia)
+    return None
+
+
+def _step_lengua(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
+    if not findings.lengua_materna:
+        return remaining, None
+
+    label = _LANGUAGE_LABELS[findings.lengua_materna]
+    evidence = findings.evidence.get("lengua_materna", [])
+    source = findings.source.get("lengua_materna", "texto")
+
+    ccaa = _resolve_ccaa_for_language(findings)
+    ccaa_distribution = LANGUAGE_BY_CCAA.get(ccaa) if ccaa else None
+    proportion = ccaa_distribution.get(findings.lengua_materna) if ccaa_distribution else None
+
+    if proportion is None:
+        return remaining, PopulationNarrowingStep(
+            attribute_label=label,
+            category="lengua_materna",
+            remaining_population=None,
+            risk_level="no_estimable",
+            evidence=evidence,
+            source=source,
+            note="Solo se puede acotar si también se conoce la comunidad autónoma de "
+                 "residencia (esta lengua es casi residual fuera de su territorio "
+                 "cooficial, así que una proporción nacional no aportaría nada útil).",
+        )
+
+    return _apply_proportion(
+        remaining,
+        proportion,
+        label,
+        "lengua_materna",
+        evidence,
+        source=source,
+        note="Proporción calculada SOLO dentro de la comunidad autónoma ya conocida "
+             "(P(lengua | comunidad autónoma), no a nivel nacional).",
+    )
+
+
 def _step_universidad(findings: DemographicFindings) -> PopulationNarrowingStep | None:
     """Universidad y empresa concretas no son "proporciones nacionales": son
     recuentos absolutos (nº de alumnos/empleados), y no tenemos esa tabla en
@@ -386,6 +522,12 @@ def _step_empresa(findings: DemographicFindings) -> PopulationNarrowingStep | No
 # módulo sobre la asunción de independencia).
 _CHAINED_STEPS = (
     _step_sexo, _step_edad, _step_location, _step_estudios, _step_ocupacion,
+    _step_nacionalidad, _step_situacion_laboral, _step_tipo_hogar,
+    # Depende de que _step_location ya haya podido resolver comunidad
+    # autónoma o provincia (ver _resolve_ccaa_for_language) -- por eso va
+    # después, aunque no dependa del PROPIO remaining de location, solo de
+    # los campos ya presentes en `findings`.
+    _step_lengua,
     # Al final: es la señal menos fiable de la cadena (inferencia simbólica
     # por IA, no autodeclaración -- ver docstring de
     # DemographicFindings.estado_civil), así que refina lo que ya se haya

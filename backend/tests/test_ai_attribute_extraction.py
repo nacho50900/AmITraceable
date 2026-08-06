@@ -502,8 +502,10 @@ class TestEstadoCivil:
         assert findings.source["estado_civil"] == "ia_simbolica"
 
     @pytest.mark.asyncio
-    async def test_con_pareja_and_soltero_and_viudo_are_parsed_too_not_just_casado(self, monkeypatch, respx_mock):
-        for value in ("con_pareja", "soltero", "viudo"):
+    async def test_con_pareja_and_soltero_and_viudo_and_divorciado_are_parsed_too_not_just_casado(
+        self, monkeypatch, respx_mock
+    ):
+        for value in ("con_pareja", "soltero", "viudo", "divorciado"):
             respx_mock.post(MISTRAL_URL).mock(
                 return_value=httpx.Response(200, json=_mock_content(estado_civil=value))
             )
@@ -546,3 +548,89 @@ class TestEstadoCivil:
 
         assert merged.estado_civil == "casado"
         assert merged.source["estado_civil"] == "ia_simbolica"
+
+
+class TestGroupBFieldsFromAI:
+    """nacionalidad, situacion_laboral, tipo_hogar y lengua_materna: a
+    diferencia de estado_civil (razonamiento simbólico), el prompt le pide
+    a la IA un valor EXACTO de un enum cerrado -- mismo patrón que sexo/
+    edad, solo que aquí es la IA quien detecta la autodeclaración en vez de
+    la regex (p.ej. porque está formulada de una manera que la regex no
+    cubre). Ver `_set_exact_enum` en ai_attribute_extraction.py."""
+
+    @pytest.mark.asyncio
+    async def test_nacionalidad_is_parsed(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(nacionalidad="extranjera"))
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.nacionalidad == "extranjera"
+        assert findings.source["nacionalidad"] == "ia"
+
+    @pytest.mark.asyncio
+    async def test_situacion_laboral_is_parsed(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(situacion_laboral="jubilado"))
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.situacion_laboral == "jubilado"
+
+    @pytest.mark.asyncio
+    async def test_tipo_hogar_is_parsed(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(tipo_hogar="monoparental"))
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.tipo_hogar == "monoparental"
+
+    @pytest.mark.asyncio
+    async def test_lengua_materna_is_parsed(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(lengua_materna="euskera"))
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.lengua_materna == "euskera"
+
+    @pytest.mark.asyncio
+    async def test_value_outside_enum_is_ignored_without_crashing(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(
+                    nacionalidad="marciana", situacion_laboral="pirata", tipo_hogar="castillo", lengua_materna="klingon"
+                ),
+            )
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.nacionalidad is None
+        assert findings.situacion_laboral is None
+        assert findings.tipo_hogar is None
+        assert findings.lengua_materna is None
+
+    @pytest.mark.asyncio
+    async def test_missing_fields_stay_none(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content()))
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.nacionalidad is None
+        assert findings.situacion_laboral is None
+        assert findings.tipo_hogar is None
+        assert findings.lengua_materna is None
+

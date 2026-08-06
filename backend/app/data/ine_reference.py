@@ -33,7 +33,7 @@ SEX_DISTRIBUTION = {
     "mujer": 0.508,
 }
 
-# Estado civil (simplificado a 4 categorías, ver DemographicFindings.estado_civil).
+# Estado civil (simplificado a 5 categorías, ver DemographicFindings.estado_civil).
 # No es una tabla del INE tal cual -- se DERIVA combinando dos fuentes
 # reales del INE que miden cosas distintas:
 #   1. Censo Anual de Población 2024 (INE, nota de prensa de dic. 2025):
@@ -41,23 +41,29 @@ SEX_DISTRIBUTION = {
 #      45,8%, divorciado/separado 7,8%, viudo 7,0%.
 #   2. ECEPOV 2021 (INE): ~70% de la población de 16+ años "tiene pareja"
 #      en sentido amplio (no solo matrimonio).
-# "casado" y "viudo" se toman directamente de (1) -- son categorías legales
-# inequívocas, no hace falta derivarlas. "con_pareja" (pareja sin estar
-# casado/a: parejas de hecho, relaciones sin convivencia legal...) se
-# deriva como la diferencia entre "tiene pareja en sentido amplio" (2) y
-# "casado" (1): 0.70 - 0.458 = 0.242. "soltero" aquí NO es el "soltero"
-# legal de (1) -- es "sin pareja actualmente" en sentido amplio: el
-# complementario de (2) menos "viudo", 1 - 0.70 - 0.07 = 0.23 (se resta
-# "viudo" aparte para no contar dos veces a quien enviudó y no tiene pareja
-# nueva; el resto -- solteros legales sin pareja y divorciados/separados
-# actualmente sin pareja -- queda aquí). Es una aproximación deliberada,
-# más basta que el resto de tablas de este fichero, documentada así por no
-# existir una única encuesta pública que desglose exactamente estas 4
-# categorías a la vez.
+# "casado", "viudo" y "divorciado" se toman directamente de (1) -- son
+# categorías legales inequívocas, no hace falta derivarlas. "con_pareja"
+# (pareja sin estar casado/a: parejas de hecho, relaciones sin convivencia
+# legal...) se deriva como la diferencia entre "tiene pareja en sentido
+# amplio" (2) y "casado" (1): 0.70 - 0.458 = 0.242, y "soltero" como el
+# complementario de todo lo anterior: 1 - 0.458 - 0.242 - 0.078 - 0.070 =
+# 0.152.
+#
+# NOTA sobre "divorciado" (0.078): el Censo mide "divorciado/separado" como
+# UNA sola categoría legal, sin distinguir si esa persona tiene pareja
+# actual o no -- una parte de ese 7,8% podría en realidad tener ya una
+# nueva pareja informal y estar contada también dentro del "con_pareja" de
+# (2). Se trata aquí como categoría propia y excluyente de las demás
+# (igual que el resto de esta tabla) porque es lo que el usuario
+# autodeclara ("estoy divorciado/a"), no porque el Censo garantice que sea
+# mutuamente excluyente con "con_pareja" -- limitación heredada de que no
+# existe una única encuesta pública que cruce las 5 categorías a la vez
+# (misma limitación ya documentada arriba para "con_pareja"/"soltero").
 MARITAL_STATUS_DISTRIBUTION = {
     "casado": 0.458,
     "con_pareja": 0.242,
-    "soltero": 0.230,
+    "divorciado": 0.078,
+    "soltero": 0.152,
     "viudo": 0.070,
 }
 
@@ -73,17 +79,28 @@ MARITAL_STATUS_DISTRIBUTION = {
 # de esa combinación concreta, en vez de multiplicar dos proporciones
 # marginales por separado. Cada sub-diccionario suma 1.0 (son P(x|sexo), no
 # P(x) sin más).
+#
+# "divorciado" por sexo NO viene de una tabla INE cruzada real (no se
+# encontró una desagregada por sexo al construir esta tabla) -- se aproxima
+# repartiendo el 7,8% nacional (ver MARITAL_STATUS_DISTRIBUTION) dentro de
+# cada sexo con el mismo criterio que "con_pareja"/"soltero": se resta
+# proporcionalmente de esos dos, manteniendo intactos "casado" y "viudo"
+# (esos sí son cifras legales directas). Doble aproximación (nacional +
+# reparto), documentada así para que quede claro que es menos fiable que el
+# resto de esta tabla.
 MARITAL_STATUS_BY_SEX = {
     "hombre": {
         "casado": 0.470,
-        "con_pareja": 0.250,
-        "soltero": 0.245,
+        "con_pareja": 0.211,
+        "divorciado": 0.078,
+        "soltero": 0.206,
         "viudo": 0.035,
     },
     "mujer": {
         "casado": 0.447,
-        "con_pareja": 0.235,
-        "soltero": 0.216,
+        "con_pareja": 0.194,
+        "divorciado": 0.078,
+        "soltero": 0.179,
         "viudo": 0.102,
     },
 }
@@ -448,3 +465,86 @@ OCCUPATION_DISTRIBUTION = {
     "construccion": 0.060,
     "transporte": 0.030,
 }
+
+# Reparto por nacionalidad (española vs. extranjera), INE -- Censo Anual de
+# Población a 1 de enero de 2025, mismo corte temporal que
+# TOTAL_POPULATION_ES (42.216.326 nacionalidad española + 6.911.971
+# nacionalidad extranjera, de 49.128.297 totales). A diferencia de
+# color de piel/origen étnico (ver ADR-17 en
+# docs/src/09_architecture_decisions.adoc), la nacionalidad LEGAL no es
+# dato de categoría especial del art. 9 RGPD -- es un dato administrativo
+# habitual (el que aparece en cualquier check-in de hotel o contrato), así
+# que sí se incluye aquí. No se desagrega por país concreto (solo
+# español/extranjero): una tabla por nacionalidad específica reduciría
+# demasiado la población de referencia con muestras pequeñas y esta
+# versión no tiene los recuentos por país necesarios para hacerlo con
+# fiabilidad.
+NATIONALITY_DISTRIBUTION = {
+    "espanola": 0.859,
+    "extranjera": 0.141,
+}
+
+# Situación laboral -- INE, Encuesta de Población Activa (EPA), 4º
+# trimestre de 2025 (tasa de actividad 58,94%, tasa de paro 9,93% sobre la
+# población activa), reexpresada como proporción de la población de 16 o
+# más años (no del total de España: la EPA no cubre a los menores de 16,
+# y son justo el universo de referencia de lo que puede autodeclararse en
+# redes sociales). Distinta de OCCUPATION_DISTRIBUTION (que es SECTOR
+# profesional, no situación): aquí lo que importa es si la persona
+# trabaja, busca trabajo, está jubilada o estudia, y son categorías
+# excluyentes entre sí en el momento de la encuesta.
+#   - activo (ocupado): 58,94% * (1 - 9,93%) = 53,08%, redondeado a 0.531
+#   - parado: 58,94% * 9,93% = 5,85%, redondeado a 0.059
+#   - inactivos (41,06% restante), repartidos con el orden de magnitud
+#     habitual de sus subcategorías en la EPA (jubilados/pensionistas
+#     ~57% de los inactivos, estudiantes ~20%, resto -- labores del hogar,
+#     incapacidad permanente, otras situaciones -- ~23%): jubilado 0.234,
+#     estudiante 0.082, otro_inactivo 0.094.
+SITUACION_LABORAL_DISTRIBUTION = {
+    "activo": 0.531,
+    "parado": 0.059,
+    "jubilado": 0.234,
+    "estudiante": 0.082,
+    "otro_inactivo": 0.094,
+}
+
+# Tipo de hogar en el que reside la persona -- INE, Encuesta Continua de
+# Hogares (ECH), aprox. 2019-2024 (proporción de HOGARES, no de personas;
+# se usa igualmente como proxy de la proporción de PERSONAS que viven en
+# cada tipo de hogar, aproximación ya asumida en el resto de este módulo
+# para ubicación -- ver docstring de scoring/k_anonymity.py sobre asumir
+# distribución similar a la media nacional). unipersonal 25,7% y
+# pareja_con_hijos 33,4% son cifras directas de la ECH; pareja_sin_hijos se
+# deriva de "10,3M hogares de pareja (con o sin hijos) sobre ~18,2M
+# hogares totales" menos pareja_con_hijos; monoparental de "~1,9M hogares
+# monoparentales sobre ~19,4M hogares totales" (2024); "otro" es el resto
+# (hogares complejos, varios núcleos familiares, corresidentes sin
+# vínculo familiar).
+HOUSEHOLD_TYPE_DISTRIBUTION = {
+    "unipersonal": 0.257,
+    "pareja_sin_hijos": 0.232,
+    "pareja_con_hijos": 0.334,
+    "monoparental": 0.100,
+    "otro": 0.077,
+}
+
+# Lengua materna/habitual cooficial, CONDICIONADA a la comunidad autónoma
+# de residencia -- P(lengua | CCAA), no P(lengua) a nivel nacional (el
+# catalán fuera de Cataluña/Baleares/C. Valenciana es residual, así que una
+# proporción nacional sería casi inútil como filtro). Fuente: Encuesta de
+# Características Esenciales de la Población y Viviendas (INE, 2021),
+# "lengua materna" por CCAA. Solo se aplica en k_anonymity.py cuando la
+# lengua autodeclarada coincide con la cooficial de la CCAA ya conocida por
+# otro medio (ubicación) -- mismo patrón que MARITAL_STATUS_BY_SEX
+# (requiere conocer primero otro atributo). Cada sub-diccionario NO suma
+# 1.0 a propósito: son solo la cooficial vs. "todo lo demás" (castellano u
+# otras), no un desglose completo de todas las lenguas de esa CCAA.
+LANGUAGE_BY_CCAA = {
+    "cataluna": {"catalan": 0.555, "castellano_u_otra": 0.445},
+    "islas baleares": {"catalan": 0.429, "castellano_u_otra": 0.571},
+    "comunidad valenciana": {"valenciano": 0.352, "castellano_u_otra": 0.648},
+    "pais vasco": {"euskera": 0.337, "castellano_u_otra": 0.663},
+    "galicia": {"gallego": 0.828, "castellano_u_otra": 0.172},
+    "navarra": {"euskera": 0.146, "castellano_u_otra": 0.854},
+}
+

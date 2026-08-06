@@ -104,6 +104,14 @@ MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
 
 # Campos "simples" (valor libre, sin normalizar contra una tabla del INE).
 _FREE_TEXT_FIELDS = ("universidad", "empresa")
+# Campos de enumeración EXACTA (el prompt ya le pide al modelo uno de estos
+# valores concretos, a diferencia de estudios/ocupacion -- ahí el modelo
+# devuelve texto libre que luego se normaliza por subcadena contra
+# STUDIES_DISTRIBUTION/OCCUPATION_DISTRIBUTION, ver `_set_normalized`).
+_NATIONALITY_VALUES = ("espanola", "extranjera")
+_EMPLOYMENT_VALUES = ("activo", "parado", "jubilado", "estudiante", "otro_inactivo")
+_LANGUAGE_VALUES = ("catalan", "euskera", "gallego", "valenciano")
+_HOUSEHOLD_VALUES = ("unipersonal", "pareja_sin_hijos", "pareja_con_hijos", "monoparental")
 # Tope defensivo de inferencias blandas aceptadas por respuesta, aunque el
 # prompt ya pide un máximo de 5 -- por si el modelo no lo respeta al pie de
 # la letra, no se toma "gratis" lo que devuelva de más.
@@ -113,6 +121,7 @@ _MAX_SOFT_INFERENCES = 5
 _ALL_FIELDS = (
     "sexo", "edad", "provincia", "municipio", "comunidad_autonoma",
     "estudios", "ocupacion", "universidad", "empresa",
+    "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
     # A diferencia de los anteriores (autodeclaraciones explícitas que la
     # regex TAMBIÉN podría detectar), este SOLO lo rellena la IA -- pero
     # reutiliza el mismo mecanismo de merge (copiar si regex_findings lo
@@ -131,9 +140,13 @@ _SYSTEM_PROMPT = (
     '{"sexo": "hombre"|"mujer"|null, "edad": <entero>|null, "provincia": <string>|null, '
     '"municipio": <string>|null, "comunidad_autonoma": <string>|null, "estudios": <string>|null, '
     '"ocupacion": <string>|null, "universidad": <string>|null, "empresa": <string>|null, '
+    '"nacionalidad": "espanola"|"extranjera"|null, '
+    '"situacion_laboral": "activo"|"parado"|"jubilado"|"estudiante"|"otro_inactivo"|null, '
+    '"tipo_hogar": "unipersonal"|"pareja_sin_hijos"|"pareja_con_hijos"|"monoparental"|null, '
+    '"lengua_materna": "catalan"|"euskera"|"gallego"|"valenciano"|null, '
     '"sexo_por_nombre": "hombre"|"mujer"|null, '
     '"fotos_de_viaje": [<identificador_de_publicacion>, ...], '
-    '"estado_civil": "soltero"|"con_pareja"|"casado"|"viudo"|null, '
+    '"estado_civil": "soltero"|"con_pareja"|"casado"|"divorciado"|"viudo"|null, '
     '"inferencias_blandas": [{"categoria": <string>, "valor": <string>, "confianza": <0-1>, '
     '"evidencia": <identificador_de_publicacion_o_bio>}, ...], '
     '"evidence": {"<nombre_de_campo>": "<identificador_de_publicacion_o_bio>"}}\n'
@@ -149,7 +162,20 @@ _SYSTEM_PROMPT = (
     "de 'sexo': aquí NO busques una autodeclaración, sino tu mejor estimación de qué sexo "
     "sugiere culturalmente el NOMBRE PÚBLICO de la cuenta en español (p. ej. 'Ana' -> "
     "'mujer'); usa null si el nombre es ambiguo, es un alias/apodo sin relación con un "
-    "nombre real, o no se te ha proporcionado nombre. 'fotos_de_viaje' es una lista aparte, "
+    "nombre real, o no se te ha proporcionado nombre. 'nacionalidad', 'situacion_laboral', "
+    "'tipo_hogar' y 'lengua_materna' son autodeclaraciones EXPLÍCITAS igual que sexo/edad/"
+    "ubicación -- NO son inferencias ni razonamiento simbólico (eso es 'inferencias_blandas' "
+    "o 'estado_civil', ver más abajo). 'situacion_laboral' distingue si la persona TRABAJA "
+    "actualmente ('activo'), busca trabajo ('parado'), está jubilada/pensionista "
+    "('jubilado'), estudia ('estudiante') o ninguna de las anteriores, p. ej. labores del "
+    "hogar ('otro_inactivo') -- distinto del SECTOR profesional, que va en 'ocupacion'. "
+    "'tipo_hogar' es SOLO si la persona dice explícitamente con quién vive o si menciona "
+    "vivir sola: 'unipersonal' (vive sola), 'pareja_sin_hijos'/'pareja_con_hijos' (vive con "
+    "su pareja, con o sin hijos en el mismo hogar) o 'monoparental' (un solo progenitor con "
+    "hijos, sin pareja). 'lengua_materna' es SOLO una de las 4 lenguas cooficiales listadas "
+    "(catalán, euskera, gallego, valenciano) si la persona dice explícitamente que es su "
+    "lengua materna o habitual -- no infieras esto del lugar donde vive ni del idioma en que "
+    "está escrito el texto. 'fotos_de_viaje' es una lista aparte, "
     "sin relación con las autodeclaraciones anteriores: incluye ahí el identificador de "
     "CUALQUIER publicación cuyo texto indique que la persona está de viaje, de vacaciones, "
     "de paso, o visitando temporalmente un sitio que NO es necesariamente donde vive (p. ej. "
@@ -175,7 +201,7 @@ _SYSTEM_PROMPT = (
     "lista vacía si no encuentras ninguna señal de este tipo.\n"
     "'estado_civil' usa el MISMO tipo de razonamiento simbólico que "
     "'inferencias_blandas' (no busques una autodeclaración explícita como 'estoy casado', "
-    "sino indicios indirectos), pero distingue tres categorías -- no te quedes en un simple "
+    "sino indicios indirectos), pero distingue varias categorías -- no te quedes en un simple "
     "sí/no:\n"
     "- 'casado': indicios de matrimonio o convivencia formal como pareja estable -- "
     "menciones a 'mi marido/esposa/mujer', anillo de boda visible en fotos, fecha "
@@ -186,6 +212,10 @@ _SYSTEM_PROMPT = (
     "contexto romántico.\n"
     "- 'soltero': indicios de estar SIN pareja actualmente -- declaraciones tipo 'soltera y "
     "feliz', menciones a estar buscando pareja, o similar.\n"
+    "- 'divorciado': indicios de una ruptura matrimonial o separación legal pasada -- "
+    "menciones a 'mi ex marido/esposa', 'desde mi divorcio', 'estoy separado/a', SIN indicios "
+    "de una nueva pareja actual (si además hay indicios de nueva pareja, usa 'con_pareja' o "
+    "'casado' en su lugar: refleja la situación ACTUAL, no el historial).\n"
     "- 'viudo': indicios de que la pareja/cónyuge ha fallecido -- menciones a 'mi difunto "
     "marido/esposa', 'en memoria de', luto explícito por una pareja.\n"
     "- null: no hay ninguna señal en ningún sentido. Ante la duda entre dos categorías, o "
@@ -308,6 +338,20 @@ def _set_normalized(
     matched = next((k for k in distribution if k in candidate), None)
     if matched:
         setattr(findings, field, matched)
+        _set_evidence(findings, field, evidence_map)
+
+
+def _set_exact_enum(
+    findings: DemographicFindings, parsed: dict, field: str, valid_values: tuple[str, ...], evidence_map: dict
+) -> None:
+    """Como `_set_normalized`, pero para campos donde el prompt ya le pide
+    al modelo uno de un puñado de valores EXACTOS (nacionalidad,
+    situacion_laboral, tipo_hogar, lengua_materna) -- no hace falta
+    normalizar por subcadena contra una tabla, solo validar que el modelo
+    no se haya inventado un valor fuera del enum."""
+    raw = parsed.get(field)
+    if raw in valid_values:
+        setattr(findings, field, raw)
         _set_evidence(findings, field, evidence_map)
 
 
@@ -441,12 +485,19 @@ def _to_findings(parsed: dict) -> DemographicFindings:
             setattr(findings, field, value.strip())
             _set_evidence(findings, field, evidence_map)
 
+    _set_exact_enum(findings, parsed, "nacionalidad", _NATIONALITY_VALUES, evidence_map)
+    _set_exact_enum(findings, parsed, "situacion_laboral", _EMPLOYMENT_VALUES, evidence_map)
+    _set_exact_enum(findings, parsed, "tipo_hogar", _HOUSEHOLD_VALUES, evidence_map)
+    _set_exact_enum(findings, parsed, "lengua_materna", _LANGUAGE_VALUES, evidence_map)
+
     fotos_de_viaje = parsed.get("fotos_de_viaje")
     if isinstance(fotos_de_viaje, list):
         findings.travel_permalinks = {p for p in fotos_de_viaje if isinstance(p, str) and p.strip()}
 
     estado_civil_raw = parsed.get("estado_civil")
-    if isinstance(estado_civil_raw, str) and estado_civil_raw in ("soltero", "con_pareja", "casado", "viudo"):
+    if isinstance(estado_civil_raw, str) and estado_civil_raw in (
+        "soltero", "con_pareja", "casado", "divorciado", "viudo",
+    ):
         findings.estado_civil = estado_civil_raw
         permalink = evidence_map.get("estado_civil") if isinstance(evidence_map, dict) else None
         findings.evidence.setdefault("estado_civil", [])

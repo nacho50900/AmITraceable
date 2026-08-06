@@ -69,6 +69,30 @@ class DemographicFindings:
     ocupacion: str | None = None
     universidad: str | None = None
     empresa: str | None = None
+    # Nacionalidad autodeclarada: "espanola" | "extranjera" | None. A
+    # diferencia de origen étnico/racial (ver ADR-17), la nacionalidad
+    # LEGAL no es dato de categoría especial del art. 9 RGPD -- ver
+    # NATIONALITY_DISTRIBUTION en ine_reference.py.
+    nacionalidad: str | None = None
+    # Situación laboral autodeclarada: "activo" (trabaja) | "parado" |
+    # "jubilado" | "estudiante" | "otro_inactivo" | None. Distinto de
+    # `ocupacion` (que es SECTOR profesional, p.ej. "sanitario") -- aquí
+    # es si la persona trabaja, busca trabajo, está jubilada o estudia.
+    situacion_laboral: str | None = None
+    # Tipo de hogar en el que vive: "unipersonal" | "pareja_sin_hijos" |
+    # "pareja_con_hijos" | "monoparental" | None. A diferencia del resto de
+    # campos de esta clase, NO se detecta con una única regex por post: se
+    # necesita combinar señales de varios posts (menciones a pareja/hijos
+    # pueden aparecer en publicaciones distintas) -- ver
+    # `_detect_household_type`, llamada una vez al final sobre TODOS los
+    # posts, no dentro del bucle principal como el resto.
+    tipo_hogar: str | None = None
+    # Lengua materna/habitual cooficial autodeclarada: "catalan" |
+    # "euskera" | "gallego" | "valenciano" | None. Solo tiene sentido como
+    # filtro de población SI también se conoce la comunidad autónoma (ver
+    # LANGUAGE_BY_CCAA en ine_reference.py y k_anonymity.py::_step_lengua) --
+    # el catalán fuera de Cataluña/Baleares es una señal casi inútil.
+    lengua_materna: str | None = None
     # Estado civil / relación de pareja. A diferencia de sexo/edad/ubicación
     # (autodeclaraciones EXPLÍCITAS), este campo SOLO lo rellena la IA
     # razonando sobre contenido simbólico/indirecto (emojis, fechas, estilo
@@ -126,6 +150,50 @@ _UNIVERSITY_RE = re.compile(r"\buniversidad de (\w+)", re.I)
 _COMPANY_RE = re.compile(r"\b[Tt]rabajo (?:en|para)\s+([A-Z][\wÁÉÍÓÚáéíóú]+)")
 _STUDY_VERB_RE = re.compile(r"\b(?:estudio|estudiante de|graduad[oa] en)\s+([a-záéíóúñ ]+)", re.I)
 
+# Nacionalidad. No se intenta cubrir todas las nacionalidades del mundo
+# (inabarcable con regex y fuera del alcance de este MVP): se cubren la
+# autodeclaración explícita ("nacionalidad española/extranjera") y los
+# gentilicios de las nacionalidades más numerosas en España a fecha de
+# escribir esto (ver NATIONALITY_DISTRIBUTION en ine_reference.py) -- si
+# no aparece ninguno de estos patrones, se queda en None (no se asume
+# "española por defecto": eso sería inventar un dato que el usuario no ha
+# declarado).
+_NATIONALITY_ESPANOLA_RE = re.compile(
+    r"\b(soy español|soy española|nacionalidad española|de nacionalidad española)\b", re.I
+)
+_NATIONALITY_EXTRANJERA_RE = re.compile(
+    r"\b(soy extranjero|soy extranjera|nacionalidad extranjera|de nacionalidad extranjera|"
+    r"soy marroqu[ií]|soy colombian[oa]|soy rumano|soy rumana|soy venezolan[oa]|"
+    r"soy peruan[oa]|soy ecuatorian[oa]|soy argentin[oa]|soy bolivian[oa]|soy chin[oa])\b",
+    re.I,
+)
+
+# Situación laboral (distinto de `ocupacion`, que es SECTOR profesional).
+_EMPLOYMENT_PARADO_RE = re.compile(r"\b(estoy en paro|desemplead[oa]|buscando empleo|busco trabajo)\b", re.I)
+_EMPLOYMENT_JUBILADO_RE = re.compile(r"\b(jubilad[oa]|pensionista)\b", re.I)
+_EMPLOYMENT_ESTUDIANTE_RE = re.compile(r"\b(soy estudiante|estudiante a tiempo completo)\b", re.I)
+_EMPLOYMENT_ACTIVO_RE = re.compile(
+    r"\b(trabajo (?:en|de|para|como)|soy autónomo|soy autónoma|tengo trabajo)\b", re.I
+)
+
+# Tipo de hogar: señales que se combinan sobre TODOS los posts (no una
+# regex "ganadora" por post, ver `_detect_household_type`).
+_HOUSEHOLD_ALONE_RE = re.compile(r"\bvivo sol[oa]\b", re.I)
+_HOUSEHOLD_WITH_PARTNER_RE = re.compile(
+    r"\bvivo con mi (pareja|novio|novia|marido|mujer|esposo|esposa)\b", re.I
+)
+_HOUSEHOLD_MONOPARENTAL_RE = re.compile(r"\b(madre soltera|padre soltero|familia monoparental)\b", re.I)
+_HOUSEHOLD_CHILDREN_MENTION_RE = re.compile(r"\bmis? hij[oa]s?\b", re.I)
+
+# Lengua materna/habitual cooficial. Igual que con nacionalidad, no se
+# intenta cubrir todo el espectro dialectal (asturiano, aragonés, aranés...
+# -- ver ADR correspondiente si se amplía en el futuro): solo las 4 lenguas
+# cooficiales con tabla de referencia en LANGUAGE_BY_CCAA.
+_LANGUAGE_CATALAN_RE = re.compile(r"\b(mi lengua materna es el catalán|hablo catalán|catalanoparlante)\b", re.I)
+_LANGUAGE_EUSKERA_RE = re.compile(r"\b(mi lengua materna es el euskera|hablo euskera|euskaldun)\b", re.I)
+_LANGUAGE_GALLEGO_RE = re.compile(r"\b(mi lengua materna es el gallego|hablo gallego|galegofalante)\b", re.I)
+_LANGUAGE_VALENCIANO_RE = re.compile(r"\b(mi lengua materna es el valenciano|hablo valenciano)\b", re.I)
+
 
 def extract_demographics(posts: list[SocialPost]) -> DemographicFindings:
     findings = DemographicFindings()
@@ -142,7 +210,11 @@ def extract_demographics(posts: list[SocialPost]) -> DemographicFindings:
         _try_detect_ocupacion(text, post.permalink, findings)
         _try_detect_universidad(text, post.permalink, findings)
         _try_detect_empresa(text, post.permalink, findings)
+        _try_detect_nacionalidad(text, post.permalink, findings)
+        _try_detect_situacion_laboral(text, post.permalink, findings)
+        _try_detect_lengua_materna(text, post.permalink, findings)
 
+    _detect_household_type(posts, findings)
     _mark_all_detected_as_texto(findings)
     return findings
 
@@ -154,6 +226,7 @@ def _mark_all_detected_as_texto(findings: DemographicFindings) -> None:
     for attr_name in (
         "sexo", "edad", "provincia", "municipio", "comunidad_autonoma",
         "estudios", "ocupacion", "universidad", "empresa",
+        "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
     ):
         if getattr(findings, attr_name) is not None:
             findings.source[attr_name] = "texto"
@@ -231,6 +304,111 @@ def _try_detect_empresa(text: str, permalink: str, findings: DemographicFindings
     if match:
         findings.empresa = match.group(1)
         findings.evidence.setdefault("empresa", []).append(permalink)
+
+
+def _try_detect_nacionalidad(text: str, permalink: str, findings: DemographicFindings) -> None:
+    if findings.nacionalidad is not None:
+        return
+
+    if _NATIONALITY_ESPANOLA_RE.search(text):
+        findings.nacionalidad = "espanola"
+    elif _NATIONALITY_EXTRANJERA_RE.search(text):
+        findings.nacionalidad = "extranjera"
+    else:
+        return
+
+    findings.evidence.setdefault("nacionalidad", []).append(permalink)
+
+
+def _try_detect_situacion_laboral(text: str, permalink: str, findings: DemographicFindings) -> None:
+    if findings.situacion_laboral is not None:
+        return
+
+    # Orden deliberado: "parado"/"jubilado"/"estudiante" son más
+    # específicos y menos ambiguos que "activo" (que podría dar un falso
+    # positivo con menciones genéricas al trabajo que no describen la
+    # situación laboral actual de la persona, p.ej. citando el trabajo de
+    # otra persona) -- se comprueban primero.
+    if _EMPLOYMENT_PARADO_RE.search(text):
+        findings.situacion_laboral = "parado"
+    elif _EMPLOYMENT_JUBILADO_RE.search(text):
+        findings.situacion_laboral = "jubilado"
+    elif _EMPLOYMENT_ESTUDIANTE_RE.search(text):
+        findings.situacion_laboral = "estudiante"
+    elif _EMPLOYMENT_ACTIVO_RE.search(text):
+        findings.situacion_laboral = "activo"
+    else:
+        return
+
+    findings.evidence.setdefault("situacion_laboral", []).append(permalink)
+
+
+def _try_detect_lengua_materna(text: str, permalink: str, findings: DemographicFindings) -> None:
+    if findings.lengua_materna is not None:
+        return
+
+    if _LANGUAGE_CATALAN_RE.search(text):
+        findings.lengua_materna = "catalan"
+    elif _LANGUAGE_EUSKERA_RE.search(text):
+        findings.lengua_materna = "euskera"
+    elif _LANGUAGE_GALLEGO_RE.search(text):
+        findings.lengua_materna = "gallego"
+    elif _LANGUAGE_VALENCIANO_RE.search(text):
+        findings.lengua_materna = "valenciano"
+    else:
+        return
+
+    findings.evidence.setdefault("lengua_materna", []).append(permalink)
+
+
+def _detect_household_type(posts: list[SocialPost], findings: DemographicFindings) -> None:
+    """A diferencia del resto de detectores de este módulo, el tipo de
+    hogar necesita combinar señales que pueden aparecer en publicaciones
+    DISTINTAS (p.ej. "vivo con mi pareja" en una bio y "mis hijos" en un
+    post posterior) -- por eso se hace en una pasada propia sobre todos los
+    posts en vez de una regex "ganadora" por post como el resto de
+    `_try_detect_*`."""
+    if findings.tipo_hogar is not None:
+        return
+
+    lives_alone = False
+    lives_with_partner = False
+    mentions_children = False
+    monoparental_explicit = False
+    evidence: list[str] = []
+
+    for post in posts:
+        text = post.text or ""
+        if not text:
+            continue
+        if _HOUSEHOLD_MONOPARENTAL_RE.search(text):
+            monoparental_explicit = True
+            evidence.append(post.permalink)
+        if _HOUSEHOLD_ALONE_RE.search(text):
+            lives_alone = True
+            evidence.append(post.permalink)
+        if _HOUSEHOLD_WITH_PARTNER_RE.search(text):
+            lives_with_partner = True
+            evidence.append(post.permalink)
+        if _HOUSEHOLD_CHILDREN_MENTION_RE.search(text):
+            mentions_children = True
+            evidence.append(post.permalink)
+
+    # Orden de prioridad: una autodeclaración EXPLÍCITA de "familia
+    # monoparental" pesa más que combinar señales indirectas, y "vivo
+    # solo/a" es inequívoco por sí solo (no necesita combinarse con nada).
+    if monoparental_explicit or (mentions_children and lives_alone):
+        findings.tipo_hogar = "monoparental"
+    elif lives_alone:
+        findings.tipo_hogar = "unipersonal"
+    elif lives_with_partner and mentions_children:
+        findings.tipo_hogar = "pareja_con_hijos"
+    elif lives_with_partner:
+        findings.tipo_hogar = "pareja_sin_hijos"
+    else:
+        return  # ninguna combinación reconocible -- se queda en None, no se adivina
+
+    findings.evidence.setdefault("tipo_hogar", []).extend(dict.fromkeys(evidence))  # sin duplicados, conserva orden
 
 
 def _try_detect_location(text: str, permalink: str, findings: DemographicFindings) -> None:

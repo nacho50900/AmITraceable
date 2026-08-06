@@ -1,7 +1,15 @@
 import pytest
 
 from app.nlp.demographic_extraction import DemographicFindings
-from app.data.ine_reference import MARITAL_STATUS_BY_SEX, MARITAL_STATUS_DISTRIBUTION, TOTAL_POPULATION_ES
+from app.data.ine_reference import (
+    HOUSEHOLD_TYPE_DISTRIBUTION,
+    LANGUAGE_BY_CCAA,
+    MARITAL_STATUS_BY_SEX,
+    MARITAL_STATUS_DISTRIBUTION,
+    NATIONALITY_DISTRIBUTION,
+    SITUACION_LABORAL_DISTRIBUTION,
+    TOTAL_POPULATION_ES,
+)
 from app.scoring.k_anonymity import (
     PopulationNarrowingStep,
     _risk_level,
@@ -316,11 +324,12 @@ class TestEstadoCivilStep:
         assert step.evidence == ["bio"]
         assert "simbólico" in step.note.lower()
 
-    def test_con_pareja_and_soltero_and_viudo_also_produce_a_step(self):
+    def test_con_pareja_and_soltero_and_viudo_and_divorciado_also_produce_a_step(self):
         for value, expected_label in [
             ("con_pareja", "Tiene pareja (sin estar casado/a)"),
             ("soltero", "Soltero/a (sin pareja actualmente)"),
             ("viudo", "Viudo/a"),
+            ("divorciado", "Divorciado/a o separado/a"),
         ]:
             steps = estimate_population_narrowing(DemographicFindings(estado_civil=value))
             assert len(steps) == 1
@@ -406,3 +415,151 @@ class TestEstadoCivilStep:
     def test_marital_status_by_sex_sums_to_one_per_sex(self):
         for sexo, distribution in MARITAL_STATUS_BY_SEX.items():
             assert sum(distribution.values()) == pytest.approx(1.0), sexo
+
+
+class TestNacionalidadStep:
+    def test_espanola_produces_a_step_that_narrows_population(self):
+        findings = DemographicFindings(nacionalidad="espanola", evidence={"nacionalidad": ["https://x/1"]})
+        steps = estimate_population_narrowing(findings)
+
+        assert len(steps) == 1
+        step = steps[0]
+        assert step.category == "nacionalidad"
+        assert step.attribute_label == "Nacionalidad: española"
+        assert step.remaining_population == round(TOTAL_POPULATION_ES * NATIONALITY_DISTRIBUTION["espanola"])
+        assert step.evidence == ["https://x/1"]
+
+    def test_extranjera_also_produces_a_step(self):
+        findings = DemographicFindings(nacionalidad="extranjera")
+        steps = estimate_population_narrowing(findings)
+
+        assert steps[0].remaining_population == round(TOTAL_POPULATION_ES * NATIONALITY_DISTRIBUTION["extranjera"])
+
+    def test_none_produces_no_step(self):
+        assert estimate_population_narrowing(DemographicFindings(nacionalidad=None)) == []
+
+    def test_counts_towards_final_remaining_population(self):
+        findings = DemographicFindings(nacionalidad="espanola")
+        steps = estimate_population_narrowing(findings)
+        assert final_remaining_population(steps) == steps[0].remaining_population
+
+    def test_distribution_sums_to_one(self):
+        assert sum(NATIONALITY_DISTRIBUTION.values()) == pytest.approx(1.0)
+
+    def test_source_defaults_to_texto(self):
+        findings = DemographicFindings(nacionalidad="espanola")
+        steps = estimate_population_narrowing(findings)
+        assert steps[0].source == "texto"
+
+
+class TestSituacionLaboralStep:
+    def test_activo_produces_a_step_that_narrows_population(self):
+        findings = DemographicFindings(situacion_laboral="activo")
+        steps = estimate_population_narrowing(findings)
+
+        assert len(steps) == 1
+        assert steps[0].category == "situacion_laboral"
+        assert steps[0].attribute_label == "Situación laboral: trabaja actualmente"
+        assert steps[0].remaining_population == round(
+            TOTAL_POPULATION_ES * SITUACION_LABORAL_DISTRIBUTION["activo"]
+        )
+
+    def test_all_five_categories_produce_a_step(self):
+        for value in ("activo", "parado", "jubilado", "estudiante", "otro_inactivo"):
+            steps = estimate_population_narrowing(DemographicFindings(situacion_laboral=value))
+            assert len(steps) == 1
+            assert steps[0].remaining_population is not None
+
+    def test_is_distinct_from_ocupacion_category(self):
+        """No debe confundirse con el sector profesional (`ocupacion`):
+        ambos pueden coexistir como pasos separados de la cadena."""
+        findings = DemographicFindings(situacion_laboral="activo", ocupacion="sanitario")
+        steps = estimate_population_narrowing(findings)
+
+        categories = {s.category for s in steps}
+        assert {"situacion_laboral", "ocupacion"} <= categories
+
+    def test_none_produces_no_step(self):
+        assert estimate_population_narrowing(DemographicFindings(situacion_laboral=None)) == []
+
+    def test_distribution_sums_to_one(self):
+        assert sum(SITUACION_LABORAL_DISTRIBUTION.values()) == pytest.approx(1.0)
+
+
+class TestTipoHogarStep:
+    def test_unipersonal_produces_a_step_that_narrows_population(self):
+        findings = DemographicFindings(tipo_hogar="unipersonal")
+        steps = estimate_population_narrowing(findings)
+
+        assert len(steps) == 1
+        assert steps[0].category == "tipo_hogar"
+        assert steps[0].attribute_label == "Tipo de hogar: vive solo/a"
+        assert steps[0].remaining_population == round(
+            TOTAL_POPULATION_ES * HOUSEHOLD_TYPE_DISTRIBUTION["unipersonal"]
+        )
+
+    def test_all_four_categories_produce_a_step(self):
+        for value in ("unipersonal", "pareja_sin_hijos", "pareja_con_hijos", "monoparental"):
+            steps = estimate_population_narrowing(DemographicFindings(tipo_hogar=value))
+            assert len(steps) == 1
+            assert steps[0].remaining_population is not None
+
+    def test_none_produces_no_step(self):
+        assert estimate_population_narrowing(DemographicFindings(tipo_hogar=None)) == []
+
+    def test_distribution_sums_to_one(self):
+        assert sum(HOUSEHOLD_TYPE_DISTRIBUTION.values()) == pytest.approx(1.0)
+
+
+class TestLenguaMaternaStep:
+    def test_no_estimable_when_ccaa_unknown(self):
+        """Sin comunidad autónoma conocida, la lengua materna cooficial no
+        se puede acotar (ver _resolve_ccaa_for_language) -- debe marcarse
+        no_estimable en vez de aplicar una proporción nacional inventada."""
+        findings = DemographicFindings(lengua_materna="catalan")
+        steps = estimate_population_narrowing(findings)
+
+        assert len(steps) == 1
+        assert steps[0].category == "lengua_materna"
+        assert steps[0].risk_level == "no_estimable"
+        assert steps[0].remaining_population is None
+
+    def test_estimable_when_comunidad_autonoma_matches(self):
+        findings = DemographicFindings(lengua_materna="catalan", comunidad_autonoma="cataluna")
+        steps = estimate_population_narrowing(findings)
+
+        lengua_step = next(s for s in steps if s.category == "lengua_materna")
+        assert lengua_step.risk_level != "no_estimable"
+        assert lengua_step.remaining_population is not None
+
+    def test_resolves_ccaa_from_provincia_when_comunidad_not_set_directly(self):
+        """Si solo se conoce la provincia (no la comunidad autónoma
+        directamente), debe resolverse vía PROVINCE_TO_CCAA -- ver
+        _resolve_ccaa_for_language."""
+        findings = DemographicFindings(lengua_materna="euskera", provincia="vizcaya")
+        steps = estimate_population_narrowing(findings)
+
+        lengua_step = next(s for s in steps if s.category == "lengua_materna")
+        assert lengua_step.risk_level != "no_estimable"
+
+    def test_uses_proportion_conditioned_on_ccaa_not_national(self):
+        findings = DemographicFindings(lengua_materna="gallego", comunidad_autonoma="galicia")
+        steps = estimate_population_narrowing(findings)
+
+        location_step = next(s for s in steps if s.category == "ubicacion")
+        lengua_step = next(s for s in steps if s.category == "lengua_materna")
+        # Se aplica sobre la población YA acotada por el paso de ubicación
+        # (comunidad_autonoma="galicia" activa también _step_location antes
+        # en la cadena), no sobre el total nacional -- por eso la base es
+        # location_step.remaining_population, no TOTAL_POPULATION_ES.
+        expected = round(location_step.remaining_population * LANGUAGE_BY_CCAA["galicia"]["gallego"])
+        assert lengua_step.remaining_population == expected
+
+    def test_none_produces_no_step(self):
+        assert estimate_population_narrowing(DemographicFindings(lengua_materna=None)) == []
+
+    def test_counts_towards_final_remaining_population_when_estimable(self):
+        findings = DemographicFindings(lengua_materna="catalan", comunidad_autonoma="cataluna")
+        steps = estimate_population_narrowing(findings)
+        assert final_remaining_population(steps) == steps[-1].remaining_population
+

@@ -111,10 +111,35 @@ def _scene_analysis_available() -> bool:
     """Comprobación barata (sin cargar el modelo) de si este módulo puede
     funcionar: dependencias opcionales instaladas. No hay ningún índice ni
     fichero que comprobar (a diferencia de geolocation.py), el modelo se
-    descarga solo la primera vez vía el caché de HuggingFace."""
+    descarga solo la primera vez vía el caché de HuggingFace.
+
+    Comprueba también `timm` y `einops`: a diferencia de DINOv2
+    (geolocation.py), que solo necesita torch/transformers/faiss, el
+    código remoto de Moondream2 (`trust_remote_code=True`, ver
+    requirements-vision.txt) los importa también. Antes de este chequeo,
+    esta función devolvía True con solo torch/transformers instalados --
+    suficiente para `estimate_locations_for_posts` (geolocalización), pero
+    NO para Moondream2 -- así que un entorno que solo siguiera las
+    instrucciones de `scripts/build_faiss_index.py` (que no menciona
+    timm/einops) tenía la geolocalización funcionando con normalidad
+    mientras esta función fallaba en silencio SIEMPRE dentro de
+    `_lazy_load()` (capturado por el try/except de
+    `analyze_image_content`, ver más abajo): la geolocalización parecía
+    funcionar bien y el contenido visual nunca daba descripción para
+    NINGUNA foto, sin ningún error visible más allá de un warning en el
+    log del backend. `accelerate` y `pyvips` no se comprueban aquí a
+    propósito: son igual de importables/baratos que timm/einops, pero
+    `from_pretrained()` los necesita en combinaciones distintas según la
+    revisión del modelo fijada en `_MODEL_REVISION` (a diferencia de
+    timm/einops, que hacen falta siempre); comprobarlos aquí acoplaría
+    este chequeo a la revisión concreta. Su ausencia sigue cayendo en el
+    try/except de `analyze_image_content`, con el nombre de la excepción
+    en el log para poder diagnosticarla."""
     try:
         import torch  # noqa: F401
         import transformers  # noqa: F401
+        import timm  # noqa: F401
+        import einops  # noqa: F401
     except ImportError:
         return False
     return True
@@ -164,12 +189,15 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
     análisis de las demás fotos."""
     if not _scene_analysis_available():
         # Causa más habitual: no se ha instalado requirements-vision.txt
-        # (o, tras el commit que añadió esta función, faltan sus deps
-        # nuevas -- timm/einops/pyvips-binary -- que no se comprueban aquí
-        # porque solo hacen falta dentro de from_pretrained(), no al
-        # importar torch/transformers).
+        # completo. En particular, construir el índice FAISS (ver
+        # scripts/build_faiss_index.py) NO instala timm/einops -- son
+        # deps exclusivas de Moondream2, no de DINOv2 -- así que un
+        # entorno con la geolocalización funcionando puede seguir sin
+        # tener esto instalado.
         logger.warning(
-            "Análisis de contenido visual no disponible: torch/transformers no instalados"
+            "Análisis de contenido visual no disponible: falta torch, transformers, "
+            "timm o einops (ver requirements-vision.txt; 'pip install timm einops' "
+            "si ya tienes torch/transformers instalados para la geolocalización)"
         )
         return [], False, None
 
@@ -177,14 +205,21 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
         _lazy_load()
         answer = _model.query(image, _QUERY)["answer"]
     except Exception as exc:
-        # Motivo típico si torch/transformers SÍ están instalados: faltan
-        # las dependencias que el propio código de Moondream2 pide vía
-        # trust_remote_code=True (timm, einops, pyvips-binary -- ver
-        # requirements-vision.txt) o un fallo de red al descargar el
-        # modelo la primera vez. Se loguea para poder diagnosticarlo sin
-        # tener que quitar el try/except (este módulo es best-effort y no
-        # debe abortar el análisis de las demás fotos).
-        logger.warning("Análisis de contenido visual falló para una foto: %s", exc)
+        # Motivo típico si torch/transformers/timm/einops SÍ están
+        # instalados (ver _scene_analysis_available arriba): falta
+        # accelerate o pyvips (a diferencia de timm/einops, no se
+        # comprueban en el chequeo barato de arriba porque from_pretrained
+        # los necesita en combinaciones distintas según la revisión del
+        # modelo -- ver requirements-vision.txt) o un fallo de red al
+        # descargar el modelo la primera vez. Se loguea para poder
+        # diagnosticarlo sin tener que quitar el try/except (este módulo
+        # es best-effort y no debe abortar el análisis de las demás
+        # fotos).
+        logger.warning(
+            "Análisis de contenido visual falló para una foto (%s): %s",
+            type(exc).__name__,
+            exc,
+        )
         return [], False, None
 
     return _parse_inferences(answer), _parse_pareja(answer), answer.strip()

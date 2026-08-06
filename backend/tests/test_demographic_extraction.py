@@ -218,3 +218,96 @@ class TestMultiplePostsAndEmptyInput:
             assert findings.source[field_name] == "texto"
         # Los campos NO detectados no aparecen en source en absoluto
         assert "estudios" not in findings.source
+
+
+class TestNationality:
+    def test_detects_nacionalidad_espanola_explicita(self):
+        findings = extract_demographics([_post("Soy español y vivo fuera desde hace años")])
+        assert findings.nacionalidad == "espanola"
+        assert findings.source["nacionalidad"] == "texto"
+
+    def test_detects_nacionalidad_extranjera_por_gentilicio(self):
+        findings = extract_demographics([_post("Soy colombiana viviendo en Madrid")])
+        assert findings.nacionalidad == "extranjera"
+
+    def test_no_nationality_mention_stays_none(self):
+        findings = extract_demographics([_post("Me encanta el fútbol")])
+        assert findings.nacionalidad is None
+
+
+class TestEmploymentStatus:
+    def test_detects_parado(self):
+        findings = extract_demographics([_post("Estoy en paro desde marzo, buscando oportunidades")])
+        assert findings.situacion_laboral == "parado"
+
+    def test_detects_jubilado(self):
+        findings = extract_demographics([_post("Jubilado y disfrutando de la huerta")])
+        assert findings.situacion_laboral == "jubilado"
+
+    def test_detects_estudiante(self):
+        findings = extract_demographics([_post("Soy estudiante y esto me quita mucho tiempo")])
+        assert findings.situacion_laboral == "estudiante"
+
+    def test_detects_activo(self):
+        findings = extract_demographics([_post("Trabajo en un hospital desde hace 3 años")])
+        assert findings.situacion_laboral == "activo"
+
+    def test_parado_takes_priority_over_generic_work_mention_in_same_text(self):
+        # "buscando empleo" (parado) no debería confundirse con "activo" aunque
+        # el texto también mencione la palabra "trabajo" de forma genérica.
+        findings = extract_demographics([_post("Busco trabajo desde hace meses, cualquier cosa vale")])
+        assert findings.situacion_laboral == "parado"
+
+
+class TestHouseholdType:
+    def test_detects_unipersonal(self):
+        findings = extract_demographics([_post("Vivo solo desde que me mudé a la ciudad")])
+        assert findings.tipo_hogar == "unipersonal"
+
+    def test_detects_pareja_sin_hijos(self):
+        findings = extract_demographics([_post("Vivo con mi pareja en un piso pequeño")])
+        assert findings.tipo_hogar == "pareja_sin_hijos"
+
+    def test_detects_pareja_con_hijos_combining_two_posts(self):
+        posts = [
+            _post("Vivo con mi pareja desde hace 5 años", permalink="https://x/1", i=1),
+            _post("Mis hijos ya están en el colegio", permalink="https://x/2", i=2),
+        ]
+        findings = extract_demographics(posts)
+        assert findings.tipo_hogar == "pareja_con_hijos"
+        # La evidencia combina los permalinks de ambas señales, sin duplicar
+        assert set(findings.evidence["tipo_hogar"]) == {"https://x/1", "https://x/2"}
+
+    def test_detects_monoparental_explicit_mention(self):
+        findings = extract_demographics([_post("Somos una familia monoparental y muy felices")])
+        assert findings.tipo_hogar == "monoparental"
+
+    def test_detects_monoparental_from_alone_plus_children(self):
+        posts = [
+            _post("Vivo sola con mis hijos", permalink="https://x/1", i=1),
+        ]
+        findings = extract_demographics(posts)
+        assert findings.tipo_hogar == "monoparental"
+
+    def test_no_household_signal_stays_none(self):
+        findings = extract_demographics([_post("Me encanta el senderismo los fines de semana")])
+        assert findings.tipo_hogar is None
+
+
+class TestMotherTongue:
+    def test_detects_catalan(self):
+        findings = extract_demographics([_post("Mi lengua materna es el catalán")])
+        assert findings.lengua_materna == "catalan"
+
+    def test_detects_euskera(self):
+        findings = extract_demographics([_post("Hablo euskera con mi familia")])
+        assert findings.lengua_materna == "euskera"
+
+    def test_detects_gallego(self):
+        findings = extract_demographics([_post("Soy galegofalante de nacimiento")])
+        assert findings.lengua_materna == "gallego"
+
+    def test_no_language_mention_stays_none(self):
+        findings = extract_demographics([_post("Me encanta cocinar los domingos")])
+        assert findings.lengua_materna is None
+
