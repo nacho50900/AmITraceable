@@ -148,26 +148,39 @@ def _scene_analysis_available() -> bool:
 def _lazy_load():
     """Carga Moondream2 en memoria (una vez por proceso).
 
-    BUG REAL encontrado en producción (no una precaución teórica): pasar
-    `device_map` como STRING suelto ("cpu"/"cuda") a `from_pretrained()`
-    revienta con `NotImplementedError: Cannot copy out of meta tensor; no
-    data!` -- SIEMPRE, en cualquier máquina, con las dependencias
-    correctamente instaladas (así se diagnosticó: con torch/transformers/
-    timm/einops/accelerate/pyvips todos presentes, el fallo seguía
-    ocurriendo en TODAS las fotos). Motivo: en cuanto `from_pretrained()`
-    recibe CUALQUIER valor de `device_map`, `transformers` activa
-    automáticamente la carga en "meta device" de `accelerate` (tensores
-    placeholder sin datos reales que se rellenan después vía dispatch) --
-    y el código de terceros de Moondream2 (`trust_remote_code=True`, ver
-    docstring del módulo) no está escrito para gestionar esa ruta
-    correctamente. La documentación oficial del modelo NUNCA pasa un
-    string: para GPU usa un DICCIONARIO (`device_map={"": "cuda"}`, con
-    las llaves vacías, no un mapeo por capa) y para CPU simplemente NO
-    pasa `device_map` en absoluto -- así el modelo se carga con tensores
-    reales desde el principio, sin pasar por meta device, igual que ya
-    hace `AutoModel.from_pretrained(_MODEL_NAME).to(device)` con DINOv2 en
-    `geolocation.py` (por eso ese modelo nunca tuvo este problema: nunca
-    usó `device_map`)."""
+    BUG REAL nº1, encontrado en producción (no una precaución teórica):
+    pasar `device_map` como STRING suelto ("cpu"/"cuda") a
+    `from_pretrained()` revienta con `NotImplementedError: Cannot copy out
+    of meta tensor; no data!` -- SIEMPRE, en cualquier máquina, con las
+    dependencias correctamente instaladas.
+
+    BUG REAL nº2, encontrado justo AL CORREGIR el nº1: especificar
+    `torch_dtype` (para ahorrar memoria, ver más abajo) revienta de forma
+    distinta -- `RuntimeError: Tensor on device cpu is not on the expected
+    device meta!` -- aunque ya no se pase `device_map` en absoluto.
+
+    Ambos bugs comparten la misma causa de fondo: en cuanto
+    `from_pretrained()` recibe CUALQUIER valor de `device_map` O de
+    `torch_dtype`, `transformers` activa automáticamente
+    `low_cpu_mem_usage=True` por su cuenta, que carga el modelo en "meta
+    device" de `accelerate` (tensores placeholder sin datos reales,
+    rellenados después vía dispatch/asignación directa) -- y el código de
+    terceros de Moondream2 (`trust_remote_code=True`, ver docstring del
+    módulo) no está escrito para gestionar esa ruta correctamente en
+    ninguna de sus dos variantes. Mismo patrón ya reportado para otros
+    modelos con código de terceros (buscar "Disable meta device for custom
+    model" en foros/repos de HuggingFace -- no es una rareza de Moondream2
+    en particular, es un choque conocido entre `low_cpu_mem_usage=True` y
+    modelos con `trust_remote_code=True` que no lo soportan).
+
+    La solución NO es evitar `torch_dtype` (se necesita para el ahorro de
+    memoria) ni resignarse a no usar `device_map` en GPU -- es forzar
+    `low_cpu_mem_usage=False` explícitamente, que desactiva la ruta de
+    meta device por completo sin importar qué otros parámetros se pasen:
+    el modelo se carga con tensores reales desde el principio, igual que
+    ya hace `AutoModel.from_pretrained(_MODEL_NAME).to(device)` con DINOv2
+    en `geolocation.py` (por eso ese modelo nunca tuvo ninguno de los dos
+    bugs: nunca entra en la ruta de meta device)."""
     global _model
     if _model is not None:
         return
@@ -175,7 +188,13 @@ def _lazy_load():
     import torch
     from transformers import AutoModelForCausalLM
 
-    kwargs = {"revision": _MODEL_REVISION, "trust_remote_code": True}
+    kwargs = {
+        "revision": _MODEL_REVISION,
+        "trust_remote_code": True,
+        # Ver bug nº2 en el docstring de esta función -- sin esto,
+        # `torch_dtype` de aquí abajo por sí solo ya rompe la carga.
+        "low_cpu_mem_usage": False,
+    }
     # torch_dtype=bfloat16 (mismo dtype que recomienda la ficha oficial del
     # modelo en HuggingFace, ahí pensado para GPU -- aquí se usa también en
     # CPU por la misma razón, memoria): 1.8B parámetros en float32 (el
@@ -184,16 +203,13 @@ def _lazy_load():
     # contenedor y el propio sistema operativo -- en una máquina con poca
     # RAM (Docker Desktop/WSL2 en Windows reparte solo una parte del total
     # a la VM) eso basta para tirarlo todo a swap y que el proceso parezca
-    # congelado en vez de fallar con un error claro (así se diagnosticó:
-    # el pipeline se quedaba parado justo al esperar esta carga en segundo
-    # plano, sin ningún error en el log -- sencillamente no había memoria
-    # libre para completarla en un tiempo razonable). En bfloat16 son
+    # congelado en vez de fallar con un error claro. En bfloat16 son
     # ~3,6 GB -- la mitad, y suficiente para razonar sobre una foto, que no
     # necesita la precisión completa de fp32.
     kwargs["torch_dtype"] = torch.bfloat16
     if torch.cuda.is_available():
         kwargs["device_map"] = {"": "cuda"}
-    # En CPU no se pasa `device_map` -- ver docstring de esta función.
+    # En CPU no se pasa `device_map` -- ver bug nº1 en el docstring de esta función.
 
     _model = AutoModelForCausalLM.from_pretrained(_MODEL_NAME, **kwargs)
 
