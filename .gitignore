@@ -24,3 +24,10 @@ backend/data/
 backend/scripts/_hf_scratch_cache/
 backend/scripts/_completed_shards.txt
 *.faiss
+
+# Graphify: artefactos y configuración específicos de cada máquina.
+# graphify-out/ (graph.json, graph.html, GRAPH_REPORT.md, manifest.json) SÍ se versiona
+# -- ver GRAPHIFY_SETUP.md -- pero lo siguiente es local o depende de la ruta de instalación:
+graphify-out/cost.json
+graphify-out/cache/
+.claude/settings.json

@@ -75,6 +75,10 @@ navegador.
   k-anonimato, geolocalización por imagen, scoring y el informe (ver
   `backend/app/`).
 - `docs/` — documentación de arquitectura Arc42.
+- `graphify-out/` — grafo de conocimiento del código (generado con
+  [Graphify](https://github.com/Graphify-Labs/graphify)) que Claude Code consulta en vez
+  de releer archivos sueltos. Ver [`GRAPHIFY_SETUP.md`](GRAPHIFY_SETUP.md) para instalarlo
+  al cambiar de equipo.
 
 ## ⚠️ Alcance y limitaciones (importante para la memoria del TFG)
 

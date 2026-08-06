@@ -1,0 +1,432 @@
+{
+  "backend/app/__init__.py": {
+    "mtime": 1786054228.7064426,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "backend/app/ai_analysis.py": {
+    "mtime": 1786054228.7070096,
+    "ast_hash": "76feb72ba239f9e6238490eeb51929f5",
+    "semantic_hash": "76feb72ba239f9e6238490eeb51929f5"
+  },
+  "backend/app/analysis_router.py": {
+    "mtime": 1786054228.7070096,
+    "ast_hash": "38d5fd05dbb5e713b9d6fea3c2a75278",
+    "semantic_hash": "38d5fd05dbb5e713b9d6fea3c2a75278"
+  },
+  "backend/app/auth/__init__.py": {
+    "mtime": 1786054228.7070096,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "backend/app/auth/dynamic_origin.py": {
+    "mtime": 1786054228.707933,
+    "ast_hash": "ee03ae494aeabb1cf3b96d733073e41c",
+    "semantic_hash": "ee03ae494aeabb1cf3b96d733073e41c"
+  },
+  "backend/app/auth/instagram_oauth.py": {
+    "mtime": 1786054228.707933,
+    "ast_hash": "fb5ccff815c6a9eccea6c12545ee6aea",
+    "semantic_hash": "fb5ccff815c6a9eccea6c12545ee6aea"
+  },
+  "backend/app/auth/reddit_oauth.py": {
+    "mtime": 1786054228.707933,
+    "ast_hash": "03069961869421bd219a70a1b02cce22",
+    "semantic_hash": "03069961869421bd219a70a1b02cce22"
+  },
+  "backend/app/config.py": {
+    "mtime": 1786054228.707933,
+    "ast_hash": "0ac25d0caeb7980bd92665e78a9ea85c",
+    "semantic_hash": "0ac25d0caeb7980bd92665e78a9ea85c"
+  },
+  "backend/app/data/ine_reference.py": {
+    "mtime": 1786054228.707933,
+    "ast_hash": "168f6d74a67a1aa91b05075a22671247",
+    "semantic_hash": "168f6d74a67a1aa91b05075a22671247"
+  },
+  "backend/app/instagram_client.py": {
+    "mtime": 1786054228.707933,
+    "ast_hash": "2e63760f159252f2b4d0b8ab2ff1e272",
+    "semantic_hash": "2e63760f159252f2b4d0b8ab2ff1e272"
+  },
+  "backend/app/main.py": {
+    "mtime": 1786054228.707933,
+    "ast_hash": "d8aa182efec6b4abd8c6557b58ddb01b",
+    "semantic_hash": "d8aa182efec6b4abd8c6557b58ddb01b"
+  },
+  "backend/app/models/Instagram API.postman_collection.json": {
+    "mtime": 1786054228.7117198,
+    "ast_hash": "5b916d0ca4e8f1c63f6e6ae2ab23b987",
+    "semantic_hash": "5b916d0ca4e8f1c63f6e6ae2ab23b987"
+  },
+  "backend/app/models/__init__.py": {
+    "mtime": 1786054228.7117198,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "backend/app/models/schemas.py": {
+    "mtime": 1786054228.7117198,
+    "ast_hash": "721b720fc4b355f5a756320c52654fd2",
+    "semantic_hash": "721b720fc4b355f5a756320c52654fd2"
+  },
+  "backend/app/nlp/__init__.py": {
+    "mtime": 1786054228.7117198,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "backend/app/nlp/ai_attribute_extraction.py": {
+    "mtime": 1786054228.713881,
+    "ast_hash": "8e5828716f35e31c35b96f4ff11cc131",
+    "semantic_hash": "8e5828716f35e31c35b96f4ff11cc131"
+  },
+  "backend/app/nlp/attribute_inference.py": {
+    "mtime": 1786054228.713881,
+    "ast_hash": "6b4676e1d8eca2e740d09ef2ac908155",
+    "semantic_hash": "6b4676e1d8eca2e740d09ef2ac908155"
+  },
+  "backend/app/nlp/demographic_extraction.py": {
+    "mtime": 1786054228.713881,
+    "ast_hash": "a90329f2b54eef67ce6a0d5830f20874",
+    "semantic_hash": "a90329f2b54eef67ce6a0d5830f20874"
+  },
+  "backend/app/nlp/fingerprint.py": {
+    "mtime": 1786054228.713881,
+    "ast_hash": "cb3fecf12477bcd043ae81121d1cd142",
+    "semantic_hash": "cb3fecf12477bcd043ae81121d1cd142"
+  },
+  "backend/app/nlp/travel_detection.py": {
+    "mtime": 1786054228.713881,
+    "ast_hash": "19fd05b205be2331e8e30d32cae45eab",
+    "semantic_hash": "19fd05b205be2331e8e30d32cae45eab"
+  },
+  "backend/app/progress.py": {
+    "mtime": 1786054228.713881,
+    "ast_hash": "9b986da47241b8307268c13a8a031ebe",
+    "semantic_hash": "9b986da47241b8307268c13a8a031ebe"
+  },
+  "backend/app/reddit_client.py": {
+    "mtime": 1786054228.713881,
+    "ast_hash": "9e7d80bd24149f71be583d3a46244245",
+    "semantic_hash": "9e7d80bd24149f71be583d3a46244245"
+  },
+  "backend/app/report/__init__.py": {
+    "mtime": 1786054228.713881,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "backend/app/report/generator.py": {
+    "mtime": 1786054228.7154493,
+    "ast_hash": "762c313f1edeb22bbcdfec38432aac90",
+    "semantic_hash": "762c313f1edeb22bbcdfec38432aac90"
+  },
+  "backend/app/scoring/__init__.py": {
+    "mtime": 1786054228.7154493,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "backend/app/scoring/k_anonymity.py": {
+    "mtime": 1786054228.71572,
+    "ast_hash": "1bd10d1c8426cb51c24d54d49d0635c6",
+    "semantic_hash": "1bd10d1c8426cb51c24d54d49d0635c6"
+  },
+  "backend/app/scoring/privacy_score.py": {
+    "mtime": 1786054228.71572,
+    "ast_hash": "f6d173c88091cec51994006a74daa84a",
+    "semantic_hash": "f6d173c88091cec51994006a74daa84a"
+  },
+  "backend/app/vision/geolocation.py": {
+    "mtime": 1786054228.71572,
+    "ast_hash": "70ce070cac7be2e4d5e9742265bd1d32",
+    "semantic_hash": "70ce070cac7be2e4d5e9742265bd1d32"
+  },
+  "backend/app/vision/scene_analysis.py": {
+    "mtime": 1786054228.7183821,
+    "ast_hash": "4e4352df65404daa58b933832f5871fb",
+    "semantic_hash": "4e4352df65404daa58b933832f5871fb"
+  },
+  "backend/monitoring/grafana/provisioning/dashboards/dashboard.json": {
+    "mtime": 1786054228.7191315,
+    "ast_hash": "5f2adc5c6d680790e10950c472a83d18",
+    "semantic_hash": "5f2adc5c6d680790e10950c472a83d18"
+  },
+  "backend/pyproject.toml": {
+    "mtime": 1786054228.7192287,
+    "ast_hash": "597cc4d652f04fccd9d1a9cf7653cbca",
+    "semantic_hash": "597cc4d652f04fccd9d1a9cf7653cbca"
+  },
+  "backend/scripts/build_faiss_index.py": {
+    "mtime": 1786054228.71972,
+    "ast_hash": "4278c67cb55ecb809228d6b5b0bbe1b7",
+    "semantic_hash": "4278c67cb55ecb809228d6b5b0bbe1b7"
+  },
+  "backend/scripts/download_osv5m_spain.py": {
+    "mtime": 1786054228.7206573,
+    "ast_hash": "73492dae099a193801f93d1c0f63b8ab",
+    "semantic_hash": "73492dae099a193801f93d1c0f63b8ab"
+  },
+  "backend/scripts/download_osv5m_world.py": {
+    "mtime": 1786054228.7206573,
+    "ast_hash": "1c946ad90634592f71fcc455f74dd80f",
+    "semantic_hash": "1c946ad90634592f71fcc455f74dd80f"
+  },
+  "backend/scripts/recover_metadata.py": {
+    "mtime": 1786054228.7206573,
+    "ast_hash": "3fd0e48670c2c5ffb4d571ad2456b88f",
+    "semantic_hash": "3fd0e48670c2c5ffb4d571ad2456b88f"
+  },
+  "backend/tests/conftest.py": {
+    "mtime": 1786054228.7206573,
+    "ast_hash": "1e4d83e6e1bac7e2cdd5c6173f43613d",
+    "semantic_hash": "1e4d83e6e1bac7e2cdd5c6173f43613d"
+  },
+  "backend/tests/test_ai_analysis.py": {
+    "mtime": 1786054228.721745,
+    "ast_hash": "d51a0b5b25e10337c730aecace4dda25",
+    "semantic_hash": "d51a0b5b25e10337c730aecace4dda25"
+  },
+  "backend/tests/test_ai_attribute_extraction.py": {
+    "mtime": 1786054228.721745,
+    "ast_hash": "22f3eec3e0e5f365839904a9da1d16b2",
+    "semantic_hash": "22f3eec3e0e5f365839904a9da1d16b2"
+  },
+  "backend/tests/test_analysis_pipeline.py": {
+    "mtime": 1786054228.721745,
+    "ast_hash": "52fdfa9774470da620abe9cb41a74b8e",
+    "semantic_hash": "52fdfa9774470da620abe9cb41a74b8e"
+  },
+  "backend/tests/test_analysis_router.py": {
+    "mtime": 1786054228.721745,
+    "ast_hash": "f89b3dc0a643cd0640a11d4a6e4d803d",
+    "semantic_hash": "f89b3dc0a643cd0640a11d4a6e4d803d"
+  },
+  "backend/tests/test_demographic_extraction.py": {
+    "mtime": 1786054228.721745,
+    "ast_hash": "7471c5551951946f9b3473f4e3041f50",
+    "semantic_hash": "7471c5551951946f9b3473f4e3041f50"
+  },
+  "backend/tests/test_generator.py": {
+    "mtime": 1786054228.721745,
+    "ast_hash": "3122eb6388077809d788b12338f8c0c3",
+    "semantic_hash": "3122eb6388077809d788b12338f8c0c3"
+  },
+  "backend/tests/test_geolocation.py": {
+    "mtime": 1786054228.721745,
+    "ast_hash": "829520cb3f83643d3606fbdc13675923",
+    "semantic_hash": "829520cb3f83643d3606fbdc13675923"
+  },
+  "backend/tests/test_ine_reference_ccaa.py": {
+    "mtime": 1786054228.721745,
+    "ast_hash": "73a3bc40b9e0c187d2d1235bed0acd04",
+    "semantic_hash": "73a3bc40b9e0c187d2d1235bed0acd04"
+  },
+  "backend/tests/test_instagram_auth.py": {
+    "mtime": 1786054228.7237198,
+    "ast_hash": "ab470447230da8cd36ea85a7ee993678",
+    "semantic_hash": "ab470447230da8cd36ea85a7ee993678"
+  },
+  "backend/tests/test_instagram_client.py": {
+    "mtime": 1786054228.7237198,
+    "ast_hash": "c8a118e28d1b1cff56758f84323c96f4",
+    "semantic_hash": "c8a118e28d1b1cff56758f84323c96f4"
+  },
+  "backend/tests/test_k_anonymity.py": {
+    "mtime": 1786054228.7237198,
+    "ast_hash": "59752ef7bbaa7ae15cccd56decb8a383",
+    "semantic_hash": "59752ef7bbaa7ae15cccd56decb8a383"
+  },
+  "backend/tests/test_lifespan.py": {
+    "mtime": 1786054228.7237198,
+    "ast_hash": "f38c5b77ba776bed6edffbc796a916db",
+    "semantic_hash": "f38c5b77ba776bed6edffbc796a916db"
+  },
+  "backend/tests/test_main.py": {
+    "mtime": 1786054228.7237198,
+    "ast_hash": "f195396049c1d22f58e0d1b8051e393f",
+    "semantic_hash": "f195396049c1d22f58e0d1b8051e393f"
+  },
+  "backend/tests/test_reddit_auth.py": {
+    "mtime": 1786054228.7237198,
+    "ast_hash": "8248a3f85157a3df98f93716cf12105f",
+    "semantic_hash": "8248a3f85157a3df98f93716cf12105f"
+  },
+  "backend/tests/test_reddit_client.py": {
+    "mtime": 1786054228.7237198,
+    "ast_hash": "4ba6e7363b613cb0cb5b9cf571d1be64",
+    "semantic_hash": "4ba6e7363b613cb0cb5b9cf571d1be64"
+  },
+  "backend/tests/test_scene_analysis.py": {
+    "mtime": 1786054228.7237198,
+    "ast_hash": "38f350d1c342d6742ae5b3ef4827bf43",
+    "semantic_hash": "38f350d1c342d6742ae5b3ef4827bf43"
+  },
+  "backend/tests/test_travel_detection.py": {
+    "mtime": 1786054228.7237198,
+    "ast_hash": "e42128ce34b95d9c9187a76f6cab91b7",
+    "semantic_hash": "e42128ce34b95d9c9187a76f6cab91b7"
+  },
+  "docs/package.json": {
+    "mtime": 1786054228.7397199,
+    "ast_hash": "b68db7cf53f34a60646318d314216f8b",
+    "semantic_hash": "b68db7cf53f34a60646318d314216f8b"
+  },
+  "webapp/eslint.config.js": {
+    "mtime": 1786054228.7922964,
+    "ast_hash": "b8893da386a89dfd3672dad848f4ec7e",
+    "semantic_hash": "b8893da386a89dfd3672dad848f4ec7e"
+  },
+  "webapp/package.json": {
+    "mtime": 1786054228.7957199,
+    "ast_hash": "9f28602f526c0fc825ce91d1966950fc",
+    "semantic_hash": "9f28602f526c0fc825ce91d1966950fc"
+  },
+  "webapp/src/__tests__/AiSummaryCard.test.tsx": {
+    "mtime": 1786054228.8099124,
+    "ast_hash": "f99ce72aa0a2dd1e3d968f671daa6137",
+    "semantic_hash": "f99ce72aa0a2dd1e3d968f671daa6137"
+  },
+  "webapp/src/__tests__/Dashboard.test.tsx": {
+    "mtime": 1786054228.8108032,
+    "ast_hash": "3c2e78283079b233c73818d1fb29a075",
+    "semantic_hash": "3c2e78283079b233c73818d1fb29a075"
+  },
+  "webapp/src/__tests__/DownloadReportButton.test.tsx": {
+    "mtime": 1786054228.8108032,
+    "ast_hash": "c8b82fd513b6b0e90b48f19c614fbcd6",
+    "semantic_hash": "c8b82fd513b6b0e90b48f19c614fbcd6"
+  },
+  "webapp/src/__tests__/Landing.test.tsx": {
+    "mtime": 1786054228.8108032,
+    "ast_hash": "804112e0e672b84ba931fbebcfe3b16c",
+    "semantic_hash": "804112e0e672b84ba931fbebcfe3b16c"
+  },
+  "webapp/src/__tests__/LocationMap.test.tsx": {
+    "mtime": 1786054228.8108032,
+    "ast_hash": "b280355df8eaffe83eb60ec01865140b",
+    "semantic_hash": "b280355df8eaffe83eb60ec01865140b"
+  },
+  "webapp/src/__tests__/PopulationNarrowingTable.test.tsx": {
+    "mtime": 1786054228.8108032,
+    "ast_hash": "3bc80925ac31cfad75e674fae6049ec9",
+    "semantic_hash": "3bc80925ac31cfad75e674fae6049ec9"
+  },
+  "webapp/src/__tests__/PopulationPictogram.test.tsx": {
+    "mtime": 1786054228.8108032,
+    "ast_hash": "4084f716d82a96e17eb6ab01a5b2aeb3",
+    "semantic_hash": "4084f716d82a96e17eb6ab01a5b2aeb3"
+  },
+  "webapp/src/__tests__/ScoreBar.test.tsx": {
+    "mtime": 1786054228.8108032,
+    "ast_hash": "5c5a343f90e30e20ecfcec4908a61246",
+    "semantic_hash": "5c5a343f90e30e20ecfcec4908a61246"
+  },
+  "webapp/src/__tests__/api.test.ts": {
+    "mtime": 1786054228.8108032,
+    "ast_hash": "213e40f098b616b122a5eb3529683a97",
+    "semantic_hash": "213e40f098b616b122a5eb3529683a97"
+  },
+  "webapp/src/__tests__/fixtures.ts": {
+    "mtime": 1786054228.81172,
+    "ast_hash": "d33be7fd7d253c8f63aca8242f6c9256",
+    "semantic_hash": "d33be7fd7d253c8f63aca8242f6c9256"
+  },
+  "webapp/src/__tests__/reportToJson.test.ts": {
+    "mtime": 1786054228.81172,
+    "ast_hash": "1aa1d99c7c1175ffbe038e1edc1e6e23",
+    "semantic_hash": "1aa1d99c7c1175ffbe038e1edc1e6e23"
+  },
+  "webapp/src/api.ts": {
+    "mtime": 1786054228.81172,
+    "ast_hash": "b9673b7e4d79d330b877b041d7ae8c95",
+    "semantic_hash": "b9673b7e4d79d330b877b041d7ae8c95"
+  },
+  "webapp/src/components/AiSummaryCard.tsx": {
+    "mtime": 1786054228.81172,
+    "ast_hash": "aa47c747c74e1876fc37e78c35d42faf",
+    "semantic_hash": "aa47c747c74e1876fc37e78c35d42faf"
+  },
+  "webapp/src/components/DownloadReportButton.tsx": {
+    "mtime": 1786054228.813955,
+    "ast_hash": "d2670eff5b65c054318be1fe4a3759fa",
+    "semantic_hash": "d2670eff5b65c054318be1fe4a3759fa"
+  },
+  "webapp/src/components/HourlyActivityChart.tsx": {
+    "mtime": 1786054228.813955,
+    "ast_hash": "6fe855b3d01bdb8f5169e844098befe5",
+    "semantic_hash": "6fe855b3d01bdb8f5169e844098befe5"
+  },
+  "webapp/src/components/LocationMap.tsx": {
+    "mtime": 1786054228.813955,
+    "ast_hash": "e58b1bf5282f6b7cd50fb4217f049768",
+    "semantic_hash": "e58b1bf5282f6b7cd50fb4217f049768"
+  },
+  "webapp/src/components/PopulationNarrowingTable.tsx": {
+    "mtime": 1786054228.813955,
+    "ast_hash": "7d6c46637c6a5fe4c21685bc763970ef",
+    "semantic_hash": "7d6c46637c6a5fe4c21685bc763970ef"
+  },
+  "webapp/src/components/PopulationPictogram.tsx": {
+    "mtime": 1786054228.813955,
+    "ast_hash": "b16d440664d1f501b9466c95291263fa",
+    "semantic_hash": "b16d440664d1f501b9466c95291263fa"
+  },
+  "webapp/src/components/ScoreBar.tsx": {
+    "mtime": 1786054228.813955,
+    "ast_hash": "45350156aeeb6bc11b818e45cfd2a27c",
+    "semantic_hash": "45350156aeeb6bc11b818e45cfd2a27c"
+  },
+  "webapp/src/env.d.ts": {
+    "mtime": 1786054228.813955,
+    "ast_hash": "643932158c234c6b05a7a8bf32209c62",
+    "semantic_hash": "643932158c234c6b05a7a8bf32209c62"
+  },
+  "webapp/src/main.tsx": {
+    "mtime": 1786054228.813955,
+    "ast_hash": "dc5cc207a3b1cd2f8a0d3d58aa3b1f24",
+    "semantic_hash": "dc5cc207a3b1cd2f8a0d3d58aa3b1f24"
+  },
+  "webapp/src/pages/Dashboard.tsx": {
+    "mtime": 1786054228.813955,
+    "ast_hash": "8555e96ef2e42ef3793e2d5fc2006c50",
+    "semantic_hash": "8555e96ef2e42ef3793e2d5fc2006c50"
+  },
+  "webapp/src/pages/Landing.tsx": {
+    "mtime": 1786054228.8159475,
+    "ast_hash": "1f85d08ad5f31ea0edcc676101d89f18",
+    "semantic_hash": "1f85d08ad5f31ea0edcc676101d89f18"
+  },
+  "webapp/src/types.ts": {
+    "mtime": 1786054228.8159475,
+    "ast_hash": "f076a57e44b07dc7e8ee7057c8a46dbf",
+    "semantic_hash": "f076a57e44b07dc7e8ee7057c8a46dbf"
+  },
+  "webapp/src/utils/reportToJson.ts": {
+    "mtime": 1786054228.8159475,
+    "ast_hash": "aa4b0afaa426a4deb3af1d8f1851f5e4",
+    "semantic_hash": "aa4b0afaa426a4deb3af1d8f1851f5e4"
+  },
+  "webapp/test/e2e/steps/dashboard-auth-guard.steps.mjs": {
+    "mtime": 1786054228.8172114,
+    "ast_hash": "6021ec66fb48ca5cbeebfc4181808bca",
+    "semantic_hash": "6021ec66fb48ca5cbeebfc4181808bca"
+  },
+  "webapp/test/e2e/steps/landing.steps.mjs": {
+    "mtime": 1786054228.8178482,
+    "ast_hash": "79b15e0c7e01ee3f5d32880328fb906a",
+    "semantic_hash": "79b15e0c7e01ee3f5d32880328fb906a"
+  },
+  "webapp/test/e2e/support/setup.mjs": {
+    "mtime": 1786054228.8178482,
+    "ast_hash": "d33239d964a2fb291619340701e7c4ab",
+    "semantic_hash": "d33239d964a2fb291619340701e7c4ab"
+  },
+  "webapp/tsconfig.json": {
+    "mtime": 1786054228.8178482,
+    "ast_hash": "3ec78a286eb018dd08da2672f8781b00",
+    "semantic_hash": "3ec78a286eb018dd08da2672f8781b00"
+  },
+  "webapp/vite.config.ts": {
+    "mtime": 1786054228.8178482,
+    "ast_hash": "8bba84e574d9b28ad203183f9019897d",
+    "semantic_hash": "8bba84e574d9b28ad203183f9019897d"
+  }
+}
