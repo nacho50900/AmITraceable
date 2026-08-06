@@ -239,6 +239,21 @@ cp .env.example .env              # y rellenar credenciales
 uvicorn app.main:app --reload --port 3000
 ```
 
+**Si quieres geolocalización por imagen o análisis de contenido visual
+(Moondream2) funcionando en este venv**, hace falta un paso más -- lo de
+arriba, por sí solo, deja ambas funciones en "no disponible" de forma
+silenciosa (ver más abajo, "Alcance y limitaciones"): no falla con un
+error, simplemente esa parte del pipeline no aporta nada, así que es
+fácil no darse cuenta de que falta este paso.
+
+```bash
+pip install -r requirements-vision.txt
+```
+
+Con Docker esto ya viene resuelto por defecto (ver `WITH_GEOLOCATION` más
+abajo) -- este paso solo es necesario si ejecutas el backend directamente
+con `uvicorn`, como aquí arriba.
+
 En arranques posteriores, con el venv ya creado, basta con activar el
 entorno y lanzar uvicorn directamente.
 

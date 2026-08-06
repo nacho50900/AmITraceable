@@ -146,6 +146,28 @@ def _scene_analysis_available() -> bool:
 
 
 def _lazy_load():
+    """Carga Moondream2 en memoria (una vez por proceso).
+
+    BUG REAL encontrado en producción (no una precaución teórica): pasar
+    `device_map` como STRING suelto ("cpu"/"cuda") a `from_pretrained()`
+    revienta con `NotImplementedError: Cannot copy out of meta tensor; no
+    data!` -- SIEMPRE, en cualquier máquina, con las dependencias
+    correctamente instaladas (así se diagnosticó: con torch/transformers/
+    timm/einops/accelerate/pyvips todos presentes, el fallo seguía
+    ocurriendo en TODAS las fotos). Motivo: en cuanto `from_pretrained()`
+    recibe CUALQUIER valor de `device_map`, `transformers` activa
+    automáticamente la carga en "meta device" de `accelerate` (tensores
+    placeholder sin datos reales que se rellenan después vía dispatch) --
+    y el código de terceros de Moondream2 (`trust_remote_code=True`, ver
+    docstring del módulo) no está escrito para gestionar esa ruta
+    correctamente. La documentación oficial del modelo NUNCA pasa un
+    string: para GPU usa un DICCIONARIO (`device_map={"": "cuda"}`, con
+    las llaves vacías, no un mapeo por capa) y para CPU simplemente NO
+    pasa `device_map` en absoluto -- así el modelo se carga con tensores
+    reales desde el principio, sin pasar por meta device, igual que ya
+    hace `AutoModel.from_pretrained(_MODEL_NAME).to(device)` con DINOv2 en
+    `geolocation.py` (por eso ese modelo nunca tuvo este problema: nunca
+    usó `device_map`)."""
     global _model
     if _model is not None:
         return
@@ -153,13 +175,12 @@ def _lazy_load():
     import torch
     from transformers import AutoModelForCausalLM
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    _model = AutoModelForCausalLM.from_pretrained(
-        _MODEL_NAME,
-        revision=_MODEL_REVISION,
-        trust_remote_code=True,
-        device_map=device,
-    )
+    kwargs = {"revision": _MODEL_REVISION, "trust_remote_code": True}
+    if torch.cuda.is_available():
+        kwargs["device_map"] = {"": "cuda"}
+    # En CPU no se pasa `device_map` -- ver docstring de esta función.
+
+    _model = AutoModelForCausalLM.from_pretrained(_MODEL_NAME, **kwargs)
 
 
 def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | None]:
@@ -220,6 +241,14 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
             type(exc).__name__,
             exc,
         )
+        # NOTA histórica: un `NotImplementedError` con el mensaje "Cannot
+        # copy out of meta tensor" aquí fue en su momento un bug real de
+        # este módulo (device_map pasado como string a from_pretrained,
+        # ver `_lazy_load`), no un problema de entorno -- se afectaba al
+        # 100% de las fotos, en cualquier máquina, con las dependencias
+        # bien instaladas. Ya está corregido; si reaparece tras cambiar
+        # `_MODEL_REVISION` o la versión de `transformers`/`accelerate`,
+        # revisar primero cómo se está pasando `device_map`.
         return [], False, None
 
     return _parse_inferences(answer), _parse_pareja(answer), answer.strip()
