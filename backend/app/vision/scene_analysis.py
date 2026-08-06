@@ -176,6 +176,21 @@ def _lazy_load():
     from transformers import AutoModelForCausalLM
 
     kwargs = {"revision": _MODEL_REVISION, "trust_remote_code": True}
+    # torch_dtype=bfloat16 (mismo dtype que recomienda la ficha oficial del
+    # modelo en HuggingFace, ahí pensado para GPU -- aquí se usa también en
+    # CPU por la misma razón, memoria): 1.8B parámetros en float32 (el
+    # default de transformers si no se especifica dtype) son ~7,2 GB SOLO
+    # de pesos, antes de sumar DINOv2, spaCy, FastAPI, el resto del
+    # contenedor y el propio sistema operativo -- en una máquina con poca
+    # RAM (Docker Desktop/WSL2 en Windows reparte solo una parte del total
+    # a la VM) eso basta para tirarlo todo a swap y que el proceso parezca
+    # congelado en vez de fallar con un error claro (así se diagnosticó:
+    # el pipeline se quedaba parado justo al esperar esta carga en segundo
+    # plano, sin ningún error en el log -- sencillamente no había memoria
+    # libre para completarla en un tiempo razonable). En bfloat16 son
+    # ~3,6 GB -- la mitad, y suficiente para razonar sobre una foto, que no
+    # necesita la precisión completa de fp32.
+    kwargs["torch_dtype"] = torch.bfloat16
     if torch.cuda.is_available():
         kwargs["device_map"] = {"": "cuda"}
     # En CPU no se pasa `device_map` -- ver docstring de esta función.
