@@ -29,6 +29,7 @@ campo) -- pero la estimación sigue siendo información real y se sigue
 mostrando en el mapa con su confianza real, no se oculta.
 """
 import asyncio
+import logging
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,6 +39,8 @@ from app.models.schemas import InferredAttribute
 from app.vision.scene_analysis import analyze_image_content
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 _INDEX_DIR = Path(__file__).parent.parent.parent / "data" / "osv5m_spain"
 _MODEL_NAME = "facebook/dinov2-small"
@@ -58,6 +61,17 @@ _MODEL_NAME = "facebook/dinov2-small"
 # práctica resulta demasiado (o poco) permisivo.
 _MAX_NEIGHBOR_SPREAD_KM = 300.0
 _MIN_NEIGHBORS_WITH_COORDS_FOR_SPREAD_CHECK = 3
+
+# Tiempo máximo que se deja a Moondream2 (análisis de CONTENIDO visual,
+# app/vision/scene_analysis.py) por foto antes de rendirse y seguir sin
+# descripción -- ver docstring de `_maybe_analyze_content` en
+# estimate_locations_for_posts() sobre por qué hace falta un límite
+# explícito (visto en producción: reintentos de red de huggingface_hub de
+# ~10s cada uno, que sin este límite bloqueaban también la geolocalización
+# -- DINOv2 -- de esa misma foto). A nivel de módulo (no dentro de la
+# función) para que sea fácil de ajustar en un test o, si hiciera falta,
+# desde fuera.
+_SCENE_ANALYSIS_TIMEOUT_SECONDS = 30
 
 # Carga perezosa: el modelo/índice solo se cargan la primera vez que se usan,
 # para no penalizar el arranque de la app cuando este módulo no se necesita.
@@ -431,6 +445,52 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
             except Exception:
                 return None  # imagen no descargable/decodificable: se omite, no se aborta el análisis
 
+    # Tiempo máximo que se deja a Moondream2 por foto antes de rendirse y
+    # seguir sin descripción -- ver docstring de `_maybe_analyze_content`
+    # más abajo sobre por qué hace falta un límite explícito.
+    async def _maybe_analyze_content(image):
+        """Envoltorio sobre `analyze_image_content` que respeta
+        `settings.enable_scene_analysis` (ver docstring en config.py --
+        desactivado por defecto, Moondream2 en CPU no es fiable
+        actualmente). Con el interruptor desactivado, ni siquiera se
+        intenta cargar el modelo -- se devuelve el mismo resultado
+        "sin nada que aportar" que ya usa `analyze_image_content` cuando
+        el módulo no está disponible en absoluto, así que el resto del
+        pipeline no necesita distinguir entre "desactivado a propósito" y
+        "no instalado".
+
+        DOS bugs reales corregidos aquí (no precauciones teóricas):
+        1. `analyze_image_content` es una función SÍNCRONA y puede
+           bloquear mucho tiempo (carga del modelo, generación de texto, o
+           -- visto en producción -- reintentos de red de hasta ~10s cada
+           uno si `huggingface_hub` necesita comprobar la caché). Llamarla
+           directamente aquí (sin `asyncio.to_thread`) bloquea el propio
+           event loop del proceso durante ese rato, no solo esta tarea.
+        2. Como esta llamada corre en `asyncio.gather` junto a la de
+           DINOv2 (ver `_process_photo` más abajo), `asyncio.gather`
+           espera a que TERMINEN LAS DOS antes de devolver nada -- así que
+           si Moondream2 se queda colgado, el resultado de DINOv2 para esa
+           MISMA foto (que puede llevar rato ya calculado) se queda
+           esperando sin necesidad. `asyncio.wait_for` con un tope pone
+           coto a esto: si Moondream2 no termina a tiempo, esta foto se
+           degrada a "sin descripción" (mismo resultado que si el módulo
+           no estuviera disponible) y el resto del pipeline -- incluida la
+           geolocalización de esa misma foto -- sigue sin más demora."""
+        if not settings.enable_scene_analysis:
+            return [], False, None
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(analyze_image_content, image),
+                timeout=_SCENE_ANALYSIS_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            logger.warning(
+                "Análisis de contenido visual descartado para una foto: "
+                "superó los %ss (ver _SCENE_ANALYSIS_TIMEOUT_SECONDS)",
+                _SCENE_ANALYSIS_TIMEOUT_SECONDS,
+            )
+            return [], False, None
+
     async def _process_photo(client, download_semaphore, analysis_semaphore, media_url):
         """Descarga UNA foto y, si se pudo, la analiza con los dos modelos.
         Devuelve (image_or_None, estimate_or_None, scene_inferences,
@@ -453,7 +513,7 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
         async with analysis_semaphore:
             estimate, (scene_inferences, indicio_pareja, description) = await asyncio.gather(
                 asyncio.to_thread(estimate_location_from_image, image),
-                asyncio.to_thread(analyze_image_content, image),
+                _maybe_analyze_content(image),
             )
         # `image` sale de scope tras este bloque y se descarta (nunca se escribe a disco)
         return image, estimate, scene_inferences, indicio_pareja, description

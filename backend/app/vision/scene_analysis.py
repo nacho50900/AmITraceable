@@ -148,70 +148,84 @@ def _scene_analysis_available() -> bool:
 def _lazy_load():
     """Carga Moondream2 en memoria (una vez por proceso).
 
-    BUG REAL nº1, encontrado en producción (no una precaución teórica):
-    pasar `device_map` como STRING suelto ("cpu"/"cuda") a
-    `from_pretrained()` revienta con `NotImplementedError: Cannot copy out
-    of meta tensor; no data!` -- SIEMPRE, en cualquier máquina, con las
-    dependencias correctamente instaladas.
+    Historial de bugs reales encontrados en producción con este modelo (no
+    precauciones teóricas -- los cuatro, en orden, fueron intentos
+    fallidos de solucionar el mismo síntoma: "Sin descripción visual
+    disponible" en TODAS las fotos):
 
-    BUG REAL nº2, encontrado justo AL CORREGIR el nº1: especificar
-    `torch_dtype` (para ahorrar memoria, ver más abajo) revienta de forma
-    distinta -- `RuntimeError: Tensor on device cpu is not on the expected
-    device meta!` -- aunque ya no se pase `device_map` en absoluto.
+    1. `device_map` como STRING suelto ("cpu"/"cuda") a `from_pretrained()`
+       -> `NotImplementedError: Cannot copy out of meta tensor; no data!`
+    2. Quitar `device_map` pero añadir `torch_dtype` -> `RuntimeError:
+       Tensor on device cpu is not on the expected device meta!`
+    3. Forzar `low_cpu_mem_usage=False` junto con `torch_dtype` -> NO
+       arregla nada, el error nº2 persiste igual.
+    4. Quitar `torch_dtype` de `from_pretrained()` y hacer
+       `.to(dtype=torch.bfloat16)` DESPUÉS, sobre el modelo ya cargado ->
+       vuelve el error nº2 ("Tensor on device cpu is not on the expected
+       device meta!"), esta vez disparado por el propio `.to()` posterior,
+       no por `from_pretrained()`.
 
-    Ambos bugs comparten la misma causa de fondo: en cuanto
-    `from_pretrained()` recibe CUALQUIER valor de `device_map` O de
-    `torch_dtype`, `transformers` activa automáticamente
-    `low_cpu_mem_usage=True` por su cuenta, que carga el modelo en "meta
-    device" de `accelerate` (tensores placeholder sin datos reales,
-    rellenados después vía dispatch/asignación directa) -- y el código de
-    terceros de Moondream2 (`trust_remote_code=True`, ver docstring del
-    módulo) no está escrito para gestionar esa ruta correctamente en
-    ninguna de sus dos variantes. Mismo patrón ya reportado para otros
-    modelos con código de terceros (buscar "Disable meta device for custom
-    model" en foros/repos de HuggingFace -- no es una rareza de Moondream2
-    en particular, es un choque conocido entre `low_cpu_mem_usage=True` y
-    modelos con `trust_remote_code=True` que no lo soportan).
+    Los cuatro intentos tocaban ALGO relacionado con dispositivo/dtype en
+    algún punto de la carga. Investigando el código fuente real de este
+    modelo (huggingface.co/vikhyatk/moondream2/blob/main/moondream.py) se
+    confirma que el modelo NO usa meta device en su propio código (es un
+    nn.Module normal, con pesos reales desde su propio __init__) -- así
+    que el meta device tiene que estar viniendo de fuera, de cómo
+    `transformers`/`accelerate` inicializan clases con
+    `trust_remote_code=True` en general. Esto coincide con un patrón ya
+    documentado por los propios mantenedores de Moondream2 (commit "Call
+    post_init() en HfMoondream for Transformers 5 compatibility" en su
+    sucesor Moondream 3) y con un issue público de compatibilidad
+    (huggingface/transformers#31782, "Moondream breaks on transformers
+    4.42+") -- el patrón de fondo es: la clase wrapper de HuggingFace de
+    este modelo (`HfMoondream`) se escribió y probó contra una versión de
+    `transformers` de la época de cada revisión, y versiones bastante más
+    nuevas cambian cómo `PreTrainedModel` inicializa/coloca los parámetros
+    internamente, rompiendo la compatibilidad con independencia de qué
+    kwargs se le pasen desde nuestro lado.
 
-    La solución NO es evitar `torch_dtype` (se necesita para el ahorro de
-    memoria) ni resignarse a no usar `device_map` en GPU -- es forzar
-    `low_cpu_mem_usage=False` explícitamente, que desactiva la ruta de
-    meta device por completo sin importar qué otros parámetros se pasen:
-    el modelo se carga con tensores reales desde el principio, igual que
-    ya hace `AutoModel.from_pretrained(_MODEL_NAME).to(device)` con DINOv2
-    en `geolocation.py` (por eso ese modelo nunca tuvo ninguno de los dos
-    bugs: nunca entra en la ruta de meta device)."""
+    Por eso el intento nº5 (el actual) no toca NINGÚN kwarg de dispositivo/
+    dtype -- es el ejemplo oficial exacto de la ficha del modelo para esta
+    revisión, literal, con CERO añadidos nuestros -- y en su lugar ataca
+    la causa por el otro lado: fijar `transformers` bastante por debajo de
+    donde empiezan a aparecer estos problemas (ver requirements-vision.txt).
+    Si esto tampoco funciona, el siguiente paso ya no es un kwarg distinto
+    -- es probar una revisión distinta del modelo (`_MODEL_REVISION` más
+    abajo), no seguir iterando aquí."""
     global _model
     if _model is not None:
         return
 
-    import torch
     from transformers import AutoModelForCausalLM
 
-    kwargs = {
-        "revision": _MODEL_REVISION,
-        "trust_remote_code": True,
-        # Ver bug nº2 en el docstring de esta función -- sin esto,
-        # `torch_dtype` de aquí abajo por sí solo ya rompe la carga.
-        "low_cpu_mem_usage": False,
-    }
-    # torch_dtype=bfloat16 (mismo dtype que recomienda la ficha oficial del
-    # modelo en HuggingFace, ahí pensado para GPU -- aquí se usa también en
-    # CPU por la misma razón, memoria): 1.8B parámetros en float32 (el
-    # default de transformers si no se especifica dtype) son ~7,2 GB SOLO
-    # de pesos, antes de sumar DINOv2, spaCy, FastAPI, el resto del
-    # contenedor y el propio sistema operativo -- en una máquina con poca
-    # RAM (Docker Desktop/WSL2 en Windows reparte solo una parte del total
-    # a la VM) eso basta para tirarlo todo a swap y que el proceso parezca
-    # congelado en vez de fallar con un error claro. En bfloat16 son
-    # ~3,6 GB -- la mitad, y suficiente para razonar sobre una foto, que no
-    # necesita la precisión completa de fp32.
-    kwargs["torch_dtype"] = torch.bfloat16
-    if torch.cuda.is_available():
-        kwargs["device_map"] = {"": "cuda"}
-    # En CPU no se pasa `device_map` -- ver bug nº1 en el docstring de esta función.
-
-    _model = AutoModelForCausalLM.from_pretrained(_MODEL_NAME, **kwargs)
+    # Deliberadamente SIN device_map, SIN torch_dtype, SIN low_cpu_mem_usage,
+    # SIN .to() posterior -- exactamente el ejemplo oficial para CPU de
+    # huggingface.co/vikhyatk/moondream2 en la revisión _MODEL_REVISION
+    # (ahí el device_map={"": "cuda"} aparece comentado con "# Uncomment
+    # to run on GPU", es decir: para CPU, no se pasa nada de esto). Ver
+    # docstring de esta función para el porqué de este cambio de enfoque.
+    #
+    # local_files_only=True primero: aunque `revision` esté fijada a un
+    # commit concreto (no "main"), `from_pretrained()` sigue haciendo por
+    # defecto una petición HEAD a huggingface.co para verificar la caché
+    # local -- innecesaria si ya está descargado y la revisión es fija, y
+    # un punto de fallo real si la conexión es lenta/inestable (visto en
+    # producción: `ReadTimeoutError` de 10s reintentando 5 veces,
+    # bloqueando esta foto -- y por tanto, indirectamente, también DINOv2
+    # para esa misma foto, ver `_maybe_analyze_content` en geolocation.py
+    # -- durante minuto y medio o más antes de rendirse). Si ya está en
+    # caché (backend/data/hf_cache/, ver docker-compose.yml), esto la usa
+    # directamente sin ningún acceso a red. Si NO está en caché todavía
+    # (primera vez), `local_files_only=True` falla rápido y limpio, y se
+    # reintenta sin él para permitir la descarga inicial.
+    try:
+        _model = AutoModelForCausalLM.from_pretrained(
+            _MODEL_NAME, revision=_MODEL_REVISION, trust_remote_code=True, local_files_only=True
+        )
+    except Exception:
+        _model = AutoModelForCausalLM.from_pretrained(
+            _MODEL_NAME, revision=_MODEL_REVISION, trust_remote_code=True
+        )
 
 
 def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | None]:

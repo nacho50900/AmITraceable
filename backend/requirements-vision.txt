@@ -15,27 +15,59 @@
 # GPU passthrough en Docker.
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch>=2.2,<3.0
-transformers>=4.40,<5.0
+# Fijado a la ventana de versiones de transformers/accelerate que existía
+# cuando se publicó la revisión de Moondream2 que usamos (_MODEL_REVISION =
+# "2025-06-21" en scene_analysis.py, transformers 4.53.0 salió el 26 de
+# junio de 2025, apenas 5 días después). Un rango abierto (`<5.0`) coge la
+# ÚLTIMA versión 4.x disponible en el momento del build, que a día de hoy
+# puede ser más de un año posterior a esa revisión.
+#
+# OJO -- esto es la mejor aproximación posible sin poder ejecutar el
+# modelo real para verificarlo (revisar el historial de
+# app/vision/scene_analysis.py: hubo varios intentos previos de arreglar
+# esto solo tocando los kwargs de `from_pretrained()`, todos fallidos, con
+# variantes del mismo error de "meta tensor"). Hay precedente conocido de
+# que este modelo concreto rompe compatibilidad con versiones de
+# `transformers` más nuevas que las usadas al publicar cada revisión
+# (huggingface/transformers#31782, "Moondream breaks on transformers
+# 4.42+", para una revisión distinta y más antigua; y un commit de los
+# propios mantenedores en Moondream 3, sucesor de este modelo, titulado
+# "Call post_init() in HfMoondream for Transformers 5 compatibility" --
+# mismo patrón de fondo, versión más reciente). Si con este rango el error
+# de "meta tensor" persiste, el siguiente paso YA NO es afinar más este
+# pin -- es probar con `_MODEL_REVISION` apuntando a una revisión más
+# antigua del modelo en scene_analysis.py (p. ej. "2025-01-09"), cuyo
+# fichero interno de integración con HuggingFace (`hf_moondream.py`, no
+# versionado por separado, va empaquetado con cada revisión) puede no
+# tener el mismo problema.
+transformers>=4.48,<4.54
 faiss-cpu>=1.8,<2.0
+
+# accelerate: mismo razonamiento que transformers arriba -- es la propia
+# librería que implementa la inicialización en "meta device" que ha dado
+# todos los problemas (ver historial en scene_analysis.py), así que su
+# versión importa tanto como la de transformers. Ventana aproximada para
+# mediados de 2025 -- accelerate llegó a la versión 1.0 en septiembre de
+# 2024, así que hacia junio de 2025 estaría en algún punto de la serie
+# 1.x. Aproximación de mejor esfuerzo, igual que arriba.
+accelerate>=1.0,<1.8
 
 # Dependencias específicas de Moondream2 (app/vision/scene_analysis.py,
 # análisis de CONTENIDO visual -- aficiones/actividades/señales de pareja
 # en cada foto, distinto del embedding de similitud de arriba). `timm` y
 # `einops` los pide directamente el código del propio modelo
-# (trust_remote_code=True). `accelerate` lo exige `transformers` en
-# cuanto se pasa `device_map=...` a `from_pretrained()` (ver _lazy_load
-# en scene_analysis.py) -- sin él, from_pretrained() lanza ImportError
-# aunque torch/transformers estén instalados. `pyvips` es el binding
-# Python que importa el propio modelo; por sí solo requeriría tener
-# libvips instalado a nivel de sistema operativo, así que se instala
-# junto a `pyvips-binary` (versión estática, precompilada) para evitar
-# esa dependencia del SO -- deben declararse los DOS paquetes, uno no
-# sustituye al otro. Estas cuatro dependencias las exigen revisiones
-# recientes del modelo -- si al fijar `_MODEL_REVISION` en
-# scene_analysis.py se cambia a una revisión más antigua, puede que
-# alguna ya no haga falta; verificar el error exacto de carga si cambia.
+# (trust_remote_code=True). `pyvips` es el binding Python que importa el
+# propio modelo; por sí solo requeriría tener libvips instalado a nivel de
+# sistema operativo, así que se instala junto a `pyvips-binary` (versión
+# estática, precompilada) para evitar esa dependencia del SO -- deben
+# declararse los DOS paquetes, uno no sustituye al otro. (`accelerate` ya
+# está fijado más arriba, junto a `transformers` -- misma razón: su
+# versión importa tanto como la de transformers para este modelo en
+# concreto, ver el comentario de ahí arriba.) Estas dependencias las exige
+# la revisión reciente del modelo fijada en `_MODEL_REVISION` -- si se
+# cambia a una revisión más antigua, puede que alguna ya no haga falta;
+# verificar el error exacto de carga si cambia.
 timm>=1.0,<2.0
 einops>=0.7,<1.0
-accelerate>=0.32,<1.0
 pyvips-binary>=8.14
 pyvips>=2.2,<3.0

@@ -390,6 +390,10 @@ class TestEstimateLocationsForPosts:
         from app.models.schemas import InferredAttribute
 
         monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        # El análisis de contenido visual (Moondream2) está desactivado por
+        # defecto (ver Settings.enable_scene_analysis) -- este test prueba
+        # justo esa integración, así que lo activa explícitamente.
+        monkeypatch.setattr(geolocation.settings, "enable_scene_analysis", True)
         monkeypatch.setattr(
             geolocation,
             "estimate_location_from_image",
@@ -452,6 +456,95 @@ class TestEstimateLocationsForPosts:
         assert outcome.visual_inferences == []
         assert outcome.partner_signal_permalinks == set()
         assert outcome.visual_descriptions == {}
+
+    @pytest.mark.asyncio
+    async def test_scene_analysis_disabled_by_default_never_calls_analyze_image_content(
+        self, monkeypatch, respx_mock
+    ):
+        """Regresión directa del interruptor `Settings.enable_scene_analysis`
+        (por defecto False, ver config.py): sin activarlo, la foto se
+        descarga y se geolocaliza igual (DINOv2 no se ve afectado), pero
+        `analyze_image_content` (Moondream2) no debe ni llegar a
+        invocarse -- así se garantiza que el modelo no se intenta cargar
+        en absoluto mientras el interruptor esté desactivado."""
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        monkeypatch.setattr(geolocation, "estimate_location_from_image", lambda image, k=15: None)
+
+        calls: list[object] = []
+        monkeypatch.setattr(
+            geolocation, "analyze_image_content", lambda image: calls.append(image) or ([], False, None)
+        )
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        outcome = await geolocation.estimate_locations_for_posts(posts)
+
+        assert calls == []  # analyze_image_content nunca se llamó
+        assert outcome.visual_inferences == []
+        assert outcome.visual_descriptions == {}
+
+    @pytest.mark.asyncio
+    async def test_scene_analysis_timeout_does_not_block_geolocation_of_same_photo(self, monkeypatch, respx_mock):
+        """Regresión directa del bug de acoplamiento: si Moondream2 se
+        queda colgado (en producción, reintentos de red de
+        huggingface_hub de varios segundos cada uno), la geolocalización
+        de ESA MISMA foto (DINOv2, ya calculada) no debe quedarse
+        esperando indefinidamente -- `asyncio.wait_for` debe cortar tras
+        `_SCENE_ANALYSIS_TIMEOUT_SECONDS` y degradar a "sin descripción",
+        dejando que el resto del resultado de la foto salga con
+        normalidad."""
+        import time
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        monkeypatch.setattr(geolocation.settings, "enable_scene_analysis", True)
+        monkeypatch.setattr(geolocation, "_SCENE_ANALYSIS_TIMEOUT_SECONDS", 0.05)
+
+        monkeypatch.setattr(
+            geolocation, "estimate_location_from_image",
+            lambda image, k=15: geolocation.ImageLocationEstimate(
+                province="Madrid", confidence=0.9, k_neighbors=15, mean_similarity=0.8
+            ),
+        )
+
+        def _hangs_forever(image):
+            time.sleep(1)  # bastante más que el timeout de 0.05s de este test
+            return [], False, "nunca debería llegar a esto"
+
+        monkeypatch.setattr(geolocation, "analyze_image_content", _hangs_forever)
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        start = time.monotonic()
+        outcome = await geolocation.estimate_locations_for_posts(posts)
+        elapsed = time.monotonic() - start
+
+        # La foto sale geolocalizada con normalidad, sin descripción de contenido
+        assert len(outcome.results) == 1
+        assert outcome.results[0][1].province == "Madrid"
+        assert outcome.visual_descriptions == {}
+        # Y sobre todo: no se esperó a los 5s del hilo colgado
+        assert elapsed < 1.0
 
     @pytest.mark.asyncio
     async def test_no_description_when_scene_analysis_returns_none(self, monkeypatch, respx_mock):
