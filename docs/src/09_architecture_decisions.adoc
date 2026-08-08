@@ -524,3 +524,97 @@ sin una señal que, en la práctica, sí podría acotar algo más la
 población estimada -- aceptado como límite de alcance, igual que la
 correlación entre plataformas en ADR-1.
 
+=== ADR-19: bfloat16 inutilizable en CPU sin aceleración por hardware -- float32 forzado, cuantización descartada
+
+*Contexto*: Moondream2 (ADR-16) se descarga con el dtype con el que
+Hugging Face publica sus pesos, `bfloat16`, sin que el código de este
+proyecto pase ningún `dtype` explícito a `from_pretrained()` (ver
+historial de bugs nº1-4 en el docstring de `_lazy_load()` en
+`scene_analysis.py`: cualquier kwarg de dispositivo/dtype disparaba un
+error de "meta tensor" propio de cómo `accelerate` inicializa modelos
+con `trust_remote_code=True`). En una GPU con tensor cores esto es lo
+correcto. En CPU de consumo (sin instrucciones AVX-512 BF16, que solo
+traen CPUs de servidor recientes) no hay aceleración de hardware para
+`bfloat16` y PyTorch lo emula por software -- medido en producción:
+*más de 3 horas* para analizar una sola foto en un portátil de 8GB de
+RAM sin GPU dedicada, frente a segundos en `float32` sobre la misma CPU.
+
+*Alternativas consideradas*, todas probadas con evidencia real, no solo
+en teoría, antes de llegar a la solución final:
+
+- *Cuantización dinámica int8 de PyTorch* (`torch.quantization.quantize_dynamic`):
+  Moondream2 no usa `nn.Linear` para casi ninguna capa interna -- la
+  atención y el MLP usan una `@dataclass` propia del modelo
+  (`LinearWeights`, ver `layers.py` del código remoto) con una función
+  `linear()` que llama a `F.linear()` a mano sobre los tensores sueltos,
+  en vez de invocar el módulo de la forma estándar de PyTorch
+  (`modulo(x)`). `quantize_dynamic` solo sabe sustituir instancias reales
+  de `nn.Linear`, así que solo llega a tocar `patch_emb` (la única capa
+  de ese tipo) -- el resto de la red, que es la inmensa mayoría de los
+  parámetros, queda intacta. Descartada: no aporta beneficio real de
+  memoria ni velocidad proporcional al riesgo de tocar internals del
+  modelo.
+- *Cuantización int4 nativa del propio modelo* (clase `QuantizedLinear`
+  en el código remoto, vía `torchao.quantization.int4_weight_only`):
+  termina su rutina de carga con `torch.cuda.empty_cache()` -- pensada
+  explícitamente para GPU/CUDA. Descartada para despliegue en CPU.
+- *float32 completo*: correcto y rápido en CPU (sin emulación), pero
+  ronda 1.9B parámetros × 4 bytes ≈ 7.6GB solo para los pesos del
+  modelo -- inviable en una máquina con 8GB de RAM totales junto al
+  resto del stack (Grafana, el propio backend, DINOv2). *Aceptada* como
+  la vía correcta en cuanto a corrección numérica, condicionada a tener
+  suficiente RAM disponible (ver Consecuencias).
+
+*Decisión*: cargar siempre en `bfloat16` primero (sigue siendo la forma
+oficial y estable de cargar el modelo, ver ADR-16), y convertir después
+a `float32` parámetro a parámetro (`param.data = param.data.float()`),
+nunca con `_model.to(dtype=torch.float32)` sobre el módulo completo --
+esa llamada es la que dispara el mismo error de "meta tensor" que ya
+bloqueó los intentos nº2 y nº4 del historial de `_lazy_load()`. Esta
+conversión se hace *solo si no hay GPU disponible*
+(`_upcast_to_float32_if_cpu()` en `scene_analysis.py`): en GPU,
+`bfloat16` ya está acelerado por hardware y forzar `float32` ahí
+duplicaría el uso de VRAM sin ninguna ganancia.
+
+Además, como la conversión por `parameters()`/`buffers()` no alcanza a
+las capas basadas en `LinearWeights`/`LayerNormWeights` (no están
+registradas como tal en el árbol de módulos de PyTorch, ver docstring de
+`_upcast_to_float32_if_cpu()`), se añade un recorrido adicional buscando
+cualquier `@dataclass` colgada como atributo de un submódulo con campos
+`torch.Tensor` en `bfloat16`. Y como la imagen de entrada llega en
+`bfloat16` a fuego (`prepare_crops()` en el código remoto lo fija sin
+mirar el dtype del modelo, y parchear esa función por nombre no tuvo
+efecto en las pruebas realizadas, por una razón no identificada), se
+intercepta directamente el `forward` del submódulo `patch_emb`
+(localizado por búsqueda en `named_modules()`, no por ruta de atributo
+fija) para forzar el cast justo antes de usarlo.
+
+*Justificación*: entre las alternativas investigadas, `float32` es la
+única que preserva la arquitectura del modelo sin parches quirúrgicos
+en capas internas (a diferencia de la cuantización int8, que solo cubre
+una capa de cientos) y sin depender de hardware que este proyecto no
+puede asumir que el usuario tenga (a diferencia del int4 nativo, atado a
+CUDA). El coste de memoria es real y explícito, no oculto: por eso
+`enable_scene_analysis` (ver `config.py`) sigue desactivado por defecto,
+en vez de asumir que toda máquina donde se despliegue este proyecto
+tiene RAM de sobra.
+
+*Consecuencias*: (+) cuando hay RAM suficiente (~10-12GB libres o más,
+o cualquier GPU), el análisis de contenido pasa de horas a segundos por
+foto, sin tocar la calidad de las respuestas del modelo (no es una
+aproximación con pérdida como la cuantización, es la misma precisión
+numérica con la que se entrenó); (+) la degradación sigue siendo
+elegante si no se activa: `_SCENE_ANALYSIS_TIMEOUT_SECONDS` (ver
+`geolocation.py`) sigue cortando a los 30s si algo va mal, sin bloquear
+la geolocalización de la misma foto; (-) el análisis de contenido sigue
+sin ser viable en portátiles modestos (8GB de RAM, sin GPU) -- limitación
+de hardware real, no de este proyecto, documentada aquí en vez de
+perseguida indefinidamente con más parches; (-) esta solución no se ha
+podido validar en un análisis completo de principio a fin en ninguna
+máquina real durante el desarrollo (el único entorno de prueba
+disponible se quedó sin memoria antes de completar una inferencia) --
+las piezas por separado (carga en float32, `patch_emb` con entrada
+correcta) sí se verificaron una a una, pero queda pendiente una prueba
+end-to-end en una máquina con RAM suficiente antes de dar esto por
+completamente cerrado.
+

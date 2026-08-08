@@ -301,6 +301,7 @@ Ver `backend/.env.example` para la lista completa comentada. Resumen:
 | `FRONTEND_ORIGIN` | No | Déjala vacía si usas Docker: se deriva sola del Host. Fíjala (p. ej. `http://localhost:5173`) solo si sirves frontend y backend en puertos distintos sin Docker |
 | `MISTRAL_API_KEY` | No | Tier gratuito de [Mistral AI](https://console.mistral.ai). Sin ella, la sección "Analizar con IA" del dashboard indica que no está disponible, sin afectar al resto |
 | `MISTRAL_MODEL` | No | Por defecto `mistral-small-latest` |
+| `ENABLE_SCENE_ANALYSIS` | No | `false` por defecto. Activa el análisis de **contenido** visual con Moondream2 (descripción de escena por foto). Afecta exclusivamente a esto: la geolocalización por similitud visual (DINOv2) no lee esta variable y sigue funcionando igual, esté esto activado o no -- probado explícitamente en `test_geolocation.py`. Para que Moondream2 pueda funcionar (con esta variable en `true`) hace falta además `WITH_GEOLOCATION=true` en el build de Docker (mismo build-arg que ya usa DINOv2 para instalar torch/faiss/transformers -- decide si las librerías están instaladas, no si Moondream2 se usa). **Antes de activarla, ver ADR-19 en `docs/`**: en CPU sin GPU necesita ~7.6GB de RAM libres solo para el modelo |
 
 **Nota sobre Instagram y HTTPS en local:** la API de Instagram (Business
 Login) exige que `redirect_uri` sea HTTPS, incluso en desarrollo. Para

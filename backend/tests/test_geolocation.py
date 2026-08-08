@@ -463,14 +463,20 @@ class TestEstimateLocationsForPosts:
     ):
         """Regresión directa del interruptor `Settings.enable_scene_analysis`
         (por defecto False, ver config.py): sin activarlo, la foto se
-        descarga y se geolocaliza igual (DINOv2 no se ve afectado), pero
-        `analyze_image_content` (Moondream2) no debe ni llegar a
-        invocarse -- así se garantiza que el modelo no se intenta cargar
-        en absoluto mientras el interruptor esté desactivado."""
+        descarga y se geolocaliza igual -- se verifica explícitamente que
+        `estimate_location_from_image` (DINOv2) SÍ se invoca, no solo que
+        no falla -- mientras que `analyze_image_content` (Moondream2) no
+        debe ni llegar a invocarse. Así queda probado en ambos sentidos
+        que el interruptor solo afecta a Moondream2, nunca a DINOv2."""
         import httpx
 
         monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
-        monkeypatch.setattr(geolocation, "estimate_location_from_image", lambda image, k=15: None)
+        dinov2_calls: list[object] = []
+        monkeypatch.setattr(
+            geolocation,
+            "estimate_location_from_image",
+            lambda image, k=15: dinov2_calls.append(image) or None,
+        )
 
         calls: list[object] = []
         monkeypatch.setattr(
@@ -490,7 +496,8 @@ class TestEstimateLocationsForPosts:
 
         outcome = await geolocation.estimate_locations_for_posts(posts)
 
-        assert calls == []  # analyze_image_content nunca se llamó
+        assert calls == []  # analyze_image_content (Moondream2) nunca se llamó
+        assert len(dinov2_calls) == 1  # estimate_location_from_image (DINOv2) SÍ se llamó, sin verse afectado
         assert outcome.visual_inferences == []
         assert outcome.visual_descriptions == {}
 

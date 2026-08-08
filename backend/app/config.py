@@ -63,5 +63,14 @@ class Settings(BaseSettings):
     # núcleos puede subirse.
     photo_analysis_concurrency: int = 2
 
+    # Interruptor para el análisis de CONTENIDO visual con Moondream2 (ver
+    # app/vision/scene_analysis.py y `_maybe_analyze_content` en
+    # geolocation.py). Desactivado por defecto: en máquinas con poca RAM
+    # (menos de ~10-12GB libres) el modelo en float32 no cabe en memoria
+    # junto al resto de servicios -- ver ADR correspondiente en docs/.
+    # La geolocalización (DINOv2) no depende de esto y sigue funcionando
+    # igual, activado o no.
+    enable_scene_analysis: bool = False
+
 
 settings = Settings()

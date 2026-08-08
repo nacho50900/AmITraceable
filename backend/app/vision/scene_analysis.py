@@ -191,7 +191,43 @@ def _lazy_load():
     donde empiezan a aparecer estos problemas (ver requirements-vision.txt).
     Si esto tampoco funciona, el siguiente paso ya no es un kwarg distinto
     -- es probar una revisión distinta del modelo (`_MODEL_REVISION` más
-    abajo), no seguir iterando aquí."""
+    abajo), no seguir iterando aquí.
+
+    Intento nº6, AÑADIDO DESPUÉS de que el nº5 cargase correctamente pero
+    dejase el modelo inutilizable en la práctica en CPU: sin dtype/device
+    explícitos, `from_pretrained()` carga los pesos con el dtype con el
+    que están guardados en HuggingFace, que para este modelo es
+    `bfloat16`. En GPU eso es lo correcto (los tensor cores modernos lo
+    aceleran de forma nativa). En CPU de consumo -- sin instrucciones
+    AVX-512 BF16, que solo traen CPUs de servidor recientes -- PyTorch
+    EMULA bfloat16 por software: no "algo más lento", sino uno o dos
+    órdenes de magnitud más lento (medido en producción: >3 horas para
+    UNA sola foto, frente a segundos en float32 sobre la misma CPU).
+
+    Se investigaron y descartaron dos alternativas antes de esta, con
+    evidencia real, no solo teoría:
+    - Cuantización dinámica int8 de PyTorch (`quantize_dynamic`):
+      Moondream2 no usa `nn.Linear` para casi ninguna capa interna (qkv,
+      proj, fc1, fc2 son una clase propia `LinearWeights`, con una función
+      `linear()` que llama a `F.linear()` a mano) -- `quantize_dynamic`
+      solo puede tocar `patch_emb`, que sí es un `nn.Linear` real. El
+      resto de la red queda intacta: sin beneficio real.
+    - Cuantización int4 nativa del propio modelo (`torchao`,
+      `QuantizedLinear.unpack()` en el código remoto del modelo): termina
+      en `torch.cuda.empty_cache()` -- pensada para GPU/CUDA, no aporta
+      nada en CPU.
+
+    La solución que sí funciona: dejar que `from_pretrained()` cargue en
+    bfloat16 como siempre (intento nº5, sin tocar), y DESPUÉS convertir
+    cada parámetro y buffer a float32 uno a uno (`param.data = param.data
+    .float()`), nunca con `.to()` sobre el módulo completo -- eso es
+    precisamente lo que disparaba el error nº2/nº4 de más arriba. La
+    diferencia importa: `.to()` pasa por hooks internos de `accelerate`
+    que asumen un modelo potencialmente repartido en meta device;
+    reasignar `.data` en cada tensor por separado es una operación de más
+    bajo nivel que nunca los toca. Solo se hace en CPU -- en GPU (si
+    algún día se despliega así) `bfloat16` es la opción correcta y no
+    conviene duplicar memoria innecesariamente pasando a float32."""
     global _model
     if _model is not None:
         return
@@ -226,6 +262,118 @@ def _lazy_load():
         _model = AutoModelForCausalLM.from_pretrained(
             _MODEL_NAME, revision=_MODEL_REVISION, trust_remote_code=True
         )
+
+    _upcast_to_float32_if_cpu()
+    _patch_vision_input_dtype()
+
+
+def _patch_vision_input_dtype():
+    """La imagen de entrada llega en bfloat16 pase lo que pase: la
+    función `prepare_crops()` del código remoto de Moondream2
+    (`vision.py`) fija `dtype=torch.bfloat16` a fuego, sin mirar en qué
+    dtype está el modelo -- así que aunque `_upcast_to_float32_if_cpu()`
+    haya convertido el modelo entero, la primera capa (`patch_emb`)
+    seguiría recibiendo una entrada en bfloat16 y fallando con
+    `RuntimeError: expected scalar type Float but found BFloat16`.
+
+    Verificado en pruebas manuales que parchear `prepare_crops()` por
+    nombre de módulo NO tiene efecto (no está claro por qué -- posible
+    referencia ya vinculada de otra forma en el código remoto que no se
+    ha investigado más a fondo); lo que sí funciona, comprobado, es
+    interceptar directamente el `forward` del propio submódulo
+    `patch_emb` -- ahí no importa cómo le haya llegado el dato, se fuerza
+    el cast justo antes de usarlo. Localizado por búsqueda en
+    `named_modules()` en vez de por ruta de atributo fija (p. ej.
+    `_model.model.vision.patch_emb`): la clase wrapper de nivel superior
+    (`HfMoondream`) no expone esa ruta como atributo estable, y esta
+    forma es además más robusta ante cambios de revisión del modelo."""
+    import torch
+
+    if torch.cuda.is_available():
+        return
+
+    patch_emb = None
+    for name, module in _model.named_modules():
+        if name.endswith("patch_emb"):
+            patch_emb = module
+            break
+
+    if patch_emb is None:
+        logger.warning(
+            "No se encontro el submodulo patch_emb de Moondream2 -- no se puede "
+            "aplicar el parche de dtype de entrada, el analisis de contenido "
+            "probablemente fallara para todas las fotos."
+        )
+        return
+
+    original_forward = patch_emb.forward
+
+    def _forward_fp32(x):
+        if x.dtype != torch.float32:
+            x = x.float()
+        return original_forward(x)
+
+    patch_emb.forward = _forward_fp32
+
+
+def _upcast_to_float32_if_cpu():
+    """Convierte el modelo de bfloat16 (dtype con el que se descarga) a
+    float32, SOLO si no hay GPU disponible. Ver el bloque "Intento nº6"
+    en el docstring de `_lazy_load()` para el porqué -- en resumen:
+    bfloat16 en CPU de consumo se emula por software y es órdenes de
+    magnitud más lento que float32 nativo; en GPU, en cambio, bfloat16 ya
+    está acelerado por hardware y conviene dejarlo tal cual (además de
+    que duplicar a float32 ahí desperdiciaría VRAM sin ninguna ganancia).
+
+    Deliberadamente NO usa `_model.to(dtype=torch.float32)`: esa llamada
+    es la que causó el error "Tensor on device cpu is not on the expected
+    device meta!" documentado como intento nº4. En su lugar, reasigna
+    `.data` de cada parámetro y buffer por separado -- una operación de
+    más bajo nivel que no pasa por los hooks de `accelerate` que asumen
+    un modelo potencialmente repartido en meta device.
+
+    IMPORTANTE, descubierto investigando por qué la cuantización int8 de
+    PyTorch fallaba a medias (ver commit que añade este bloque): la
+    mayoría de las capas internas de Moondream2 (atención, MLP) NO son
+    `nn.Linear`/`nn.LayerNorm` reales -- son una `@dataclass` propia del
+    modelo (`LinearWeights`/`LayerNormWeights` en el código remoto) con
+    tensores sueltos como atributos, colgada como atributo normal de un
+    `nn.Module`. `model.parameters()`/`model.buffers()` SOLO recorren lo
+    que PyTorch registra formalmente (`nn.Parameter`, buffers vía
+    `register_buffer`) -- una dataclass colgada como atributo corriente
+    NO aparece ahí. Por eso esta función NO se conforma con
+    `parameters()`/`buffers()`: además recorre a mano, recursivamente,
+    los atributos de cada submódulo buscando cualquier objeto con campos
+    de tipo `torch.Tensor` en bfloat16 (duck typing sobre `dataclass`,
+    sin importar la clase concreta del código remoto -- más robusto ante
+    cambios de revisión del modelo que importar `LinearWeights`
+    directamente)."""
+    import dataclasses
+    import torch
+    import torch.nn as nn
+
+    if torch.cuda.is_available():
+        return
+
+    with torch.no_grad():
+        for param in _model.parameters():
+            if param.dtype == torch.bfloat16:
+                param.data = param.data.float()
+        for buf in _model.buffers():
+            if buf.dtype == torch.bfloat16:
+                buf.data = buf.data.float()
+
+        seen_ids = set()
+        for module in _model.modules():
+            for attr_name, attr_val in list(vars(module).items()):
+                if attr_name.startswith("_"):
+                    continue  # _parameters, _buffers, _modules, etc. -- ya cubiertos arriba
+                if dataclasses.is_dataclass(attr_val) and id(attr_val) not in seen_ids:
+                    seen_ids.add(id(attr_val))
+                    for field in dataclasses.fields(attr_val):
+                        value = getattr(attr_val, field.name)
+                        if isinstance(value, torch.Tensor) and value.dtype == torch.bfloat16:
+                            setattr(attr_val, field.name, value.float())
 
 
 def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | None]:

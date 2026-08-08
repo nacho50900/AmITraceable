@@ -153,4 +153,21 @@ Ordenados de mayor a menor impacto sobre el calendario/alcance del TFG.
   (`TestGeolocationAvailable`) que cubre explícitamente el caso "índice
   presente pero dependencia no importable", que es justo el que pasó
   desapercibido la primera vez.
+
+| Moondream2 (análisis de contenido visual) requiere ~7.6GB de RAM libre
+  en `float32` -- inviable en portátiles modestos (8GB de RAM totales,
+  sin GPU); `bfloat16` cabe en memoria pero es 1-2 órdenes de magnitud
+  más lento en CPU sin aceleración AVX-512 BF16 (ver ADR-19)
+| Alta (ya materializado y mitigado)
+| Medio (afecta solo al análisis de contenido, no a la geolocalización;
+  degrada con gracia vía `_SCENE_ANALYSIS_TIMEOUT_SECONDS` en vez de
+  bloquear el pipeline)
+| `enable_scene_analysis` desactivado por defecto (`config.py`); cuando
+  se activa, se fuerza `float32` automáticamente en CPU
+  (`_upcast_to_float32_if_cpu()` en `scene_analysis.py`, ver ADR-19).
+  Pendiente: validar en una máquina con RAM suficiente (no disponible
+  durante el desarrollo) antes de considerar la función completamente
+  operativa; evaluar como alternativa una máquina con GPU (laboratorio
+  de la universidad, instancia cloud puntual) para la demo/evaluación
+  del TFG.
 |===
