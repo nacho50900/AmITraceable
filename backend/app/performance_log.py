@@ -27,12 +27,18 @@ regenerables, no versionados). Si el directorio no se puede escribir (p.
 ej. permisos en algún despliegue concreto), se avisa una vez por proceso y
 se sigue sin romper el análisis -- este módulo es una herramienta de
 observación, nunca debe ser motivo de que un análisis falle.
+
+Puede desactivarse por completo con ENABLE_PERFORMANCE_LOGGING=false (ver
+Settings.enable_performance_logging en config.py) -- activado por
+defecto, ya que no guarda nada personal.
 """
 import json
 import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +76,9 @@ def log_photo_analysis_run(
     el llamador: un fallo al escribir el log no debe tumbar ni degradar el
     análisis real."""
     global _warned_unwritable
+
+    if not settings.enable_performance_logging:
+        return  # logging de rendimiento desactivado, ver ENABLE_PERFORMANCE_LOGGING
 
     if total_photos == 0:
         return  # nada que registrar -- no hubo fotos que analizar

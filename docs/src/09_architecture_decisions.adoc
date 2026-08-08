@@ -618,3 +618,106 @@ correcta) sí se verificaron una a una, pero queda pendiente una prueba
 end-to-end en una máquina con RAM suficiente antes de dar esto por
 completamente cerrado.
 
+=== ADR-20: Concurrencia de fotos autocalibrada por máquina, con log de rendimiento propio en vez de ajuste manual a ciegas
+
+*Contexto*: `Settings.photo_analysis_concurrency` (nº de fotos analizadas
+en paralelo con DINOv2/Moondream2, ver ADR-15) era un entero fijo (`2`)
+igual en cualquier máquina donde se desplegara el backend, elegido sin
+ninguna medición real -- un servidor con muchos más núcleos que el
+entorno de desarrollo se quedaría con el mismo valor, infrautilizando
+la CPU disponible, y no había ningún dato (más allá de la percepción
+subjetiva al usar la aplicación) con el que justificar un valor distinto
+en la memoria del TFG.
+
+*Alternativas consideradas*: dejar el valor fijo y documentar
+"ajustar manualmente según la máquina" (descartado: exactamente lo que
+se quería evitar, un paso manual más que además nadie sabría a qué
+número mover sin medir antes); autoajuste dinámico dentro de un mismo
+proceso, probando varias concurrencias y quedándose con la mejor
+(descartado: no hay forma fiable de medir varias configuraciones sobre
+el mismo lote de fotos sin repetir trabajo y con medidas ruidosas por
+una sola muestra -- un verdadero óptimo requiere comparar análisis
+completos, no improvisar dentro de uno).
+
+*Decisión*: dos cambios independientes.
+
+1. `photo_analysis_concurrency` pasa a autocalcularse en cada arranque a
+partir de `os.cpu_count()` (`cpu_count // 2`, ver
+`_default_photo_analysis_concurrency()` en `config.py`), sin tocar nada
+al cambiar de servidor. Sigue siendo sobreescribible con la variable de
+entorno `PHOTO_ANALYSIS_CONCURRENCY` para forzar un valor concreto (p.
+ej. al comparar configuraciones a propósito); dejarla vacía en `.env`
+se trata igual que no definirla (un `field_validator` intercepta la
+cadena vacía antes de que Pydantic intente convertirla a `int`, que
+si no se hubiera añadido, habría impedido arrancar la aplicación).
+Además, la concurrencia *real* usada en cada análisis se capa al nº de
+fotos de ese análisis concreto (`min(configured_concurrency, total)`,
+en `geolocation.py`) -- nunca abre más huecos de paralelismo de los que
+hay fotos que procesar.
+
+2. Dos logs JSON Lines nuevos, en `backend/data/performance/` (ya
+cubierto por el `.gitignore` de `backend/data/`, igual criterio que el
+índice FAISS: regenerable, no versionado):
++
+--
+- `photo_analysis_log.jsonl` (`app/performance_log.py`): una línea por
+  análisis con fotos -- núcleos, concurrencia configurada/real, hilos
+  por inferencia, si Moondream2 estaba activo, y el tiempo de cada foto
+  individual.
+- `analysis_run_log.jsonl` (`app/analysis_run_log.py`): una línea por
+  análisis completo (Reddit o Instagram) -- nº de posts/comentarios/
+  fotos, y cuánto tardó cada etapa del pipeline (huella de escritura,
+  detección de atributos, autodeclaraciones con IA, espera de la
+  geolocalización en segundo plano, estrechamiento de población...). El
+  desglose por etapa se recoge con `app/analysis_timing.py`, un
+  `ContextVar` que cualquier función puede usar (`async with
+  timed_stage("nombre"):`) sin que haya que añadir un parámetro nuevo a
+  cada firma del pipeline (`generate_report`, `_apply_ai_findings`...).
+  La tarea de geolocalización en segundo plano (ver ADR-15) se crea
+  *antes* de activar este cronómetro a propósito, para que su tiempo
+  siga midiéndose aparte, por foto, en el log anterior, y no se mezcle
+  con el del pipeline principal.
+--
++
+Ambos logs son estrictamente técnicos: ningún campo identifica a la
+persona ni a su cuenta (ni username, ni bio, ni permalinks, ni IP, ni
+contenido de ningún post), coherente con ADR-3 (sin persistencia) -- no
+son la base de datos que ese ADR evita, son observabilidad de
+rendimiento. Ambos se desactivan juntos con
+`ENABLE_PERFORMANCE_LOGGING=false` (activado por defecto) y nunca
+lanzan una excepción hacia el análisis real: un fallo al escribir a
+disco se registra como aviso una vez por proceso y se sigue sin
+interrumpir nada.
+
+Para analizarlos: `scripts/analyze_performance_log.py` (rendimiento por
+foto, agrupado por configuración de núcleos/concurrencia) y
+`scripts/analyze_analysis_run_log.py` (tiempo por etapa del pipeline
+completo, con correlación simple frente al volumen de posts/fotos), los
+dos con `pandas` y un modo `--plot` opcional.
+
+*Justificación*: la autocalibración resuelve el problema práctico (no
+hay que tocar nada al desplegar en otra máquina) sin fingir encontrar un
+óptimo que solo se puede conocer midiendo. Los logs son precisamente esa
+medición: en vez de defender la heurística por argumento, la memoria del
+TFG puede apoyarse en cifras reales de segundos por foto y por etapa, en
+distintas máquinas y configuraciones, acumuladas sin esfuerzo adicional
+durante el uso normal de la aplicación.
+
+*Consecuencias*: (+) cero pasos manuales al cambiar de servidor; (+)
+datos empíricos citables para la sección "Plan de evaluación pendiente"
+de la memoria, que antes no existían; (+) visibilidad de qué etapa del
+pipeline pesa más en la práctica, no solo la de fotos (p. ej. permite
+comprobar si `espera_geolocalizacion_fotos` tiende a cero, señal de que
+el paralelismo con la tarea en segundo plano funciona de verdad, en la
+línea de lo ya detectado en ADR-11 y en el historial de este proyecto
+sobre paralelismo nominal vs. real); (-) la heurística
+(`cpu_count // 2`) sigue siendo un punto de partida razonado, no un
+óptimo demostrado -- validarlo (o ajustarlo) con los datos acumulados
+queda como trabajo futuro, una vez haya suficientes análisis registrados
+en máquinas distintas; (-) dos ficheros más creciendo sin límite en
+`backend/data/performance/` mientras el proceso esté en marcha con el
+logging activado -- sin rotación ni purga automática por ahora, asumible
+para el volumen de análisis de un TFG pero a revisar si esto se
+convirtiera en un despliegue de uso continuado.
+
+

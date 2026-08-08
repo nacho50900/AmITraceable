@@ -28,6 +28,7 @@ from app.nlp.ai_attribute_extraction import extract_demographics_with_ai, merge_
 from app.nlp.demographic_extraction import DemographicFindings, extract_demographics
 from app.nlp.travel_detection import detect_travel_permalinks
 from app.progress import ProgressCallback, emit_progress
+from app.analysis_timing import timed_stage
 from app.scoring.k_anonymity import estimate_population_narrowing, final_remaining_population
 
 # Umbrales para aceptar una estimación de RESIDENCIA HABITUAL a partir de
@@ -387,12 +388,15 @@ async def generate_report(
 ) -> ExposureReport:
 
     posts_for_demographics = _posts_with_bio_pseudo_post(platform, posts, bio)
-    demographic_findings = extract_demographics(posts_for_demographics)
-    travel_permalinks = detect_travel_permalinks(posts)
+    async with timed_stage("extraccion_demografica_regex"):
+        demographic_findings = extract_demographics(posts_for_demographics)
+    async with timed_stage("deteccion_viajes"):
+        travel_permalinks = detect_travel_permalinks(posts)
 
-    demographic_findings, travel_permalinks, soft_inferences = await _apply_ai_findings(
-        demographic_findings, travel_permalinks, posts, username, full_name, bio, progress_callback
-    )
+    async with timed_stage("autodeclaraciones_ia"):
+        demographic_findings, travel_permalinks, soft_inferences = await _apply_ai_findings(
+            demographic_findings, travel_permalinks, posts, username, full_name, bio, progress_callback
+        )
     # Las inferencias blandas (emojis, fechas, señales simbólicas -- ver
     # app/nlp/ai_attribute_extraction.py) se añaden a la lista general de
     # atributos inferidos, junto a las que ya detectó infer_attributes()
@@ -401,9 +405,17 @@ async def generate_report(
     # ya alimentó compute_score) en analysis_router._build_report.
     inferred_attributes = [*inferred_attributes, *soft_inferences]
 
-    image_location_points, geolocation_available, visual_inferences = await _apply_image_geolocation(
-        platform, posts, demographic_findings, travel_permalinks, geolocation_task, progress_callback
-    )
+    # Este tramo mide principalmente la ESPERA a que termine la tarea de
+    # geolocalización lanzada en segundo plano al principio del pipeline
+    # (ver analysis_router._build_report) -- no el trabajo por foto en sí,
+    # que se mide aparte y con más detalle en app/performance_log.py. Si
+    # ya ha terminado para cuando se llega aquí (lo normal, gracias al
+    # paralelismo), este tramo sale casi a cero -- que es justo la señal
+    # de que el paralelismo está funcionando.
+    async with timed_stage("espera_geolocalizacion_fotos"):
+        image_location_points, geolocation_available, visual_inferences = await _apply_image_geolocation(
+            platform, posts, demographic_findings, travel_permalinks, geolocation_task, progress_callback
+        )
     # Igual que las inferencias blandas de texto: se AÑADEN a lo que ya
     # había (regex + texto por IA), nunca lo sustituyen. Ver
     # app/vision/scene_analysis.py para el prompt y el límite ético sobre
@@ -412,23 +424,27 @@ async def generate_report(
 
     await emit_progress(progress_callback, "Generando el informe final...")
 
-    narrowing_steps = estimate_population_narrowing(demographic_findings)
-    population_narrowing = [
-        PopulationEstimate(
-            attribute_label=step.attribute_label,
-            category=step.category,
-            remaining_population=step.remaining_population,
-            risk_level=step.risk_level,
-            evidence=step.evidence,
-            source=step.source,
-            note=step.note,
-            proportion=step.proportion,
-            reduction_percent=step.reduction_percent,
-        )
-        for step in narrowing_steps
-    ]
+    async with timed_stage("estrechamiento_poblacion"):
+        narrowing_steps = estimate_population_narrowing(demographic_findings)
+        population_narrowing = [
+            PopulationEstimate(
+                attribute_label=step.attribute_label,
+                category=step.category,
+                remaining_population=step.remaining_population,
+                risk_level=step.risk_level,
+                evidence=step.evidence,
+                source=step.source,
+                note=step.note,
+                proportion=step.proportion,
+                reduction_percent=step.reduction_percent,
+            )
+            for step in narrowing_steps
+        ]
 
-    remaining_all_traits = final_remaining_population(narrowing_steps)
+        remaining_all_traits = final_remaining_population(narrowing_steps)
+
+    async with timed_stage("recomendaciones"):
+        recommendations = _build_recommendations(fingerprint, inferred_attributes, score)
 
     return ExposureReport(
         platform=platform,
@@ -438,7 +454,7 @@ async def generate_report(
         fingerprint=fingerprint,
         inferred_attributes=inferred_attributes,
         privacy_score=score,
-        recommendations=_build_recommendations(fingerprint, inferred_attributes, score),
+        recommendations=recommendations,
         population_narrowing=population_narrowing,
         remaining_population_all_traits=remaining_all_traits,
         remaining_population_all_traits_proportion=(

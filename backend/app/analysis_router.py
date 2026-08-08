@@ -15,12 +15,16 @@ ninguna otra plataforma.
 """
 import asyncio
 import json
+import time
 from typing import Annotated, Callable
 
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.ai_analysis import AiAnalysisUnavailable, analyze_report_with_ai
+from app.analysis_run_log import log_analysis_run
+from app.analysis_timing import run_with_timer, timed_stage
+from app.config import settings
 from app.instagram_client import InstagramClient
 from app.models.schemas import ExposureReport, SocialProfile
 from app.nlp.attribute_inference import infer_attributes
@@ -57,14 +61,25 @@ _PLATFORM_CLIENT_FACTORIES: dict[str, Callable[[Request], object]] = {
 }
 
 
-async def _build_report(profile: SocialProfile, progress_callback: ProgressCallback | None = None) -> ExposureReport:
+async def _build_report(
+    profile: SocialProfile,
+    progress_callback: ProgressCallback | None = None,
+    fetch_seconds: float | None = None,
+) -> ExposureReport:
     """Ejecuta el pipeline común (fingerprint -> inferencia -> scoring ->
     informe) sobre un perfil ya normalizado, sea cual sea su origen.
 
     `progress_callback` es opcional y no cambia el comportamiento si se
     omite (usado por `POST /api/analyze/{platform}`, incluidos los tests
     existentes); solo lo usa el endpoint de streaming de progreso en vivo,
-    más abajo."""
+    más abajo.
+
+    `fetch_seconds`, si se da, es el tiempo que tardó `fetch_profile()` en
+    el llamador (ver `analyze`/`analyze_stream` más abajo) -- se registra
+    como una etapa más en el log general de análisis (ver
+    app/analysis_run_log.py), aunque ocurra fuera de esta función, para
+    que el log refleje el tiempo total real de principio a fin y no solo
+    el del pipeline interno."""
     if not profile.posts:
         raise HTTPException(
             status_code=422,
@@ -79,6 +94,11 @@ async def _build_report(profile: SocialProfile, progress_callback: ProgressCallb
     # esperar a que todo eso termine para empezar con las fotos de una en
     # una. El resultado se recoge más adelante, dentro de generate_report,
     # justo cuando hace falta (ver el parámetro `geolocation_task`).
+    #
+    # Se crea ANTES de activar `run_with_timer()` a propósito -- ver el
+    # docstring de app/analysis_timing.py sobre por qué esta tarea nunca
+    # debe compartir el timer del pipeline principal (su tiempo se mide
+    # aparte, por foto, en app/performance_log.py).
     geolocation_task: asyncio.Task | None = None
     if profile.platform == "instagram":
         from app.vision.geolocation import estimate_locations_for_posts
@@ -97,28 +117,67 @@ async def _build_report(profile: SocialProfile, progress_callback: ProgressCallb
         # real (arranca la descarga de la primera foto) antes de seguir.
         await asyncio.sleep(0)
 
-    await emit_progress(progress_callback, "Analizando tu forma de escribir...")
-    fingerprint = build_fingerprint(profile.posts)
+    async with run_with_timer() as timer:
+        if fetch_seconds is not None:
+            timer.add("obtencion_perfil", fetch_seconds)
 
-    await emit_progress(progress_callback, "Detectando atributos personales...")
-    inferred_attributes = infer_attributes(profile.posts)
+        pipeline_start = time.monotonic()
 
-    await emit_progress(progress_callback, "Calculando el riesgo de privacidad...")
-    score = compute_score(profile.posts, fingerprint, inferred_attributes)
+        async with timed_stage("huella_escritura"):
+            await emit_progress(progress_callback, "Analizando tu forma de escribir...")
+            fingerprint = build_fingerprint(profile.posts)
 
-    return await generate_report(
-        platform=profile.platform,
-        username=profile.username,
-        posts=profile.posts,
-        fingerprint=fingerprint,
-        inferred_attributes=inferred_attributes,
-        score=score,
-        progress_callback=progress_callback,
-        bio=profile.bio,
-        full_name=profile.full_name,
-        avatar_url=profile.avatar_url,
-        geolocation_task=geolocation_task,
-    )
+        async with timed_stage("deteccion_atributos"):
+            await emit_progress(progress_callback, "Detectando atributos personales...")
+            inferred_attributes = infer_attributes(profile.posts)
+
+        async with timed_stage("scoring"):
+            await emit_progress(progress_callback, "Calculando el riesgo de privacidad...")
+            score = compute_score(profile.posts, fingerprint, inferred_attributes)
+
+        report = await generate_report(
+            platform=profile.platform,
+            username=profile.username,
+            posts=profile.posts,
+            fingerprint=fingerprint,
+            inferred_attributes=inferred_attributes,
+            score=score,
+            progress_callback=progress_callback,
+            bio=profile.bio,
+            full_name=profile.full_name,
+            avatar_url=profile.avatar_url,
+            geolocation_task=geolocation_task,
+        )
+
+        total_seconds = time.monotonic() - pipeline_start + (fetch_seconds or 0.0)
+
+        # Recuentos agregados para el log -- sin ningún dato personal, ver
+        # docstring de app/analysis_run_log.py. `n_photos` cuenta FICHEROS
+        # de imagen (un carrusel de 5 fotos suma 5, no 1), igual criterio
+        # que `total` en estimate_locations_for_posts().
+        n_comments = sum(1 for p in profile.posts if p.type == "comment")
+        n_media_items = sum(1 for p in profile.posts if p.type in ("image", "video", "carousel_album"))
+        n_photos = sum(
+            len(getattr(p, "media_urls", None) or [])
+            for p in profile.posts
+            if p.type in ("image", "carousel_album")
+        )
+        n_posts = len(profile.posts) - n_comments
+
+        log_analysis_run(
+            platform=profile.platform,
+            n_posts=n_posts,
+            n_comments=n_comments,
+            n_media_items=n_media_items,
+            n_photos=n_photos,
+            ai_enabled=bool(settings.mistral_api_key),
+            scene_analysis_enabled=settings.enable_scene_analysis,
+            geolocation_available=report.geolocation_available,
+            total_seconds=total_seconds,
+            timer=timer,
+        )
+
+    return report
 
 
 @router.post(
@@ -176,8 +235,10 @@ async def analyze(platform: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Plataforma no soportada: {platform}")
 
     client = factory(request)
+    fetch_start = time.monotonic()
     profile = await client.fetch_profile()
-    return await _build_report(profile)
+    fetch_seconds = time.monotonic() - fetch_start
+    return await _build_report(profile, fetch_seconds=fetch_seconds)
 
 
 @router.get(
@@ -233,8 +294,10 @@ async def analyze_stream(platform: str, request: Request):
     async def run_pipeline() -> None:
         try:
             await on_progress("Conectando con la plataforma...", {})
+            fetch_start = time.monotonic()
             profile = await client.fetch_profile(progress_callback=on_progress)
-            report = await _build_report(profile, progress_callback=on_progress)
+            fetch_seconds = time.monotonic() - fetch_start
+            report = await _build_report(profile, progress_callback=on_progress, fetch_seconds=fetch_seconds)
             await queue.put({"done": True, "report": json.loads(report.model_dump_json())})
         except HTTPException as exc:
             await queue.put({"done": True, "error": exc.detail})

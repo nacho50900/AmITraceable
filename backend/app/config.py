@@ -9,7 +9,7 @@ Importante (cumplimiento RGPD / diseño del TFG):
 """
 import os
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -88,6 +88,18 @@ class Settings(BaseSettings):
     # scripts/analyze_performance_log.py).
     photo_analysis_concurrency: int = Field(default_factory=_default_photo_analysis_concurrency)
 
+    @field_validator("photo_analysis_concurrency", mode="before")
+    @classmethod
+    def _empty_env_value_means_auto(cls, value: object) -> object:
+        """`PHOTO_ANALYSIS_CONCURRENCY=` (vacía) en `.env` llega aquí como
+        cadena vacía, no como "variable no definida" -- sin este paso,
+        Pydantic intentaría convertir "" a int y el arranque fallaría con
+        un error de validación. Se trata igual que dejarla sin poner: se
+        recalcula con `_default_photo_analysis_concurrency()`."""
+        if value in (None, ""):
+            return _default_photo_analysis_concurrency()
+        return value
+
     # Interruptor para el análisis de CONTENIDO visual con Moondream2 (ver
     # app/vision/scene_analysis.py y `_maybe_analyze_content` en
     # geolocation.py). Desactivado por defecto: en máquinas con poca RAM
@@ -96,6 +108,18 @@ class Settings(BaseSettings):
     # La geolocalización (DINOv2) no depende de esto y sigue funcionando
     # igual, activado o no.
     enable_scene_analysis: bool = False
+
+    # Interruptor GENERAL de los logs de rendimiento (ver
+    # app/performance_log.py y app/analysis_run_log.py): activado por
+    # defecto porque son datos puramente técnicos, sin nada personal (ver
+    # el docstring de cada módulo), y son la fuente empírica para la
+    # sección "Plan de evaluación pendiente" de la memoria del TFG -- no
+    # hay motivo para tenerlos desactivados salvo que se quiera evitar por
+    # completo la escritura a disco (p. ej. un despliegue de solo lectura,
+    # o simplemente no querer acumular estos ficheros). Con esto en false,
+    # ninguno de los dos logs escribe nada, sin que el análisis en sí se
+    # vea afectado.
+    enable_performance_logging: bool = True
 
 
 settings = Settings()
