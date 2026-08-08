@@ -408,7 +408,7 @@ async def generate_report(
     # Este tramo mide principalmente la ESPERA a que termine la tarea de
     # geolocalización lanzada en segundo plano al principio del pipeline
     # (ver analysis_router._build_report) -- no el trabajo por foto en sí,
-    # que se mide aparte y con más detalle en app/performance_log.py. Si
+    # que se mide aparte y con más detalle en app/log/performance_log.py. Si
     # ya ha terminado para cuando se llega aquí (lo normal, gracias al
     # paralelismo), este tramo sale casi a cero -- que es justo la señal
     # de que el paralelismo está funcionando.
