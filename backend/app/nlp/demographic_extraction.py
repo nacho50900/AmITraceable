@@ -361,16 +361,10 @@ def _try_detect_lengua_materna(text: str, permalink: str, findings: DemographicF
     findings.evidence.setdefault("lengua_materna", []).append(permalink)
 
 
-def _detect_household_type(posts: list[SocialPost], findings: DemographicFindings) -> None:
-    """A diferencia del resto de detectores de este módulo, el tipo de
-    hogar necesita combinar señales que pueden aparecer en publicaciones
-    DISTINTAS (p.ej. "vivo con mi pareja" en una bio y "mis hijos" en un
-    post posterior) -- por eso se hace en una pasada propia sobre todos los
-    posts en vez de una regex "ganadora" por post como el resto de
-    `_try_detect_*`."""
-    if findings.tipo_hogar is not None:
-        return
-
+def _collect_household_signals(posts: list[SocialPost]) -> tuple[bool, bool, bool, bool, list[str]]:
+    """Recorre TODOS los posts (no uno solo -- ver docstring de
+    `_detect_household_type`) acumulando qué señales de tipo de hogar
+    aparecen en cualquiera de ellos, y en qué publicaciones concretas."""
     lives_alone = False
     lives_with_partner = False
     mentions_children = False
@@ -394,20 +388,47 @@ def _detect_household_type(posts: list[SocialPost], findings: DemographicFinding
             mentions_children = True
             evidence.append(post.permalink)
 
-    # Orden de prioridad: una autodeclaración EXPLÍCITA de "familia
-    # monoparental" pesa más que combinar señales indirectas, y "vivo
-    # solo/a" es inequívoco por sí solo (no necesita combinarse con nada).
+    return lives_alone, lives_with_partner, mentions_children, monoparental_explicit, evidence
+
+
+def _resolve_household_type(
+    lives_alone: bool, lives_with_partner: bool, mentions_children: bool, monoparental_explicit: bool
+) -> str | None:
+    """Decide la categoría de tipo de hogar a partir de las señales ya
+    recogidas (ver `_collect_household_signals`). Orden de prioridad: una
+    autodeclaración EXPLÍCITA de "familia monoparental" pesa más que
+    combinar señales indirectas, y "vivo solo/a" es inequívoco por sí solo
+    (no necesita combinarse con nada). Devuelve None si ninguna
+    combinación es reconocible -- nunca se adivina."""
     if monoparental_explicit or (mentions_children and lives_alone):
-        findings.tipo_hogar = "monoparental"
-    elif lives_alone:
-        findings.tipo_hogar = "unipersonal"
-    elif lives_with_partner and mentions_children:
-        findings.tipo_hogar = "pareja_con_hijos"
-    elif lives_with_partner:
-        findings.tipo_hogar = "pareja_sin_hijos"
-    else:
+        return "monoparental"
+    if lives_alone:
+        return "unipersonal"
+    if lives_with_partner and mentions_children:
+        return "pareja_con_hijos"
+    if lives_with_partner:
+        return "pareja_sin_hijos"
+    return None
+
+
+def _detect_household_type(posts: list[SocialPost], findings: DemographicFindings) -> None:
+    """A diferencia del resto de detectores de este módulo, el tipo de
+    hogar necesita combinar señales que pueden aparecer en publicaciones
+    DISTINTAS (p.ej. "vivo con mi pareja" en una bio y "mis hijos" en un
+    post posterior) -- por eso se hace en una pasada propia sobre todos los
+    posts en vez de una regex "ganadora" por post como el resto de
+    `_try_detect_*`."""
+    if findings.tipo_hogar is not None:
+        return
+
+    lives_alone, lives_with_partner, mentions_children, monoparental_explicit, evidence = (
+        _collect_household_signals(posts)
+    )
+    tipo_hogar = _resolve_household_type(lives_alone, lives_with_partner, mentions_children, monoparental_explicit)
+    if tipo_hogar is None:
         return  # ninguna combinación reconocible -- se queda en None, no se adivina
 
+    findings.tipo_hogar = tipo_hogar
     findings.evidence.setdefault("tipo_hogar", []).extend(dict.fromkeys(evidence))  # sin duplicados, conserva orden
 
 

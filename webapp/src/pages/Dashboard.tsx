@@ -38,6 +38,23 @@ function formatPhotosLabel(
   return done ? `${doneLabel} (${analyzed}/${total})` : `${verb} (${analyzed}/${total})...`;
 }
 
+function StatusIcon({ done }: { done: boolean }) {
+  return done ? (
+    <span className="progress-icon progress-icon-done" aria-hidden="true">✓</span>
+  ) : (
+    <span className="spinner spinner-sm" aria-hidden="true" />
+  );
+}
+
+// Progreso de una pista de fotos (geolocalización o análisis de contenido,
+// ver docstring del estado más abajo) como "terminada": ambos contadores son
+// números válidos y ya se ha llegado al total.
+function isTrackDone(counts: Record<string, unknown>): boolean {
+  const analyzed = counts.photos_analyzed;
+  const total = counts.total_photos;
+  return typeof analyzed === 'number' && typeof total === 'number' && analyzed >= total && total > 0;
+}
+
 const Dashboard: React.FC = () => {
   const [platform] = useState<Platform>(readPlatform);
   const [report, setReport] = useState<ExposureReport | null>(null);
@@ -123,21 +140,13 @@ const Dashboard: React.FC = () => {
 
           if (event.track === 'fotos') {
             setPhotosCounts(counts);
-            const analyzed = counts.photos_analyzed;
-            const total = counts.total_photos;
-            setPhotosDone(
-              typeof analyzed === 'number' && typeof total === 'number' && analyzed >= total && total > 0
-            );
+            setPhotosDone(isTrackDone(counts));
             return;
           }
 
           if (event.track === 'geolocalizacion') {
             setGeoCounts(counts);
-            const analyzed = counts.photos_analyzed;
-            const total = counts.total_photos;
-            setGeoDone(
-              typeof analyzed === 'number' && typeof total === 'number' && analyzed >= total && total > 0
-            );
+            setGeoDone(isTrackDone(counts));
             return;
           }
 
@@ -233,21 +242,13 @@ const Dashboard: React.FC = () => {
               )}
               {geoCounts && (
                 <li className={geoDone ? 'progress-done' : 'progress-current'}>
-                  {geoDone ? (
-                    <span className="progress-icon progress-icon-done" aria-hidden="true">✓</span>
-                  ) : (
-                    <span className="spinner spinner-sm" aria-hidden="true" />
-                  )}
+                  <StatusIcon done={geoDone} />
                   {formatPhotosLabel(geoCounts, geoDone, 'Geolocalizando fotos', 'Fotos geolocalizadas')}
                 </li>
               )}
               {photosCounts && (
                 <li className={photosDone ? 'progress-done' : 'progress-current'}>
-                  {photosDone ? (
-                    <span className="progress-icon progress-icon-done" aria-hidden="true">✓</span>
-                  ) : (
-                    <span className="spinner spinner-sm" aria-hidden="true" />
-                  )}
+                  <StatusIcon done={photosDone} />
                   {formatPhotosLabel(photosCounts, photosDone, 'Analizando fotos', 'Fotos analizadas')}
                 </li>
               )}

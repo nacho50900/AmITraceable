@@ -364,6 +364,126 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
     )
 
 
+async def _download_image(client, semaphore, media_url):
+    """Descarga UNA foto (I/O de red). La descarga es un recurso totalmente
+    distinto de la CPU que usan los dos modelos de visión -- solaparla con
+    el análisis de otras fotos reduce el tiempo total, sin competir por los
+    mismos núcleos que usa torch."""
+    from PIL import Image
+    import io
+
+    async with semaphore:
+        try:
+            resp = await client.get(media_url)
+            resp.raise_for_status()
+            return Image.open(io.BytesIO(resp.content))
+        except Exception:
+            return None  # imagen no descargable/decodificable: se omite, no se aborta el análisis
+
+
+async def _maybe_analyze_content(image):
+    """Envoltorio sobre `analyze_image_content` que respeta
+    `settings.enable_scene_analysis` (ver docstring en config.py --
+    desactivado por defecto, Moondream2 en CPU no es fiable actualmente).
+    Con el interruptor desactivado, ni siquiera se intenta cargar el
+    modelo -- se devuelve el mismo resultado "sin nada que aportar" que ya
+    usa `analyze_image_content` cuando el módulo no está disponible en
+    absoluto, así que el resto del pipeline no necesita distinguir entre
+    "desactivado a propósito" y "no instalado".
+
+    DOS bugs reales corregidos aquí (no precauciones teóricas):
+    1. `analyze_image_content` es una función SÍNCRONA y puede bloquear
+       mucho tiempo (carga del modelo, generación de texto, o -- visto en
+       producción -- reintentos de red de hasta ~10s cada uno si
+       `huggingface_hub` necesita comprobar la caché). Llamarla
+       directamente aquí (sin `asyncio.to_thread`) bloquea el propio event
+       loop del proceso durante ese rato, no solo esta tarea.
+    2. Como esta llamada corre en `asyncio.gather` junto a la de DINOv2
+       (ver `_process_photo` más abajo), `asyncio.gather` espera a que
+       TERMINEN LAS DOS antes de devolver nada -- así que si Moondream2 se
+       queda colgado, el resultado de DINOv2 para esa MISMA foto (que
+       puede llevar rato ya calculado) se queda esperando sin necesidad.
+       `asyncio.wait_for` con un tope pone coto a esto: si Moondream2 no
+       termina a tiempo, esta foto se degrada a "sin descripción" (mismo
+       resultado que si el módulo no estuviera disponible) y el resto del
+       pipeline -- incluida la geolocalización de esa misma foto -- sigue
+       sin más demora."""
+    if not settings.enable_scene_analysis:
+        return [], False, None
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(analyze_image_content, image),
+            timeout=_SCENE_ANALYSIS_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        logger.warning(
+            "Análisis de contenido visual descartado para una foto: "
+            "superó los %ss (ver _SCENE_ANALYSIS_TIMEOUT_SECONDS)",
+            _SCENE_ANALYSIS_TIMEOUT_SECONDS,
+        )
+        return [], False, None
+
+
+async def _process_photo(client, download_semaphore, analysis_semaphore, media_url, timing):
+    """Descarga UNA foto y, si se pudo, la analiza con los dos modelos.
+    Devuelve (image_or_None, estimate_or_None, scene_inferences,
+    indicio_pareja, description_or_None). Pensada para lanzarse como tarea
+    independiente por foto (ver `estimate_locations_for_posts`): así varias
+    fotos pueden estar en distintas etapas (descargando / en cola para
+    analizar / analizando) a la vez.
+
+    `timing` (PhotoAnalysisTiming, ver app/performance_log.py) recibe UNA
+    medición por foto -- solo el tramo de análisis con los modelos de
+    visión (no la descarga, que es I/O de red y depende de factores ajenos
+    a la CPU/concurrencia que queremos medir aquí)."""
+    image = await _download_image(client, download_semaphore, media_url)
+    if image is None:
+        return None, None, [], False, None
+
+    # `analysis_semaphore` (ver Settings.photo_analysis_concurrency) acota
+    # cuántas fotos ocupan a la vez los modelos de visión -- DINOv2 es
+    # rápido pero Moondream2 es lento (generación autoregresiva), así que
+    # sin este límite de concurrencia el núcleo que usaría DINOv2 para la
+    # siguiente foto se quedaría ocioso mientras Moondream2 termina la
+    # actual. Se deja como configurable porque el punto óptimo depende de
+    # cuántos núcleos tenga la máquina que lo ejecute.
+    async with analysis_semaphore:
+        start = time.monotonic()
+        estimate, (scene_inferences, indicio_pareja, description) = await asyncio.gather(
+            asyncio.to_thread(estimate_location_from_image, image),
+            _maybe_analyze_content(image),
+        )
+        timing.record(time.monotonic() - start)
+    # `image` sale de scope tras este bloque y se descarta (nunca se escribe a disco)
+    return image, estimate, scene_inferences, indicio_pareja, description
+
+
+def _collect_photo_result(
+    permalink: str,
+    photo_result: tuple,
+    results: list,
+    visual_inferences: list,
+    partner_signal_permalinks: set,
+    visual_descriptions: dict,
+) -> None:
+    """Vuelca el resultado de UNA foto (ya resuelto, ver `_process_photo`)
+    en las listas/diccionarios compartidos de `estimate_locations_for_posts`.
+    Extraído a su propia función para que el bucle principal se limite a
+    orquestar -- consumir la tarea, delegar el volcado, emitir progreso --
+    en vez de acumular aquí varias ramas `if` seguidas."""
+    _image, estimate, scene_inferences, indicio_pareja, description = photo_result
+
+    if estimate is not None:
+        results.append((permalink, estimate))
+    for inferred in scene_inferences:
+        inferred.evidence.append(permalink)
+        visual_inferences.append((permalink, inferred))
+    if indicio_pareja:
+        partner_signal_permalinks.add(permalink)
+    if description:
+        visual_descriptions[permalink] = description
+
+
 async def estimate_locations_for_posts(posts: list, progress_callback=None) -> GeolocationOutcome:
     """
     Orquestación de alto nivel: para CADA foto de CADA SocialPost de tipo
@@ -434,99 +554,6 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
     partner_signal_permalinks: set[str] = set()
     visual_descriptions: dict[str, str] = {}
 
-    async def _download_image(client, semaphore, media_url):
-        # La descarga (I/O de red) es un recurso totalmente distinto de la
-        # CPU que usan los dos modelos más abajo -- solaparla con el
-        # análisis de otras fotos reduce el tiempo total, sin competir por
-        # los mismos núcleos que usa torch.
-        async with semaphore:
-            try:
-                resp = await client.get(media_url)
-                resp.raise_for_status()
-                return Image.open(io.BytesIO(resp.content))
-            except Exception:
-                return None  # imagen no descargable/decodificable: se omite, no se aborta el análisis
-
-    # Tiempo máximo que se deja a Moondream2 por foto antes de rendirse y
-    # seguir sin descripción -- ver docstring de `_maybe_analyze_content`
-    # más abajo sobre por qué hace falta un límite explícito.
-    async def _maybe_analyze_content(image):
-        """Envoltorio sobre `analyze_image_content` que respeta
-        `settings.enable_scene_analysis` (ver docstring en config.py --
-        desactivado por defecto, Moondream2 en CPU no es fiable
-        actualmente). Con el interruptor desactivado, ni siquiera se
-        intenta cargar el modelo -- se devuelve el mismo resultado
-        "sin nada que aportar" que ya usa `analyze_image_content` cuando
-        el módulo no está disponible en absoluto, así que el resto del
-        pipeline no necesita distinguir entre "desactivado a propósito" y
-        "no instalado".
-
-        DOS bugs reales corregidos aquí (no precauciones teóricas):
-        1. `analyze_image_content` es una función SÍNCRONA y puede
-           bloquear mucho tiempo (carga del modelo, generación de texto, o
-           -- visto en producción -- reintentos de red de hasta ~10s cada
-           uno si `huggingface_hub` necesita comprobar la caché). Llamarla
-           directamente aquí (sin `asyncio.to_thread`) bloquea el propio
-           event loop del proceso durante ese rato, no solo esta tarea.
-        2. Como esta llamada corre en `asyncio.gather` junto a la de
-           DINOv2 (ver `_process_photo` más abajo), `asyncio.gather`
-           espera a que TERMINEN LAS DOS antes de devolver nada -- así que
-           si Moondream2 se queda colgado, el resultado de DINOv2 para esa
-           MISMA foto (que puede llevar rato ya calculado) se queda
-           esperando sin necesidad. `asyncio.wait_for` con un tope pone
-           coto a esto: si Moondream2 no termina a tiempo, esta foto se
-           degrada a "sin descripción" (mismo resultado que si el módulo
-           no estuviera disponible) y el resto del pipeline -- incluida la
-           geolocalización de esa misma foto -- sigue sin más demora."""
-        if not settings.enable_scene_analysis:
-            return [], False, None
-        try:
-            return await asyncio.wait_for(
-                asyncio.to_thread(analyze_image_content, image),
-                timeout=_SCENE_ANALYSIS_TIMEOUT_SECONDS,
-            )
-        except TimeoutError:
-            logger.warning(
-                "Análisis de contenido visual descartado para una foto: "
-                "superó los %ss (ver _SCENE_ANALYSIS_TIMEOUT_SECONDS)",
-                _SCENE_ANALYSIS_TIMEOUT_SECONDS,
-            )
-            return [], False, None
-
-    async def _process_photo(client, download_semaphore, analysis_semaphore, media_url, timing):
-        """Descarga UNA foto y, si se pudo, la analiza con los dos modelos.
-        Devuelve (image_or_None, estimate_or_None, scene_inferences,
-        indicio_pareja, description_or_None). Pensada para lanzarse como
-        tarea independiente por foto (ver más abajo): así varias fotos
-        pueden estar en distintas etapas (descargando / en cola para
-        analizar / analizando) a la vez.
-
-        `timing` (PhotoAnalysisTiming, ver app/performance_log.py) recibe
-        UNA medición por foto -- solo el tramo de análisis con los modelos
-        de visión (no la descarga, que es I/O de red y depende de factores
-        ajenos a la CPU/concurrencia que queremos medir aquí)."""
-        image = await _download_image(client, download_semaphore, media_url)
-        if image is None:
-            return None, None, [], False, None
-
-        # `analysis_semaphore` (ver Settings.photo_analysis_concurrency)
-        # acota cuántas fotos ocupan a la vez los modelos de visión --
-        # DINOv2 es rápido pero Moondream2 es lento (generación
-        # autoregresiva), así que sin este límite de concurrencia el
-        # núcleo que usaría DINOv2 para la siguiente foto se quedaría
-        # ocioso mientras Moondream2 termina la actual. Se deja como
-        # configurable porque el punto óptimo depende de cuántos núcleos
-        # tenga la máquina que lo ejecute.
-        async with analysis_semaphore:
-            start = time.monotonic()
-            estimate, (scene_inferences, indicio_pareja, description) = await asyncio.gather(
-                asyncio.to_thread(estimate_location_from_image, image),
-                _maybe_analyze_content(image),
-            )
-            timing.record(time.monotonic() - start)
-        # `image` sale de scope tras este bloque y se descarta (nunca se escribe a disco)
-        return image, estimate, scene_inferences, indicio_pareja, description
-
     async with httpx.AsyncClient(timeout=10.0) as client:
         # Se lanza YA el pipeline completo (descarga + análisis) de TODAS
         # las fotos como tareas independientes, acotadas por dos límites
@@ -561,28 +588,21 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
         ]
 
         for i, (permalink, _media_url) in enumerate(photo_units, start=1):
-            _image, estimate, scene_inferences, indicio_pareja, description = await photo_tasks[i - 1]
-
-            if estimate is not None:
-                results.append((permalink, estimate))
-            for inferred in scene_inferences:
-                inferred.evidence.append(permalink)
-                visual_inferences.append((permalink, inferred))
-            if indicio_pareja:
-                partner_signal_permalinks.add(permalink)
-            if description:
-                visual_descriptions[permalink] = description
+            photo_result = await photo_tasks[i - 1]
+            _collect_photo_result(
+                permalink, photo_result, results, visual_inferences, partner_signal_permalinks, visual_descriptions
+            )
 
             # Dos líneas de progreso independientes para dos análisis
-            # distintos sobre la misma foto (ver el asyncio.gather más
-            # arriba): geolocalización por similitud visual (DINOv2) y
-            # análisis de contenido -- aficiones, pareja -- (Moondream2, ver
-            # scene_analysis.py). Avanzan siempre a la vez en el backend (se
-            # esperan juntas con gather), pero se muestran como dos líneas
-            # separadas en el frontend porque son dos modelos y dos
-            # propósitos distintos -- mezclarlas en una sola línea
-            # ("Analizando fotos...") no dejaba claro que se estaban
-            # haciendo dos cosas diferentes sobre cada foto.
+            # distintos sobre la misma foto (ver el asyncio.gather dentro
+            # de `_process_photo`): geolocalización por similitud visual
+            # (DINOv2) y análisis de contenido -- aficiones, pareja --
+            # (Moondream2, ver scene_analysis.py). Avanzan siempre a la vez
+            # en el backend (se esperan juntas con gather), pero se
+            # muestran como dos líneas separadas en el frontend porque son
+            # dos modelos y dos propósitos distintos -- mezclarlas en una
+            # sola línea ("Analizando fotos...") no dejaba claro que se
+            # estaban haciendo dos cosas diferentes sobre cada foto.
             await emit_progress(
                 progress_callback,
                 "Geolocalizando fotos...",

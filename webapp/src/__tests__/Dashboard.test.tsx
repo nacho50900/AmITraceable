@@ -216,7 +216,7 @@ describe('Dashboard', () => {
     // (se montan en instantes DISTINTOS al spinner de cabecera, que es
     // justo el escenario que antes se desincronizaba).
     await waitFor(() => {
-      expect(container.querySelectorAll('.spinner').length).toBe(3);
+      expect(container.querySelectorAll('.spinner')).toHaveLength(3);
     });
 
     // Dar tiempo a que el requestAnimationFrame compartido pinte al menos

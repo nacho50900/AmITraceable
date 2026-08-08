@@ -316,6 +316,52 @@ def _patch_vision_input_dtype():
     patch_emb.forward = _forward_fp32
 
 
+def _upcast_registered_tensors(model) -> None:
+    """Reasigna a float32 los parámetros y buffers que PyTorch SÍ registra
+    formalmente (`nn.Parameter`, buffers vía `register_buffer`) y que
+    estén en bfloat16. Ver el docstring de `_upcast_to_float32_if_cpu`
+    para el porqué de hacerlo así (reasignar `.data`) en vez de
+    `.to(dtype=...)`."""
+    import torch
+
+    for param in model.parameters():
+        if param.dtype == torch.bfloat16:
+            param.data = param.data.float()
+    for buf in model.buffers():
+        if buf.dtype == torch.bfloat16:
+            buf.data = buf.data.float()
+
+
+def _upcast_dataclass_attr(attr_val, seen_ids: set) -> None:
+    """Si `attr_val` es una dataclass no vista todavía (p.ej.
+    `LinearWeights`/`LayerNormWeights`, ver docstring de
+    `_upcast_to_float32_if_cpu`), reasigna a float32 cualquiera de sus
+    campos que sea un tensor en bfloat16."""
+    import dataclasses
+    import torch
+
+    if not dataclasses.is_dataclass(attr_val) or id(attr_val) in seen_ids:
+        return
+    seen_ids.add(id(attr_val))
+    for field in dataclasses.fields(attr_val):
+        value = getattr(attr_val, field.name)
+        if isinstance(value, torch.Tensor) and value.dtype == torch.bfloat16:
+            setattr(attr_val, field.name, value.float())
+
+
+def _upcast_unregistered_dataclass_tensors(model) -> None:
+    """Recorre a mano los atributos de cada submódulo buscando dataclasses
+    colgadas como atributo normal -- no registradas por PyTorch, ver
+    docstring de `_upcast_to_float32_if_cpu` -- y sube sus tensores en
+    bfloat16 a float32."""
+    seen_ids: set = set()
+    for module in model.modules():
+        for attr_name, attr_val in vars(module).items():
+            if attr_name.startswith("_"):
+                continue  # _parameters, _buffers, _modules, etc. -- ya cubiertos en _upcast_registered_tensors
+            _upcast_dataclass_attr(attr_val, seen_ids)
+
+
 def _upcast_to_float32_if_cpu():
     """Convierte el modelo de bfloat16 (dtype con el que se descarga) a
     float32, SOLO si no hay GPU disponible. Ver el bloque "Intento nº6"
@@ -328,9 +374,10 @@ def _upcast_to_float32_if_cpu():
     Deliberadamente NO usa `_model.to(dtype=torch.float32)`: esa llamada
     es la que causó el error "Tensor on device cpu is not on the expected
     device meta!" documentado como intento nº4. En su lugar, reasigna
-    `.data` de cada parámetro y buffer por separado -- una operación de
-    más bajo nivel que no pasa por los hooks de `accelerate` que asumen
-    un modelo potencialmente repartido en meta device.
+    `.data` de cada parámetro y buffer por separado (ver
+    `_upcast_registered_tensors`) -- una operación de más bajo nivel que
+    no pasa por los hooks de `accelerate` que asumen un modelo
+    potencialmente repartido en meta device.
 
     IMPORTANTE, descubierto investigando por qué la cuantización int8 de
     PyTorch fallaba a medias (ver commit que añade este bloque): la
@@ -339,41 +386,23 @@ def _upcast_to_float32_if_cpu():
     modelo (`LinearWeights`/`LayerNormWeights` en el código remoto) con
     tensores sueltos como atributos, colgada como atributo normal de un
     `nn.Module`. `model.parameters()`/`model.buffers()` SOLO recorren lo
-    que PyTorch registra formalmente (`nn.Parameter`, buffers vía
-    `register_buffer`) -- una dataclass colgada como atributo corriente
-    NO aparece ahí. Por eso esta función NO se conforma con
-    `parameters()`/`buffers()`: además recorre a mano, recursivamente,
-    los atributos de cada submódulo buscando cualquier objeto con campos
-    de tipo `torch.Tensor` en bfloat16 (duck typing sobre `dataclass`,
-    sin importar la clase concreta del código remoto -- más robusto ante
-    cambios de revisión del modelo que importar `LinearWeights`
-    directamente)."""
-    import dataclasses
+    que PyTorch registra formalmente -- una dataclass colgada como
+    atributo corriente NO aparece ahí. Por eso, además de
+    `_upcast_registered_tensors`, hace falta
+    `_upcast_unregistered_dataclass_tensors`: recorre a mano,
+    recursivamente, los atributos de cada submódulo buscando cualquier
+    objeto con campos de tipo `torch.Tensor` en bfloat16 (duck typing
+    sobre `dataclass`, sin importar la clase concreta del código remoto
+    -- más robusto ante cambios de revisión del modelo que importar
+    `LinearWeights` directamente)."""
     import torch
-    import torch.nn as nn
 
     if torch.cuda.is_available():
         return
 
     with torch.no_grad():
-        for param in _model.parameters():
-            if param.dtype == torch.bfloat16:
-                param.data = param.data.float()
-        for buf in _model.buffers():
-            if buf.dtype == torch.bfloat16:
-                buf.data = buf.data.float()
-
-        seen_ids = set()
-        for module in _model.modules():
-            for attr_name, attr_val in list(vars(module).items()):
-                if attr_name.startswith("_"):
-                    continue  # _parameters, _buffers, _modules, etc. -- ya cubiertos arriba
-                if dataclasses.is_dataclass(attr_val) and id(attr_val) not in seen_ids:
-                    seen_ids.add(id(attr_val))
-                    for field in dataclasses.fields(attr_val):
-                        value = getattr(attr_val, field.name)
-                        if isinstance(value, torch.Tensor) and value.dtype == torch.bfloat16:
-                            setattr(attr_val, field.name, value.float())
+        _upcast_registered_tensors(_model)
+        _upcast_unregistered_dataclass_tensors(_model)
 
 
 def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | None]:

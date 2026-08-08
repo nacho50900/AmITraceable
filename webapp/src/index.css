@@ -761,7 +761,11 @@ body {
   min-width: 0;
   flex: 1 1 auto;
   text-align: right;
-  word-break: break-word;
+  /* "break-word" en word-break está obsoleto (ver especificación CSS Text
+     Module Level 3) -- overflow-wrap:anywhere es el equivalente moderno,
+     con el mismo efecto de partir dentro de una palabra larga si hace
+     falta para no desbordar el contenedor. */
+  overflow-wrap: anywhere;
 }
 
 .photo-details summary:hover {

@@ -406,6 +406,35 @@ def _set_location(findings: DemographicFindings, parsed: dict, evidence_map: dic
     _set_comunidad_autonoma(findings, parsed.get("comunidad_autonoma"), evidence_map)
 
 
+def _parse_soft_inference_confidence(raw: object) -> float:
+    """Convierte el campo 'confianza' de un item de 'inferencias_blandas'
+    a un float entre 0 y 1, con un valor moderado por defecto si el
+    modelo no dio un número usable."""
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return max(0.0, min(1.0, float(raw)))
+    return 0.5
+
+
+def _parse_soft_inference_evidence(raw: object) -> list[str]:
+    if isinstance(raw, str) and raw.strip():
+        return [raw]
+    return []
+
+
+def _valid_soft_inference_fields(item: dict) -> tuple[str, str] | None:
+    """Extrae y valida (categoria, valor) de un item de
+    'inferencias_blandas'. Devuelve None si al item le falta alguna de las
+    dos cadenas no vacías que hacen falta para construir un
+    InferredAttribute con sentido."""
+    categoria = item.get("categoria")
+    valor = item.get("valor")
+    if not isinstance(categoria, str) or not categoria.strip():
+        return None
+    if not isinstance(valor, str) or not valor.strip():
+        return None
+    return categoria.strip(), valor.strip()
+
+
 def _parse_soft_inferences(parsed: dict) -> list[InferredAttribute]:
     """Valida y convierte el campo 'inferencias_blandas' del modelo (ver
     _SYSTEM_PROMPT) en InferredAttribute. A diferencia del resto de este
@@ -422,31 +451,82 @@ def _parse_soft_inferences(parsed: dict) -> list[InferredAttribute]:
     for item in raw[:_MAX_SOFT_INFERENCES]:
         if not isinstance(item, dict):
             continue
-        categoria = item.get("categoria")
-        valor = item.get("valor")
-        if not isinstance(categoria, str) or not categoria.strip():
+        fields = _valid_soft_inference_fields(item)
+        if fields is None:
             continue
-        if not isinstance(valor, str) or not valor.strip():
-            continue
-
-        confianza = item.get("confianza")
-        if isinstance(confianza, (int, float)) and not isinstance(confianza, bool):
-            confianza = max(0.0, min(1.0, float(confianza)))
-        else:
-            confianza = 0.5  # el modelo no dio un número usable; valor moderado por defecto
-
-        evidencia = item.get("evidencia")
-        evidence = [evidencia] if isinstance(evidencia, str) and evidencia.strip() else []
+        categoria, valor = fields
 
         result.append(
             InferredAttribute(
-                category=categoria.strip(),
-                value=valor.strip(),
-                confidence=confianza,
-                evidence=evidence,
+                category=categoria,
+                value=valor,
+                confidence=_parse_soft_inference_confidence(item.get("confianza")),
+                evidence=_parse_soft_inference_evidence(item.get("evidencia")),
             )
         )
     return result
+
+
+def _set_sexo(findings: DemographicFindings, parsed: dict, evidence_map: dict) -> None:
+    sexo = parsed.get("sexo")
+    if sexo in ("hombre", "mujer"):
+        findings.sexo = sexo
+        _set_evidence(findings, "sexo", evidence_map)
+        return
+
+    # Solo se usa la estimación por nombre si no hay autodeclaración
+    # explícita -- es una señal más débil (ver docstring del módulo) y
+    # nunca debe pisar una frase literal tipo "soy mujer".
+    sexo_por_nombre = parsed.get("sexo_por_nombre")
+    if sexo_por_nombre in ("hombre", "mujer"):
+        findings.sexo = sexo_por_nombre
+        findings.evidence.setdefault("sexo", []).append("nombre público de la cuenta")
+        findings.source["sexo"] = "ia_nombre"
+
+
+def _set_edad(findings: DemographicFindings, parsed: dict, evidence_map: dict) -> None:
+    edad = parsed.get("edad")
+    if not isinstance(edad, int) or isinstance(edad, bool):
+        return
+    if not (12 <= edad <= 100):
+        return
+    findings.edad = edad
+    _set_evidence(findings, "edad", evidence_map)
+
+
+def _set_free_text_fields(findings: DemographicFindings, parsed: dict, evidence_map: dict) -> None:
+    for field in _FREE_TEXT_FIELDS:
+        value = parsed.get(field)
+        if isinstance(value, str) and value.strip():
+            setattr(findings, field, value.strip())
+            _set_evidence(findings, field, evidence_map)
+
+
+def _set_travel_permalinks(findings: DemographicFindings, parsed: dict) -> None:
+    fotos_de_viaje = parsed.get("fotos_de_viaje")
+    if isinstance(fotos_de_viaje, list):
+        findings.travel_permalinks = {p for p in fotos_de_viaje if isinstance(p, str) and p.strip()}
+
+
+_ESTADO_CIVIL_VALUES = ("soltero", "con_pareja", "casado", "divorciado", "viudo")
+
+
+def _set_estado_civil(findings: DemographicFindings, parsed: dict, evidence_map: dict) -> None:
+    estado_civil_raw = parsed.get("estado_civil")
+    if not isinstance(estado_civil_raw, str) or estado_civil_raw not in _ESTADO_CIVIL_VALUES:
+        return
+
+    findings.estado_civil = estado_civil_raw
+    permalink = evidence_map.get("estado_civil") if isinstance(evidence_map, dict) else None
+    findings.evidence.setdefault("estado_civil", [])
+    if isinstance(permalink, str) and permalink:
+        findings.evidence["estado_civil"].append(permalink)
+    # NUNCA "ia" a secas: es una inferencia simbólica/indirecta (ver
+    # docstring del campo en DemographicFindings), categóricamente menos
+    # fiable que una autodeclaración explícita detectada por IA en el
+    # resto de este módulo -- k_anonymity.py usa esta distinción para
+    # añadir una nota de fiabilidad menor en el informe.
+    findings.source["estado_civil"] = "ia_simbolica"
 
 
 def _to_findings(parsed: dict) -> DemographicFindings:
@@ -456,59 +536,18 @@ def _to_findings(parsed: dict) -> DemographicFindings:
     findings = DemographicFindings()
     evidence_map = parsed.get("evidence") or {}
 
-    sexo = parsed.get("sexo")
-    if sexo in ("hombre", "mujer"):
-        findings.sexo = sexo
-        _set_evidence(findings, "sexo", evidence_map)
-    else:
-        # Solo se usa la estimación por nombre si no hay autodeclaración
-        # explícita -- es una señal más débil (ver docstring del módulo) y
-        # nunca debe pisar una frase literal tipo "soy mujer".
-        sexo_por_nombre = parsed.get("sexo_por_nombre")
-        if sexo_por_nombre in ("hombre", "mujer"):
-            findings.sexo = sexo_por_nombre
-            findings.evidence.setdefault("sexo", []).append("nombre público de la cuenta")
-            findings.source["sexo"] = "ia_nombre"
-
-    edad = parsed.get("edad")
-    if isinstance(edad, int) and not isinstance(edad, bool) and 12 <= edad <= 100:
-        findings.edad = edad
-        _set_evidence(findings, "edad", evidence_map)
-
+    _set_sexo(findings, parsed, evidence_map)
+    _set_edad(findings, parsed, evidence_map)
     _set_normalized(findings, parsed, "estudios", STUDIES_DISTRIBUTION, evidence_map)
     _set_normalized(findings, parsed, "ocupacion", OCCUPATION_DISTRIBUTION, evidence_map)
     _set_location(findings, parsed, evidence_map)
-
-    for field in _FREE_TEXT_FIELDS:
-        value = parsed.get(field)
-        if isinstance(value, str) and value.strip():
-            setattr(findings, field, value.strip())
-            _set_evidence(findings, field, evidence_map)
-
+    _set_free_text_fields(findings, parsed, evidence_map)
     _set_exact_enum(findings, parsed, "nacionalidad", _NATIONALITY_VALUES, evidence_map)
     _set_exact_enum(findings, parsed, "situacion_laboral", _EMPLOYMENT_VALUES, evidence_map)
     _set_exact_enum(findings, parsed, "tipo_hogar", _HOUSEHOLD_VALUES, evidence_map)
     _set_exact_enum(findings, parsed, "lengua_materna", _LANGUAGE_VALUES, evidence_map)
-
-    fotos_de_viaje = parsed.get("fotos_de_viaje")
-    if isinstance(fotos_de_viaje, list):
-        findings.travel_permalinks = {p for p in fotos_de_viaje if isinstance(p, str) and p.strip()}
-
-    estado_civil_raw = parsed.get("estado_civil")
-    if isinstance(estado_civil_raw, str) and estado_civil_raw in (
-        "soltero", "con_pareja", "casado", "divorciado", "viudo",
-    ):
-        findings.estado_civil = estado_civil_raw
-        permalink = evidence_map.get("estado_civil") if isinstance(evidence_map, dict) else None
-        findings.evidence.setdefault("estado_civil", [])
-        if isinstance(permalink, str) and permalink:
-            findings.evidence["estado_civil"].append(permalink)
-        # NUNCA "ia" a secas: es una inferencia simbólica/indirecta (ver
-        # docstring del campo en DemographicFindings), categóricamente
-        # menos fiable que una autodeclaración explícita detectada por IA
-        # en el resto de este módulo -- k_anonymity.py usa esta distinción
-        # para añadir una nota de fiabilidad menor en el informe.
-        findings.source["estado_civil"] = "ia_simbolica"
+    _set_travel_permalinks(findings, parsed)
+    _set_estado_civil(findings, parsed, evidence_map)
 
     findings.soft_inferences = _parse_soft_inferences(parsed)
 
