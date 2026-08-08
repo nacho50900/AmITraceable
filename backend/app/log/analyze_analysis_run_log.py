@@ -1,6 +1,6 @@
 """
 Analiza `backend/data/performance/analysis_run_log.jsonl` (ver
-app/analysis_run_log.py): tiempo total y por ETAPA de cada análisis
+app/log/analysis_run_log.py): tiempo total y por ETAPA de cada análisis
 completo (huella de escritura, detección de atributos, autodeclaraciones
 con IA, espera de geolocalización, estrechamiento de población...).
 
@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pandas as pd
 
-_LOG_PATH = Path(__file__).parent.parent / "data" / "performance" / "analysis_run_log.jsonl"
+_LOG_PATH = Path(__file__).parent.parent.parent / "data" / "performance" / "analysis_run_log.jsonl"
 
 
 def load_log(path: Path = _LOG_PATH) -> pd.DataFrame:

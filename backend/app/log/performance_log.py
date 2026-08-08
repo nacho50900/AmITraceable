@@ -42,7 +42,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_LOG_DIR = Path(__file__).parent.parent / "data" / "performance"
+_LOG_DIR = Path(__file__).parent.parent.parent / "data" / "performance"
 _LOG_PATH = _LOG_DIR / "photo_analysis_log.jsonl"
 
 _warned_unwritable = False

@@ -19,7 +19,7 @@ def _default_photo_analysis_concurrency() -> int:
     cambiar de servidor.
 
     No es un óptimo calculado (eso solo se puede medir empíricamente, ver
-    `app/performance_log.py` y `scripts/analyze_performance_log.py`): es
+    `app/log/performance_log.py` y `scripts/analyze_performance_log.py`): es
     una heurística de "reparto a partes iguales" -- 2 hilos de PyTorch por
     foto en vuelo es el punto donde, en la práctica, una sola inferencia ya
     no se beneficia mucho de más hilos (rendimientos decrecientes), así
@@ -110,7 +110,7 @@ class Settings(BaseSettings):
     enable_scene_analysis: bool = False
 
     # Interruptor GENERAL de los logs de rendimiento (ver
-    # app/performance_log.py y app/analysis_run_log.py): activado por
+    # app/log/performance_log.py y app/log/analysis_run_log.py): activado por
     # defecto porque son datos puramente técnicos, sin nada personal (ver
     # el docstring de cada módulo), y son la fuente empírica para la
     # sección "Plan de evaluación pendiente" de la memoria del TFG -- no

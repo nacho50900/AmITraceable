@@ -1,6 +1,6 @@
 """
 Cronometraje interno del pipeline de análisis, usado por el log GENERAL de
-cada análisis (ver app/analysis_run_log.py) para saber cuánto tardó cada
+cada análisis (ver app/log/analysis_run_log.py) para saber cuánto tardó cada
 etapa (huella de escritura, detección de atributos, autodeclaraciones con
 IA, geolocalización de fotos, estrechamiento de población...), no solo el
 tiempo total.
@@ -22,7 +22,7 @@ una tarea creada así copia el `contextvars.Context` en el momento de
 crearse, así que si no hay ningún timer activo todavía en ese instante,
 esa tarea nunca "ve" el timer que se active después en la tarea padre --
 mejor así: el tiempo de esa tarea en segundo plano se mide aparte, con más
-detalle, en app/performance_log.py (tiempo por FOTO, no de este pipeline
+detalle, en app/log/performance_log.py (tiempo por FOTO, no de este pipeline
 general).
 
 Si no hay ningún timer activo (p. ej. un test que llama a

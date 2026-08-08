@@ -22,7 +22,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.ai_analysis import AiAnalysisUnavailable, analyze_report_with_ai
-from app.analysis_run_log import log_analysis_run
+from app.log.analysis_run_log import log_analysis_run
 from app.analysis_timing import run_with_timer, timed_stage
 from app.config import settings
 from app.instagram_client import InstagramClient
@@ -77,7 +77,7 @@ async def _build_report(
     `fetch_seconds`, si se da, es el tiempo que tardó `fetch_profile()` en
     el llamador (ver `analyze`/`analyze_stream` más abajo) -- se registra
     como una etapa más en el log general de análisis (ver
-    app/analysis_run_log.py), aunque ocurra fuera de esta función, para
+    app/log/analysis_run_log.py), aunque ocurra fuera de esta función, para
     que el log refleje el tiempo total real de principio a fin y no solo
     el del pipeline interno."""
     if not profile.posts:
@@ -98,7 +98,7 @@ async def _build_report(
     # Se crea ANTES de activar `run_with_timer()` a propósito -- ver el
     # docstring de app/analysis_timing.py sobre por qué esta tarea nunca
     # debe compartir el timer del pipeline principal (su tiempo se mide
-    # aparte, por foto, en app/performance_log.py).
+    # aparte, por foto, en app/log/performance_log.py).
     geolocation_task: asyncio.Task | None = None
     if profile.platform == "instagram":
         from app.vision.geolocation import estimate_locations_for_posts
@@ -152,7 +152,7 @@ async def _build_report(
         total_seconds = time.monotonic() - pipeline_start + (fetch_seconds or 0.0)
 
         # Recuentos agregados para el log -- sin ningún dato personal, ver
-        # docstring de app/analysis_run_log.py. `n_photos` cuenta FICHEROS
+        # docstring de app/log/analysis_run_log.py. `n_photos` cuenta FICHEROS
         # de imagen (un carrusel de 5 fotos suma 5, no 1), igual criterio
         # que `total` en estimate_locations_for_posts().
         n_comments = sum(1 for p in profile.posts if p.type == "comment")

@@ -1,6 +1,6 @@
 """
 Log GENERAL de cada análisis completo -- a diferencia de
-app/performance_log.py, que solo registra el tramo de análisis de fotos,
+app/log/performance_log.py, que solo registra el tramo de análisis de fotos,
 este registra el pipeline entero: fecha, plataforma, volumen de actividad
 analizado (nº de posts/comentarios/fotos) y cuánto tardó cada etapa
 (huella de escritura, detección de atributos, autodeclaraciones con IA,
@@ -29,7 +29,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_LOG_DIR = Path(__file__).parent.parent / "data" / "performance"
+_LOG_DIR = Path(__file__).parent.parent.parent / "data" / "performance"
 _LOG_PATH = _LOG_DIR / "analysis_run_log.jsonl"
 
 _warned_unwritable = False

@@ -37,7 +37,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.models.schemas import InferredAttribute
-from app.performance_log import PhotoAnalysisTiming, log_photo_analysis_run
+from app.log.performance_log import PhotoAnalysisTiming, log_photo_analysis_run
 from app.vision.scene_analysis import analyze_image_content
 
 import numpy as np
@@ -432,7 +432,7 @@ async def _process_photo(client, download_semaphore, analysis_semaphore, media_u
     fotos pueden estar en distintas etapas (descargando / en cola para
     analizar / analizando) a la vez.
 
-    `timing` (PhotoAnalysisTiming, ver app/performance_log.py) recibe UNA
+    `timing` (PhotoAnalysisTiming, ver app/log/performance_log.py) recibe UNA
     medición por foto -- solo el tramo de análisis con los modelos de
     visión (no la descarga, que es I/O de red y depende de factores ajenos
     a la CPU/concurrencia que queremos medir aquí)."""
