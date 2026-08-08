@@ -25,6 +25,33 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    # Reparto de hilos internos de PyTorch entre las inferencias que pueden
+    # correr A LA VEZ, para evitar sobre-suscripción de CPU: por defecto,
+    # PyTorch usa TODOS los núcleos disponibles en CADA llamada (da igual
+    # que la hayas lanzado desde un hilo de Python aparte) -- con
+    # `photo_analysis_concurrency` fotos analizándose a la vez, eso
+    # significa varias inferencias peleándose por los mismos núcleos en
+    # vez de repartírselos, lo que puede hacer que el conjunto vaya MÁS
+    # LENTO que analizar las fotos de una en una. Se fija UNA VEZ aquí,
+    # antes de que ningún modelo haga ninguna inferencia real (es un
+    # ajuste de proceso completo, no por modelo ni por hilo) -- afecta por
+    # igual a DINOv2 y a Moondream2, comparten el mismo runtime de
+    # PyTorch. Dimensionado para el caso sostenido (varias fotos
+    # analizándose a la vez, cada una con su propio Moondream2 en marcha),
+    # que es el que de verdad importa: DINOv2 es rápido y su ventana de
+    # solape con Moondream2 en la misma foto es breve, así que no compensa
+    # complicar esto con un reparto dinámico por modelo.
+    try:
+        import os
+
+        import torch
+
+        cpu_count = os.cpu_count() or 4
+        concurrency = max(1, settings.photo_analysis_concurrency)
+        torch.set_num_threads(max(1, cpu_count // concurrency))
+    except ImportError:
+        pass  # torch no instalado (WITH_GEOLOCATION=false) -- nada que ajustar
+
     # Precarga el modelo DINOv2 + el índice FAISS de geolocalización EN EL
     # ARRANQUE del contenedor, en vez de esperar a la primera petición de
     # análisis de Instagram. `_lazy_load()` ya cachea en variables de
@@ -46,6 +73,37 @@ async def _lifespan(app: FastAPI):
         # asyncio mientras carga.
         await asyncio.to_thread(_lazy_load)
         logger.info("Modelo de geolocalización listo.")
+
+    # Moondream2 (análisis de CONTENIDO, distinto de la geolocalización de
+    # arriba) se precarga TAMBIÉN aquí, mismo motivo que DINOv2 -- antes NO
+    # se precargaba, así que la primera foto analizada tras activar
+    # ENABLE_SCENE_ANALYSIS pagaba el coste de carga completo (hasta ~350s
+    # en frío, medido en producción) DENTRO de
+    # `_SCENE_ANALYSIS_TIMEOUT_SECONDS` (30s, pensado para el tiempo de
+    # INFERENCIA, no de carga) -- esa primera foto fallaba casi siempre por
+    # timeout, sin ser un problema real de esa foto en concreto. Se salta
+    # si el interruptor está desactivado (default): no tiene sentido pagar
+    # ese coste de arranque si no se va a usar.
+    if settings.enable_scene_analysis:
+        from app.vision.scene_analysis import _lazy_load as _lazy_load_scene_analysis
+        from app.vision.scene_analysis import _scene_analysis_available
+
+        if _scene_analysis_available():
+            logger.info("Precargando modelo de analisis de contenido (Moondream2)...")
+            await asyncio.to_thread(_lazy_load_scene_analysis)
+            logger.info("Modelo de analisis de contenido listo.")
+        else:
+            # Mismo aviso que ya usa analyze_image_content() en tiempo de
+            # peticion -- ENABLE_SCENE_ANALYSIS=true sin las dependencias
+            # instaladas (falta requirements-vision.txt completo, o
+            # WITH_GEOLOCATION=false en el build) es una config
+            # inconsistente, pero no debe tumbar el arranque: se avisa y
+            # se sigue, igual que ya hace analyze_image_content() por foto.
+            logger.warning(
+                "ENABLE_SCENE_ANALYSIS=true pero faltan dependencias "
+                "(torch/transformers/timm/einops, ver requirements-vision.txt) "
+                "-- el analisis de contenido se saltara silenciosamente en cada foto."
+            )
 
     yield
 
