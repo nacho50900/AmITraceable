@@ -30,12 +30,14 @@ mostrando en el mapa con su confianza real, no se oculta.
 """
 import asyncio
 import logging
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.config import settings
 from app.models.schemas import InferredAttribute
+from app.performance_log import PhotoAnalysisTiming, log_photo_analysis_run
 from app.vision.scene_analysis import analyze_image_content
 
 import numpy as np
@@ -491,13 +493,18 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
             )
             return [], False, None
 
-    async def _process_photo(client, download_semaphore, analysis_semaphore, media_url):
+    async def _process_photo(client, download_semaphore, analysis_semaphore, media_url, timing):
         """Descarga UNA foto y, si se pudo, la analiza con los dos modelos.
         Devuelve (image_or_None, estimate_or_None, scene_inferences,
         indicio_pareja, description_or_None). Pensada para lanzarse como
         tarea independiente por foto (ver más abajo): así varias fotos
         pueden estar en distintas etapas (descargando / en cola para
-        analizar / analizando) a la vez."""
+        analizar / analizando) a la vez.
+
+        `timing` (PhotoAnalysisTiming, ver app/performance_log.py) recibe
+        UNA medición por foto -- solo el tramo de análisis con los modelos
+        de visión (no la descarga, que es I/O de red y depende de factores
+        ajenos a la CPU/concurrencia que queremos medir aquí)."""
         image = await _download_image(client, download_semaphore, media_url)
         if image is None:
             return None, None, [], False, None
@@ -511,10 +518,12 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
         # configurable porque el punto óptimo depende de cuántos núcleos
         # tenga la máquina que lo ejecute.
         async with analysis_semaphore:
+            start = time.monotonic()
             estimate, (scene_inferences, indicio_pareja, description) = await asyncio.gather(
                 asyncio.to_thread(estimate_location_from_image, image),
                 _maybe_analyze_content(image),
             )
+            timing.record(time.monotonic() - start)
         # `image` sale de scope tras este bloque y se descarta (nunca se escribe a disco)
         return image, estimate, scene_inferences, indicio_pareja, description
 
@@ -533,9 +542,21 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
         # en vez de empezar recién en ese momento.
         _MAX_CONCURRENT_DOWNLOADS = 4
         download_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_DOWNLOADS)
-        analysis_semaphore = asyncio.Semaphore(max(1, settings.photo_analysis_concurrency))
+        # Capado a `total`: si este análisis solo tiene, p. ej., 2 fotos,
+        # no tiene sentido abrir más de 2 "huecos" de concurrencia aunque
+        # la máquina tenga músculo para más -- reduce el nº de huecos
+        # abiertos, nunca lo aumenta, así que no hay riesgo de
+        # sobre-suscripción de CPU: `torch.set_num_threads()` ya se fijó en
+        # el arranque asumiendo como máximo `settings.photo_analysis_concurrency`
+        # fotos a la vez (ver app/main.py), y aquí nunca se supera ese tope.
+        actual_concurrency = max(1, min(settings.photo_analysis_concurrency, total))
+        analysis_semaphore = asyncio.Semaphore(actual_concurrency)
+        timing = PhotoAnalysisTiming()
+        run_start = time.monotonic()
         photo_tasks = [
-            asyncio.create_task(_process_photo(client, download_semaphore, analysis_semaphore, media_url))
+            asyncio.create_task(
+                _process_photo(client, download_semaphore, analysis_semaphore, media_url, timing)
+            )
             for _permalink, media_url in photo_units
         ]
 
@@ -583,6 +604,22 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
                 # análisis.
                 track="fotos",
             )
+
+    import os
+
+    log_photo_analysis_run(
+        total_photos=total,
+        cpu_count=os.cpu_count() or 4,
+        configured_concurrency=settings.photo_analysis_concurrency,
+        actual_concurrency=actual_concurrency,
+        # Igual que se calcula en app/main.py -- se repite aquí (en vez de
+        # leerlo de algún sitio compartido) porque es una cuenta trivial y
+        # así este módulo no depende de detalles de arranque de main.py.
+        threads_per_inference=max(1, (os.cpu_count() or 4) // max(1, settings.photo_analysis_concurrency)),
+        enable_scene_analysis=settings.enable_scene_analysis,
+        total_wall_seconds=time.monotonic() - run_start,
+        per_photo_seconds=timing.per_photo_seconds,
+    )
 
     return GeolocationOutcome(
         index_available=index_available,

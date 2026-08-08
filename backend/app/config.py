@@ -7,7 +7,28 @@ Importante (cumplimiento RGPD / diseño del TFG):
 - Las credenciales de Reddit se leen de variables de entorno, nunca se
   hardcodean ni se loguean.
 """
+import os
+
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _default_photo_analysis_concurrency() -> int:
+    """Punto de partida razonable para `photo_analysis_concurrency` en la
+    máquina donde arranca el proceso, sin necesidad de tocar `.env` al
+    cambiar de servidor.
+
+    No es un óptimo calculado (eso solo se puede medir empíricamente, ver
+    `app/performance_log.py` y `scripts/analyze_performance_log.py`): es
+    una heurística de "reparto a partes iguales" -- 2 hilos de PyTorch por
+    foto en vuelo es el punto donde, en la práctica, una sola inferencia ya
+    no se beneficia mucho de más hilos (rendimientos decrecientes), así
+    que por debajo de eso es mejor meter más fotos en paralelo que más
+    hilos por foto. Con 4 núcleos da concurrencia 2 (como el valor fijo
+    anterior); con 16 da 8. Nunca menos de 1.
+    """
+    cpu_count = os.cpu_count() or 4
+    return max(1, cpu_count // 2)
 
 
 class Settings(BaseSettings):
@@ -58,10 +79,14 @@ class Settings(BaseSettings):
     # una foto, el núcleo que habría usado DINOv2 para la siguiente queda
     # ocioso. Subir esto aprovecha esos huecos, a costa de más RAM (cada
     # foto en vuelo mantiene su propia pasada de Moondream2 en memoria) y
-    # de competir más por los mismos núcleos -- 2 es un punto de partida
-    # razonable para una CPU de pocos núcleos; en un servidor con más
-    # núcleos puede subirse.
-    photo_analysis_concurrency: int = 2
+    # de competir más por los mismos núcleos. Se calcula solo a partir de
+    # los núcleos disponibles en la máquina donde arranca el proceso (ver
+    # `_default_photo_analysis_concurrency`) -- no hace falta tocar esto al
+    # cambiar de servidor. Sigue siendo sobreescribible con la variable de
+    # entorno PHOTO_ANALYSIS_CONCURRENCY si algún día conviene forzar un
+    # valor concreto (p. ej. para comparar configuraciones, ver
+    # scripts/analyze_performance_log.py).
+    photo_analysis_concurrency: int = Field(default_factory=_default_photo_analysis_concurrency)
 
     # Interruptor para el análisis de CONTENIDO visual con Moondream2 (ver
     # app/vision/scene_analysis.py y `_maybe_analyze_content` en

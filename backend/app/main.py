@@ -48,7 +48,21 @@ async def _lifespan(app: FastAPI):
 
         cpu_count = os.cpu_count() or 4
         concurrency = max(1, settings.photo_analysis_concurrency)
-        torch.set_num_threads(max(1, cpu_count // concurrency))
+        threads_per_inference = max(1, cpu_count // concurrency)
+        torch.set_num_threads(threads_per_inference)
+        # `photo_analysis_concurrency` ahora se autocalcula por defecto a
+        # partir de `cpu_count` (ver `_default_photo_analysis_concurrency`
+        # en config.py) -- se deja constancia aquí de los valores
+        # resultantes en ESTA máquina para poder verificarlos en el log de
+        # arranque, en vez de tener que inferirlos indirectamente.
+        logger.info(
+            "Reparto de hilos de PyTorch: %d núcleos detectados, "
+            "concurrencia de fotos=%d, hilos por inferencia=%d "
+            "(PHOTO_ANALYSIS_CONCURRENCY en .env para forzar otro valor)",
+            cpu_count,
+            concurrency,
+            threads_per_inference,
+        )
     except ImportError:
         pass  # torch no instalado (WITH_GEOLOCATION=false) -- nada que ajustar
 
