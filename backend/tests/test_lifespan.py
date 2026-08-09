@@ -86,3 +86,37 @@ class TestLifespanSceneAnalysisPreload:
 
         fake_lazy_load.assert_not_called()
 
+
+class TestLifespanIneStalenessWarning:
+    """Regresión directa de `ine_reference.stale_tables()` -- ver su
+    docstring y el de `_LAST_VERIFIED` en ese mismo fichero."""
+
+    def test_logs_warning_when_tables_are_stale(self, monkeypatch, caplog):
+        import logging
+        from datetime import date
+
+        monkeypatch.setattr("app.vision.geolocation._geolocation_available", lambda: False)
+        monkeypatch.setattr("app.config.settings.enable_scene_analysis", False)
+        monkeypatch.setattr(
+            "app.data.ine_reference.stale_tables",
+            lambda: [("TOTAL_POPULATION_ES", date(2020, 1, 1), 2000)],
+        )
+
+        with caplog.at_level(logging.WARNING):
+            with TestClient(app):
+                pass
+
+        assert "TOTAL_POPULATION_ES" in caplog.text
+
+    def test_no_warning_when_tables_are_current(self, monkeypatch, caplog):
+        import logging
+
+        monkeypatch.setattr("app.vision.geolocation._geolocation_available", lambda: False)
+        monkeypatch.setattr("app.config.settings.enable_scene_analysis", False)
+        monkeypatch.setattr("app.data.ine_reference.stale_tables", lambda: [])
+
+        with caplog.at_level(logging.WARNING):
+            with TestClient(app):
+                pass
+
+        assert "ine_reference" not in caplog.text.lower()

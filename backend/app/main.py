@@ -119,6 +119,24 @@ async def _lifespan(app: FastAPI):
                 "-- el analisis de contenido se saltara silenciosamente en cada foto."
             )
 
+    # Aviso (no bloqueante) de tablas de distribución poblacional del INE
+    # (app/data/ine_reference.py, usadas por k_anonymity.py) cuyo dato de
+    # origen documentado ha superado su umbral de antigüedad esperado --
+    # ver stale_tables() para el criterio. Es solo un log, no impide
+    # arrancar ni cambia ningún cálculo: hay que revisar y actualizar la
+    # tabla a mano si el aviso salta.
+    from app.data.ine_reference import stale_tables
+
+    stale = stale_tables()
+    if stale:
+        detalle = ", ".join(f"{name} ({days}d)" for name, _verified, days in stale)
+        logger.warning(
+            "Tablas de app/data/ine_reference.py con más antigüedad de la "
+            "esperada desde su fecha de origen documentada -- revisar si "
+            "el INE ha publicado cifras más recientes: %s",
+            detalle,
+        )
+
     yield
 
 

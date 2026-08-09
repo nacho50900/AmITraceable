@@ -20,7 +20,97 @@ CSV descargados directamente de:
 No se ha construido una base de datos sintética persona-a-persona (ver nota
 de diseño en `scoring/k_anonymity.py`): estas son distribuciones agregadas,
 no microdatos individuales.
+
+SOBRE LA VIGENCIA DE ESTOS DATOS (`_LAST_VERIFIED` más abajo):
+cada tabla lleva asociada la fecha del dato del INE en el que se basó (no
+la fecha en que se escribió este fichero). `stale_tables()` compara esa
+fecha contra hoy y avisa si ha pasado demasiado tiempo -- ver esa función
+para el criterio de umbral por tipo de fuente (anual vs. plurianual). Es
+un AVISO, no una descarga automática: cuando salte, hay que revisar a mano
+si el INE ha publicado cifras más recientes y actualizar la tabla y su
+fecha en `_LAST_VERIFIED` a la vez. Para las tablas con una fuente clara y
+estructurada en la API del INE, `backend/scripts/update_ine_reference.py`
+automatiza la parte de DESCARGAR el dato nuevo (no de aplicarlo -- eso
+sigue siendo una decisión humana, ver docstring de ese script).
 """
+
+from datetime import date, timedelta
+
+# Fecha del dato de origen de cada tabla (NO la fecha en que se escribió
+# este fichero) -- usada por `stale_tables()`. `None` significa "sin fuente
+# con fecha de publicación periódica conocida", ver esa misma tabla más
+# abajo para el porqué en cada caso -- esas no se comprueban.
+_LAST_VERIFIED: dict[str, date | None] = {
+    "TOTAL_POPULATION_ES": date(2025, 1, 1),
+    "SEX_DISTRIBUTION": date(2025, 1, 1),
+    "MARITAL_STATUS_DISTRIBUTION": date(2024, 1, 1),
+    "MARITAL_STATUS_BY_SEX": date(2024, 1, 1),
+    "AGE_DISTRIBUTION_5Y": date(2025, 1, 1),
+    "PROVINCE_POPULATION": date(2024, 1, 1),
+    # Sin tabla INE concreta citada al construir estas dos -- son un orden
+    # de magnitud estimado a mano, no una cifra derivada de una fuente con
+    # fecha de publicación. No tiene sentido marcarlas "caducadas" frente a
+    # una fuente que nunca existió; si se sustituyen por datos reales del
+    # Censo/EPA, añadir su fecha aquí en ese momento.
+    "STUDIES_DISTRIBUTION": None,
+    "OCCUPATION_DISTRIBUTION": None,
+    "NATIONALITY_DISTRIBUTION": date(2025, 1, 1),
+    "SITUACION_LABORAL_DISTRIBUTION": date(2025, 10, 1),  # EPA T4 2025
+    "HOUSEHOLD_TYPE_DISTRIBUTION": date(2024, 1, 1),
+    # ECEPOV es una encuesta puntual del INE, sin periodicidad anual fija
+    # (la última es de 2021, la anterior de 2018) -- un umbral de "1 año"
+    # saltaría permanentemente sin que haya nada nuevo que revisar. Se
+    # comprueba con un umbral mucho más largo (ver STALE_THRESHOLDS).
+    "LANGUAGE_BY_CCAA": date(2021, 1, 1),
+}
+
+# Umbral de antigüedad (días) a partir del cual `stale_tables()` avisa,
+# distinto según la periodicidad real de la fuente -- un umbral único de
+# "1 año" para todo generaría avisos constantes en tablas que el propio
+# INE no actualiza cada año (Censo, ECEPOV/ECH), y dejaría pasar demasiado
+# tiempo en las que sí se actualizan anualmente (Padrón, EPA).
+_STALE_THRESHOLD_ANNUAL = timedelta(days=400)  # Padrón, EPA: margen de ~1 mes sobre 1 año
+_STALE_THRESHOLD_MULTIYEAR = timedelta(days=6 * 365)  # Censo (~cada 10 años, pero se usan notas de prensa intermedias), ECEPOV/ECH (sin periodicidad fija)
+
+_STALE_THRESHOLDS: dict[str, timedelta] = {
+    "TOTAL_POPULATION_ES": _STALE_THRESHOLD_ANNUAL,
+    "SEX_DISTRIBUTION": _STALE_THRESHOLD_ANNUAL,
+    "AGE_DISTRIBUTION_5Y": _STALE_THRESHOLD_ANNUAL,
+    "PROVINCE_POPULATION": _STALE_THRESHOLD_ANNUAL,
+    "NATIONALITY_DISTRIBUTION": _STALE_THRESHOLD_ANNUAL,
+    "SITUACION_LABORAL_DISTRIBUTION": _STALE_THRESHOLD_ANNUAL,
+    "MARITAL_STATUS_DISTRIBUTION": _STALE_THRESHOLD_MULTIYEAR,
+    "MARITAL_STATUS_BY_SEX": _STALE_THRESHOLD_MULTIYEAR,
+    "HOUSEHOLD_TYPE_DISTRIBUTION": _STALE_THRESHOLD_MULTIYEAR,
+    "LANGUAGE_BY_CCAA": _STALE_THRESHOLD_MULTIYEAR,
+}
+
+
+def stale_tables(as_of: date | None = None) -> list[tuple[str, date, int]]:
+    """Tablas de este fichero cuyo dato de origen (`_LAST_VERIFIED`) ha
+    superado su umbral de antigüedad esperado (`_STALE_THRESHOLDS`).
+
+    Devuelve una lista de (nombre_tabla, fecha_verificacion, dias_de_antiguedad),
+    ordenada de más a menos antigua. Lista vacía si todo está dentro de
+    plazo (o si `as_of` es anterior a todas las fechas registradas).
+
+    NO descarga nada ni compara contra el INE en vivo -- es una
+    comprobación puramente local de "¿cuánto tiempo ha pasado desde la
+    fecha que documentamos como origen de este dato?". Pensada para
+    llamarse una vez al arrancar el backend (ver `_lifespan` en
+    `main.py`) y dejar un aviso en el log, igual que ya se hace con la
+    disponibilidad de los modelos de visión."""
+    as_of = as_of or date.today()
+    stale = []
+    for name, last_verified in _LAST_VERIFIED.items():
+        if last_verified is None:
+            continue
+        age = as_of - last_verified
+        threshold = _STALE_THRESHOLDS.get(name, _STALE_THRESHOLD_ANNUAL)
+        if age > threshold:
+            stale.append((name, last_verified, age.days))
+    return sorted(stale, key=lambda row: row[2], reverse=True)
+
 
 # Población residente en España a 1 de enero de 2025 (INE, Estadística
 # Continua de Población / Censo Anual de Población).
