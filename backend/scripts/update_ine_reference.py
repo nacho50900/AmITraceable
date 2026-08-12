@@ -8,6 +8,20 @@ CÓMO USARLO:
     python scripts/update_ine_reference.py            # solo compara, no escribe nada
     python scripts/update_ine_reference.py --apply     # además, aplica PROVINCE_POPULATION
     python scripts/update_ine_reference.py --apply --yes  # sin pedir confirmación por teclado
+    python scripts/update_ine_reference.py --apply --force-tasa-paro   # aplica SITUACION_LABORAL_DISTRIBUTION
+                                                                        # aunque la tasa de paro parezca implausible
+    python scripts/update_ine_reference.py --apply --force-ocupacion   # aplica OCCUPATION_DISTRIBUTION aunque la
+                                                                        # suma de categorías mapeadas parezca implausible
+    python scripts/update_ine_reference.py --apply --force-hogar       # aplica HOUSEHOLD_TYPE_DISTRIBUTION aunque la
+                                                                        # suma de categorías parezca implausible
+
+NOTA (encontrada en esta misma sesión, no corregida a propósito -- fuera
+del alcance de lo pedido): el párrafo siguiente, sobre qué toca `--apply`,
+está desactualizado frente al comportamiento real de `main()` más abajo
+-- NATIONALITY_DISTRIBUTION, MARITAL_STATUS_DISTRIBUTION/BY_SEX y
+SITUACION_LABORAL_DISTRIBUTION SÍ se aplican con `--apply` hoy (esta
+última con la guarda de `--force-tasa-paro`), no solo PROVINCE_POPULATION.
+Revisar y corregir este docstring es trabajo aparte.
 
 Por defecto (sin `--apply`) imprime, por cada tabla soportada, el valor
 actual en el código frente al valor recién descargado del INE, y si
@@ -36,9 +50,168 @@ esas tres es el siguiente paso pendiente, no algo ya resuelto aquí.
 
 LIMITACIÓN IMPORTANTE, para que quede documentada y no se asuma más
 cobertura de la que hay: la API del INE (Tempus3, servicios.ine.es) exige
-conocer el ID numérico exacto de cada tabla. Se han localizado por
-búsqueda web IDs candidatos para las cinco tablas con fuente periódica
-conocida (población por provincia, estado civil, nacionalidad, tasas EPA).
+conocer el ID numérico exacto de cada tabla (o, en el caso de tablas
+PC-Axis, su ruta exacta -- ver más abajo). Se han localizado por
+búsqueda web IDs/rutas candidatas para las siete tablas con fuente
+periódica conocida (población por provincia, estado civil, nacionalidad,
+tasas EPA, ocupación CNO-11, tipo de hogar ECH).
+
+BUG CORREGIDO (sesión posterior, a petición explícita de Nacho: "resuelve
+y busca por el bug de SITUACION_LABORAL_DISTRIBUTION"): la tasa de paro
+de 26,03% que devolvía _TABLA_TASAS_EPA (en vez del ~9,93% real,
+confirmado contra la nota de prensa oficial EPA T4 2025) no era un
+problema de metodología vigente/no vigente como se había hipotetizado
+sin poder confirmarlo -- esa dualidad, comprobada con la propia página
+del INE, es sobre la clasificación CNAE de rama de actividad, no sobre
+esta tabla de tasas. La causa real, respaldada por ejemplos externos
+documentados del formato JSON de esta misma API, es que el array `Data`
+de cada serie viene ordenado DESCENDENTEMENTE por fecha (el dato más
+reciente primero), y las 6 funciones fetch_* de este script cogían
+`datos[-1]` -- el ÚLTIMO elemento, el más ANTIGUO, no el más reciente --
+cuando `Data` traía más de un periodo. Un 26,03% encaja con un trimestre
+real del pico de la crisis de 2013. Corregido en las 6 funciones fetch_*
+a la vez (no solo en la de tasas EPA) con `_latest_valor_por_nombre` /
+`_valor_mas_reciente`, que comparan la fecha real de cada punto en vez de
+fiarse de la posición en el array o del orden de iteración. Ver el bloque
+de comentario junto a esas dos funciones (más abajo en este fichero) para
+el detalle completo, la evidencia externa concreta, y el aviso de que
+sigue sin poder confirmarse al 100% sin ejecutar esto contra la API real.
+
+INVESTIGACIÓN de STUDIES_DISTRIBUTION y OCCUPATION_DISTRIBUTION (sesión
+posterior a la del párrafo anterior, a petición explícita de Nacho tras
+descartar en una pasada previa que fuera un "quick win"):
+
+- OCCUPATION_DISTRIBUTION SÍ tiene tabla INE anual/trimestral con
+  granularidad suficiente: tabla 65134, "Ocupados por sexo y ocupación"
+  (EPA, subgrupos principales -2 dígitos- de la CNO-11), confirmada por
+  su ficha en datos.gob.es (da explícitamente la URL JSON de Tempus3).
+  El trabajo de diseño real -- mapear cada uno de los ~40 subgrupos
+  CNO-11 a una de las 10 categorías coloquiales de
+  OCCUPATION_DISTRIBUTION -- se ha hecho a mano usando los nombres
+  oficiales de subgrupo (ver `_CNO11_SUBGRUPO_TO_APP_CATEGORY`, más
+  abajo en este fichero): es DELIBERADAMENTE un mapeo incompleto (la
+  mayoría de subgrupos CNO-11 -agricultura, industria pesada, fuerzas
+  armadas...- no tienen equivalente en las 10 categorías actuales y se
+  dejan sin mapear a propósito). Como con estado civil/nacionalidad/tasas
+  EPA, el ID de tabla y el mapeo NO se han podido ejecutar contra la API
+  real desde este entorno de trabajo (sin acceso de red a
+  servicios.ine.es) -- `fetch_occupation`/`_normalize_occupation` hacen
+  además un supuesto sin verificar sobre el formato exacto de `Nombre`
+  (ver AVISO DE FORMATO en el docstring de `fetch_occupation`), así que
+  esta tabla necesita más revisión que ninguna otra la primera vez que
+  se corra de verdad.
+
+- STUDIES_DISTRIBUTION NO tiene un camino equivalente. Sus claves son
+  titulaciones/carreras concretas (medicina, derecho, ingenieria
+  informatica...), no niveles de formación (primaria/secundaria/
+  universitaria, que sí tiene el INE con esa granularidad amplia) ni
+  ramas de conocimiento amplias (que es todo lo que ofrece la fuente más
+  cercana encontrada). Esa fuente más cercana es la Encuesta de
+  Inserción Laboral de Titulados Universitarios (EILU) del propio INE
+  (https://ine.es/dyngs/INEbase/es/operacion.htm?c=Estadistica_C&cid=1254736176991),
+  que sí desglosa por "ámbito de estudio" con una granularidad parecida
+  a la de este diccionario -- pero con tres problemas que la hacen no
+  automatizable de la misma forma que las demás tablas de este script:
+  (1) es una encuesta PUNTUAL, no anual/trimestral (ediciones conocidas:
+  2014 y 2019 -- sin edición más reciente localizada al escribir esto);
+  (2) mide TITULADOS de una cohorte concreta (p. ej. "curso 2013-2014"),
+  no la población total viva con esa titulación, que es lo que necesita
+  STUDIES_DISTRIBUTION; y (3) para convertir eso en una proporción sobre
+  población total haría falta combinarlo con la tabla de nivel de
+  formación alcanzado (ID candidato 66017/4194, sin verificar tampoco)
+  para saber qué fracción de la población tiene estudios universitarios,
+  y aun así seguiría siendo una aproximación (titulados de una cohorte
+  puntual como proxy de la población total con cada titulación). Si se
+  quiere abordar STUDIES_DISTRIBUTION con datos reales, ese es el camino
+  -- pero es una tarea de diseño y verificación en sí misma, no una
+  automatización directa como las demás tablas de este script; se deja
+  documentado aquí en vez de intentarlo a ciegas en esta misma pasada.
+
+INVESTIGACIÓN de HOUSEHOLD_TYPE_DISTRIBUTION (sesión posterior, a
+petición explícita de Nacho): esta SÍ es -tal como ya se sospechaba antes
+de investigarla- el caso genuino de tabla PC-Axis (identificador en forma
+de ruta, no ID numérico) que las demás tablas de este fichero no son. Se
+han resuelto dos cosas, no solo el ID/ruta:
+
+1. Cómo se llama una tabla PC-Axis desde la misma API Tempus3 que ya usa
+   el resto de este script (mismo endpoint DATOS_TABLA, pasando la ruta
+   completa en vez de un ID numérico -- confirmado con un ejemplo literal
+   de la documentación oficial del INE para otra tabla PC-Axis). Ver el
+   comentario de `_TABLA_HOGAR_TIPO` más abajo para el detalle y la URL
+   de referencia.
+2. Qué ruta concreta usar: "t20/p274/serie/prov/p01/l0/01013.px"
+   ("Número de hogares según el tipo de hogar y el tipo de edificio
+   donde se encuentra la vivienda", ECH, nacional), confirmada por sus
+   etiquetas en datos.gob.es, que incluyen literalmente varias de las
+   categorías de tipo de hogar que necesitamos.
+
+Sigue habiendo un supuesto SIN VERIFICAR sobre el formato exacto de
+`Nombre` en esta tabla (no se ha podido ejecutar contra la API real desde
+este entorno de trabajo) -- ver `_normalize_household_type` para el
+supuesto concreto y cómo corregirlo con el ejemplo real la primera vez
+que se corra.
+
+BÚSQUEDA FUERA DEL INE de STUDIES_DISTRIBUTION y LANGUAGE_BY_CCAA
+(sesión posterior, a petición explícita de Nacho: "no tenemos una manera
+de sacar las otras dos, aunque no sea por el INE, busca por internet").
+Resultado desigual entre las dos -- una tiene un candidato nuevo y real,
+la otra sigue sin un camino que valga la pena automatizar:
+
+- STUDIES_DISTRIBUTION -- CANDIDATO NUEVO Y PROMETEDOR, pero sin
+  mecanismo de acceso confirmado: el Ministerio de Ciencia, Innovación y
+  Universidades (NO el INE -- fuente distinta, mismo Estado) publica a
+  través de su Sistema Integrado de Información Universitaria (SIIU,
+  https://www.ciencia.gob.es/Ministerio/Estadisticas/SIIU.html) una
+  tabla ANUAL (última edición confirmada: curso 2024-2025) de
+  "Matriculados por nivel académico, sexo, grupo de edad y CAMPO de
+  estudio" -- "campo de estudio" es justo la granularidad de carrera
+  concreta que necesita STUDIES_DISTRIBUTION (ISCED-F: Medicina,
+  Derecho, Informática... como categorías individuales, no ramas
+  amplias), confirmada por su propio catálogo de clasificaciones
+  ("Titulaciones según rama, ISCED 2013, ámbito de estudio y campo de
+  estudio. Curso 2024-2025"). Es un candidato claramente MEJOR que la
+  EILU mencionada arriba: es anual (no puntual) y viene del mismo
+  sistema estadístico oficial. Su limitación real, distinta de la de la
+  EILU: mide MATRICULADOS actuales, no la población total que ya tiene
+  cada titulación -- una aproximación razonable si la popularidad
+  relativa de cada campo es estable en el tiempo (asunción ya implícita
+  en que STUDIES_DISTRIBUTION se documenta a sí misma como "MUY
+  aproximado"), pero sigue siendo una aproximación, no una medición
+  directa de población total como si tiene OCCUPATION_DISTRIBUTION.
+  LO QUE FALTA CONFIRMAR, y por lo que NO se ha implementado nada
+  todavía en este script: el portal que sirve estos datos
+  (estadisticas.ciencia.gob.es, con URLs "dynPx/inebase" muy similares a
+  las del propio INE) bloquea el acceso automatizado desde este entorno
+  de trabajo (robots.txt), y no se ha podido confirmar si expone una API
+  JSON tipo Tempus3 como la del INE (con URL y parámetros documentados)
+  o si solo distribuye XLS/CSV para descarga manual -- a diferencia de
+  HOUSEHOLD_TYPE_DISTRIBUTION, aquí NO hay una URL de API confirmada por
+  ninguna documentación oficial encontrada, así que escribir un
+  fetch_studies() ahora mismo sería inventar un mecanismo de acceso sin
+  respaldo, algo que este script ha evitado deliberadamente en todo lo
+  demás. Trabajo pendiente concreto para una sesión dedicada: entrar a
+  https://www.ciencia.gob.es/Ministerio/Estadisticas/SIIU/Estudiantes.html
+  desde un navegador normal (sin el bloqueo de robots.txt de este
+  entorno) y comprobar si el explorador de tablas PC-Axis de ese portal
+  ofrece la misma opción de descarga JSON/API que sí tiene INEbase.
+
+- LANGUAGE_BY_CCAA -- sigue sin un camino que compense el esfuerzo: los
+  institutos estadísticos autonómicos de las CCAA con lengua cooficial
+  SÍ hacen sus propias encuestas sociolingüísticas, y al menos una
+  (IDESCAT, Cataluña, "Encuesta de usos lingüísticos de la población",
+  https://www.idescat.cat/pub/?id=eulp&lang=es) tiene mejor periodicidad
+  que la ECEPOV del INE (quinquenal -2003/2008/2013/2018/2023- frente a
+  los ~7-8 años entre ediciones de la ECEPOV) -- pero sigue sin ser
+  anual, y automatizar esto de verdad exigiría repetir esta misma
+  investigación por separado para CADA comunidad con lengua cooficial
+  (Cataluña, Baleares, C. Valenciana, País Vasco, Galicia, Navarra),
+  cada una con su propio instituto, su propio diseño de encuesta, su
+  propia periodicidad y sus propias categorías de respuesta -- un
+  trabajo de fragmentación en 6 fuentes distintas, no una tabla única
+  como el resto de este script. No se ha considerado que compense frente
+  al beneficio (pasar de "cada 7-8 años" a "cada 5 años" en el mejor de
+  los casos) en esta pasada; se deja documentado como posible tarea
+  aparte si en algún momento se decide abordarla región por región.
 
 Estado tras la primera ejecución real (por Nacho, en su máquina): las
 tres tablas nuevas (estado civil, nacionalidad, tasas EPA) funcionaron a
@@ -71,13 +244,14 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from datetime import date
 from pathlib import Path
 
 import httpx
 
-sys.path.insert(0, "..")
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.data import ine_reference  # noqa: E402
 
 _INE_API_BASE = "https://servicios.ine.es/wstempus/js/ES"
@@ -114,6 +288,76 @@ _TABLA_POBLACION_PROVINCIAS = 67988
 _TABLA_ESTADO_CIVIL = 76288  # "Población de 16 y más años por sexo y estado civil"
 _TABLA_NACIONALIDAD = 59587  # "Población residente por fecha, sexo, grupo de edad y nacionalidad (española/extranjera)"
 _TABLA_TASAS_EPA = 1113  # "Tasas de actividad, paro y empleo, por sexo y distintos grupos de edad"
+
+# ID=65134, "Ocupados por sexo y ocupación. Valores absolutos y
+# porcentajes respecto del total de cada sexo" (EPA, trimestral,
+# nacional, desglose por subgrupo principal -2 dígitos- de la CNO-11) --
+# confirmado por la ficha oficial del conjunto de datos en datos.gob.es
+# (https://datos.gob.es/es/catalogo/ea0042823-ocupados-por-sexo-y-ocupacion-valores-absolutos-y-porcentajes-respecto-del-total-de-cada-sexo-epa-identificador-api-4143),
+# cuyo título muestra el ID real (65134) aunque la URL conserve en el
+# slug un ID antiguo/redirigido (4143) -- la propia ficha da la URL JSON
+# de Tempus3 usada por este script:
+# https://servicios.ine.es/wstempus/js/es/DATOS_TABLA/65134?tip=AM
+# Cobertura 2011-2026, identificador Tempus3 urn:ine:es:TABLA:T3:330:4143
+# (el "4143" que sí aparece aquí es el ID interno T3:330:xxxx, DISTINTO
+# del ID de tabla 65134 usado en la URL de descarga -- confusión real de
+# la propia ficha de datos.gob.es, no un error de este script; se usa
+# 65134 porque es el que da la URL JSON explícita).
+#
+# NO verificado todavía contra la API real desde este entorno de trabajo
+# (mismo motivo que _TABLA_ESTADO_CIVIL/_TABLA_NACIONALIDAD/_TABLA_TASAS_EPA:
+# sin acceso de red a servicios.ine.es aquí) -- revisa la salida de este
+# script con cuidado la primera vez que lo corras con este ID.
+_TABLA_OCUPACION_CNO11 = 65134
+
+# "t20/p274/serie/prov/p01/l0/01013.px" -- Encuesta Continua de Hogares
+# (ECH), "Número de hogares según el tipo de hogar y el tipo de edificio
+# donde se encuentra la vivienda", NACIONAL. A diferencia de las tablas
+# anteriores, esta NO tiene un ID numérico Tempus3 -- es una tabla
+# PC-Axis, identificada por una RUTA (path + fichero .px), tal como ya
+# se sospechaba en el registro de trabajo antes de esta sesión ("aquí sí
+# que es el caso genuino de tabla PC-Axis"). Dos cosas se han resuelto
+# en esta sesión, no solo una:
+#
+# 1. CÓMO SE LLAMA una tabla PC-Axis desde la misma API Tempus3 que ya
+#    usa el resto de este script: la documentación oficial del INE
+#    (https://www.ine.es/dyngs/DAB/index.htm?cid=1102) da un ejemplo
+#    literal para OTRA tabla PC-Axis con el mismo formato de ruta:
+#    https://servicios.ine.es/wstempus/js/ES/DATOS_TABLA/t20/e245/p08/l0/01001.px?nult=2&tv=...
+#    -- es decir, el mismo endpoint DATOS_TABLA de `_fetch_series`,
+#    pasando la ruta completa (path + fichero) en vez de un ID numérico.
+#    `_fetch_series` ya funciona para esto sin cambios: construye la URL
+#    con un f-string, así que un `table_id` de tipo `str` con la ruta
+#    completa encaja directamente en `{_INE_API_BASE}/DATOS_TABLA/{table_id}`.
+#
+# 2. QUÉ RUTA CONCRETA usar: localizada por búsqueda del título exacto
+#    de la tabla (mismo método que el resto de IDs de este fichero), y
+#    confirmada -- a diferencia de estado civil/nacionalidad/tasas
+#    EPA/ocupación, aquí SÍ hay evidencia directa de que las categorías
+#    de "tipo de hogar" de esta tabla concreta son las que necesitamos:
+#    la ficha de datos.gob.es
+#    (https://datos.gob.es/es/catalogo/ea0010587-numero-de-hogares-segun-el-tipo-de-hogar-y-el-tipo-de-edificio-donde-se-encuentra-la-vivienda-identificador-api-t20-p274-serie-prov-p01-l0-01013-px1)
+#    incluye entre sus etiquetas, tal cual: "Hogar unipersonal", "Hogar
+#    monoparental", "Núcleo familiar con otras personas que no forman
+#    núcleo familiar", "Dos o más núcleos familiares" -- coinciden
+#    exactamente con las categorías reales de la ECH ya confirmadas por
+#    fuentes espejo de institutos autonómicos (p. ej. ICANE) para esta
+#    misma variable "tipo de hogar", que además incluye "Pareja sin
+#    hijos que convivan en el hogar" y "Pareja con hijos que convivan en
+#    el hogar" (estas dos no aparecían truncadas en las etiquetas
+#    encontradas, pero son parte de la misma clasificación oficial de la
+#    ECH -- ver `_TIPO_HOGAR_TO_APP_CATEGORY` más abajo).
+#
+# Alternativa NO usada pero igual de válida si esta diera problemas al
+# ejecutarla de verdad: "t20/p274/serie/def/p01/l0/01003.px" (mismo
+# desglose de tipo de hogar, cruzado con número de habitaciones de la
+# vivienda en vez de con tipo de edificio) -- misma variable de interés,
+# solo cambia el segundo eje de la tabla.
+#
+# NO verificado todavía contra la API real desde este entorno de trabajo
+# (sin acceso de red a servicios.ine.es) -- revisa la salida de este
+# script con cuidado la primera vez que lo corras con esta tabla.
+_TABLA_HOGAR_TIPO = "t20/p274/serie/prov/p01/l0/01013.px"
 
 
 # El INE usa el nombre OFICIAL bilingüe actual para las provincias con
@@ -207,6 +451,213 @@ def _warn_if_empty(table_id: int | str, series: list[dict], result: dict) -> Non
         )
         for serie in series[:2]:
             print(f"    ejemplo crudo: {serie}")
+
+
+def _mostrar_ejemplos_nombres(raw: dict, *, filtro_subcadenas: list[str] | None = None, max_n: int = 20) -> None:
+    """Imprime hasta `max_n` claves `Nombre` reales de `raw` -- a
+    diferencia de `_warn_if_empty` (que solo dispara cuando `raw`/`series`
+    quedan del todo vacíos), esto se llama cuando el fetch SÍ trajo datos
+    pero la normalización posterior no encontró las filas que esperaba
+    (p. ej. SITUACION_LABORAL_DISTRIBUTION con una tasa de paro
+    implausible, u OCCUPATION_DISTRIBUTION/HOUSEHOLD_TYPE_DISTRIBUTION
+    sin ninguna fila reconocible) -- en esos casos `_warn_if_empty` no
+    imprime nada útil porque `raw` no está vacío, solo mal interpretado.
+    Ver esta salida real es lo único que permite ajustar el parseo de
+    forma definitiva en vez de seguir hipotetizando sin verlo."""
+    claves = list(raw.keys())
+    if filtro_subcadenas:
+        claves_filtradas = [
+            c for c in claves
+            if any(sub.lower() in c.lower() for sub in filtro_subcadenas)
+        ]
+    else:
+        claves_filtradas = claves
+
+    print(f"  Ejemplos reales de 'Nombre' ({len(claves_filtradas)} de {len(claves)} totales, mostrando hasta {max_n}):")
+    for clave in claves_filtradas[:max_n]:
+        print(f"    {clave!r} -> {raw[clave]}")
+    if not claves_filtradas:
+        print(f"    (ningún 'Nombre' contiene {filtro_subcadenas} -- aquí van {min(max_n, len(claves))} claves sin filtrar en su lugar:)")
+        for clave in claves[:max_n]:
+            print(f"    {clave!r} -> {raw[clave]}")
+
+
+def _diagnosticar_series_duplicadas(table_id: int | str, nombre_exacto: str) -> None:
+    """DIAGNÓSTICO EXTRA, más caro que `_mostrar_ejemplos_nombres` (vuelve
+    a pedir la tabla entera a la API) -- se llama solo cuando ya se sabe
+    qué `Nombre` exacto da un valor implausible (p. ej. la tasa de paro),
+    para ver TODAS las series que comparten ese texto EXACTO con su
+    array `Data` COMPLETO (no solo el punto que `_latest_valor_por_nombre`
+    ya eligió como "más reciente").
+
+    Por qué hace falta esto y no basta con `_mostrar_ejemplos_nombres`:
+    esa otra función opera sobre `raw`, que ya está COLAPSADO por
+    `_latest_valor_por_nombre` -- por construcción, solo puede enseñar
+    UN valor por Nombre (el que ganó), nunca si había varias series
+    compitiendo por la misma clave ni qué pinta tenían sus campos de
+    fecha reales. Si de verdad hay una serie antigua/descontinuada
+    compartiendo Nombre con la vigente (la hipótesis original, nunca
+    confirmada con datos reales), esto es lo único que puede probarlo o
+    descartarlo de una vez.
+
+    RESULTADO YA CONOCIDO (primera vez que se corrió esto de verdad,
+    tabla 1113): NO hay ninguna serie duplicada -- solo existe UNA serie
+    (COD='EPAH796') para el Nombre exacto de la tasa de paro nacional
+    total, y su único dato (con nult=1) es de 2013-T4. Esto descarta la
+    hipótesis de "dos series con el mismo Nombre" -- lo que queda por
+    determinar es si esa serie está genuinamente descontinuada desde
+    2013, o si `nult=1` no está devolviendo de verdad el periodo más
+    reciente para esta tabla (ver `_diagnosticar_historial_completo`,
+    añadida después de ver este resultado, para esa segunda pregunta)."""
+    print(f"\n  DIAGNÓSTICO EXTRA: repitiendo la petición de la tabla {table_id} (sin colapsar) para buscar Nombre exacto = {nombre_exacto!r}...")
+    series = _fetch_series(table_id)
+    coincidencias = [s for s in series if s.get("Nombre") == nombre_exacto]
+    print(f"  {len(coincidencias)} serie(s) encontradas con ESE Nombre EXACTO (si aquí sale más de 1, ESA es la causa del problema):")
+    for i, serie in enumerate(coincidencias):
+        print(f"    Serie #{i}: COD={serie.get('COD')!r}")
+        for punto in serie.get("Data", []):
+            print(f"      {punto}")
+
+
+def _diagnosticar_historial_completo(table_id: int | str, nombre_exacto: str, *, nult: int = 20) -> None:
+    """Repite la petición con `nult` más alto (en vez del `nult=1` fijo
+    de `_fetch_series`) para ver el HISTORIAL COMPLETO reciente de la
+    serie exacta, no solo el único punto que devuelve nult=1. Se llama
+    DESPUÉS de `_diagnosticar_series_duplicadas`, cuando esa ya descartó
+    que haya dos series compitiendo -- esto responde una pregunta
+    distinta: ¿de verdad la serie no tiene datos más recientes que 2013,
+    o es `nult=1` el que no está devolviendo el periodo correcto para
+    esta tabla en concreto?
+
+    Si esto muestra puntos posteriores a 2013, `nult=1` tiene un
+    problema real para esta tabla y hay que dejar de usarlo aquí (pedir
+    con nult más alto y quedarse con el más reciente en el propio código,
+    en vez de fiarse de que el servidor ya lo hace). Si esto NO muestra
+    nada más reciente que 2013 tampoco, la serie está genuinamente
+    descontinuada y hay que buscar un ID de tabla distinto para la tasa
+    de paro actual (el título "Tasas de actividad, paro y empleo, por
+    sexo y distintos grupos de edad" puede corresponder a más de un ID a
+    lo largo del tiempo, si el INE reestructuró la tabla)."""
+    print(f"\n  DIAGNÓSTICO EXTRA 2: repitiendo la petición de la tabla {table_id} con nult={nult} (en vez de 1) para Nombre = {nombre_exacto!r}...")
+    response = httpx.get(
+        f"{_INE_API_BASE}/DATOS_TABLA/{table_id}",
+        params={"nult": nult, "tip": "AM"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    series = response.json()
+    coincidencias = [s for s in series if s.get("Nombre") == nombre_exacto]
+    print(f"  {len(coincidencias)} serie(s) encontradas -- Data completo (hasta {nult} puntos por serie):")
+    for i, serie in enumerate(coincidencias):
+        print(f"    Serie #{i}: COD={serie.get('COD')!r}")
+        for punto in serie.get("Data", []):
+            print(f"      {punto}")
+
+
+# ============================================================================
+# BUG ENCONTRADO Y CORREGIDO en esta sesión, al investigar por qué
+# _TABLA_TASAS_EPA (ID 1113) devolvía una tasa de paro de 26,03% en vez
+# del ~9,93% real confirmado contra la nota de prensa oficial (ver
+# comentario extenso de _TASA_PARO_RECIENTE_CONOCIDA más abajo, que
+# documentaba la hipótesis ANTES de esta sesión -- se deja sin borrar
+# para que quede el rastro de qué se pensaba antes y por qué se corrigió).
+#
+# EVIDENCIA ENCONTRADA (esta vez sí externa y concreta, no solo
+# hipótesis): varios ejemplos reales y documentados públicamente de la
+# respuesta JSON de esta misma API
+# (https://www.lapaginadefinitiva.com/2016/02/14/tutorial-para-leer-con-json-las-estadisticas-del-ine/,
+# serie EPA87 "Ocupados"; también replicado en
+# https://github.com/es-ine/ineapir) muestran el array `Data` de cada
+# serie ORDENADO DESCENDENTEMENTE por fecha: el dato más reciente
+# aparece PRIMERO (`Data[0]`), los más antiguos después. TODAS las
+# funciones fetch_* de este script (hasta esta sesión) leían
+# `datos[-1]["Valor"]` -- el ÚLTIMO elemento del array-- asumiendo que
+# era el más reciente. Si `Data` trae más de un periodo para una serie
+# (algo que `nult=1` debería evitar, pero sin garantía confirmada para
+# todas las tablas -- _TABLA_TASAS_EPA es de las series con más
+# historial de este fichero, con datos que arrancan en 2002 o antes),
+# `datos[-1]` coge el dato MÁS ANTIGUO, no el más reciente. Un 26,03% de
+# tasa de paro encaja perfectamemte con un trimestre real del pico de la
+# crisis de 2013 (España rondó el 26-27% ese año) apareciendo por error
+# en vez del dato actual.
+#
+# Esto también resuelve, de paso, el otro mecanismo que se había
+# hipotetizado (series distintas -p. ej. metodología vigente/no
+# vigente- compartiendo el mismo texto `Nombre` y sobrescribiéndose
+# según el orden de iteración del diccionario): en vez de fiarse de CUÁL
+# serie se procesó última para decidir qué valor gana, se compara la
+# fecha real (`Fecha`, o `Anyo`+`FK_Periodo` si `Fecha` no viniera) de
+# TODOS los puntos de TODAS las series que comparten `Nombre`, y se elige
+# el genuinamente más reciente -- sea cual sea la razón por la que había
+# más de un candidato para la misma clave.
+#
+# Aplicado a las 5 funciones fetch_* que indexaban por `Nombre` de texto
+# (fetch_marital_status, fetch_nationality, fetch_situacion_laboral,
+# fetch_occupation, fetch_household_type) vía `_latest_valor_por_nombre`,
+# y a fetch_population_by_province (que indexa por MetaData, no por
+# Nombre, pero tenía el mismo `datos[-1]` dentro de CADA serie) vía
+# `_valor_mas_reciente`. Es decir: el bug que se pidió investigar para
+# SITUACION_LABORAL_DISTRIBUTION en realidad afectaba potencialmente a
+# las 6 tablas de este script por igual, no solo a esa -- se corrige en
+# las 6 a la vez en vez de dejar el mismo fallo latente en las demás.
+#
+# SIGUE sin poder ejecutarse contra la API real desde este entorno de
+# trabajo para confirmar el 100% del mecanismo -- pero a diferencia de la
+# hipótesis anterior (sin ningún respaldo externo), esta corrección está
+# basada en el formato de `Data` documentado con ejemplos reales fuera de
+# este proyecto, no solo en conjetura. Si al ejecutar esto de verdad la
+# tasa de paro sigue sin acercarse al ~9-11% esperado, el problema NO es
+# este (revisar entonces si de verdad hay dos series con `Nombre`
+# IDÉNTICO pero fechas ambas "recientes" -- ambigüedad genuina que ni
+# esta corrección puede resolver sola, ver AVISO impreso en main()).
+# ============================================================================
+
+def _valor_mas_reciente(datos: list[dict]) -> float | None:
+    """Devuelve el `Valor` del punto con la fecha más reciente dentro de
+    UN array `Data` de una sola serie (no compara entre series distintas
+    -- para eso, ver `_latest_valor_por_nombre`). Usa `Fecha` (timestamp
+    Unix en ms, confirmado en la documentación/ejemplos reales de esta
+    API) y cae a `Anyo`*100 + `FK_Periodo` si `Fecha` no viniera en algún
+    punto -- ambas formas son comparables como número creciente en el
+    tiempo, sin necesidad de parsear una fecha real."""
+    mejor_fecha: float | None = None
+    mejor_valor: float | None = None
+    for punto in datos:
+        valor = punto.get("Valor")
+        if valor is None:
+            continue
+        fecha = punto.get("Fecha")
+        if fecha is None:
+            fecha = punto.get("Anyo", 0) * 100 + punto.get("FK_Periodo", 0)
+        if mejor_fecha is None or fecha > mejor_fecha:
+            mejor_fecha, mejor_valor = fecha, valor
+    return mejor_valor
+
+
+def _latest_valor_por_nombre(series: list[dict]) -> dict[str, float]:
+    """Sustituye el patrón `{serie["Nombre"]: serie["Data"][-1]["Valor"]}`
+    que usaban (hasta esta sesión) fetch_marital_status/fetch_nationality/
+    fetch_situacion_laboral/fetch_occupation/fetch_household_type -- ver
+    el bloque de comentario justo encima de `_valor_mas_reciente` para el
+    porqué. Considera TODOS los puntos de TODAS las series (no solo el
+    último elemento de cada una), y para cada texto de `Nombre` se queda
+    con el valor del punto genuinamente más reciente por fecha real, sin
+    depender del orden de iteración de `series` ni de que `Data` venga
+    ordenado de una forma concreta."""
+    mejor: dict[str, tuple[float, float]] = {}  # nombre -> (fecha_ordenable, valor)
+    for serie in series:
+        nombre = serie.get("Nombre", "")
+        for punto in serie.get("Data", []):
+            valor = punto.get("Valor")
+            if valor is None:
+                continue
+            fecha = punto.get("Fecha")
+            if fecha is None:
+                fecha = punto.get("Anyo", 0) * 100 + punto.get("FK_Periodo", 0)
+            anterior = mejor.get(nombre)
+            if anterior is None or fecha > anterior[0]:
+                mejor[nombre] = (fecha, valor)
+    return {nombre: valor for nombre, (_fecha, valor) in mejor.items()}
 
 
 # Las 4 categorías que NO son la variable geográfica en esta tabla, según
@@ -304,7 +755,7 @@ def fetch_population_by_province() -> dict[str, int]:
         if not territorio or territorio == "Total Nacional":
             continue  # agregado nacional, no una provincia ni CCAA
 
-        valor = datos[-1].get("Valor")
+        valor = _valor_mas_reciente(datos)
         if valor is not None:
             clave = ine_reference._strip_accents(territorio).lower()
             # Traduce el nombre oficial bilingüe del INE a la clave
@@ -333,13 +784,8 @@ def fetch_marital_status() -> dict[str, float]:
     ine_reference.py sobre cómo se combinaron dos fuentes distintas) --
     la normalización final es una decisión humana que requiere mirar los
     nombres de serie reales primero, no algo que este script deba asumir."""
-    result: dict[str, float] = {}
     series = _fetch_series(_TABLA_ESTADO_CIVIL)
-    for serie in series:
-        nombre = serie.get("Nombre", "")
-        datos = serie.get("Data", [])
-        if datos and datos[-1].get("Valor") is not None:
-            result[nombre] = datos[-1]["Valor"]
+    result = _latest_valor_por_nombre(series)
     _warn_if_empty(_TABLA_ESTADO_CIVIL, series, result)
     return result
 
@@ -347,13 +793,8 @@ def fetch_marital_status() -> dict[str, float]:
 def fetch_nationality() -> dict[str, float]:
     """CANDIDATO SIN VERIFICAR (ver _TABLA_NACIONALIDAD más arriba) --
     mismo aviso que fetch_marital_status: valores en bruto, sin normalizar."""
-    result: dict[str, float] = {}
     series = _fetch_series(_TABLA_NACIONALIDAD)
-    for serie in series:
-        nombre = serie.get("Nombre", "")
-        datos = serie.get("Data", [])
-        if datos and datos[-1].get("Valor") is not None:
-            result[nombre] = datos[-1]["Valor"]
+    result = _latest_valor_por_nombre(series)
     _warn_if_empty(_TABLA_NACIONALIDAD, series, result)
     return result
 
@@ -366,16 +807,339 @@ def fetch_situacion_laboral() -> dict[str, float]:
     (proporción sobre población de 16+ total, incluyendo inactivos
     desglosados) -- hace falta el mismo cálculo que ya está documentado
     en el comentario de esa constante en ine_reference.py, esta función
-    solo trae el dato crudo de la EPA."""
-    result: dict[str, float] = {}
+    solo trae el dato crudo de la EPA.
+
+    Usa `_latest_valor_por_nombre` (no `datos[-1]` directo) desde esta
+    sesión -- ver el bloque de comentario junto a esa función para el
+    bug real que esto corrige, encontrado precisamente al investigar por
+    qué esta tabla daba 26,03% de tasa de paro en vez de ~9,93%."""
     series = _fetch_series(_TABLA_TASAS_EPA)
-    for serie in series:
-        nombre = serie.get("Nombre", "")
-        datos = serie.get("Data", [])
-        if datos and datos[-1].get("Valor") is not None:
-            result[nombre] = datos[-1]["Valor"]
+    result = _latest_valor_por_nombre(series)
     _warn_if_empty(_TABLA_TASAS_EPA, series, result)
     return result
+
+
+def fetch_occupation() -> dict[str, float]:
+    """CANDIDATO SIN VERIFICAR (ver _TABLA_OCUPACION_CNO11 más arriba) --
+    mismo aviso que fetch_marital_status/fetch_situacion_laboral: valores
+    en bruto tal como los da `Nombre`, sin normalizar ni filtrar
+    sexo/unidad todavía (eso lo hace `_normalize_occupation`).
+
+    AVISO DE FORMATO, distinto del resto de tablas de este script: el
+    título de la tabla ("... Valores absolutos Y porcentajes respecto
+    del total de cada sexo") indica que probablemente trae, para cada
+    subgrupo CNO-11, tanto la cifra absoluta como el porcentaje -- y
+    encima desglosado por sexo (Total/Hombres/Mujeres), igual que
+    _TABLA_ESTADO_CIVIL. Eso significa que lo más probable es que varias
+    series compartan el mismo texto de `Nombre` si ese texto no incluye
+    ambas dimensiones (sexo Y tipo de dato) de forma explícita, con el
+    mismo riesgo de sobrescritura silenciosa ya documentado en
+    `_warn_if_empty` y en el comentario de `_TASA_PARO_RECIENTE_CONOCIDA`
+    para _TABLA_TASAS_EPA. NO se ha podido confirmar el formato real de
+    `Nombre` para esta tabla concreta (sin acceso a la API desde aquí) --
+    `_normalize_occupation` documenta el supuesto que hace mientras tanto
+    y cómo verificarlo en la primera ejecución real.
+
+    Usa `_latest_valor_por_nombre` desde esta sesión -- ver el bug real
+    que corrige junto a esa función."""
+    series = _fetch_series(_TABLA_OCUPACION_CNO11)
+    result = _latest_valor_por_nombre(series)
+    _warn_if_empty(_TABLA_OCUPACION_CNO11, series, result)
+    return result
+
+
+# Mapeo de subgrupo principal (2 dígitos) de la CNO-11 -- Clasificación
+# Nacional de Ocupaciones 2011, ver notas explicativas del INE
+# (https://www.ine.es/daco/daco42/clasificaciones/cno11_notas.pdf) -- a
+# las 10 categorías, mucho más amplias y coloquiales, que ya usa
+# OCCUPATION_DISTRIBUTION en ine_reference.py. Es EL trabajo de diseño
+# que el registro de trabajo (sesión anterior) dejó pendiente a
+# propósito en vez de resolverlo a ciegas: cada clave de la izquierda es
+# el nombre real de un subgrupo principal CNO-11 (confirmado por las
+# etiquetas de la ficha de datos.gob.es de _TABLA_OCUPACION_CNO11 y por
+# la estructura oficial de 9 grandes grupos / subgrupos principales de la
+# CNO-11), cada valor de la derecha es la clave de OCCUPATION_DISTRIBUTION
+# a la que ese subgrupo contribuye.
+#
+# ES UN MAPEO MUCHOS-A-UNO Y DELIBERADAMENTE INCOMPLETO: la CNO-11 tiene
+# unos 40 subgrupos principales y OCCUPATION_DISTRIBUTION solo 10
+# categorías -- la mayoría de subgrupos (agricultura, industria pesada,
+# fuerzas armadas, servicios domésticos, artes y espectáculo...) no
+# encajan en ninguna de las 10 categorías actuales y se dejan SIN
+# mapear a propósito (no contribuyen a ninguna clave, no es un olvido).
+# Si en el futuro se amplía OCCUPATION_DISTRIBUTION con más categorías,
+# hay que revisar también qué subgrupos sin mapear deberían entrar.
+#
+# Cada subgrupo se cuenta en UNA sola categoría de la app (no hay reparto
+# fraccionario entre dos claves), incluso cuando el encaje es parcial --
+# p. ej. "Dependientes en tiendas y almacenes" se cuenta entero en
+# "comercial" aunque parte de ese subgrupo podría razonablemente
+# describirse como "hosteleria" en algún caso concreto; es una
+# aproximación deliberada, coherente con el resto de este fichero (ver
+# p. ej. el reparto de inactivos en _normalize_situacion_laboral).
+_CNO11_SUBGRUPO_TO_APP_CATEGORY: dict[str, str] = {
+    # docente
+    "Profesionales de la enseñanza infantil, primaria, secundaria y postsecundaria": "docente",
+    "Otros profesionales de la enseñanza": "docente",
+    # sanitario
+    "Profesionales de la salud": "sanitario",
+    "Técnicos sanitarios y profesionales de las terapias alternativas": "sanitario",
+    "Trabajadores de los cuidados a las personas en servicios de salud": "sanitario",
+    # desarrollador de software
+    "Profesionales de las tecnologías de la información": "desarrollador de software",
+    "Técnicos de las tecnologías de la información y las comunicaciones (TIC)": "desarrollador de software",
+    # ingeniero
+    "Profesionales de la ciencias físicas, químicas, matemáticas y de las ingenierías": "ingeniero",
+    "Técnicos de las ciencias y de las ingenierías": "ingeniero",
+    # abogado
+    "Profesionales en derecho": "abogado",
+    # comercial
+    "Representantes, agentes comerciales y afines": "comercial",
+    "Comerciantes propietarios de tiendas": "comercial",
+    "Vendedores (excepto en tiendas y almacenes)": "comercial",
+    "Dependientes en tiendas y almacenes": "comercial",
+    # hosteleria
+    "Camareros y cocineros propietarios": "hosteleria",
+    "Trabajadores asalariados de los servicios de restauración": "hosteleria",
+    # administracion publica
+    "Miembros del poder ejecutivo y de los cuerpos legislativos; directivos de la Administración Pública": "administracion publica",
+    "Especialistas en organización de la Administración Pública y de las empresas y en la comercialización": "administracion publica",
+    "Empleados administrativos con tareas de atención al público no clasificados bajo otros epígrafes": "administracion publica",
+    "Otros empleados administrativos sin tareas de atención al público": "administracion publica",
+    # construccion
+    "Trabajadores cualificados de la construcción, excepto operadores de máquinas": "construccion",
+    "Trabajadores en obras estructurales de construcción y afines": "construccion",
+    "Trabajadores de acabado de construcciones e instalaciones (excepto electricistas), pintores y afines": "construccion",
+    "Peones de la construcción y de la minería": "construccion",
+    # transporte
+    "Conductores de vehículos para el transporte urbano o por carretera": "transporte",
+    "Conductores y operadores de maquinaria móvil": "transporte",
+    "Peones del transporte, descargadores y reponedores": "transporte",
+    "Maquinistas de locomotoras, operadores de maquinaria agrícola y de equipos pesados móviles, y marineros": "transporte",
+}
+
+# Rango de plausibilidad para la SUMA de las 10 categorías mapeadas --
+# guarda de seguridad, mismo espíritu que _TASA_PARO_PLAUSIBLE. Como el
+# mapeo es DELIBERADAMENTE incompleto (ver comentario de
+# _CNO11_SUBGRUPO_TO_APP_CATEGORY), la suma nunca debe acercarse al 100%
+# -- si se acerca o lo supera, lo más probable es que `Nombre` esté
+# repitiendo la misma serie varias veces por sexo/tipo de dato sin
+# filtrar (ver AVISO DE FORMATO en fetch_occupation), no que de repente
+# el mapeo cubra toda la población ocupada.
+_OCUPACION_SUMA_PLAUSIBLE = (15.0, 55.0)
+
+
+def _normalize_occupation(raw: dict[str, float]) -> dict[str, float] | None:
+    """Filtra `raw` (salida cruda de fetch_occupation) a las filas de
+    ÁMBITO NACIONAL, AMBOS SEXOS y PORCENTAJE (no cifra absoluta ni
+    desglose por sexo) y sea cual sea el subgrupo CNO-11 de cada fila, lo
+    suma dentro de la categoría de OCCUPATION_DISTRIBUTION a la que
+    apunte `_CNO11_SUBGRUPO_TO_APP_CATEGORY` (ninguna, una entrada, o
+    varias entradas sumadas en la misma categoría).
+
+    FORMATO REAL confirmado contra la API en vivo (ya no es un supuesto
+    sin verificar): "Ocupados. Total Nacional. <Sexo>. <Ocupación>.
+    <TipoDato>. " -- con un PREFIJO FIJO de 2 segmentos ("Ocupados",
+    "Total Nacional") antes del sexo, que no se había visto en ningún
+    ejemplo real hasta la primera ejecución contra la API en vivo. El
+    supuesto anterior (sexo en segments[0]) cogía literalmente
+    "Ocupados" como si fuera el sexo, así que ninguna fila pasaba nunca
+    el filtro `sexo != "Ambos sexos"`.
+
+    Nivel de jerarquía CNO-11: esta tabla mezcla en la misma lista plana
+    filas de varios niveles de la clasificación a la vez (gran grupo de
+    1 dígito, subgrupo de 2, sub-subgrupo de 3...) -- p. ej. "Técnicos y
+    profesionales científicos e intelectuales" (1 dígito) Y, aparte,
+    "Profesionales de la salud" (más granular, dentro del anterior)
+    aparecen ambas como filas independientes. `_CNO11_SUBGRUPO_TO_APP_CATEGORY`
+    se diseñó a propósito usando solo nombres granular-específicos (nunca
+    los nombres de gran grupo de 1 dígito), así que no debería haber
+    doble conteo por mezclar padre e hijo -- pero si `OCCUPATION_DISTRIBUTION`
+    sale con una suma sospechosamente alta, revisar primero si alguna
+    clave del diccionario coincide sin querer con un nombre de nivel
+    superior en vez de nivel específico."""
+    por_categoria: dict[str, float] = {}
+    alguna_fila_nacional_valida = False
+    for nombre, valor in raw.items():
+        segments = [s.strip() for s in nombre.split(". ") if s.strip()]
+        if len(segments) < 4 or segments[0] != "Ocupados":
+            continue
+        sexo = segments[2]
+        tipo_dato = segments[-1]
+        ocupacion = ". ".join(segments[3:-1])
+        if sexo != "Ambos sexos":
+            continue
+        if "orcentaje" not in tipo_dato and "%" not in tipo_dato:
+            continue
+        categoria = _CNO11_SUBGRUPO_TO_APP_CATEGORY.get(ocupacion)
+        alguna_fila_nacional_valida = True
+        if categoria is None:
+            continue  # subgrupo sin mapear a propósito, ver comentario del diccionario
+        por_categoria[categoria] = por_categoria.get(categoria, 0.0) + valor
+
+    if not alguna_fila_nacional_valida or not por_categoria:
+        return None
+
+    return {clave: round(valor / 100, 3) for clave, valor in por_categoria.items()}
+
+
+def fetch_household_type() -> dict[str, float]:
+    """CANDIDATO SIN VERIFICAR (ver _TABLA_HOGAR_TIPO más arriba) --
+    misma llamada que el resto de fetch_*, pero con un identificador de
+    RUTA en vez de un ID numérico (ver comentario de la constante para
+    por qué `_fetch_series` funciona igual para ambos casos).
+
+    A diferencia de las tablas EPA de este script (que ya dan
+    porcentajes), esta tabla da CIFRAS ABSOLUTAS ("Número de hogares"),
+    no proporciones -- `_normalize_household_type` calcula la proporción
+    dividiendo por la fila "Total" de la propia tabla, no asume un
+    total de hogares aparte.
+
+    Usa `_latest_valor_por_nombre` desde esta sesión -- ver el bug real
+    que corrige junto a esa función."""
+    series = _fetch_series(_TABLA_HOGAR_TIPO)
+    result = _latest_valor_por_nombre(series)
+    _warn_if_empty(_TABLA_HOGAR_TIPO, series, result)
+    return result
+
+
+# Categorías reales de "tipo de hogar" de la ECH (confirmadas por fuentes
+# espejo de institutos autonómicos que replican esta misma tabla del INE,
+# ver comentario de _TABLA_HOGAR_TIPO) mapeadas a las 5 claves que ya usa
+# HOUSEHOLD_TYPE_DISTRIBUTION. A diferencia de
+# _CNO11_SUBGRUPO_TO_APP_CATEGORY, este mapeo SÍ es exhaustivo -- la ECH
+# solo tiene estas categorías de tipo de hogar (más su fila "Total"), así
+# que las 5 claves de la app deberían cubrir el 100% de los hogares, no
+# un subconjunto. "otro" agrupa las 3 categorías residuales de hogares
+# complejos/multi-núcleo, igual que ya documentaba el comentario de
+# HOUSEHOLD_TYPE_DISTRIBUTION en ine_reference.py antes de esta sesión.
+_TIPO_HOGAR_TO_APP_CATEGORY: dict[str, str] = {
+    "Hogar unipersonal": "unipersonal",
+    "Pareja sin hijos que convivan en el hogar": "pareja_sin_hijos",
+    "Pareja con hijos que convivan en el hogar": "pareja_con_hijos",
+    "Hogar monoparental": "monoparental",
+    "Núcleo familiar con otras personas que no forman núcleo familiar": "otro",
+    "Personas que no forman ningún núcleo familiar entre sí": "otro",
+    "Dos o más núcleos familiares": "otro",
+}
+
+# Rango de plausibilidad para la SUMA de las 5 categorías -- a diferencia
+# de _OCUPACION_SUMA_PLAUSIBLE (mapeo deliberadamente incompleto), aquí
+# el mapeo SÍ es exhaustivo (ver comentario de _TIPO_HOGAR_TO_APP_CATEGORY),
+# así que la suma debería acercarse a 1.0 (100% de los hogares). Un valor
+# lejos de 1.0 indica más probablemente un fallo de parseo (p. ej. no
+# haber filtrado bien la fila "Total" del segundo eje de la tabla, con lo
+# que se estarían sumando varias filas del mismo hogar cruzadas con cada
+# tipo de edificio) que una categoría real sin cubrir.
+_HOGAR_SUMA_PLAUSIBLE = (0.85, 1.15)
+
+
+def _categorizar_tipo_hogar(tipo_hogar: str) -> str | None:
+    """Wrapper sobre `_TIPO_HOGAR_TO_APP_CATEGORY` que además reconoce
+    "Pareja con hijos que convivan en el hogar" con sufijo -- CONFIRMADO
+    contra la API real (primera ejecución real de este script) que esta
+    categoría NO aparece como fila única con ese texto exacto, sino
+    partida por número de hijos: "Pareja con hijos que convivan en el
+    hogar: 1 hijo", "... 2 hijos", etc. -- de ahí que
+    `pareja_con_hijos` saliera completamente vacía (0%) mientras las
+    demás categorías sí funcionaban, y la suma total quedara en ~67% en
+    vez de ~100% (67% + los ~33% que faltaban de pareja_con_hijos
+    encajan). Se usa `startswith` en vez de una lista fija de sufijos
+    ("1 hijo"/"2 hijos"/"3 o más hijos"...) porque no se ha confirmado el
+    conjunto exacto y completo de sufijos, y un `startswith` los cubre
+    todos sin tener que enumerarlos."""
+    categoria = _TIPO_HOGAR_TO_APP_CATEGORY.get(tipo_hogar)
+    if categoria is not None:
+        return categoria
+    if tipo_hogar.startswith("Pareja con hijos que convivan en el hogar"):
+        return "pareja_con_hijos"
+    return None
+
+
+def _normalize_household_type(raw: dict[str, float]) -> dict[str, float] | None:
+    """FORMATO REAL confirmado contra la API en vivo (ya no es un
+    supuesto sin verificar): "<TipoDeHogar>, <TipoDeEdificio>" -- con
+    COMA+espacio como separador, NO punto+espacio como se asumía antes
+    de ver un ejemplo real (p. ej. 'Hogar unipersonal, Total',
+    'Total (tipo de hogar), Vivienda unifamiliar independiente'). Ese
+    supuesto equivocado explicaba exactamente el fallo visto en la
+    primera ejecución real: el `split('. ')` no partía nada (no hay
+    ningún '. ' en el string), así que ninguna fila pasaba nunca el
+    `len(segments) < 2`.
+
+    La fila de gran total tampoco se llama "Total" a secas en el primer
+    eje, se llama literalmente "Total (tipo de hogar)" -- de ahí el
+    `{"total", "total (tipo de hogar)"}` de abajo en vez de una sola
+    cadena fija.
+
+    Ver `_categorizar_tipo_hogar` para el caso especial de "Pareja con
+    hijos", partido en sub-filas por número de hijos."""
+    total: float | None = None
+    por_categoria: dict[str, float] = {}
+    etiquetas_total = {"total", "total (tipo de hogar)"}
+    for nombre, valor in raw.items():
+        segments = [s.strip() for s in nombre.split(", ") if s.strip()]
+        if len(segments) < 2:
+            continue
+        tipo_hogar = segments[0]
+        resto = segments[1:]
+        if not any(s.lower() == "total" for s in resto):
+            continue  # fila de un tipo de edificio concreto, no la marginal
+
+        if tipo_hogar.lower() in etiquetas_total:
+            total = valor
+            continue
+        categoria = _categorizar_tipo_hogar(tipo_hogar)
+        if categoria is None:
+            continue  # categoría de tipo de hogar no reconocida -- revisar el mapeo si aparece en el AVISO
+        por_categoria[categoria] = por_categoria.get(categoria, 0.0) + valor
+
+    if not total or not por_categoria:
+        return None
+
+    return {clave: round(valor / total, 3) for clave, valor in por_categoria.items()}
+
+
+def _diagnosticar_ocupaciones_unicas(raw: dict) -> None:
+    """Para OCCUPATION_DISTRIBUTION cuando la suma de categorías mapeadas
+    sale implausible (visto en la primera ejecución real: 66.4%, muy por
+    encima del rango (15,55) esperado) -- extrae y muestra el nombre de
+    OCUPACIÓN único de cada fila (sin repetir por sexo/tipo de dato),
+    usando el mismo parseo que `_normalize_occupation`. La sospecha a
+    confirmar/descartar con esto: la tabla mezcla varios NIVELES de la
+    jerarquía CNO-11 en la misma lista plana (gran grupo de 1 dígito,
+    subgrupo de 2, sub-subgrupo de 3...), y si dos nombres de
+    `_CNO11_SUBGRUPO_TO_APP_CATEGORY` resultan ser padre e hijo el uno
+    del otro, se estaría sumando el mismo grupo de ocupados dos veces."""
+    ocupaciones_unicas: set[str] = set()
+    for nombre in raw:
+        segments = [s.strip() for s in nombre.split(". ") if s.strip()]
+        if len(segments) < 4 or segments[0] != "Ocupados":
+            continue
+        ocupaciones_unicas.add(". ".join(segments[3:-1]))
+    print(f"\n  DIAGNÓSTICO EXTRA: {len(ocupaciones_unicas)} nombres de ocupación ÚNICOS encontrados (sin repetir por sexo/tipo de dato):")
+    for ocupacion in sorted(ocupaciones_unicas):
+        marcado = " <-- EN _CNO11_SUBGRUPO_TO_APP_CATEGORY" if ocupacion in _CNO11_SUBGRUPO_TO_APP_CATEGORY else ""
+        print(f"    {ocupacion!r}{marcado}")
+
+
+def _diagnosticar_tipos_hogar_unicos(raw: dict) -> None:
+    """Para HOUSEHOLD_TYPE_DISTRIBUTION cuando falta alguna categoría del
+    todo (visto en la primera ejecución real: 'pareja_con_hijos' no
+    aparece en absoluto, y la suma total queda en 67% en vez de ~100%)
+    -- extrae y muestra el nombre de TIPO DE HOGAR único de cada fila
+    (primer segmento antes de la coma), para ver la redacción EXACTA que
+    usa la API y compararla con las claves de
+    `_TIPO_HOGAR_TO_APP_CATEGORY`."""
+    tipos_unicos: set[str] = set()
+    for nombre in raw:
+        segments = [s.strip() for s in nombre.split(", ") if s.strip()]
+        if segments:
+            tipos_unicos.add(segments[0])
+    print(f"\n  DIAGNÓSTICO EXTRA: {len(tipos_unicos)} nombres de tipo de hogar ÚNICOS encontrados:")
+    for tipo in sorted(tipos_unicos):
+        marcado = " <-- reconocido" if _categorizar_tipo_hogar(tipo) is not None else ""
+        print(f"    {tipo!r}{marcado}")
 
 
 def _compare(name: str, current: dict, fetched: dict) -> None:
@@ -901,6 +1665,36 @@ def _apply_situacion_laboral(normalized: dict[str, float], *, auto_confirm: bool
     return _confirm_and_write(changes, "SITUACION_LABORAL_DISTRIBUTION", lines, auto_confirm=auto_confirm)
 
 
+def _apply_occupation(normalized: dict[str, float], *, auto_confirm: bool) -> bool:
+    """Solo toca las claves de OCCUPATION_DISTRIBUTION presentes en
+    `normalized` -- las que no tengan ningún subgrupo CNO-11 mapeado
+    (ver _CNO11_SUBGRUPO_TO_APP_CATEGORY) se quedan con su valor actual
+    sin tocar, no se ponen a 0 ni se borran."""
+    lines = _INE_REFERENCE_PATH.read_text(encoding="utf-8").splitlines(keepends=True)
+    block = _locate_block(lines, lambda line: line.startswith("OCCUPATION_DISTRIBUTION = {"))
+    if block is None:
+        print("ERROR: no se encontró 'OCCUPATION_DISTRIBUTION = { ... }' -- no se ha tocado nada.")
+        return False
+    start, end = block
+    changes = _apply_float_block(lines, start, end, normalized)
+    if changes:
+        _update_last_verified(lines, "OCCUPATION_DISTRIBUTION")
+    return _confirm_and_write(changes, "OCCUPATION_DISTRIBUTION", lines, auto_confirm=auto_confirm)
+
+
+def _apply_household_type(normalized: dict[str, float], *, auto_confirm: bool) -> bool:
+    lines = _INE_REFERENCE_PATH.read_text(encoding="utf-8").splitlines(keepends=True)
+    block = _locate_block(lines, lambda line: line.startswith("HOUSEHOLD_TYPE_DISTRIBUTION = {"))
+    if block is None:
+        print("ERROR: no se encontró 'HOUSEHOLD_TYPE_DISTRIBUTION = { ... }' -- no se ha tocado nada.")
+        return False
+    start, end = block
+    changes = _apply_float_block(lines, start, end, normalized)
+    if changes:
+        _update_last_verified(lines, "HOUSEHOLD_TYPE_DISTRIBUTION")
+    return _confirm_and_write(changes, "HOUSEHOLD_TYPE_DISTRIBUTION", lines, auto_confirm=auto_confirm)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
@@ -915,6 +1709,26 @@ def main() -> None:
         "--force-tasa-paro", action="store_true",
         help="Con --apply, aplicar SITUACION_LABORAL_DISTRIBUTION aunque la tasa de paro "
         "se aleje mucho del valor reciente conocido (ver aviso más abajo)",
+    )
+    parser.add_argument(
+        "--force-ocupacion", action="store_true",
+        help="Con --apply, aplicar OCCUPATION_DISTRIBUTION aunque la suma de las categorías "
+        "mapeadas se salga del rango de plausibilidad esperado (ver aviso más abajo)",
+    )
+    parser.add_argument(
+        "--force-hogar", action="store_true",
+        help="Con --apply, aplicar HOUSEHOLD_TYPE_DISTRIBUTION aunque la suma de las 5 "
+        "categorías se salga del rango de plausibilidad esperado (ver aviso más abajo)",
+    )
+    parser.add_argument(
+        "--no-studies", action="store_true",
+        help="No llamar a update_studies_distribution.py al final (por si solo se quieren "
+        "comprobar las tablas del INE de este script)",
+    )
+    parser.add_argument(
+        "--insecure", action="store_true",
+        help="Pasado tal cual a update_studies_distribution.py -- desactiva verificación SSL "
+        "al descargar (mismo uso que en ese script: diagnóstico/último recurso)",
     )
     args = parser.parse_args()
 
@@ -1000,6 +1814,9 @@ def main() -> None:
                     "filtro de categoría no del todo correcto, sin dar ningún error HTTP). "
                     "Verifica el ID de tabla antes de confiar en este número."
                 )
+                _mostrar_ejemplos_nombres(laboral_raw, filtro_subcadenas=["paro"], max_n=25)
+                _diagnosticar_series_duplicadas(_TABLA_TASAS_EPA, "Tasa de paro. Nacional. Ambos sexos. Total. Valor absoluto")
+                _diagnosticar_historial_completo(_TABLA_TASAS_EPA, "Tasa de paro. Nacional. Ambos sexos. Total. Valor absoluto")
             if args.apply:
                 if tasa_sospechosa and not args.force_tasa_paro:
                     print(
@@ -1011,13 +1828,108 @@ def main() -> None:
     except httpx.HTTPError as e:
         print(f"ERROR al descargar situación laboral: {e}")
 
+    try:
+        ocupacion_raw = fetch_occupation()
+        ocupacion_normalized = _normalize_occupation(ocupacion_raw)
+        if ocupacion_normalized is None:
+            print(
+                "\n=== OCCUPATION_DISTRIBUTION ===\n"
+                "  No se encontró ninguna fila 'Ambos sexos'/porcentaje reconocible -- "
+                "revisa el formato real con fetch_occupation() antes de ajustar el "
+                "parseo de _normalize_occupation()."
+            )
+            _mostrar_ejemplos_nombres(ocupacion_raw)
+        else:
+            _compare("OCCUPATION_DISTRIBUTION", ine_reference.OCCUPATION_DISTRIBUTION, ocupacion_normalized)
+            suma = sum(ocupacion_normalized.values()) * 100
+            suma_sospechosa = not (_OCUPACION_SUMA_PLAUSIBLE[0] <= suma <= _OCUPACION_SUMA_PLAUSIBLE[1])
+            if suma_sospechosa:
+                print(
+                    f"\n  AVISO IMPORTANTE: la suma de las categorías mapeadas de "
+                    f"OCCUPATION_DISTRIBUTION es {suma:.1f}%, fuera del rango "
+                    f"{_OCUPACION_SUMA_PLAUSIBLE} esperado para un mapeo deliberadamente "
+                    "incompleto (ver _CNO11_SUBGRUPO_TO_APP_CATEGORY). Puede que "
+                    "_normalize_occupation esté sumando series repetidas por sexo o tipo "
+                    "de dato en vez de filtrarlas -- revisa el formato real de 'Nombre' "
+                    "antes de confiar en estos números."
+                )
+                _diagnosticar_ocupaciones_unicas(ocupacion_raw)
+            if args.apply:
+                if suma_sospechosa and not args.force_ocupacion:
+                    print(
+                        "  OCCUPATION_DISTRIBUTION: NO se aplica por el aviso de arriba -- "
+                        "usa --force-ocupacion si quieres aplicarlo igualmente."
+                    )
+                else:
+                    _apply_occupation(ocupacion_normalized, auto_confirm=args.yes)
+    except httpx.HTTPError as e:
+        print(f"ERROR al descargar ocupación (CNO-11): {e}")
+
+    try:
+        hogar_raw = fetch_household_type()
+        hogar_normalized = _normalize_household_type(hogar_raw)
+        if hogar_normalized is None:
+            print(
+                "\n=== HOUSEHOLD_TYPE_DISTRIBUTION ===\n"
+                "  No se encontró ninguna fila 'Total' (tipo de edificio) reconocible -- "
+                "revisa el formato real con fetch_household_type() antes de ajustar el "
+                "parseo de _normalize_household_type()."
+            )
+            _mostrar_ejemplos_nombres(hogar_raw)
+        else:
+            _compare("HOUSEHOLD_TYPE_DISTRIBUTION", ine_reference.HOUSEHOLD_TYPE_DISTRIBUTION, hogar_normalized)
+            suma = sum(hogar_normalized.values())
+            suma_sospechosa = not (_HOGAR_SUMA_PLAUSIBLE[0] <= suma <= _HOGAR_SUMA_PLAUSIBLE[1])
+            if suma_sospechosa:
+                print(
+                    f"\n  AVISO IMPORTANTE: la suma de las 5 categorías de "
+                    f"HOUSEHOLD_TYPE_DISTRIBUTION es {suma:.3f} (se espera ~1.0, mapeo "
+                    "exhaustivo -- ver _TIPO_HOGAR_TO_APP_CATEGORY). Puede que el filtro "
+                    "por fila 'Total' de tipo de edificio no esté funcionando como se "
+                    "espera (p. ej. sumando varias filas del mismo tipo de hogar cruzadas "
+                    "con cada tipo de edificio en vez de solo la marginal) -- revisa el "
+                    "formato real de 'Nombre' antes de confiar en estos números."
+                )
+                _diagnosticar_tipos_hogar_unicos(hogar_raw)
+            if args.apply:
+                if suma_sospechosa and not args.force_hogar:
+                    print(
+                        "  HOUSEHOLD_TYPE_DISTRIBUTION: NO se aplica por el aviso de arriba -- "
+                        "usa --force-hogar si quieres aplicarlo igualmente."
+                    )
+                else:
+                    _apply_household_type(hogar_normalized, auto_confirm=args.yes)
+    except httpx.HTTPError as e:
+        print(f"ERROR al descargar tipo de hogar (ECH): {e}")
+
     print(
-        "\nSTUDIES_DISTRIBUTION y OCCUPATION_DISTRIBUTION no tienen tabla "
-        "INE concreta citada (ver _LAST_VERIFIED en ine_reference.py) -- "
-        "nada que comprobar automáticamente."
+        "\nSTUDIES_DISTRIBUTION: fuente distinta del INE, sin API en vivo -- "
+        "delegando en scripts/update_studies_distribution.py (intenta "
+        "descargar los ficheros del Ministerio solo, con instrucciones "
+        "manuales si falla)."
     )
+    if args.no_studies:
+        print("(--no-studies: NO se llama a update_studies_distribution.py)")
+    else:
+        comando = [sys.executable, str(Path(__file__).parent / "update_studies_distribution.py")]
+        if args.apply:
+            comando.append("--apply")
+        if args.yes:
+            comando.append("--yes")
+        if args.insecure:
+            comando.append("--insecure")
+        print(f"  Ejecutando: {' '.join(comando)}\n")
+        resultado = subprocess.run(comando)
+        if resultado.returncode != 0:
+            print(
+                f"\n  AVISO: update_studies_distribution.py terminó con código "
+                f"{resultado.returncode} (fallo) -- revisa su salida de arriba. "
+                "No es un fallo de las tablas del INE de este script, es "
+                "independiente (usa --no-studies para saltártelo si hace falta)."
+            )
+
     print(
-        "LANGUAGE_BY_CCAA: encuesta puntual (ECEPOV), sin tabla anual "
+        "\nLANGUAGE_BY_CCAA: encuesta puntual (ECEPOV), sin tabla anual "
         "equivalente que comparar -- revisar a mano si el INE ha "
         "publicado una edición más reciente."
     )

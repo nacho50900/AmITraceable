@@ -34,3 +34,6 @@ graphify-out/cache/
 
 # Backups con fecha que graphify crea automáticamente al sobrescribir etiquetas curadas
 graphify-out/20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
+
+# Cache de los scripts de actualización de datos estadísticos
+backend/scripts/.cache_studies/

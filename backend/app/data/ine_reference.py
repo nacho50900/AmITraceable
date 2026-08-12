@@ -43,18 +43,24 @@ from datetime import date, timedelta
 _LAST_VERIFIED: dict[str, date | None] = {
     "TOTAL_POPULATION_ES": date(2025, 1, 1),
     "SEX_DISTRIBUTION": date(2025, 1, 1),
-    "MARITAL_STATUS_DISTRIBUTION": date(2024, 1, 1),
-    "MARITAL_STATUS_BY_SEX": date(2024, 1, 1),
+    "MARITAL_STATUS_DISTRIBUTION": date(2026, 8, 11),
+    "MARITAL_STATUS_BY_SEX": date(2026, 8, 11),
     "AGE_DISTRIBUTION_5Y": date(2025, 1, 1),
-    "PROVINCE_POPULATION": date(2024, 1, 1),
-    # Sin tabla INE concreta citada al construir estas dos -- son un orden
-    # de magnitud estimado a mano, no una cifra derivada de una fuente con
-    # fecha de publicación. No tiene sentido marcarlas "caducadas" frente a
-    # una fuente que nunca existió; si se sustituyen por datos reales del
-    # Censo/EPA, añadir su fecha aquí en ese momento.
-    "STUDIES_DISTRIBUTION": None,
+    "PROVINCE_POPULATION": date(2026, 8, 11),
+    # Sin tabla INE concreta citada al construir esta -- es un orden de
+    # magnitud estimado a mano, no una cifra derivada de una fuente con
+    # fecha de publicación. No tiene sentido marcarla "caducada" frente a
+    # una fuente que nunca existió.
     "OCCUPATION_DISTRIBUTION": None,
-    "NATIONALITY_DISTRIBUTION": date(2025, 1, 1),
+    # STUDIES_DISTRIBUTION tiene fuente real (histórico de egresados por
+    # rama desde 1985 + detalle reciente por titulación, Ministerio de
+    # Ciencia/Universidades) -- no es del INE ni tiene API en vivo, así
+    # que `update_ine_reference.py` no la recalcula sola; se refresca con
+    # `scripts/update_studies_distribution.py` (intenta descargar solo,
+    # cae a instrucciones manuales si falla) cuando el Ministerio
+    # publique una edición más reciente de cualquiera de los ficheros.
+    "STUDIES_DISTRIBUTION": date(2026, 8, 11),  # fecha de esta ejecución -- el histórico llega hasta el curso 2023-2024, el detalle por titulación hasta 2023 (egresados) / 2024 (matriculados)
+    "NATIONALITY_DISTRIBUTION": date(2026, 8, 11),
     "SITUACION_LABORAL_DISTRIBUTION": date(2025, 10, 1),  # EPA T4 2025
     "HOUSEHOLD_TYPE_DISTRIBUTION": date(2024, 1, 1),
     # ECEPOV es una encuesta puntual del INE, sin periodicidad anual fija
@@ -79,6 +85,10 @@ _STALE_THRESHOLDS: dict[str, timedelta] = {
     "PROVINCE_POPULATION": _STALE_THRESHOLD_ANNUAL,
     "NATIONALITY_DISTRIBUTION": _STALE_THRESHOLD_ANNUAL,
     "SITUACION_LABORAL_DISTRIBUTION": _STALE_THRESHOLD_ANNUAL,
+    # STUDIES_DISTRIBUTION: el Ministerio publica una edición nueva del
+    # Excel de matriculados por titulación cada curso -- mismo umbral
+    # anual que el resto de fuentes con periodicidad de curso/año.
+    "STUDIES_DISTRIBUTION": _STALE_THRESHOLD_ANNUAL,
     "MARITAL_STATUS_DISTRIBUTION": _STALE_THRESHOLD_MULTIYEAR,
     "MARITAL_STATUS_BY_SEX": _STALE_THRESHOLD_MULTIYEAR,
     "HOUSEHOLD_TYPE_DISTRIBUTION": _STALE_THRESHOLD_MULTIYEAR,
@@ -153,7 +163,7 @@ MARITAL_STATUS_DISTRIBUTION = {
     "casado": 0.458,
     "con_pareja": 0.242,
     "divorciado": 0.078,
-    "soltero": 0.152,
+    "soltero": 0.153,
     "viudo": 0.070,
 }
 
@@ -180,18 +190,18 @@ MARITAL_STATUS_DISTRIBUTION = {
 # resto de esta tabla.
 MARITAL_STATUS_BY_SEX = {
     "hombre": {
-        "casado": 0.470,
-        "con_pareja": 0.211,
-        "divorciado": 0.078,
-        "soltero": 0.206,
-        "viudo": 0.035,
+        "casado": 0.464,
+        "con_pareja": 0.270,
+        "divorciado": 0.072,
+        "soltero": 0.170,
+        "viudo": 0.025,
     },
     "mujer": {
-        "casado": 0.447,
-        "con_pareja": 0.194,
-        "divorciado": 0.078,
-        "soltero": 0.179,
-        "viudo": 0.102,
+        "casado": 0.452,
+        "con_pareja": 0.216,
+        "divorciado": 0.083,
+        "soltero": 0.136,
+        "viudo": 0.113,
     },
 }
 
@@ -264,58 +274,58 @@ _CCAA_PAIS_VASCO = "pais vasco"
 # Población). Cubre una selección representativa; añade más si tu análisis
 # lo necesita. Claves en minúsculas, sin tildes para facilitar el matching.
 PROVINCE_POPULATION = {
-    "madrid": 7_100_000,
-    "barcelona": 5_800_000,
-    "valencia": 2_650_000,
-    "sevilla": 1_950_000,
-    "alicante": 1_950_000,
-    "malaga": 1_750_000,
-    "murcia": 1_570_000,
-    "cadiz": 1_240_000,
-    "vizcaya": 1_170_000,
-    "a coruna": 1_120_000,
-    "baleares": 1_260_000,
-    "las palmas": 1_130_000,
-    "santa cruz de tenerife": 1_060_000,
-    "zaragoza": 980_000,
-    "asturias": 1_000_000,
-    "pontevedra": 940_000,
-    "granada": 920_000,
-    "tarragona": 830_000,
-    "gerona": 770_000,
-    "castellon": 590_000,
-    "toledo": 730_000,
-    "badajoz": 660_000,
-    "cordoba": 780_000,
-    "jaen": 610_000,
-    "navarra": 670_000,
-    "almeria": 730_000,
-    "guipuzcoa": 720_000,
-    "valladolid": 519_000,
-    "cantabria": 585_000,
-    "leon": 438_000,
-    "lerida": 430_000,
-    "huelva": 520_000,
-    "burgos": 355_000,
-    "caceres": 385_000,
-    "salamanca": 336_000,
-    _CCAA_LA_RIOJA: 320_000,
-    "lugo": 327_000,
-    "orense": 305_000,
-    "albacete": 385_000,
-    "guadalajara": 265_000,
-    "ciudad real": 495_000,
-    "alava": 335_000,
-    "huesca": 225_000,
-    "zamora": 165_000,
-    "avila": 158_000,
-    "palencia": 155_000,
-    "segovia": 154_000,
-    "teruel": 134_000,
-    "cuenca": 195_000,
-    "soria": 88_000,
-    "ceuta": 83_000,
-    "melilla": 87_000,
+    "madrid": 7_113_886,
+    "barcelona": 5_959_941,
+    "valencia": 2_763_996,
+    "sevilla": 1_977_664,
+    "alicante": 2_033_566,
+    "malaga": 1_791_183,
+    "murcia": 1_586_989,
+    "cadiz": 1_261_420,
+    "vizcaya": 1_167_233,
+    "a coruna": 1_135_623,
+    "baleares": 1_249_844,
+    "las palmas": 1_171_547,
+    "santa cruz de tenerife": 1_087_319,
+    "zaragoza": 998_443,
+    "asturias": 1_015_128,
+    "pontevedra": 947_818,
+    "granada": 945_797,
+    "tarragona": 875_530,
+    "gerona": 830_429,
+    "castellon": 627_620,
+    "toledo": 755_081,
+    "badajoz": 665_155,
+    "cordoba": 773_163,
+    "jaen": 618_143,
+    "navarra": 683_854,
+    "almeria": 770_554,
+    "guipuzcoa": 733_149,
+    "valladolid": 528_644,
+    "cantabria": 593_623,
+    "leon": 448_030,
+    "lerida": 458_226,
+    "huelva": 538_789,
+    "burgos": 362_663,
+    "caceres": 388_190,
+    "salamanca": 328_446,
+    _CCAA_LA_RIOJA: 326_803,
+    "lugo": 326_022,
+    "orense": 305_278,
+    "albacete": 390_751,
+    "guadalajara": 285_839,
+    "ciudad real": 494_848,
+    "alava": 341_961,
+    "huesca": 230_087,
+    "zamora": 165_564,
+    "avila": 160_738,
+    "palencia": 158_702,
+    "segovia": 158_251,
+    "teruel": 136_091,
+    "cuenca": 199_859,
+    "soria": 90_183,
+    "ceuta": 83_567,
+    "melilla": 87_067,
 }
 
 # Población por municipio (aprox.). Solo capitales/ciudades grandes de
@@ -520,29 +530,102 @@ PROVINCE_TO_CCAA: dict[str, str] = {
 
 
 # Proporción de la población adulta (25-64) con una titulación/ámbito de
-# estudio concreto. MUY aproximado (basado en órdenes de magnitud de
-# graduados universitarios en España por rama, ~40% de esa franja tiene
-# estudios superiores). Ajusta con datos reales del Censo/EPA si tu TFG
-# necesita precisión aquí.
+# estudio concreto.
+#
+# RESUELTO con el MÉTODO DE DOS PASOS (versión final, no el de respaldo
+# de una sesión anterior): el INE no publica esta granularidad de
+# titulación concreta (ver HISTORIAL DE INVESTIGACIÓN más abajo), pero sí
+# es automatizable combinando dos fuentes reales del Ministerio de
+# Ciencia/Universidades (ninguna con API en vivo -- se descargan a mano o
+# vía el intento de descarga automática de
+# `scripts/update_studies_distribution.py`, que cae a instrucciones
+# manuales si falla):
+#
+#  1. TOTAL POR RAMA, ROBUSTO: suma de EGRESADOS (graduados, no
+#     matriculados -- cada persona cuenta una sola vez, el año que se
+#     titula) desde el curso 1985-1986 hasta 2023-2024, fichero "Series
+#     históricas de estudiantes universitarios... Total SUE... Egresados
+#     por nivel de estudio, sexo y rama de enseñanza" -- 8.622.396
+#     egresados acumulados en total, repartidos en las 5 ramas amplias
+#     (Ciencias de la Salud, Ciencias Sociales y Jurídicas, Ingeniería y
+#     Arquitectura, Ciencias, Artes y Humanidades).
+#  2. REPARTO DENTRO DE CADA RAMA: usando el detalle reciente por
+#     titulación concreta (Egresados 2015-2023, con Matriculados
+#     2015-2024 como respaldo si una titulación no tiene egresados en ese
+#     rango), se calculó qué proporción de cada rama corresponde a cada
+#     una de las 14 categorías de aquí abajo (p. ej. dentro de "Ciencias
+#     de la Salud": medicina/enfermeria/farmacia/veterinaria), asumiendo
+#     que ese reparto reciente aproxima el reparto histórico de la rama.
+#
+# total_estimado[carrera] = total_historico_egresados[rama] x reparto_reciente[carrera dentro de la rama]
+# proporción_final[carrera] = total_estimado[carrera] / población_25_64
+#
+# población_25_64 (27.659.231) se calculó de verdad, no se asumió un
+# "40%": TOTAL_POPULATION_ES x suma de AGE_DISTRIBUTION_5Y para los
+# tramos 25-29 a 60-64, ambos ya en este mismo fichero.
+#
+# COMPROBACIÓN DE CONSISTENCIA hecha antes de aplicar esto: la suma de
+# los totales históricos de las 5 ramas (8.622.396) cuadra EXACTAMENTE
+# con el bloque "Total" del propio fichero histórico (misma cifra) --
+# confirma que el parseo de columnas/filas del Excel (una tabla ancha con
+# 6 bloques de 39 columnas -uno por año- y una jerarquía anidada de filas
+# por Universidad > Nivel > Sexo) está cogiendo la fila y los rangos de
+# columna correctos.
+#
+# LIMITACIONES CONOCIDAS: clasificación del reparto por PALABRAS CLAVE,
+# no código oficial (a diferencia de OCCUPATION_DISTRIBUTION con la
+# CNO-11 -- ver `_CNO11_SUBGRUPO_TO_APP_CATEGORY` en
+# update_ine_reference.py para contraste; algún caso límite conocido,
+# p. ej. "Bioinformática" cae también en "ingenieria informatica" por
+# compartir subcadena); dobles grados cuentan enteros en las dos
+# categorías que combinan, no repartidos; el reparto DENTRO de cada rama
+# usa datos recientes (2015-2023) aplicados al total histórico completo
+# (desde 1985), asumiendo que la popularidad relativa de cada carrera
+# dentro de su rama no ha cambiado radicalmente en 40 años -- una
+# aproximación, no una medición directa. Ver
+# `scripts/update_studies_distribution.py` para el cálculo completo,
+# reproducible con `--matriculados --egresados --egresados-historico-rama`.
+#
+# HISTORIAL DE INVESTIGACIÓN (para contexto, ya no aplica): el INE no
+# tiene tabla anual con esta granularidad (solo la EILU, puntual); el
+# SIIU del Ministerio de Ciencia/Universidades sí publica anualmente por
+# "campo de estudio", pero sin API confirmada -- lo que sí resultó
+# accesible y suficiente fue este otro fichero de series históricas por
+# titulación, encontrado y descargado por Nacho. Ver el docstring de
+# `scripts/update_ine_reference.py` (secciones "INVESTIGACIÓN de
+# STUDIES_DISTRIBUTION..." y "BÚSQUEDA FUERA DEL INE...") para el
+# historial completo de intentos previos, incluido el método de respaldo
+# (reparto reciente x 40% asumido) usado antes de conseguir el fichero
+# histórico por rama.
 STUDIES_DISTRIBUTION = {
-    "medicina": 0.006,
-    "enfermeria": 0.010,
-    "derecho": 0.014,
-    "ingenieria informatica": 0.012,
-    "ingenieria industrial": 0.008,
-    "administracion de empresas": 0.018,
-    "psicologia": 0.010,
-    "magisterio": 0.016,
-    "arquitectura": 0.003,
-    "farmacia": 0.004,
-    "biologia": 0.005,
-    "periodismo": 0.004,
-    "economia": 0.010,
-    "veterinaria": 0.002,
+    "medicina": 0.0128,
+    "enfermeria": 0.0231,
+    "derecho": 0.0308,
+    "ingenieria informatica": 0.0300,
+    "ingenieria industrial": 0.0114,
+    "administracion de empresas": 0.0328,
+    "psicologia": 0.0331,
+    "magisterio": 0.0524,
+    "arquitectura": 0.0127,
+    "farmacia": 0.0048,
+    "biologia": 0.0201,
+    "periodismo": 0.0064,
+    "economia": 0.0101,
+    "veterinaria": 0.0027,
 }
 
 # Proporción de la población ocupada por gran categoría profesional
 # (aprox., basado en agregados de la EPA/CNO-11).
+#
+# CANDIDATO DE AUTOMATIZACIÓN LOCALIZADO (sin aplicar todavía): tabla INE
+# 65134, "Ocupados por sexo y ocupación" (EPA, subgrupos CNO-11), con un
+# mapeo subgrupo->categoría diseñado a mano en
+# `scripts/update_ine_reference.py` (`_CNO11_SUBGRUPO_TO_APP_CATEGORY`).
+# Sin verificar todavía contra la API real -- ver el docstring de ese
+# script (cabecera, sección "INVESTIGACIÓN de STUDIES_DISTRIBUTION y
+# OCCUPATION_DISTRIBUTION") para el detalle completo y las limitaciones
+# conocidas. Corre `python scripts/update_ine_reference.py` para comparar
+# estos valores contra el INE.
 OCCUPATION_DISTRIBUTION = {
     "docente": 0.049,
     "sanitario": 0.055,
@@ -570,8 +653,8 @@ OCCUPATION_DISTRIBUTION = {
 # versión no tiene los recuentos por país necesarios para hacerlo con
 # fiabilidad.
 NATIONALITY_DISTRIBUTION = {
-    "espanola": 0.859,
-    "extranjera": 0.141,
+    "espanola": 0.851,
+    "extranjera": 0.149,
 }
 
 # Situación laboral -- INE, Encuesta de Población Activa (EPA), 4º
@@ -610,6 +693,16 @@ SITUACION_LABORAL_DISTRIBUTION = {
 # monoparentales sobre ~19,4M hogares totales" (2024); "otro" es el resto
 # (hogares complejos, varios núcleos familiares, corresidentes sin
 # vínculo familiar).
+#
+# CANDIDATO DE AUTOMATIZACIÓN LOCALIZADO (sin aplicar todavía): tabla
+# PC-Axis del INE "t20/p274/serie/prov/p01/l0/01013.px" (ECH, tipo de
+# hogar x tipo de edificio, nacional), con mapeo exhaustivo a estas 5
+# categorías en `scripts/update_ine_reference.py`
+# (`_TIPO_HOGAR_TO_APP_CATEGORY`). Sin verificar todavía contra la API
+# real -- ver el docstring de ese script (cabecera, sección
+# "INVESTIGACIÓN de HOUSEHOLD_TYPE_DISTRIBUTION") para el detalle
+# completo. Corre `python scripts/update_ine_reference.py` para comparar
+# estos valores contra el INE.
 HOUSEHOLD_TYPE_DISTRIBUTION = {
     "unipersonal": 0.257,
     "pareja_sin_hijos": 0.232,
@@ -629,6 +722,16 @@ HOUSEHOLD_TYPE_DISTRIBUTION = {
 # (requiere conocer primero otro atributo). Cada sub-diccionario NO suma
 # 1.0 a propósito: son solo la cooficial vs. "todo lo demás" (castellano u
 # otras), no un desglose completo de todas las lenguas de esa CCAA.
+#
+# INVESTIGADO fuera del INE (sin automatizar): los institutos autonómicos
+# con lengua cooficial hacen sus propias encuestas sociolingüísticas (p.
+# ej. IDESCAT en Cataluña, quinquenal) con mejor periodicidad que la
+# ECEPOV del INE, pero automatizarlo de verdad exigiría repetir esta
+# investigación por separado para cada una de las 6 CCAA con lengua
+# cooficial (cada una con su propio instituto/encuesta/periodicidad) --
+# no se ha considerado que compense en esta pasada. Ver el docstring de
+# `scripts/update_ine_reference.py` (sección "BÚSQUEDA FUERA DEL INE...")
+# para el detalle.
 LANGUAGE_BY_CCAA = {
     "cataluna": {"catalan": 0.555, "castellano_u_otra": 0.445},
     "islas baleares": {"catalan": 0.429, "castellano_u_otra": 0.571},
