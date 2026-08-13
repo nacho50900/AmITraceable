@@ -51,6 +51,56 @@ son las de Reddit y `SESSION_SECRET_KEY`; Instagram y Mistral AI son
 opcionales (sin ellas, esas funciones concretas quedan desactivadas sin
 afectar al resto — ver el README raíz para el detalle).
 
+## Datos de referencia poblacional (`app/data/ine_reference.py`)
+
+El k-anonimato (`scoring/k_anonymity.py`) y el scoring de privacidad
+necesitan saber qué tan común es cada atributo en la población española
+(p. ej. "¿qué % de gente de tu edad y CCAA estudió Medicina?"). Esas
+distribuciones viven en `app/data/ine_reference.py`, y se mantienen con
+dos scripts en `scripts/` — herramientas de mantenimiento para refrescar
+los datos de vez en cuando, no parte del pipeline de análisis en
+producción.
+
+**Comando para refrescar todo de una vez:**
+
+```bash
+cd backend
+python scripts/update_ine_reference.py --insecure --apply --yes
+```
+
+`--apply` escribe los cambios en `ine_reference.py` (sin él, solo los
+compara y muestra). `--yes` no pide confirmación por teclado. `--insecure`
+desactiva la verificación SSL — hace falta en Windows si falla con
+`CERTIFICATE_VERIFY_FAILED` (prueba antes `pip install --upgrade
+certifi`, que suele arreglarlo sin necesidad de `--insecure`).
+
+Al final, este comando llama automáticamente a
+`update_studies_distribution.py` (usa `--no-studies` para saltártelo).
+Hay tres flags `--force-*` (`--force-tasa-paro`, `--force-ocupacion`,
+`--force-hogar`) para aplicar una tabla igualmente aunque el script avise
+de que el resultado parece implausible — solo úsalos tras revisar el
+aviso a mano.
+
+### Las 8 tablas, de un vistazo
+
+| Tabla | Fuente | Estado |
+|---|---|---|
+| `PROVINCE_POPULATION` | INE (Tempus3, ID 67988) | ✅ Confirmada contra la API real |
+| `MARITAL_STATUS_DISTRIBUTION` / `_BY_SEX` | INE (ID 76288) | ✅ Confirmada contra la API real |
+| `NATIONALITY_DISTRIBUTION` | INE (ID 59587) | ✅ Confirmada contra la API real |
+| `SITUACION_LABORAL_DISTRIBUTION` | INE (IDs 65081 + 65219) | ⚠️ La tabla original (1113) resultó descontinuada desde 2013 — sustituida por dos tablas nuevas; la de paro (65219) está confirmada con datos reales hasta 2026, la de actividad (65081) es candidata de alta confianza sin confirmar todavía |
+| `OCCUPATION_DISTRIBUTION` | INE (ID 65134, CNO-11) | ✅ Confirmada — corregido un bug real de doble conteo (una categoría "padre" y sus "hijos" sumaban el mismo colectivo dos veces) |
+| `HOUSEHOLD_TYPE_DISTRIBUTION` | INE (PC-Axis) | ✅ Confirmada — corregidos dos bugs reales de parseo del formato |
+| `STUDIES_DISTRIBUTION` | Ministerio de Universidades (Excel, sin API) | ✅ Con datos reales — método de dos pasos: total histórico por rama (egresados desde 1985) repartido según el detalle reciente por titulación |
+| `LANGUAGE_BY_CCAA` | ECEPOV 2021 (INE) | ❌ Sin solución automática (encuesta puntual, sin equivalente anual) |
+
+Cada tabla tiene su propia fecha de última verificación y umbral de
+caducidad (`ine_reference.stale_tables()` dice cuáles llevan demasiado
+tiempo sin refrescar). El docstring de cabecera de cada script documenta
+el historial completo de investigación de cada tabla (IDs descartados,
+bugs encontrados y cómo se confirmaron) — merece la pena leerlo antes de
+tocar nada a mano.
+
 ## Estructura
 
 ```
@@ -72,7 +122,8 @@ app/
 │   ├── demographic_extraction.py  # declaraciones explícitas en texto, por regex
 │   └── ai_attribute_extraction.py # lo mismo, vía IA (Mistral, opcional) -- complementa a la regex, no la sustituye
 ├── data/
-│   └── ine_reference.py       # tablas de distribución poblacional (INE)
+│   ├── ine_reference.py       # tablas de distribución poblacional (INE / Ministerio de Universidades) -- ver README arriba
+│   └── studies_by_university.json  # detalle completo matriculados/egresados por universidad, generado por update_studies_distribution.py
 ├── scoring/
 │   ├── privacy_score.py       # score de privacidad 0-100
 │   └── k_anonymity.py         # estrechamiento de población (k-anonimato)
@@ -84,6 +135,8 @@ app/
     └── schemas.py             # modelos Pydantic (SocialPost, ExposureReport...)
 
 scripts/
+├── update_ine_reference.py       # refresca 6 tablas de app/data/ine_reference.py contra el INE -- ver README arriba
+├── update_studies_distribution.py # refresca STUDIES_DISTRIBUTION (Ministerio de Universidades, sin API) -- ver README arriba
 ├── download_osv5m_spain.py    # descarga filtrada del dataset OSV-5M
 ├── download_osv5m_world.py    # variante sin filtro de país
 ├── build_faiss_index.py       # construcción del índice FAISS

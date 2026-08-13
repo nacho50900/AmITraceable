@@ -287,7 +287,45 @@ _TABLA_POBLACION_PROVINCIAS = 67988
 # que la de PROVINCE_POPULATION la primera vez que lo corras.
 _TABLA_ESTADO_CIVIL = 76288  # "Población de 16 y más años por sexo y estado civil"
 _TABLA_NACIONALIDAD = 59587  # "Población residente por fecha, sexo, grupo de edad y nacionalidad (española/extranjera)"
-_TABLA_TASAS_EPA = 1113  # "Tasas de actividad, paro y empleo, por sexo y distintos grupos de edad"
+
+# RESUELTO tras confirmar que 1113 estaba descontinuada (ver historial
+# completo justo abajo): _TABLA_TASAS_EPA (1113, "Tasas de actividad,
+# paro y empleo, por sexo y distintos grupos de edad", una sola tabla
+# combinada) se sustituye por DOS tablas separadas, encontradas y
+# CONFIRMADAS por Nacho -- descargó el Excel real de la 65219 desde
+# https://www.ine.es/jaxiT3/Tabla.htm?t=65219 ("consultar todo") y sus
+# datos llegan hasta 2026T2 (9,87%) y 2025T4 (9,93%, coincide EXACTO con
+# la cifra ya confirmada contra la nota de prensa EPA al principio de
+# esta investigación) -- esta SÍ es la tabla vigente, no descontinuada.
+# La hermana de "tasa de actividad" (65081) se localizó por búsqueda
+# igual que el resto de IDs de este fichero (mismo catálogo de
+# datos.gob.es, tema "empleo", misma familia EPA) pero NO se ha
+# descargado ni confirmado un Excel real para ella todavía -- candidato
+# de alta confianza (mismo catálogo, mismo patrón de nombre/ID que
+# 65219), pero no al mismo nivel de certeza que 65219.
+_TABLA_TASA_ACTIVIDAD_EPA = 65081  # "Tasas de actividad por sexo y grupo de edad" -- CANDIDATO, sin Excel de verificación descargado
+_TABLA_TASA_PARO_EPA = 65219  # "Tasas de paro por sexo y grupo de edad" -- CONFIRMADO con Excel real (datos hasta 2026T2)
+
+# HISTORIAL COMPLETO de 1113 (ya NO se usa, se deja documentado para que
+# quede el rastro de por qué se cambió a las dos tablas de arriba):
+# CONFIRMADO DESCONTINUADA (primera ejecución real de este script,
+# sesión con Nacho): el histórico completo (nult=20) y la descarga
+# oficial "consultar todo" desde la propia web del INE
+# (https://www.ine.es/jaxiT3/Tabla.htm?t=1113) muestran ambos que esta
+# tabla se congela en 2013T4 -- 108 trimestres de datos reales y
+# coherentes terminando ahí, no un fallo de `nult` ni de este script.
+# Investigado en la misma sesión: las tablas hermanas de esta misma
+# operación EPA (3996, 4086, 4247, 4942, 4966) están TODAS marcadas
+# explícitamente "histórica" por el INE, con enlace a "resultados
+# actuales" -- 1113 casi seguro tiene el mismo problema aunque su propia
+# página no mostrara el aviso "histórica" de forma visible. La tabla
+# vigente parece vivir bajo un sistema de carpetas por "metodología"
+# (PC-Axis, path tipo /t22/e308/meto_XX/pae/px/l0/NNNNN.px, con
+# meto_02/meto_05/meto_05_bis como versiones archivadas encontradas) --
+# no se ha podido confirmar el ID/ruta de la versión vigente por
+# búsqueda web; pendiente de que Nacho lo localice a mano en la propia
+# web del INE (mismo método que ya usó para descargar 1113.xlsx) y lo
+# pase para terminar de cablear esto.
 
 # ID=65134, "Ocupados por sexo y ocupación. Valores absolutos y
 # porcentajes respecto del total de cada sexo" (EPA, trimestral,
@@ -799,24 +837,32 @@ def fetch_nationality() -> dict[str, float]:
     return result
 
 
-def fetch_situacion_laboral() -> dict[str, float]:
-    """CANDIDATO SIN VERIFICAR (ver _TABLA_TASAS_EPA más arriba) -- mismo
-    aviso que fetch_marital_status: valores en bruto, sin normalizar.
-    Nota adicional: esta tabla da TASAS (porcentajes sobre población
-    activa/de 16+), no la misma base que SITUACION_LABORAL_DISTRIBUTION
-    (proporción sobre población de 16+ total, incluyendo inactivos
-    desglosados) -- hace falta el mismo cálculo que ya está documentado
-    en el comentario de esa constante en ine_reference.py, esta función
-    solo trae el dato crudo de la EPA.
+def fetch_situacion_laboral() -> tuple[dict[str, float], dict[str, float]]:
+    """Devuelve (actividad_raw, paro_raw) -- DOS tablas separadas desde
+    esta sesión (ver _TABLA_TASA_ACTIVIDAD_EPA/_TABLA_TASA_PARO_EPA más
+    arriba para el porqué: 1113, la tabla combinada original, resultó
+    estar descontinuada desde 2013, confirmado con datos reales).
 
-    Usa `_latest_valor_por_nombre` (no `datos[-1]` directo) desde esta
-    sesión -- ver el bloque de comentario junto a esa función para el
-    bug real que esto corrige, encontrado precisamente al investigar por
-    qué esta tabla daba 26,03% de tasa de paro en vez de ~9,93%."""
-    series = _fetch_series(_TABLA_TASAS_EPA)
-    result = _latest_valor_por_nombre(series)
-    _warn_if_empty(_TABLA_TASAS_EPA, series, result)
-    return result
+    SUPUESTO SIN VERIFICAR sobre el formato de `Nombre` de estas DOS
+    tablas nuevas: no se ha visto un ejemplo real de la respuesta JSON
+    (solo el Excel de "consultar todo" de la web, que no expone los
+    nombres de serie de la API). Al ser tablas de un solo concepto cada
+    una (no "actividad, paro y empleo" combinadas como 1113), lo más
+    probable es que `Nombre` sea más simple -- posiblemente sin el
+    prefijo "Tasa de paro. Nacional." de antes, algo más parecido a
+    "Total. Ambos sexos. Valor absoluto" o similar. `_normalize_situacion_laboral`
+    intenta varias formas plausibles; si ninguna encaja, hace falta ver
+    un ejemplo real con `_mostrar_ejemplos_nombres` (ya se llama
+    automáticamente si el resultado sale sospechoso)."""
+    series_actividad = _fetch_series(_TABLA_TASA_ACTIVIDAD_EPA)
+    actividad_raw = _latest_valor_por_nombre(series_actividad)
+    _warn_if_empty(_TABLA_TASA_ACTIVIDAD_EPA, series_actividad, actividad_raw)
+
+    series_paro = _fetch_series(_TABLA_TASA_PARO_EPA)
+    paro_raw = _latest_valor_por_nombre(series_paro)
+    _warn_if_empty(_TABLA_TASA_PARO_EPA, series_paro, paro_raw)
+
+    return actividad_raw, paro_raw
 
 
 def fetch_occupation() -> dict[str, float]:
@@ -902,18 +948,36 @@ _CNO11_SUBGRUPO_TO_APP_CATEGORY: dict[str, str] = {
     "Camareros y cocineros propietarios": "hosteleria",
     "Trabajadores asalariados de los servicios de restauración": "hosteleria",
     # administracion publica
-    "Miembros del poder ejecutivo y de los cuerpos legislativos; directivos de la Administración Pública": "administracion publica",
+    #
+    # OJO: el texto de la primera clave se corrigió tras ver la lista real
+    # de 84 ocupaciones únicas (primera ejecución real) -- el texto
+    # anterior estaba TRUNCADO ("...Administración Pública" a secas) y no
+    # coincidía con el real, así que esta fila nunca se sumaba. El texto
+    # completo real es más largo (incluye "...y organizaciones de interés
+    # social; directores ejecutivos").
+    "Miembros del poder ejecutivo y de los cuerpos legislativos; directivos de la Administración Pública y organizaciones de interés social; directores ejecutivos": "administracion publica",
     "Especialistas en organización de la Administración Pública y de las empresas y en la comercialización": "administracion publica",
     "Empleados administrativos con tareas de atención al público no clasificados bajo otros epígrafes": "administracion publica",
     "Otros empleados administrativos sin tareas de atención al público": "administracion publica",
     # construccion
-    "Trabajadores cualificados de la construcción, excepto operadores de máquinas": "construccion",
+    #
+    # OJO: se ha quitado "Trabajadores cualificados de la construcción,
+    # excepto operadores de máquinas" de aquí -- confirmado con la lista
+    # real de 84 ocupaciones (primera ejecución real) que es el PADRE
+    # directo de las dos filas de abajo (obras estructurales + acabados),
+    # así que tenerlo también aquí sumaba el mismo colectivo dos veces
+    # (la suma total salía en 66.4% en vez de max. 55%). Se dejan solo
+    # los hijos, más específicos y sin solapamiento entre sí.
     "Trabajadores en obras estructurales de construcción y afines": "construccion",
     "Trabajadores de acabado de construcciones e instalaciones (excepto electricistas), pintores y afines": "construccion",
     "Peones de la construcción y de la minería": "construccion",
     # transporte
+    #
+    # OJO: mismo problema que construccion -- "Conductores y operadores
+    # de maquinaria móvil" es el PADRE directo de las dos filas de abajo
+    # (conductores urbanos + maquinistas), quitado de aquí por el mismo
+    # motivo (doble conteo confirmado con datos reales).
     "Conductores de vehículos para el transporte urbano o por carretera": "transporte",
-    "Conductores y operadores de maquinaria móvil": "transporte",
     "Peones del transporte, descargadores y reponedores": "transporte",
     "Maquinistas de locomotoras, operadores de maquinaria agrícola y de equipos pesados móviles, y marineros": "transporte",
 }
@@ -926,7 +990,23 @@ _CNO11_SUBGRUPO_TO_APP_CATEGORY: dict[str, str] = {
 # repitiendo la misma serie varias veces por sexo/tipo de dato sin
 # filtrar (ver AVISO DE FORMATO en fetch_occupation), no que de repente
 # el mapeo cubra toda la población ocupada.
-_OCUPACION_SUMA_PLAUSIBLE = (15.0, 55.0)
+#
+# LÍMITE SUPERIOR AJUSTADO a 62 (era 55) tras verificar contra datos
+# reales, dos veces: la primera ejecución real dio 66.4% -- SÍ era un bug
+# real (dos categorías tenían un grupo "padre" y sus propios "hijos" del
+# CNO-11 sumados a la vez, ver historial en el propio diccionario). Tras
+# arreglarlo, la SEGUNDA ejecución real dio 57.2% -- revisado a mano
+# entrada por entrada contra la jerarquía completa del CNO-11 (84
+# ocupaciones únicas vistas), SIN ningún padre marcado junto a sus
+# hijos esta vez. 57.2% es, por tanto, el resultado correcto para estas
+# 10 categorías (bastante amplias: comercial+construcción+transporte+
+# sanitario+docente ya son, cada una, una fracción considerable de la
+# población ocupada) -- el límite de 55 era una estimación a mano
+# demasiado ajustada, no una señal real de bug. Se deja algo de margen
+# por encima de 57.2 (hasta 62) para seguir detectando una regresión real
+# si el mapeo se rompe de nuevo, sin disparar una alarma falsa por este
+# valor ya confirmado correcto.
+_OCUPACION_SUMA_PLAUSIBLE = (15.0, 62.0)
 
 
 def _normalize_occupation(raw: dict[str, float]) -> dict[str, float] | None:
@@ -1036,22 +1116,22 @@ _HOGAR_SUMA_PLAUSIBLE = (0.85, 1.15)
 
 def _categorizar_tipo_hogar(tipo_hogar: str) -> str | None:
     """Wrapper sobre `_TIPO_HOGAR_TO_APP_CATEGORY` que además reconoce
-    "Pareja con hijos que convivan en el hogar" con sufijo -- CONFIRMADO
-    contra la API real (primera ejecución real de este script) que esta
-    categoría NO aparece como fila única con ese texto exacto, sino
-    partida por número de hijos: "Pareja con hijos que convivan en el
-    hogar: 1 hijo", "... 2 hijos", etc. -- de ahí que
-    `pareja_con_hijos` saliera completamente vacía (0%) mientras las
-    demás categorías sí funcionaban, y la suma total quedara en ~67% en
-    vez de ~100% (67% + los ~33% que faltaban de pareja_con_hijos
-    encajan). Se usa `startswith` en vez de una lista fija de sufijos
-    ("1 hijo"/"2 hijos"/"3 o más hijos"...) porque no se ha confirmado el
-    conjunto exacto y completo de sufijos, y un `startswith` los cubre
-    todos sin tener que enumerarlos."""
+    "Pareja con hijos que convivan en el hogar" -- CONFIRMADO contra la
+    API real (primera ejecución real) que esta categoría tiene DOS
+    formas de aparecer en la misma tabla: una fila resumen
+    "...: Total" (ya es la suma de todo) Y, ADEMÁS, filas desglosadas por
+    número de hijos ("...: 1 hijo", "...: 2 hijos", "...: 3 o más
+    hijos"...). El primer intento de reconocer esto usaba `startswith`
+    sobre CUALQUIER sufijo -- eso sumaba la fila ": Total" JUNTO CON sus
+    propias partes desglosadas, duplicando el conteo (la suma total de
+    las 5 categorías salió en 133% en vez de ~100%). Ahora se usa
+    ÚNICAMENTE la fila ": Total" (ya correcta de por sí, sin tener que
+    sumar nada a mano) y se ignoran a propósito las filas desglosadas por
+    número de hijos."""
     categoria = _TIPO_HOGAR_TO_APP_CATEGORY.get(tipo_hogar)
     if categoria is not None:
         return categoria
-    if tipo_hogar.startswith("Pareja con hijos que convivan en el hogar"):
+    if tipo_hogar == "Pareja con hijos que convivan en el hogar: Total":
         return "pareja_con_hijos"
     return None
 
@@ -1486,9 +1566,31 @@ _TASA_PARO_PLAUSIBLE = (5.0, 28.0)
 _TASA_PARO_RECIENTE_CONOCIDA = 9.93  # EPA T4 2025, la que ya había en el comentario de esta constante
 
 
-def _normalize_situacion_laboral(raw: dict[str, float]) -> dict[str, float] | None:
-    tasa_actividad = raw.get("Tasa de actividad. Nacional. Ambos sexos. Total. Valor absoluto")
-    tasa_paro = raw.get("Tasa de paro. Nacional. Ambos sexos. Total. Valor absoluto")
+def _buscar_por_segmentos(raw: dict[str, float], requeridos: list[str]) -> float | None:
+    """Busca en `raw` la primera clave cuyos segmentos (separados por
+    ". ") contengan TODOS los textos de `requeridos`, sin importar el
+    ORDEN en que aparezcan -- más robusto que adivinar una concatenación
+    exacta como "Total. Ambos sexos. Valor absoluto" cuando no se ha
+    visto un ejemplo real del formato (caso de _TABLA_TASA_ACTIVIDAD_EPA/
+    _TABLA_TASA_PARO_EPA en esta sesión: solo se vio la rejilla del Excel
+    de "consultar todo", no el JSON real de la API, así que no se sabe el
+    orden exacto de los segmentos de `Nombre`)."""
+    for nombre, valor in raw.items():
+        segments = {s.strip() for s in nombre.split(". ") if s.strip()}
+        if all(req in segments for req in requeridos):
+            return valor
+    return None
+
+
+def _normalize_situacion_laboral(actividad_raw: dict[str, float], paro_raw: dict[str, float]) -> dict[str, float] | None:
+    """Recibe las DOS tablas por separado (ver fetch_situacion_laboral)
+    -- antes era una sola tabla combinada (1113, descontinuada, ver
+    historial en el comentario de _TABLA_TASA_ACTIVIDAD_EPA). Busca
+    "Total" + "Ambos sexos" en cada una con `_buscar_por_segmentos`, sin
+    asumir un orden concreto de los segmentos de `Nombre` (formato sin
+    confirmar todavía contra la API real de estas dos tablas nuevas)."""
+    tasa_actividad = _buscar_por_segmentos(actividad_raw, ["Total", "Ambos sexos"])
+    tasa_paro = _buscar_por_segmentos(paro_raw, ["Total", "Ambos sexos"])
     if tasa_actividad is None or tasa_paro is None:
         return None
     activo = tasa_actividad / 100 * (1 - tasa_paro / 100)
@@ -1738,13 +1840,28 @@ def main() -> None:
     else:
         print("(esto NO modifica ine_reference.py -- solo muestra diferencias; usa --apply para escribir)\n")
 
+    # Resumen final -- cada entrada es (tabla, estado, detalle). Se
+    # rellena en cada punto de salida de cada bloque try/except de abajo,
+    # para poder imprimir al final una tabla de un vistazo con qué se
+    # actualizó, qué no, y por qué (pedido explícito de Nacho: "que ponga
+    # una tabla con las que se han podido actualizar y las que no y por
+    # qué -- url no encontrado, fallo de descarga, fallo de mapeo...").
+    resultados: list[tuple[str, str, str]] = []
+
+    def _registrar(tabla: str, estado: str, detalle: str) -> None:
+        resultados.append((tabla, estado, " ".join(detalle.split())))  # aplana saltos de línea (p. ej. de httpx.HTTPError) para que la tabla resumen no se rompa
+
     try:
         province_data = fetch_population_by_province()
         _compare("PROVINCE_POPULATION", ine_reference.PROVINCE_POPULATION, province_data)
         if args.apply:
-            _apply_province_population(province_data, auto_confirm=args.yes)
+            escrito = _apply_province_population(province_data, auto_confirm=args.yes)
+            _registrar("PROVINCE_POPULATION", "actualizada" if escrito else "sin cambios", "descarga y mapeo OK")
+        else:
+            _registrar("PROVINCE_POPULATION", "comparada (sin --apply)", "descarga y mapeo OK")
     except httpx.HTTPError as e:
         print(f"ERROR al descargar población por provincia: {e}")
+        _registrar("PROVINCE_POPULATION", "FALLO", f"error de descarga (HTTP): {e}")
 
     try:
         marital_raw = fetch_marital_status()
@@ -1757,6 +1874,8 @@ def main() -> None:
                 "Nacional) en la respuesta -- revisa el formato real con "
                 "fetch_marital_status() antes de forzar nada."
             )
+            _registrar("MARITAL_STATUS_DISTRIBUTION", "FALLO", "fallo de mapeo -- formato de 'Nombre' no reconocido (¿estructura del INE cambiada?)")
+            _registrar("MARITAL_STATUS_BY_SEX", "FALLO", "depende de MARITAL_STATUS_DISTRIBUTION, no calculada")
         else:
             _compare("MARITAL_STATUS_DISTRIBUTION", ine_reference.MARITAL_STATUS_DISTRIBUTION, marital_normalized)
             by_sex_normalized = _normalize_marital_status_by_sex(
@@ -1767,11 +1886,20 @@ def main() -> None:
                 for sexo in ("hombre", "mujer"):
                     _compare(f"  {sexo}", ine_reference.MARITAL_STATUS_BY_SEX[sexo], by_sex_normalized[sexo])
             if args.apply:
-                _apply_marital_status(marital_normalized, auto_confirm=args.yes)
+                escrito = _apply_marital_status(marital_normalized, auto_confirm=args.yes)
+                _registrar("MARITAL_STATUS_DISTRIBUTION", "actualizada" if escrito else "sin cambios", "descarga y mapeo OK")
                 if by_sex_normalized is not None:
-                    _apply_marital_status_by_sex(by_sex_normalized, auto_confirm=args.yes)
+                    escrito_sexo = _apply_marital_status_by_sex(by_sex_normalized, auto_confirm=args.yes)
+                    _registrar("MARITAL_STATUS_BY_SEX", "actualizada" if escrito_sexo else "sin cambios", "descarga y mapeo OK")
+                else:
+                    _registrar("MARITAL_STATUS_BY_SEX", "FALLO", "fallo de mapeo del desglose por sexo")
+            else:
+                _registrar("MARITAL_STATUS_DISTRIBUTION", "comparada (sin --apply)", "descarga y mapeo OK")
+                _registrar("MARITAL_STATUS_BY_SEX", "comparada (sin --apply)" if by_sex_normalized is not None else "FALLO", "descarga y mapeo OK" if by_sex_normalized is not None else "fallo de mapeo del desglose por sexo")
     except httpx.HTTPError as e:
         print(f"ERROR al descargar estado civil: {e}")
+        _registrar("MARITAL_STATUS_DISTRIBUTION", "FALLO", f"error de descarga (HTTP): {e}")
+        _registrar("MARITAL_STATUS_BY_SEX", "FALLO", "depende de MARITAL_STATUS_DISTRIBUTION, no calculada")
 
     try:
         nationality_raw = fetch_nationality()
@@ -1782,25 +1910,34 @@ def main() -> None:
                 "  No se encontraron las filas nacionales esperadas -- revisa el "
                 "formato real con fetch_nationality() antes de forzar nada."
             )
+            _registrar("NATIONALITY_DISTRIBUTION", "FALLO", "fallo de mapeo -- formato de 'Nombre' no reconocido (¿estructura del INE cambiada?)")
         else:
             _compare("NATIONALITY_DISTRIBUTION", ine_reference.NATIONALITY_DISTRIBUTION, nationality_normalized)
             if args.apply:
-                _apply_nationality(nationality_normalized, auto_confirm=args.yes)
+                escrito = _apply_nationality(nationality_normalized, auto_confirm=args.yes)
+                _registrar("NATIONALITY_DISTRIBUTION", "actualizada" if escrito else "sin cambios", "descarga y mapeo OK")
+            else:
+                _registrar("NATIONALITY_DISTRIBUTION", "comparada (sin --apply)", "descarga y mapeo OK")
     except httpx.HTTPError as e:
         print(f"ERROR al descargar nacionalidad: {e}")
+        _registrar("NATIONALITY_DISTRIBUTION", "FALLO", f"error de descarga (HTTP): {e}")
 
     try:
-        laboral_raw = fetch_situacion_laboral()
-        laboral_normalized = _normalize_situacion_laboral(laboral_raw)
+        actividad_raw, paro_raw = fetch_situacion_laboral()
+        laboral_normalized = _normalize_situacion_laboral(actividad_raw, paro_raw)
         if laboral_normalized is None:
             print(
                 "\n=== SITUACION_LABORAL_DISTRIBUTION ===\n"
-                "  No se encontraron 'Tasa de actividad'/'Tasa de paro' nacionales "
-                "esperadas -- revisa el formato real con fetch_situacion_laboral()."
+                "  No se encontraron 'Total'+'Ambos sexos' en alguna de las dos tablas "
+                "(actividad 65081 / paro 65219) -- revisa el formato real con "
+                "fetch_situacion_laboral()."
             )
+            _mostrar_ejemplos_nombres(actividad_raw, max_n=15)
+            _mostrar_ejemplos_nombres(paro_raw, max_n=15)
+            _registrar("SITUACION_LABORAL_DISTRIBUTION", "FALLO", "fallo de mapeo -- formato de 'Nombre' no reconocido en 65081/65219 (¿estructura del INE cambiada?)")
         else:
             _compare("SITUACION_LABORAL_DISTRIBUTION", ine_reference.SITUACION_LABORAL_DISTRIBUTION, laboral_normalized)
-            tasa_paro = laboral_raw.get("Tasa de paro. Nacional. Ambos sexos. Total. Valor absoluto")
+            tasa_paro = _buscar_por_segmentos(paro_raw, ["Total", "Ambos sexos"])
             tasa_sospechosa = tasa_paro is not None and (
                 not (_TASA_PARO_PLAUSIBLE[0] <= tasa_paro <= _TASA_PARO_PLAUSIBLE[1])
                 or abs(tasa_paro - _TASA_PARO_RECIENTE_CONOCIDA) > _TASA_PARO_RECIENTE_CONOCIDA
@@ -1809,24 +1946,28 @@ def main() -> None:
                 print(
                     f"\n  AVISO IMPORTANTE: la tasa de paro nacional que trae esta tabla "
                     f"es {tasa_paro}%, muy distinta del ~{_TASA_PARO_RECIENTE_CONOCIDA}% "
-                    "conocido de la EPA más reciente. Puede que _TABLA_TASAS_EPA tenga el "
-                    "mismo problema que tuvo _TABLA_POBLACION_PROVINCIAS al principio (ID o "
-                    "filtro de categoría no del todo correcto, sin dar ningún error HTTP). "
-                    "Verifica el ID de tabla antes de confiar en este número."
+                    "conocido de la EPA más reciente. La tabla 65219 se confirmó vigente "
+                    "con un Excel real (datos hasta 2026T2) -- si esto sigue saliendo mal, "
+                    "sospecha primero de _buscar_por_segmentos (¿hay más de una fila que "
+                    "matchee 'Total'+'Ambos sexos', p. ej. por edad 'Total' Y sexo 'Ambos "
+                    "sexos' combinados con otra dimensión?) antes que del ID de tabla."
                 )
-                _mostrar_ejemplos_nombres(laboral_raw, filtro_subcadenas=["paro"], max_n=25)
-                _diagnosticar_series_duplicadas(_TABLA_TASAS_EPA, "Tasa de paro. Nacional. Ambos sexos. Total. Valor absoluto")
-                _diagnosticar_historial_completo(_TABLA_TASAS_EPA, "Tasa de paro. Nacional. Ambos sexos. Total. Valor absoluto")
+                _mostrar_ejemplos_nombres(paro_raw, filtro_subcadenas=["Total"], max_n=25)
             if args.apply:
                 if tasa_sospechosa and not args.force_tasa_paro:
                     print(
                         "  SITUACION_LABORAL_DISTRIBUTION: NO se aplica por el aviso de "
                         "arriba -- usa --force-tasa-paro si quieres aplicarlo igualmente."
                     )
+                    _registrar("SITUACION_LABORAL_DISTRIBUTION", "no aplicada", f"valor sospechoso (tasa de paro {tasa_paro}%) -- usa --force-tasa-paro")
                 else:
-                    _apply_situacion_laboral(laboral_normalized, auto_confirm=args.yes)
+                    escrito = _apply_situacion_laboral(laboral_normalized, auto_confirm=args.yes)
+                    _registrar("SITUACION_LABORAL_DISTRIBUTION", "actualizada" if escrito else "sin cambios", "descarga y mapeo OK")
+            else:
+                _registrar("SITUACION_LABORAL_DISTRIBUTION", "comparada (sin --apply)" if not tasa_sospechosa else "comparada, valor sospechoso", "descarga y mapeo OK")
     except httpx.HTTPError as e:
         print(f"ERROR al descargar situación laboral: {e}")
+        _registrar("SITUACION_LABORAL_DISTRIBUTION", "FALLO", f"error de descarga (HTTP): {e}")
 
     try:
         ocupacion_raw = fetch_occupation()
@@ -1839,6 +1980,7 @@ def main() -> None:
                 "parseo de _normalize_occupation()."
             )
             _mostrar_ejemplos_nombres(ocupacion_raw)
+            _registrar("OCCUPATION_DISTRIBUTION", "FALLO", "fallo de mapeo -- formato de 'Nombre' no reconocido (¿estructura del INE cambiada?)")
         else:
             _compare("OCCUPATION_DISTRIBUTION", ine_reference.OCCUPATION_DISTRIBUTION, ocupacion_normalized)
             suma = sum(ocupacion_normalized.values()) * 100
@@ -1860,10 +2002,15 @@ def main() -> None:
                         "  OCCUPATION_DISTRIBUTION: NO se aplica por el aviso de arriba -- "
                         "usa --force-ocupacion si quieres aplicarlo igualmente."
                     )
+                    _registrar("OCCUPATION_DISTRIBUTION", "no aplicada", f"suma sospechosa ({suma:.1f}%) -- usa --force-ocupacion")
                 else:
-                    _apply_occupation(ocupacion_normalized, auto_confirm=args.yes)
+                    escrito = _apply_occupation(ocupacion_normalized, auto_confirm=args.yes)
+                    _registrar("OCCUPATION_DISTRIBUTION", "actualizada" if escrito else "sin cambios", "descarga y mapeo OK")
+            else:
+                _registrar("OCCUPATION_DISTRIBUTION", "comparada (sin --apply)" if not suma_sospechosa else "comparada, valor sospechoso", "descarga y mapeo OK")
     except httpx.HTTPError as e:
         print(f"ERROR al descargar ocupación (CNO-11): {e}")
+        _registrar("OCCUPATION_DISTRIBUTION", "FALLO", f"error de descarga (HTTP): {e}")
 
     try:
         hogar_raw = fetch_household_type()
@@ -1876,6 +2023,7 @@ def main() -> None:
                 "parseo de _normalize_household_type()."
             )
             _mostrar_ejemplos_nombres(hogar_raw)
+            _registrar("HOUSEHOLD_TYPE_DISTRIBUTION", "FALLO", "fallo de mapeo -- formato de 'Nombre' no reconocido (¿estructura del INE cambiada?)")
         else:
             _compare("HOUSEHOLD_TYPE_DISTRIBUTION", ine_reference.HOUSEHOLD_TYPE_DISTRIBUTION, hogar_normalized)
             suma = sum(hogar_normalized.values())
@@ -1897,10 +2045,15 @@ def main() -> None:
                         "  HOUSEHOLD_TYPE_DISTRIBUTION: NO se aplica por el aviso de arriba -- "
                         "usa --force-hogar si quieres aplicarlo igualmente."
                     )
+                    _registrar("HOUSEHOLD_TYPE_DISTRIBUTION", "no aplicada", f"suma sospechosa ({suma:.3f}) -- usa --force-hogar")
                 else:
-                    _apply_household_type(hogar_normalized, auto_confirm=args.yes)
+                    escrito = _apply_household_type(hogar_normalized, auto_confirm=args.yes)
+                    _registrar("HOUSEHOLD_TYPE_DISTRIBUTION", "actualizada" if escrito else "sin cambios", "descarga y mapeo OK")
+            else:
+                _registrar("HOUSEHOLD_TYPE_DISTRIBUTION", "comparada (sin --apply)" if not suma_sospechosa else "comparada, valor sospechoso", "descarga y mapeo OK")
     except httpx.HTTPError as e:
         print(f"ERROR al descargar tipo de hogar (ECH): {e}")
+        _registrar("HOUSEHOLD_TYPE_DISTRIBUTION", "FALLO", f"error de descarga (HTTP): {e}")
 
     print(
         "\nSTUDIES_DISTRIBUTION: fuente distinta del INE, sin API en vivo -- "
@@ -1910,6 +2063,7 @@ def main() -> None:
     )
     if args.no_studies:
         print("(--no-studies: NO se llama a update_studies_distribution.py)")
+        _registrar("STUDIES_DISTRIBUTION", "omitida", "--no-studies")
     else:
         comando = [sys.executable, str(Path(__file__).parent / "update_studies_distribution.py")]
         if args.apply:
@@ -1927,12 +2081,30 @@ def main() -> None:
                 "No es un fallo de las tablas del INE de este script, es "
                 "independiente (usa --no-studies para saltártelo si hace falta)."
             )
+            _registrar("STUDIES_DISTRIBUTION", "FALLO", f"update_studies_distribution.py devolvió código {resultado.returncode} -- ver su salida arriba (fallo de descarga o de mapeo del Ministerio)")
+        else:
+            _registrar("STUDIES_DISTRIBUTION", "actualizada" if args.apply else "comparada (sin --apply)", "delegado a update_studies_distribution.py -- ver su salida arriba para el detalle")
 
     print(
         "\nLANGUAGE_BY_CCAA: encuesta puntual (ECEPOV), sin tabla anual "
         "equivalente que comparar -- revisar a mano si el INE ha "
         "publicado una edición más reciente."
     )
+    _registrar("LANGUAGE_BY_CCAA", "sin fuente automática", "ECEPOV es puntual, sin equivalente anual conocido -- ver README")
+
+    # --- Tabla resumen final ---
+    ancho_tabla = max(len(t) for t, _, _ in resultados)
+    ancho_estado = max(len(e) for _, e, _ in resultados)
+    print("\n" + "=" * 78)
+    print("RESUMEN")
+    print("=" * 78)
+    for tabla, estado, detalle in resultados:
+        marca = "✅" if estado in ("actualizada", "sin cambios") else "⚠️ " if estado in ("no aplicada", "omitida", "sin fuente automática") or estado.startswith("comparada") else "❌"
+        print(f"{marca} {tabla.ljust(ancho_tabla)}  {estado.ljust(ancho_estado)}  {detalle}")
+    print("=" * 78)
+    n_fallo = sum(1 for _, e, _ in resultados if e == "FALLO")
+    n_ok = sum(1 for _, e, _ in resultados if e in ("actualizada", "sin cambios"))
+    print(f"{n_ok}/{len(resultados)} tablas OK, {n_fallo} con fallo real, el resto sin --apply/sin fuente/bloqueadas por un aviso de plausibilidad.")
 
 
 if __name__ == "__main__":

@@ -61,8 +61,8 @@ _LAST_VERIFIED: dict[str, date | None] = {
     # publique una edición más reciente de cualquiera de los ficheros.
     "STUDIES_DISTRIBUTION": date(2026, 8, 11),  # fecha de esta ejecución -- el histórico llega hasta el curso 2023-2024, el detalle por titulación hasta 2023 (egresados) / 2024 (matriculados)
     "NATIONALITY_DISTRIBUTION": date(2026, 8, 11),
-    "SITUACION_LABORAL_DISTRIBUTION": date(2025, 10, 1),  # EPA T4 2025
-    "HOUSEHOLD_TYPE_DISTRIBUTION": date(2024, 1, 1),
+    "SITUACION_LABORAL_DISTRIBUTION": date(2026, 8, 13),  # EPA T4 2025
+    "HOUSEHOLD_TYPE_DISTRIBUTION": date(2026, 8, 13),
     # ECEPOV es una encuesta puntual del INE, sin periodicidad anual fija
     # (la última es de 2021, la anterior de 2018) -- un umbral de "1 año"
     # saltaría permanentemente sin que haya nada nuevo que revisar. Se
@@ -627,16 +627,16 @@ STUDIES_DISTRIBUTION = {
 # conocidas. Corre `python scripts/update_ine_reference.py` para comparar
 # estos valores contra el INE.
 OCCUPATION_DISTRIBUTION = {
-    "docente": 0.049,
-    "sanitario": 0.055,
-    "desarrollador de software": 0.018,
-    "ingeniero": 0.020,
-    "abogado": 0.008,
-    "comercial": 0.049,
-    "hosteleria": 0.044,
-    "administracion publica": 0.065,
-    "construccion": 0.060,
-    "transporte": 0.030,
+    "docente": 0.058,
+    "sanitario": 0.070,
+    "desarrollador de software": 0.034,
+    "ingeniero": 0.051,
+    "abogado": 0.012,
+    "comercial": 0.090,
+    "hosteleria": 0.053,
+    "administracion publica": 0.082,
+    "construccion": 0.055,
+    "transporte": 0.067,
 }
 
 # Reparto por nacionalidad (española vs. extranjera), INE -- Censo Anual de
@@ -674,10 +674,10 @@ NATIONALITY_DISTRIBUTION = {
 #     incapacidad permanente, otras situaciones -- ~23%): jubilado 0.234,
 #     estudiante 0.082, otro_inactivo 0.094.
 SITUACION_LABORAL_DISTRIBUTION = {
-    "activo": 0.531,
+    "activo": 0.534,
     "parado": 0.059,
-    "jubilado": 0.234,
-    "estudiante": 0.082,
+    "jubilado": 0.232,
+    "estudiante": 0.081,
     "otro_inactivo": 0.094,
 }
 
@@ -704,11 +704,11 @@ SITUACION_LABORAL_DISTRIBUTION = {
 # completo. Corre `python scripts/update_ine_reference.py` para comparar
 # estos valores contra el INE.
 HOUSEHOLD_TYPE_DISTRIBUTION = {
-    "unipersonal": 0.257,
-    "pareja_sin_hijos": 0.232,
-    "pareja_con_hijos": 0.334,
-    "monoparental": 0.100,
-    "otro": 0.077,
+    "unipersonal": 0.261,
+    "pareja_sin_hijos": 0.209,
+    "pareja_con_hijos": 0.331,
+    "monoparental": 0.104,
+    "otro": 0.096,
 }
 
 # Lengua materna/habitual cooficial, CONDICIONADA a la comunidad autónoma
