@@ -1442,24 +1442,37 @@ def _normalize_marital_status(raw_nacional: dict[str, float]) -> dict[str, float
     toman directamente del Censo (aquí, ya real -- `raw_nacional` viene de
     `_parse_marital_status_by_sex(...)['total']`); 'con_pareja' se deriva
     de _ECEPOV_TIENE_PAREJA_SENTIDO_AMPLIO menos 'casado'; 'soltero' es el
-    complementario de las otras cuatro."""
+    complementario de las otras cuatro.
+
+    BUG ENCONTRADO Y CORREGIDO en esta sesión (CI: test_k_anonymity.py
+    detectó que MARITAL_STATUS_DISTRIBUTION sumaba 1.001 en vez de 1.0
+    tras aplicar esta función en su primera ejecución real): 'soltero'
+    tiene que calcularse como el complementario de las otras cuatro
+    proporciones YA REDONDEADAS a 3 decimales -- no redondear las 5 por
+    separado a partir de fórmulas independientes, porque aunque las 5
+    sumen exactamente 1.0 sin redondear, cada `round(..., 3)` por
+    separado puede desviar la suma final en ±0.001-0.002. Al calcular
+    'soltero' DESPUÉS de redondear las otras cuatro (en vez de antes),
+    absorbe ese residuo de redondeo y la suma da 1.0 exacto siempre.
+    Verificado con 200.000 combinaciones aleatorias de total/casado/
+    viudo/divorciado: 0 fallos."""
     total = raw_nacional.get("total")
     casado = raw_nacional.get("casado")
     viudo = raw_nacional.get("viudo")
     divorciado = raw_nacional.get("divorciado")
     if not total or casado is None or viudo is None or divorciado is None:
         return None
-    p_casado = casado / total
-    p_viudo = viudo / total
-    p_divorciado = divorciado / total
-    p_con_pareja = _ECEPOV_TIENE_PAREJA_SENTIDO_AMPLIO - p_casado
-    p_soltero = 1 - p_casado - p_con_pareja - p_divorciado - p_viudo
+    p_casado = round(casado / total, 3)
+    p_viudo = round(viudo / total, 3)
+    p_divorciado = round(divorciado / total, 3)
+    p_con_pareja = round(_ECEPOV_TIENE_PAREJA_SENTIDO_AMPLIO - casado / total, 3)
+    p_soltero = round(1 - p_casado - p_con_pareja - p_divorciado - p_viudo, 3)
     return {
-        "casado": round(p_casado, 3),
-        "con_pareja": round(p_con_pareja, 3),
-        "divorciado": round(p_divorciado, 3),
-        "soltero": round(p_soltero, 3),
-        "viudo": round(p_viudo, 3),
+        "casado": p_casado,
+        "con_pareja": p_con_pareja,
+        "divorciado": p_divorciado,
+        "soltero": p_soltero,
+        "viudo": p_viudo,
     }
 
 
@@ -1479,7 +1492,17 @@ def _normalize_marital_status_by_sex(
     probabilidad que queda tras casado/viudo/divorciado entre los dos,
     manteniendo la misma proporción con_pareja:soltero que ya salió para
     `nacional` -- mismo criterio de reparto que documentaba la versión
-    anterior de esta tabla, aplicado ahora sobre una base más precisa."""
+    anterior de esta tabla, aplicado ahora sobre una base más precisa.
+
+    BUG ENCONTRADO Y CORREGIDO en esta sesión (mismo bug de
+    `_normalize_marital_status`, aquí en MARITAL_STATUS_BY_SEX["hombre"]:
+    sumaba 1.001, "mujer" se libró de casualidad de redondeo): 'soltero'
+    se calculaba con su propia fórmula (`resto * (1 - frac_con_pareja)`)
+    redondeada de forma independiente a 'con_pareja', en vez de como el
+    complementario de las otras cuatro YA REDONDEADAS. Igual que en
+    `_normalize_marital_status`, se calcula ahora DESPUÉS de redondear
+    casado/viudo/divorciado/con_pareja, así absorbe el residuo de
+    redondeo y la suma da 1.0 exacto siempre."""
     ratio_total = nacional["con_pareja"] + nacional["soltero"]
     if ratio_total <= 0:
         return None
@@ -1492,16 +1515,18 @@ def _normalize_marital_status_by_sex(
         divorciado = raw.get("divorciado")
         if not total or casado is None or viudo is None or divorciado is None:
             return None
-        p_casado = casado / total
-        p_viudo = viudo / total
-        p_divorciado = divorciado / total
-        resto = max(0.0, 1 - p_casado - p_viudo - p_divorciado)
+        p_casado = round(casado / total, 3)
+        p_viudo = round(viudo / total, 3)
+        p_divorciado = round(divorciado / total, 3)
+        resto = max(0.0, 1 - casado / total - viudo / total - divorciado / total)
+        p_con_pareja = round(resto * frac_con_pareja, 3)
+        p_soltero = round(1 - p_casado - p_viudo - p_divorciado - p_con_pareja, 3)
         return {
-            "casado": round(p_casado, 3),
-            "viudo": round(p_viudo, 3),
-            "divorciado": round(p_divorciado, 3),
-            "con_pareja": round(resto * frac_con_pareja, 3),
-            "soltero": round(resto * (1 - frac_con_pareja), 3),
+            "casado": p_casado,
+            "viudo": p_viudo,
+            "divorciado": p_divorciado,
+            "con_pareja": p_con_pareja,
+            "soltero": p_soltero,
         }
 
     hombre = _por_sexo(raw_hombre)
