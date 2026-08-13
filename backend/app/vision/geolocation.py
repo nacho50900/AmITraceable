@@ -75,6 +75,16 @@ _MIN_NEIGHBORS_WITH_COORDS_FOR_SPREAD_CHECK = 3
 # desde fuera.
 _SCENE_ANALYSIS_TIMEOUT_SECONDS = 30
 
+# Lado más largo tras redimensionar cada foto justo al descargarla (ver
+# `_download_image`), antes de que espere turno para el análisis. 1024px
+# es bastante más de lo que necesita ninguno de los dos modelos (ambos
+# reescalan internamente a una entrada más pequeña), pero evita que una
+# foto de cámara/móvil moderna (3000-4000px de lado) ocupe memoria a
+# resolución completa mientras hace cola -- ver el bug documentado en
+# `_download_image` sobre por qué esa cola puede acumular muchas fotos a
+# la vez en cuentas con muchas publicaciones.
+_MAX_QUEUED_IMAGE_DIMENSION = 1024
+
 # Carga perezosa: el modelo/índice solo se cargan la primera vez que se usan,
 # para no penalizar el arranque de la app cuando este módulo no se necesita.
 _model = None
@@ -368,7 +378,31 @@ async def _download_image(client, semaphore, media_url):
     """Descarga UNA foto (I/O de red). La descarga es un recurso totalmente
     distinto de la CPU que usan los dos modelos de visión -- solaparla con
     el análisis de otras fotos reduce el tiempo total, sin competir por los
-    mismos núcleos que usa torch."""
+    mismos núcleos que usa torch.
+
+    BUG ENCONTRADO Y CORREGIDO en esta sesión (Docker Desktop entero se
+    quedaba sin memoria y se colgaba -- desaparecían sus métricas de
+    CPU/RAM, no solo el contenedor del backend -- en cuentas con muchas
+    fotos): esta función devolvía el `PIL.Image` a resolución ORIGINAL. El
+    semáforo de descargas (`_MAX_CONCURRENT_DOWNLOADS`) se libera en
+    cuanto se decodifica la imagen, pero el semáforo de ANÁLISIS
+    (`Settings.photo_analysis_concurrency`, bastante más lento -- sobre
+    todo con Moondream2, generación autoregresiva) es independiente y más
+    estrecho. Como la descarga siempre adelanta al análisis, las fotos ya
+    descargadas se acumulan en memoria a resolución completa mientras
+    esperan su turno -- con cuentas de decenas/cientos de fotos, decenas
+    de imágenes sin comprimir (una foto de 4000x3000 son ~36 MB cada una)
+    pueden estar en cola a la vez, sin que ningún límite de concurrencia
+    lo evite (ninguno de los dos semáforos acota CUÁNTAS fotos
+    descargadas-pero-aún-sin-analizar puede haber a la vez).
+
+    Se redimensiona aquí, justo tras decodificar y ANTES de que la imagen
+    entre en la cola de espera del análisis, a un tamaño mucho mayor del
+    que necesita cualquiera de los dos modelos (sus propios
+    `AutoImageProcessor`/pipeline ya reescalan internamente a una entrada
+    bastante más pequeña), así que no se pierde precisión -- solo se
+    evita cargar con megapíxeles que ningún modelo va a usar mientras la
+    imagen espera en memoria."""
     from PIL import Image
     import io
 
@@ -376,7 +410,12 @@ async def _download_image(client, semaphore, media_url):
         try:
             resp = await client.get(media_url)
             resp.raise_for_status()
-            return Image.open(io.BytesIO(resp.content))
+            image = Image.open(io.BytesIO(resp.content))
+            image.load()  # decodificar ya (si no, queda diferido al primer uso, dentro del semáforo de análisis)
+            if image.mode not in ("RGB", "L"):
+                image = image.convert("RGB")
+            image.thumbnail((_MAX_QUEUED_IMAGE_DIMENSION, _MAX_QUEUED_IMAGE_DIMENSION), Image.LANCZOS)
+            return image
         except Exception:
             return None  # imagen no descargable/decodificable: se omite, no se aborta el análisis
 
