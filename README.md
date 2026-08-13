@@ -77,26 +77,6 @@ navegador.
 - `docs/` — documentación de arquitectura Arc42.
 - `graphify-out/` — grafo de conocimiento del código, ver sección "Graphify" más abajo.
 
-## Graphify (grafo de conocimiento del código)
-
-El repo tiene un grafo generado con [Graphify](https://github.com/Graphify-Labs/graphify)
-(`graphify-out/`) que **Claude Code** consulta automáticamente en vez de releer archivos
-sueltos, ahorrando tokens. Solo funciona así de forma automática dentro de Claude Code
-(usa hooks internos de esa herramienta) — en un chat normal de Claude no hay ahorro
-automático salvo que se le pida explícitamente consultar el grafo por terminal.
-
-Al clonar en un equipo nuevo, ejecutar una vez (regeneran configuración local, no se versiona):
-
-```bash
-uv tool install graphifyy          # o: pipx install graphifyy — evitar "pip" a secas
-graphify claude install --project  # regenera .claude/settings.json con la ruta de este PC
-graphify hook install              # auto-actualiza el grafo tras cada commit
-```
-
-`graphify-out/` (grafo, informe, visualización) sí se versiona; `.claude/settings.json`,
-`graphify-out/cache/`, `graphify-out/cost.json` y las carpetas de backup con fecha
-(`graphify-out/20YY-MM-DD/`) no, porque son específicos de cada máquina — ver `.gitignore`.
-
 ## ⚠️ Alcance y limitaciones (importante para la memoria del TFG)
 
 - El usuario solo puede analizar **su propia cuenta autenticada**. No existe
@@ -177,9 +157,13 @@ graphify hook install              # auto-actualiza el grafo tras cada commit
 
 ## Componentes
 
-### Webapp (`webapp/`)
+- **`webapp/`** — SPA con [Vite](https://vitejs.dev/) + [React](https://react.dev/)/TypeScript: pantalla de consentimiento y login OAuth, dashboard con el informe completo (score, progreso en vivo vía SSE, estrechamiento de población, mapa, gráficos, veredicto de IA), tests con Vitest/Testing Library y E2E con Playwright + Cucumber.
+- **`backend/`** — API en Python/FastAPI: OAuth con cada plataforma, extracción y normalización de posts públicos, inferencia de atributos (regex + IA opcional), estrechamiento de k-anonimato contra datos del INE, scoring de privacidad, geolocalización de fotos (DINOv2 + FAISS, opcional) y análisis de escena (Moondream2, opcional), generación del informe final y veredicto de IA.
 
-SPA creada con [Vite](https://vitejs.dev/) y [React](https://react.dev/) en TypeScript.
+<details>
+<summary>Desglose fichero por fichero</summary>
+
+### Webapp (`webapp/`)
 
 - `src/pages/Landing.tsx` — pantalla de consentimiento + login OAuth (Reddit/Instagram).
 - `src/pages/Dashboard.tsx` — informe completo: score, progreso en vivo vía SSE, tabla de estrechamiento de población (con pictograma visual), mapa + lista de ubicaciones estimadas, gráfico horario, perfil de escritura, veredicto y conclusiones de IA, descarga en JSON.
@@ -211,6 +195,8 @@ SPA creada con [Vite](https://vitejs.dev/) y [React](https://react.dev/) en Type
 - `tests/` — pytest (unit + endpoints), ~95% cobertura, para Sonar.
 - `scripts/` — descarga del dataset OSV-5M, construcción del índice FAISS, y recuperación de metadatos (ver más abajo).
 - `monitoring/` — configuración de Prometheus/Grafana.
+
+</details>
 
 ## Running the Project
 
@@ -316,6 +302,9 @@ ngrok http 8080
 
 (requiere cuenta gratuita en https://ngrok.com y `ngrok config add-authtoken <token>` una vez).
 
+<details>
+<summary>Notas importantes sobre ngrok y por qué no usar Cloudflare Quick Tunnel</summary>
+
 ⚠️ **No usar `cloudflared tunnel --url ...` (Cloudflare Quick Tunnel)**:
 el edge de `trycloudflare.com` bufferiza por completo las respuestas
 `text/event-stream`, así que el streaming SSE de `/api/analyze/{platform}/stream`
@@ -339,6 +328,8 @@ reiniciar `uvicorn`) se adapta solo en cada reinicio del túnel.
 La primera vez que abras la URL de ngrok en el navegador, el plan
 gratuito muestra una página intermedia de aviso ("You are about to
 visit...") -- solo hay que darle a "Visit Site", no es un error.
+
+</details>
 
 ### Scripts de geolocalización por imagen (opcional)
 
@@ -396,6 +387,29 @@ Estos datos/artefactos **no se versionan** en el repositorio (ver
 - `uvicorn app.main:app --reload --port 3000` — arranca el backend en desarrollo.
 - `pytest` — tests unitarios (~260 tests, 1 se salta si no tienes instalado `requirements-vision.txt` en local).
 - `pytest --cov=app --cov-report=xml --cov-report=term` — tests con cobertura (genera `coverage.xml` para Sonar).
+
+<details>
+<summary>Graphify (grafo de conocimiento del código)</summary>
+
+El repo tiene un grafo generado con [Graphify](https://github.com/Graphify-Labs/graphify)
+(`graphify-out/`) que **Claude Code** consulta automáticamente en vez de releer archivos
+sueltos, ahorrando tokens. Solo funciona así de forma automática dentro de Claude Code
+(usa hooks internos de esa herramienta) — en un chat normal de Claude no hay ahorro
+automático salvo que se le pida explícitamente consultar el grafo por terminal.
+
+Al clonar en un equipo nuevo, ejecutar una vez (regeneran configuración local, no se versiona):
+
+```bash
+uv tool install graphifyy          # o: pipx install graphifyy — evitar "pip" a secas
+graphify claude install --project  # regenera .claude/settings.json con la ruta de este PC
+graphify hook install              # auto-actualiza el grafo tras cada commit
+```
+
+`graphify-out/` (grafo, informe, visualización) sí se versiona; `.claude/settings.json`,
+`graphify-out/cache/`, `graphify-out/cost.json` y las carpetas de backup con fecha
+(`graphify-out/20YY-MM-DD/`) no, porque son específicos de cada máquina — ver `.gitignore`.
+
+</details>
 
 ## Respecto a SonarQube
 
