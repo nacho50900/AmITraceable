@@ -26,7 +26,27 @@ def _default_photo_analysis_concurrency() -> int:
     que por debajo de eso es mejor meter más fotos en paralelo que más
     hilos por foto. Con 4 núcleos da concurrencia 2 (como el valor fijo
     anterior); con 16 da 8. Nunca menos de 1.
+
+    EXCEPCIÓN con GPU (CUDA disponible): esta heurística de "núcleos de
+    CPU" deja de tener sentido -- con GPU, DINOv2 y Moondream2 comparten
+    la misma VRAM (no núcleos de CPU), y cada foto en vuelo mantiene su
+    propia pasada de Moondream2 (pesos + activaciones + caché KV de la
+    generación autoregresiva) ocupando esa VRAM a la vez. En una GPU de
+    consumo con poca VRAM (p. ej. 4GB: los pesos de Moondream2 en float16
+    ya son ~3.6GB por sí solos, ver el comentario de presupuesto de VRAM
+    en app/vision/scene_analysis.py), concurrencia > 1 multiplicaría ese
+    uso y agotaría la VRAM enseguida -- así que con CUDA disponible se
+    fuerza concurrencia 1, sin mirar núcleos de CPU. Sigue siendo
+    sobreescribible con PHOTO_ANALYSIS_CONCURRENCY si algún día se
+    despliega con una GPU con VRAM de sobra para más de una foto a la vez.
     """
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return 1
+    except ImportError:
+        pass  # requirements-vision.txt no instalado -- ni geolocalización ni scene_analysis se van a usar, la heurística de CPU no importa
     cpu_count = os.cpu_count() or 4
     return max(1, cpu_count // 2)
 
@@ -104,7 +124,11 @@ class Settings(BaseSettings):
     # app/vision/scene_analysis.py y `_maybe_analyze_content` en
     # geolocation.py). Desactivado por defecto: en máquinas con poca RAM
     # (menos de ~10-12GB libres) el modelo en float32 no cabe en memoria
-    # junto al resto de servicios -- ver ADR correspondiente en docs/.
+    # junto al resto de servicios -- ver ADR correspondiente en docs/. Con
+    # GPU (CUDA disponible), el modelo se carga en VRAM en vez de RAM (ver
+    # scene_analysis.py) -- el límite pasa a ser VRAM, no RAM del sistema;
+    # revisa el presupuesto de VRAM documentado ahí antes de activar esto
+    # en una GPU con poca memoria dedicada (4GB o menos va muy justo).
     # La geolocalización (DINOv2) no depende de esto y sigue funcionando
     # igual, activado o no.
     enable_scene_analysis: bool = False

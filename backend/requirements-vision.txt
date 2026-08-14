@@ -9,11 +9,23 @@
 # en cada análisis de Instagram, la IMAGEN del backend necesita instalar
 # esto también -- ver el ARG WITH_GEOLOCATION en el Dockerfile.
 #
-# torch: se usa el índice oficial de builds SOLO-CPU de PyTorch en vez del
-# paquete por defecto de PyPI (que incluye CUDA y pesa bastante más) --
-# este contenedor corre en CPU de todos modos, ver la conversación sobre
-# GPU passthrough en Docker.
---extra-index-url https://download.pytorch.org/whl/cpu
+# torch: build con CUDA (índice cu121) en vez del build SOLO-CPU que se
+# usaba antes -- ver docker-compose.yml (reserva de GPU) y el comentario
+# largo en app/vision/scene_analysis.py sobre por qué se fuerza float16
+# (no bfloat16) para una GPU Turing (GTX 1650 y similares, compute
+# capability 7.5): bfloat16 solo tiene aceleración nativa por tensor cores
+# desde Ampere (compute capability >= 8.0) -- en Turing, PyTorch SÍ deja
+# usar bfloat16, pero lo emula por software (2-4x más lento que con tensor
+# cores reales, no tan catastrófico como la emulación en CPU pero tampoco
+# la opción correcta aquí). float16 sí tiene aceleración nativa completa
+# desde Volta (compute capability >= 7.0), así que es la opción correcta
+# para esta GPU en concreto.
+#
+# cu121 (CUDA 12.1) en vez de una versión más reciente: es la ventana más
+# amplia de compatibilidad de drivers NVIDIA razonablemente recientes sin
+# exigir la última versión de CUDA -- ajustar si `nvidia-smi` en el host
+# reporta una versión de CUDA distinta y da problemas.
+--extra-index-url https://download.pytorch.org/whl/cu121
 torch>=2.2,<3.0
 # Fijado a la ventana de versiones de transformers/accelerate que existía
 # cuando se publicó la revisión de Moondream2 que usamos (_MODEL_REVISION =

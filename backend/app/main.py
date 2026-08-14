@@ -63,6 +63,32 @@ async def _lifespan(app: FastAPI):
             concurrency,
             threads_per_inference,
         )
+
+        # Log explícito de si hay GPU disponible: sin esto, la única forma
+        # de saber si de verdad se está usando la GPU (en vez de haber
+        # caído a CPU en silencio -- p. ej. porque falta la reserva de GPU
+        # en docker-compose.yml, o el driver NVIDIA no tiene soporte WSL2)
+        # era mirar el uso de VRAM por fuera del contenedor mientras corría
+        # un análisis, indirecto y fácil de malinterpretar. `cuda.is_available()`
+        # es la MISMA comprobación que ya hacen geolocation.py y
+        # scene_analysis.py para decidir dónde cargar cada modelo -- este
+        # log solo hace explícito, en el arranque, lo que esos dos módulos
+        # ya deciden por su cuenta más abajo.
+        if torch.cuda.is_available():
+            logger.info(
+                "GPU detectada: %s (CUDA %s) -- los modelos de vision (DINOv2, y "
+                "Moondream2 si ENABLE_SCENE_ANALYSIS=true) se cargaran en GPU.",
+                torch.cuda.get_device_name(0),
+                torch.version.cuda,
+            )
+        else:
+            logger.info(
+                "GPU no detectada (torch.cuda.is_available()=False) -- los modelos "
+                "de vision se cargaran en CPU. Si esperabas usar una GPU, revisa la "
+                "reserva de GPU en docker-compose.yml, el driver NVIDIA (soporte "
+                "WSL2 si estas en Windows) y que requirements-vision.txt este "
+                "instalando el build de torch con CUDA, no el SOLO-CPU."
+            )
     except ImportError:
         pass  # torch no instalado (WITH_GEOLOCATION=false) -- nada que ajustar
 
@@ -104,8 +130,28 @@ async def _lifespan(app: FastAPI):
 
         if _scene_analysis_available():
             logger.info("Precargando modelo de analisis de contenido (Moondream2)...")
-            await asyncio.to_thread(_lazy_load_scene_analysis)
-            logger.info("Modelo de analisis de contenido listo.")
+            # try/except AÑADIDO: `_lazy_load_scene_analysis()` ahora mismo
+            # incluye el "Intento nº7" (carga en GPU, ver scene_analysis.py)
+            # que está bien razonado pero SIN VERIFICAR contra el modelo
+            # real -- si falla, antes esto tumbaba el arranque ENTERO del
+            # backend (ni Reddit ni Instagram sin Moondream2 funcionarían,
+            # aunque el fallo sea solo de esta función opcional). Con esto,
+            # un fallo aquí se registra con el traceback completo y el
+            # arranque sigue -- mismo comportamiento de fallback silencioso
+            # por foto que ya tiene `analyze_image_content()` cuando faltan
+            # dependencias, ver el `else` de abajo.
+            try:
+                await asyncio.to_thread(_lazy_load_scene_analysis)
+            except Exception:
+                logger.exception(
+                    "Fallo al cargar Moondream2 -- el analisis de contenido se "
+                    "saltara silenciosamente en cada foto (geolocalizacion y el "
+                    "resto de la app siguen funcionando con normalidad). Traceback "
+                    "completo arriba -- si es el 'Intento nº7' (GPU) fallando, "
+                    "pega este traceback para seguir depurando desde ahi."
+                )
+            else:
+                logger.info("Modelo de analisis de contenido listo.")
         else:
             # Mismo aviso que ya usa analyze_image_content() en tiempo de
             # peticion -- ENABLE_SCENE_ANALYSIS=true sin las dependencias

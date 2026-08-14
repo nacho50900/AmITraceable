@@ -32,6 +32,23 @@ services:
       - ./backend/data/hf_cache:/root/.cache/huggingface
     networks:
       - monitor-net
+    # GPU dedicada (NVIDIA, vía Docker Desktop + WSL2 en Windows -- no hace
+    # falta instalar nvidia-container-toolkit aparte, Docker Desktop lo trae
+    # integrado en su backend WSL2; solo hace falta tener actualizado el
+    # driver NVIDIA de Windows con soporte WSL2 y "GPU support" activo en
+    # Docker Desktop, Settings > Resources). Sin este bloque, aunque
+    # requirements-vision.txt instale el build CUDA de torch, el contenedor
+    # no ve la GPU y `torch.cuda.is_available()` da False en silencio (cae
+    # a CPU sin avisar) -- ver el comentario largo en
+    # app/vision/scene_analysis.py sobre el presupuesto de VRAM ajustado
+    # (4GB) antes de asumir que esto por sí solo arregla el problema.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   webapp:
     build:
@@ -56,6 +73,11 @@ services:
   prometheus:
     image: prom/prometheus
     container_name: prometheus
+    # profiles: solo arranca con `docker compose --profile monitoring up`,
+    # NO con `docker compose up` a secas -- ver comentario junto a
+    # `grafana` más abajo para el motivo.
+    profiles:
+      - monitoring
     ports:
       - "9090:9090"
     volumes:
@@ -66,6 +88,18 @@ services:
   grafana:
     image: grafana/grafana
     container_name: grafana
+    # profiles: Grafana y Prometheus meten bastante ruido en los logs de
+    # `docker compose up` (mensajes de arranque, migraciones de BD,
+    # reintentos de "No last resource version found" cada 30s...) que no
+    # aporta nada cuando lo que se está depurando es el backend -- con
+    # "profiles" (mecanismo nativo de Docker Compose, no una variable de
+    # entorno casera) estos dos servicios quedan FUERA por defecto.
+    #   docker compose up                       -> solo backend + webapp
+    #   docker compose --profile monitoring up   -> los cuatro servicios
+    # Los dashboards de Grafana siguen estando disponibles siempre que se
+    # necesiten, solo que no arrancan solos en cada `docker compose up`.
+    profiles:
+      - monitoring
     ports:
       - "9091:3000"
     volumes:

@@ -225,21 +225,76 @@ def _lazy_load():
     diferencia importa: `.to()` pasa por hooks internos de `accelerate`
     que asumen un modelo potencialmente repartido en meta device;
     reasignar `.data` en cada tensor por separado es una operación de más
-    bajo nivel que nunca los toca. Solo se hace en CPU -- en GPU (si
-    algún día se despliega así) `bfloat16` es la opción correcta y no
-    conviene duplicar memoria innecesariamente pasando a float32."""
+    bajo nivel que nunca los toca. Solo se hace en CPU.
+
+    Intento nº7, AÑADIDO cuando se pasó de correr esto en CPU a una GPU
+    dedicada (NVIDIA GTX 1650, 4GB VRAM, arquitectura Turing/compute
+    capability 7.5): en GPU NO hace falta el parche de arriba (upcast a
+    float32) -- ese parche existe solo por lo lenta que es la emulación
+    software de bfloat16 en CPU de consumo. Pero tampoco vale con dejar
+    bfloat16 tal cual (que sería lo ideal en una GPU con tensor cores
+    bfloat16 nativos): esos tensor cores bfloat16 solo llegaron con Ampere
+    (compute capability >= 8.0) -- Turing es 7.5, así que bfloat16 en esta
+    GPU también se emula por software (2-4x más lento que con tensor cores
+    reales -- no tan grave como en CPU, pero tampoco la opción correcta
+    aquí). float16 sí tiene aceleración nativa completa desde Volta
+    (compute capability >= 7.0), así que es lo que se usa en GPU: se pasa
+    `torch_dtype=torch.float16` Y `device_map={"": "cuda"}` juntos a
+    `from_pretrained()` -- la FORMA DE DICCIONARIO exacta del ejemplo
+    oficial del modelo para GPU (comentada en el ejemplo oficial con
+    "Uncomment to run on GPU"), NO la forma de STRING SUELTO
+    (`device_map="cuda"`) que fue el intento nº1 fallido de más arriba
+    (`NotImplementedError: Cannot copy out of meta tensor`) -- son dos
+    invocaciones distintas de `accelerate` con comportamiento distinto: la
+    de string dispara su lógica de reparto automático entre dispositivos
+    (pensada para repartir un modelo grande entre varias GPUs), que es la
+    que entra en conflicto con este wrapper concreto; la de diccionario
+    con un solo destino ("" = todo el modelo) es una instrucción más
+    simple ("todo aquí") que no necesita esa lógica de reparto.
+
+    SIN VERIFICAR TODAVÍA contra el modelo real en esta GPU concreta (bien
+    razonado por lo que documenta la propia ficha del modelo + lo que ya
+    se sabe de intentos anteriores en este mismo fichero, no probado en
+    producción) -- si esto falla, sigue el mismo patrón de depuración que
+    los intentos nº1-6: pega aquí el traceback exacto y seguimos desde
+    ahí, no se vuelve a intentar a ciegas.
+
+    PRESUPUESTO DE VRAM (para tener a mano si esto peta por
+    `torch.cuda.OutOfMemoryError` en vez de por un error de carga): los
+    1.8B parámetros de Moondream2 en float16 son ~3.6GB SOLO en pesos --
+    en una GPU de 4GB, eso deja muy poco margen para el contexto de
+    CUDA/cuDNN (~300-500MB) y la caché KV de la generación. Concurrencia
+    forzada a 1 en GPU (ver `_default_photo_analysis_concurrency` en
+    config.py) para no multiplicar ese uso con varias fotos en vuelo a la
+    vez. Cuantización (bitsandbytes/8-bit) NO se ha intentado a propósito:
+    Moondream2 no usa `nn.Linear` para casi ninguna capa interna (ver la
+    investigación de cuantización dinámica más arriba, mismo motivo) --
+    `load_in_8bit` de `transformers` sustituye capas por CLASE
+    (`nn.Linear` -> `bnb.nn.Linear8bitLt`), así que es muy probable que
+    tampoco toque la mayoría de la red, igual que le pasó a
+    `quantize_dynamic`. Si el presupuesto de VRAM de arriba no llega,
+    antes que cuantización probar: bajar `max_new_tokens` de la
+    generación (menos caché KV), o mantener `enable_scene_analysis` en
+    CPU (`enable_scene_analysis=True` pero sin GPU visible para este
+    proceso) mientras la geolocalización (DINOv2, mucho más ligera) sí usa
+    la GPU -- DINOv2 ya selecciona GPU automáticamente si está disponible,
+    con independencia de esto (ver geolocation.py)."""
     global _model
     if _model is not None:
         return
 
     from transformers import AutoModelForCausalLM
+    import torch
 
     # Deliberadamente SIN device_map, SIN torch_dtype, SIN low_cpu_mem_usage,
     # SIN .to() posterior -- exactamente el ejemplo oficial para CPU de
     # huggingface.co/vikhyatk/moondream2 en la revisión _MODEL_REVISION
     # (ahí el device_map={"": "cuda"} aparece comentado con "# Uncomment
-    # to run on GPU", es decir: para CPU, no se pasa nada de esto). Ver
-    # docstring de esta función para el porqué de este cambio de enfoque.
+    # to run on GPU", es decir: para CPU, no se pasa nada de esto). Con
+    # CUDA disponible, SÍ se pasan esos dos kwargs -- ver "Intento nº7" en
+    # el docstring de esta función para el porqué exacto de la forma
+    # concreta que se usa (diccionario, no string) y del dtype elegido
+    # (float16, no bfloat16) para esta GPU en particular.
     #
     # local_files_only=True primero: aunque `revision` esté fijada a un
     # commit concreto (no "main"), `from_pretrained()` sigue haciendo por
@@ -254,27 +309,64 @@ def _lazy_load():
     # directamente sin ningún acceso a red. Si NO está en caché todavía
     # (primera vez), `local_files_only=True` falla rápido y limpio, y se
     # reintenta sin él para permitir la descarga inicial.
+    _gpu_kwargs = {"torch_dtype": torch.float16, "device_map": {"": "cuda"}} if torch.cuda.is_available() else {}
     try:
         _model = AutoModelForCausalLM.from_pretrained(
-            _MODEL_NAME, revision=_MODEL_REVISION, trust_remote_code=True, local_files_only=True
+            _MODEL_NAME, revision=_MODEL_REVISION, trust_remote_code=True, local_files_only=True, **_gpu_kwargs
         )
     except Exception:
         _model = AutoModelForCausalLM.from_pretrained(
-            _MODEL_NAME, revision=_MODEL_REVISION, trust_remote_code=True
+            _MODEL_NAME, revision=_MODEL_REVISION, trust_remote_code=True, **_gpu_kwargs
         )
 
-    _upcast_to_float32_if_cpu()
-    _patch_vision_input_dtype()
+    # BUG ENCONTRADO en la sesión del "Intento nº7" (GPU): si el post-
+    # procesado de abajo (upcast/parche de dtype) falla a medias, `_model`
+    # ya está asignado (no None) -- la comprobación `if _model is not
+    # None: return` del principio de esta función haría que un reintento
+    # posterior (la siguiente foto) se quedara con este modelo roto en vez
+    # de volver a intentar la carga completa. Se envuelve el post-
+    # procesado y, si falla, se deja `_model = None` para que el próximo
+    # intento arranque de cero.
+    try:
+        _upcast_to_float32_if_cpu()
+        _patch_vision_input_dtype()
+
+        # Log explícito de dónde y en qué dtype ha quedado el modelo: sin
+        # esto, no hay ninguna forma de confirmar desde los logs si cargó
+        # de verdad en GPU o cayó en silencio a CPU --
+        # `torch.cuda.is_available()` puede dar False por motivos que no
+        # lanzan ninguna excepción (falta la reserva de GPU en
+        # docker-compose.yml, el driver de Windows no tiene soporte WSL2,
+        # "GPU support" desactivado en Docker Desktop...), y en ese caso
+        # `_gpu_kwargs` queda vacío y todo el código de arriba sigue
+        # funcionando igual, solo que en CPU -- sin ningún error, solo más
+        # lento. Un timeout de 30s superado no distingue por sí solo entre
+        # "la GPU no está siendo usada" y "la GPU sí se usa pero esta foto
+        # en concreto ha tardado más de la cuenta" -- este log sí lo
+        # distingue.
+        _actual_device = next(_model.parameters()).device
+        _actual_dtype = next(_model.parameters()).dtype
+        logger.info(
+            "Moondream2 cargado: device=%s dtype=%s (torch.cuda.is_available()=%s)",
+            _actual_device,
+            _actual_dtype,
+            torch.cuda.is_available(),
+        )
+    except Exception:
+        _model = None
+        raise
 
 
 def _patch_vision_input_dtype():
     """La imagen de entrada llega en bfloat16 pase lo que pase: la
     función `prepare_crops()` del código remoto de Moondream2
     (`vision.py`) fija `dtype=torch.bfloat16` a fuego, sin mirar en qué
-    dtype está el modelo -- así que aunque `_upcast_to_float32_if_cpu()`
-    haya convertido el modelo entero, la primera capa (`patch_emb`)
-    seguiría recibiendo una entrada en bfloat16 y fallando con
-    `RuntimeError: expected scalar type Float but found BFloat16`.
+    dtype está el modelo -- así que si el modelo se ha quedado en otro
+    dtype (float32 tras `_upcast_to_float32_if_cpu()` en CPU, o float16
+    en GPU -- ver "Intento nº7" en `_lazy_load()`), la primera capa
+    (`patch_emb`) recibiría una entrada en bfloat16 y fallaría con un
+    `RuntimeError: expected scalar type X but found BFloat16` (X = Float
+    en CPU, Half en GPU).
 
     Verificado en pruebas manuales que parchear `prepare_crops()` por
     nombre de módulo NO tiene efecto (no está claro por qué -- posible
@@ -286,11 +378,22 @@ def _patch_vision_input_dtype():
     `named_modules()` en vez de por ruta de atributo fija (p. ej.
     `_model.model.vision.patch_emb`): la clase wrapper de nivel superior
     (`HfMoondream`) no expone esa ruta como atributo estable, y esta
-    forma es además más robusta ante cambios de revisión del modelo."""
+    forma es además más robusta ante cambios de revisión del modelo.
+
+    CORREGIDO al añadir el "Intento nº7" (GPU): esta función comprobaba
+    `torch.cuda.is_available()` para decidir si hacía falta el parche,
+    asumiendo que "hay GPU" implicaba "el modelo se ha quedado en
+    bfloat16" (que coincide con el dtype fijo que usa `prepare_crops()`,
+    así que no habría descuadre). Eso dejó de ser cierto en cuanto
+    `_lazy_load()` empezó a pedir `torch_dtype=torch.float16` en GPU
+    (Turing no acelera bfloat16 por hardware, ver ahí) -- con el modelo en
+    float16 y la entrada en bfloat16 fijo, el descuadre de dtype vuelve a
+    aparecer, solo que ahora también en GPU. La condición correcta es
+    comprobar el dtype REAL del modelo, no el dispositivo."""
     import torch
 
-    if torch.cuda.is_available():
-        return
+    if next(_model.parameters()).dtype == torch.bfloat16:
+        return  # el modelo se ha quedado en bfloat16 (mismo dtype que la entrada fija de prepare_crops()) -- no hay descuadre que parchear
 
     patch_emb = None
     for name, module in _model.named_modules():
@@ -307,13 +410,14 @@ def _patch_vision_input_dtype():
         return
 
     original_forward = patch_emb.forward
+    target_dtype = next(_model.parameters()).dtype  # float32 en CPU (tras el upcast), float16 en GPU (ver "Intento nº7")
 
-    def _forward_fp32(x):
-        if x.dtype != torch.float32:
-            x = x.float()
+    def _forward_matching_dtype(x):
+        if x.dtype != target_dtype:
+            x = x.to(target_dtype)
         return original_forward(x)
 
-    patch_emb.forward = _forward_fp32
+    patch_emb.forward = _forward_matching_dtype
 
 
 def _upcast_registered_tensors(model) -> None:
@@ -367,9 +471,12 @@ def _upcast_to_float32_if_cpu():
     float32, SOLO si no hay GPU disponible. Ver el bloque "Intento nº6"
     en el docstring de `_lazy_load()` para el porqué -- en resumen:
     bfloat16 en CPU de consumo se emula por software y es órdenes de
-    magnitud más lento que float32 nativo; en GPU, en cambio, bfloat16 ya
-    está acelerado por hardware y conviene dejarlo tal cual (además de
-    que duplicar a float32 ahí desperdiciaría VRAM sin ninguna ganancia).
+    magnitud más lento que float32 nativo. Con GPU disponible, esta
+    función no actúa -- `_lazy_load()` ya evita bfloat16 desde el propio
+    `from_pretrained()` (ver "Intento nº7" ahí: en Turing, compute
+    capability 7.5, bfloat16 tampoco tiene tensor cores nativos -- solo
+    desde Ampere -- así que se pide float16 en su lugar, que sí los
+    tiene desde Volta).
 
     Deliberadamente NO usa `_model.to(dtype=torch.float32)`: esa llamada
     es la que causó el error "Tensor on device cpu is not on the expected
