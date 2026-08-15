@@ -56,7 +56,7 @@ export function makeExposureReport(overrides: Partial<ExposureReport> = {}): Exp
     remaining_population_all_traits: 24957175,
     remaining_population_all_traits_proportion: 0.508,
     image_location_points: [
-      { permalink: 'https://instagram.com/p/1', province: 'Madrid', confidence: 0.6, lat: 40.41, lon: -3.7, representative: true, created_utc: '2024-06-15T10:00:00Z', visual_description: 'PERSONAS: una\nAFICION: guitarra\nPAREJA: no' },
+      { permalink: 'https://instagram.com/p/1', province: 'Madrid', confidence: 0.6, lat: 40.41, lon: -3.7, representative: true, created_utc: '2024-06-15T10:00:00Z', visual_description: 'DESCRIPCION: una persona tocando la guitarra\nPERSONAS: una\nAFICION: guitarra\nPAREJA: no', visual_description_general: 'una persona tocando la guitarra' },
     ],
     geolocation_available: true,
     avatar_url: null,

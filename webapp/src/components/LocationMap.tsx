@@ -155,6 +155,11 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
                       {point.lat === null && ' (sin coordenadas para el mapa)'}
                     </span>
                   </summary>
+                  <p className="photo-visual-description-general">
+                    {point.visual_description_general
+                      ? point.visual_description_general
+                      : 'Sin descripción general disponible para esta foto.'}
+                  </p>
                   <p className="photo-visual-description">
                     {point.visual_description
                       ? point.visual_description
@@ -190,6 +195,11 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
                     </a>
                     <span>{formatDate(point.created_utc)}</span>
                   </summary>
+                  <p className="photo-visual-description-general">
+                    {point.visual_description_general
+                      ? point.visual_description_general
+                      : 'Sin descripción general disponible para esta foto.'}
+                  </p>
                   <p className="photo-visual-description">
                     {point.visual_description
                       ? point.visual_description

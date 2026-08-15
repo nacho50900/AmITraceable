@@ -40,7 +40,8 @@ function makePoint(overrides: Partial<ImageLocationPoint> = {}): ImageLocationPo
     lon: -3.7,
     representative: true,
     created_utc: '2024-06-15T10:00:00Z',
-    visual_description: 'PERSONAS: una\nAFICION: guitarra\nPAREJA: no',
+    visual_description: 'DESCRIPCION: una persona tocando la guitarra\nPERSONAS: una\nAFICION: guitarra\nPAREJA: no',
+    visual_description_general: 'una persona tocando la guitarra',
     ...overrides,
   };
 }
@@ -301,6 +302,20 @@ describe('LocationMap', () => {
     render(<LocationMap points={points} platform="instagram" available={true} />);
 
     expect(screen.getByText(/Sin descripción visual disponible/)).toBeInTheDocument();
+  });
+
+  test('al desplegar una foto se ve la descripción general', () => {
+    const points = [makePoint({ visual_description_general: '4 personas comiendo pizza alegremente en una terraza' })];
+    render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    expect(screen.getByText('4 personas comiendo pizza alegremente en una terraza')).toBeInTheDocument();
+  });
+
+  test('sin descripción general (null): muestra el aviso en vez de dejarlo vacío', () => {
+    const points = [makePoint({ visual_description_general: null })];
+    render(<LocationMap points={points} platform="instagram" available={true} />);
+
+    expect(screen.getByText(/Sin descripción general disponible/)).toBeInTheDocument();
   });
 
   test('el apartado de no representativas tiene la clase de scroll con altura máxima', () => {

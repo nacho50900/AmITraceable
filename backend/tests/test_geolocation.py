@@ -404,7 +404,8 @@ class TestEstimateLocationsForPosts:
             return (
                 [InferredAttribute(category="aficion", value="Fan del baloncesto", confidence=0.5, evidence=[])],
                 True,
-                "PERSONAS: una\nAFICION: Fan del baloncesto\nPAREJA: si",
+                "DESCRIPCION: una persona jugando al baloncesto\nPERSONAS: una\nAFICION: Fan del baloncesto\nPAREJA: si",
+                "una persona jugando al baloncesto",
             )
 
         monkeypatch.setattr(geolocation, "analyze_image_content", _fake_scene_analysis)
@@ -430,7 +431,10 @@ class TestEstimateLocationsForPosts:
         # scene_analysis.py la deja vacía a propósito (no conoce el permalink).
         assert inferred.evidence == ["https://ig/1"]
         assert outcome.partner_signal_permalinks == {"https://ig/1"}
-        assert outcome.visual_descriptions == {"https://ig/1": "PERSONAS: una\nAFICION: Fan del baloncesto\nPAREJA: si"}
+        assert outcome.visual_descriptions == {
+            "https://ig/1": "DESCRIPCION: una persona jugando al baloncesto\nPERSONAS: una\nAFICION: Fan del baloncesto\nPAREJA: si"
+        }
+        assert outcome.general_descriptions == {"https://ig/1": "una persona jugando al baloncesto"}
 
     @pytest.mark.asyncio
     async def test_no_pareja_signal_leaves_partner_signal_permalinks_empty(self, monkeypatch, respx_mock):
@@ -438,7 +442,7 @@ class TestEstimateLocationsForPosts:
 
         monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
         monkeypatch.setattr(geolocation, "estimate_location_from_image", lambda image, k=15: None)
-        monkeypatch.setattr(geolocation, "analyze_image_content", lambda image: ([], False, None))
+        monkeypatch.setattr(geolocation, "analyze_image_content", lambda image: ([], False, None, None))
 
         Post = namedtuple("Post", ["type", "media_urls", "permalink"])
         posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]
@@ -480,7 +484,7 @@ class TestEstimateLocationsForPosts:
 
         calls: list[object] = []
         monkeypatch.setattr(
-            geolocation, "analyze_image_content", lambda image: calls.append(image) or ([], False, None)
+            geolocation, "analyze_image_content", lambda image: calls.append(image) or ([], False, None, None)
         )
 
         Post = namedtuple("Post", ["type", "media_urls", "permalink"])
@@ -527,7 +531,7 @@ class TestEstimateLocationsForPosts:
 
         def _hangs_forever(image):
             time.sleep(1)  # bastante más que el timeout de 0.05s de este test
-            return [], False, "nunca debería llegar a esto"
+            return [], False, "nunca debería llegar a esto", "nunca debería llegar a esto"
 
         monkeypatch.setattr(geolocation, "analyze_image_content", _hangs_forever)
 
@@ -562,7 +566,7 @@ class TestEstimateLocationsForPosts:
 
         monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
         monkeypatch.setattr(geolocation, "estimate_location_from_image", lambda image, k=15: None)
-        monkeypatch.setattr(geolocation, "analyze_image_content", lambda image: ([], False, None))
+        monkeypatch.setattr(geolocation, "analyze_image_content", lambda image: ([], False, None, None))
 
         Post = namedtuple("Post", ["type", "media_urls", "permalink"])
         posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]

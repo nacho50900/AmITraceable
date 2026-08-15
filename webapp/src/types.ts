@@ -67,10 +67,18 @@ export interface ImageLocationPoint {
   // pudo emparejar (no debería ocurrir en la práctica).
   created_utc: string | null;
   // Respuesta cruda de Moondream2 sobre el contenido de la foto (ver
-  // app/vision/scene_analysis.py) -- las tres líneas PERSONAS/AFICION/
-  // PAREJA tal cual, no una redacción libre. null si el modelo no estaba
-  // disponible en el servidor, o la inferencia falló para esta foto.
+  // app/vision/scene_analysis.py) -- las cuatro líneas DESCRIPCION/
+  // PERSONAS/AFICION/PAREJA tal cual, no una redacción libre. null si el
+  // modelo no estaba disponible en el servidor, o la inferencia falló
+  // para esta foto.
   visual_description: string | null;
+  // Descripción GENERAL de la escena, ya extraída (p. ej. "4 personas
+  // comiendo pizza alegremente en una terraza") -- pensada para mostrarse
+  // tal cual, a diferencia de `visual_description` (las cuatro líneas
+  // crudas). Nunca menciona raza, etnia, tono de piel, edad ni aspecto
+  // físico de ninguna persona (restricción del prompt en el backend).
+  // null en los mismos casos que `visual_description`.
+  visual_description_general: string | null;
 }
 
 export interface ExposureReport {

@@ -142,17 +142,28 @@ class ImageLocationPoint(BaseModel):
     # con su publicación original (no debería ocurrir en la práctica).
     created_utc: datetime | None = None
     # Respuesta cruda de Moondream2 sobre el CONTENIDO de la foto (ver
-    # app/vision/scene_analysis.py), no una redacción -- mismas tres líneas
-    # (PERSONAS/AFICION/PAREJA) que ya alimentan `inferred_attributes` y el
-    # estado civil, pero aquí visibles tal cual, foto por foto, para que el
-    # frontend las pueda mostrar al desplegar cada foto. None si el modelo
-    # no estaba disponible en este servidor, o la inferencia falló para
-    # esta foto en concreto (no bloquea el resto del análisis).
+    # app/vision/scene_analysis.py), no una redacción -- mismas cuatro
+    # líneas (DESCRIPCION/PERSONAS/AFICION/PAREJA) que ya alimentan
+    # `inferred_attributes` y el estado civil, pero aquí visibles tal
+    # cual, foto por foto, para que el frontend las pueda mostrar al
+    # desplegar cada foto. None si el modelo no estaba disponible en este
+    # servidor, o la inferencia falló para esta foto en concreto (no
+    # bloquea el resto del análisis).
     #
     # Al formar parte de este modelo, se incluye automáticamente en el JSON
     # completo del informe que ai_analysis.py le manda a Mistral para las
     # conclusiones finales -- sin necesitar ningún cambio ahí.
     visual_description: str | None = None
+    # Descripción GENERAL de la escena (campo DESCRIPCION del prompt de
+    # scene_analysis.py, ya parseado -- p. ej. "4 personas comiendo pizza
+    # alegremente en una terraza"). A diferencia de `visual_description`
+    # (las cuatro líneas crudas, para la vista de detalle "qué vio la
+    # IA"), este campo es una frase legible pensada para mostrarse de
+    # forma prominente como pie de foto. Nunca menciona raza, etnia, tono
+    # de piel, edad ni aspecto físico de ninguna persona -- restricción
+    # explícita del prompt (ver scene_analysis.py), no un filtro aparte.
+    # None en los mismos casos que `visual_description`.
+    visual_description_general: str | None = None
 
 
 class ExposureReport(BaseModel):

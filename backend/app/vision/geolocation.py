@@ -75,16 +75,6 @@ _MIN_NEIGHBORS_WITH_COORDS_FOR_SPREAD_CHECK = 3
 # desde fuera.
 _SCENE_ANALYSIS_TIMEOUT_SECONDS = 30
 
-# Lado más largo tras redimensionar cada foto justo al descargarla (ver
-# `_download_image`), antes de que espere turno para el análisis. 1024px
-# es bastante más de lo que necesita ninguno de los dos modelos (ambos
-# reescalan internamente a una entrada más pequeña), pero evita que una
-# foto de cámara/móvil moderna (3000-4000px de lado) ocupe memoria a
-# resolución completa mientras hace cola -- ver el bug documentado en
-# `_download_image` sobre por qué esa cola puede acumular muchas fotos a
-# la vez en cuentas con muchas publicaciones.
-_MAX_QUEUED_IMAGE_DIMENSION = 1024
-
 # Carga perezosa: el modelo/índice solo se cargan la primera vez que se usan,
 # para no penalizar el arranque de la app cuando este módulo no se necesita.
 _model = None
@@ -266,6 +256,15 @@ class GeolocationOutcome:
     # que se le manda a ai_analysis.py para las conclusiones finales -- sin
     # necesitar ningún cambio ahí, ya manda el informe completo tal cual.
     visual_descriptions: dict[str, str] = field(default_factory=dict)
+    # Descripción GENERAL de la escena (campo DESCRIPCION del prompt de
+    # scene_analysis.py, ya parseado -- p. ej. "4 personas comiendo pizza
+    # alegremente en una terraza"), una por permalink. A diferencia de
+    # `visual_descriptions` (las cuatro líneas crudas, pensadas para la
+    # vista de detalle "qué vio la IA"), esta es una frase legible pensada
+    # para mostrarse de forma prominente como pie de foto -- mismo límite
+    # ético/legal del resto del módulo (nunca menciona raza/etnia/aspecto
+    # físico, ver prompt en scene_analysis.py).
+    general_descriptions: dict[str, str] = field(default_factory=dict)
 
 
 def _lazy_load():
@@ -378,31 +377,7 @@ async def _download_image(client, semaphore, media_url):
     """Descarga UNA foto (I/O de red). La descarga es un recurso totalmente
     distinto de la CPU que usan los dos modelos de visión -- solaparla con
     el análisis de otras fotos reduce el tiempo total, sin competir por los
-    mismos núcleos que usa torch.
-
-    BUG ENCONTRADO Y CORREGIDO en esta sesión (Docker Desktop entero se
-    quedaba sin memoria y se colgaba -- desaparecían sus métricas de
-    CPU/RAM, no solo el contenedor del backend -- en cuentas con muchas
-    fotos): esta función devolvía el `PIL.Image` a resolución ORIGINAL. El
-    semáforo de descargas (`_MAX_CONCURRENT_DOWNLOADS`) se libera en
-    cuanto se decodifica la imagen, pero el semáforo de ANÁLISIS
-    (`Settings.photo_analysis_concurrency`, bastante más lento -- sobre
-    todo con Moondream2, generación autoregresiva) es independiente y más
-    estrecho. Como la descarga siempre adelanta al análisis, las fotos ya
-    descargadas se acumulan en memoria a resolución completa mientras
-    esperan su turno -- con cuentas de decenas/cientos de fotos, decenas
-    de imágenes sin comprimir (una foto de 4000x3000 son ~36 MB cada una)
-    pueden estar en cola a la vez, sin que ningún límite de concurrencia
-    lo evite (ninguno de los dos semáforos acota CUÁNTAS fotos
-    descargadas-pero-aún-sin-analizar puede haber a la vez).
-
-    Se redimensiona aquí, justo tras decodificar y ANTES de que la imagen
-    entre en la cola de espera del análisis, a un tamaño mucho mayor del
-    que necesita cualquiera de los dos modelos (sus propios
-    `AutoImageProcessor`/pipeline ya reescalan internamente a una entrada
-    bastante más pequeña), así que no se pierde precisión -- solo se
-    evita cargar con megapíxeles que ningún modelo va a usar mientras la
-    imagen espera en memoria."""
+    mismos núcleos que usa torch."""
     from PIL import Image
     import io
 
@@ -410,12 +385,7 @@ async def _download_image(client, semaphore, media_url):
         try:
             resp = await client.get(media_url)
             resp.raise_for_status()
-            image = Image.open(io.BytesIO(resp.content))
-            image.load()  # decodificar ya (si no, queda diferido al primer uso, dentro del semáforo de análisis)
-            if image.mode not in ("RGB", "L"):
-                image = image.convert("RGB")
-            image.thumbnail((_MAX_QUEUED_IMAGE_DIMENSION, _MAX_QUEUED_IMAGE_DIMENSION), Image.LANCZOS)
-            return image
+            return Image.open(io.BytesIO(resp.content))
         except Exception:
             return None  # imagen no descargable/decodificable: se omite, no se aborta el análisis
 
@@ -448,7 +418,7 @@ async def _maybe_analyze_content(image):
        pipeline -- incluida la geolocalización de esa misma foto -- sigue
        sin más demora."""
     if not settings.enable_scene_analysis:
-        return [], False, None
+        return [], False, None, None
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(analyze_image_content, image),
@@ -460,16 +430,17 @@ async def _maybe_analyze_content(image):
             "superó los %ss (ver _SCENE_ANALYSIS_TIMEOUT_SECONDS)",
             _SCENE_ANALYSIS_TIMEOUT_SECONDS,
         )
-        return [], False, None
+        return [], False, None, None
 
 
 async def _process_photo(client, download_semaphore, analysis_semaphore, media_url, timing):
     """Descarga UNA foto y, si se pudo, la analiza con los dos modelos.
     Devuelve (image_or_None, estimate_or_None, scene_inferences,
-    indicio_pareja, description_or_None). Pensada para lanzarse como tarea
-    independiente por foto (ver `estimate_locations_for_posts`): así varias
-    fotos pueden estar en distintas etapas (descargando / en cola para
-    analizar / analizando) a la vez.
+    indicio_pareja, description_or_None, description_general_or_None).
+    Pensada para lanzarse como tarea independiente por foto (ver
+    `estimate_locations_for_posts`): así varias fotos pueden estar en
+    distintas etapas (descargando / en cola para analizar / analizando) a
+    la vez.
 
     `timing` (PhotoAnalysisTiming, ver app/log/performance_log.py) recibe UNA
     medición por foto -- solo el tramo de análisis con los modelos de
@@ -477,7 +448,7 @@ async def _process_photo(client, download_semaphore, analysis_semaphore, media_u
     a la CPU/concurrencia que queremos medir aquí)."""
     image = await _download_image(client, download_semaphore, media_url)
     if image is None:
-        return None, None, [], False, None
+        return None, None, [], False, None, None
 
     # `analysis_semaphore` (ver Settings.photo_analysis_concurrency) acota
     # cuántas fotos ocupan a la vez los modelos de visión -- DINOv2 es
@@ -488,13 +459,13 @@ async def _process_photo(client, download_semaphore, analysis_semaphore, media_u
     # cuántos núcleos tenga la máquina que lo ejecute.
     async with analysis_semaphore:
         start = time.monotonic()
-        estimate, (scene_inferences, indicio_pareja, description) = await asyncio.gather(
+        estimate, (scene_inferences, indicio_pareja, description, description_general) = await asyncio.gather(
             asyncio.to_thread(estimate_location_from_image, image),
             _maybe_analyze_content(image),
         )
         timing.record(time.monotonic() - start)
     # `image` sale de scope tras este bloque y se descarta (nunca se escribe a disco)
-    return image, estimate, scene_inferences, indicio_pareja, description
+    return image, estimate, scene_inferences, indicio_pareja, description, description_general
 
 
 def _collect_photo_result(
@@ -504,13 +475,14 @@ def _collect_photo_result(
     visual_inferences: list,
     partner_signal_permalinks: set,
     visual_descriptions: dict,
+    general_descriptions: dict,
 ) -> None:
     """Vuelca el resultado de UNA foto (ya resuelto, ver `_process_photo`)
     en las listas/diccionarios compartidos de `estimate_locations_for_posts`.
     Extraído a su propia función para que el bucle principal se limite a
     orquestar -- consumir la tarea, delegar el volcado, emitir progreso --
     en vez de acumular aquí varias ramas `if` seguidas."""
-    _image, estimate, scene_inferences, indicio_pareja, description = photo_result
+    _image, estimate, scene_inferences, indicio_pareja, description, description_general = photo_result
 
     if estimate is not None:
         results.append((permalink, estimate))
@@ -521,6 +493,8 @@ def _collect_photo_result(
         partner_signal_permalinks.add(permalink)
     if description:
         visual_descriptions[permalink] = description
+    if description_general:
+        general_descriptions[permalink] = description_general
 
 
 async def estimate_locations_for_posts(posts: list, progress_callback=None) -> GeolocationOutcome:
@@ -592,6 +566,7 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
     visual_inferences: list[tuple[str, InferredAttribute]] = []
     partner_signal_permalinks: set[str] = set()
     visual_descriptions: dict[str, str] = {}
+    general_descriptions: dict[str, str] = {}
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         # Se lanza YA el pipeline completo (descarga + análisis) de TODAS
@@ -629,7 +604,13 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
         for i, (permalink, _media_url) in enumerate(photo_units, start=1):
             photo_result = await photo_tasks[i - 1]
             _collect_photo_result(
-                permalink, photo_result, results, visual_inferences, partner_signal_permalinks, visual_descriptions
+                permalink,
+                photo_result,
+                results,
+                visual_inferences,
+                partner_signal_permalinks,
+                visual_descriptions,
+                general_descriptions,
             )
 
             # Dos líneas de progreso independientes para dos análisis
@@ -686,4 +667,5 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
         visual_inferences=visual_inferences,
         partner_signal_permalinks=partner_signal_permalinks,
         visual_descriptions=visual_descriptions,
+        general_descriptions=general_descriptions,
     )

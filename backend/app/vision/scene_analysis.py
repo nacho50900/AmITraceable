@@ -88,20 +88,111 @@ _MODEL_REVISION = "2025-06-21"  # fijado explícitamente, ver docstring del mode
 
 _model = None
 
-_QUERY = (
-    "Analiza esta imagen. Responde EXACTAMENTE en este formato, tres líneas, sin nada más:\n"
-    "PERSONAS: <'ninguna' si no aparece ninguna persona, 'una' si aparece exactamente una "
-    "persona protagonista, o 'varias' si aparecen dos o más personas de protagonismo similar "
-    "(p. ej. una pareja, un grupo)>\n"
-    "AFICION: <una afición, actividad, deporte, instrumento musical o fandom concreto que "
-    "sugiera la imagen, en pocas palabras, o la palabra 'ninguno' si no hay nada específico>\n"
-    "PAREJA: <'si' si la imagen muestra a dos personas besándose, en un abrazo claramente "
-    "romántico, o cogidas de la mano en un contexto de pareja, o 'no' en cualquier otro caso>\n"
-    "No describas ni identifiques físicamente a ninguna persona que aparezca en la imagen -- "
-    "ni su aspecto, ni su sexo, ni su edad -- más allá de contarlas y de si hay o no un "
-    "contexto romántico entre ellas."
+_CAPTION_QUERY = (
+    # NOTA (ver registro de trabajo): la primera versión de este campo
+    # (DESCRIPCION) vivía DENTRO del mismo prompt combinado de cuatro
+    # líneas que PERSONAS/AFICION/PAREJA, con una línea de ejemplo tipo
+    # "DESCRIPCION: varias personas charlando alrededor de una mesa" para
+    # que el modelo "copiara la forma". Con Moondream2, eso resultó en el
+    # MISMO fallo que ya habíamos visto con los placeholders <...>: el
+    # modelo devolvía literalmente mi frase de ejemplo (o una muy
+    # parecida) en vez de describir la imagen real, y en un caso incluso
+    # la repitió una segunda vez tras terminar las otras tres líneas. Se
+    # sacó a su propia pregunta de texto libre, sin plantilla que copiar
+    # -- pero en producción (GTX 1650) seguía saliendo mal: frases con
+    # gramática rota y palabras inventadas (p. ej. "comengan", que no
+    # existe en español), tejiendo fragmentos sueltos del propio prompt en
+    # español en vez de describir la imagen.
+    #
+    # Causa real, confirmada por el propio autor del modelo en la
+    # discusión "OCR and multi-Language support?" de
+    # huggingface.co/vikhyatk/moondream2/discussions/22: "The training
+    # data is currently english-only" -- Moondream2 no tiene apenas datos
+    # de entrenamiento en español. Los campos PERSONAS/AFICION/PAREJA
+    # funcionan en español porque son respuestas CORTAS de un conjunto
+    # cerrado (básicamente reproducir 2-3 palabras del propio ejemplo del
+    # prompt); pedirle que GENERE una frase española libre y coherente lo
+    # saca de su dominio de entrenamiento.
+    #
+    # Solución adoptada (decisión de producto, no solo técnica): preguntar
+    # en INGLÉS, que es donde el modelo es fiable, y mostrar el caption
+    # resultante tal cual, en inglés, en vez de traducirlo -- se descartó
+    # traducir con Mistral (ya integrado en el resto del pipeline) por
+    # reintroducir el mismo límite de 2 peticiones/minuto del tier
+    # gratuito que motivó pasar a un modelo local en primer lugar (ver
+    # docstring de cabecera del módulo), salvo que se batchee a UNA
+    # llamada por informe en vez de por foto -- no implementado aquí.
+    "Describe what's happening in this image in one short sentence (8-15 words): the "
+    "activity, the setting, and the mood. Be specific about the real scene, not generic. "
+    "Do not mention any person's physical appearance, race, ethnicity, skin tone, or age "
+    "-- only the activity and the context."
 )
 
+_STRUCTURED_QUERY = (
+    # NOTA (ver registro de trabajo): la primera versión de este prompt
+    # metía la explicación de cada valor DENTRO de un placeholder <...> en
+    # la misma línea que la etiqueta (p. ej. "AFICION: <una afición... o la
+    # palabra 'ninguno' si no hay nada específico>"). Con Moondream2, eso
+    # provocaba que el modelo devolviera el propio texto del placeholder
+    # como si fuera la respuesta (copiaba literalmente la explicación en
+    # vez de sustituirla por un valor real) -- fallo de instruction-
+    # following típico de VQA pequeños cuando la etiqueta, la explicación
+    # de las opciones y el valor esperado se mezclan en una sola línea.
+    # Esto también explica por qué el análisis superaba el timeout de 30s
+    # (`_SCENE_ANALYSIS_TIMEOUT_SECONDS` en geolocation.py) incluso en
+    # GPU: al "confundirse", el modelo generaba varios cientos de tokens
+    # de texto repetido en vez de líneas cortas. La solución: separar un
+    # EJEMPLO literal de líneas (que el modelo solo tiene que "copiar la
+    # forma de") de la explicación de qué valores son válidos, en párrafos
+    # aparte -- y capar la generación con _STRUCTURED_SETTINGS más abajo
+    # como red de seguridad adicional. A diferencia de _CAPTION_QUERY
+    # (texto libre), aquí SÍ funciona dar un ejemplo literal porque las
+    # tres respuestas son opciones fijas (ninguna/una/varias, si/no, o una
+    # palabra corta de afición) -- no hay contenido "copiable" que pueda
+    # colarse como respuesta real, solo forma.
+    "Analiza esta imagen y responde EXACTAMENTE en este formato de tres líneas, sin nada más, "
+    "como en este ejemplo (sustituyendo los valores por los reales de ESTA imagen):\n"
+    "PERSONAS: varias\n"
+    "AFICION: ninguno\n"
+    "PAREJA: no\n\n"
+    "PERSONAS solo puede valer: 'ninguna' (no aparece ninguna persona), 'una' (aparece "
+    "exactamente una persona protagonista), o 'varias' (dos o más personas de protagonismo "
+    "similar, p. ej. una pareja o un grupo).\n"
+    "AFICION solo puede valer: una afición, actividad, deporte, instrumento musical o fandom "
+    "concreto que sugiera la imagen, en pocas palabras, o la palabra 'ninguno' si no hay nada "
+    "específico.\n"
+    "PAREJA solo puede valer: 'si' si la imagen muestra a dos personas besándose, en un abrazo "
+    "claramente romántico, o cogidas de la mano en un contexto de pareja, o 'no' en cualquier "
+    "otro caso.\n\n"
+    "No describas ni identifiques físicamente a ninguna persona que aparezca en la imagen -- "
+    "ni su aspecto, ni su sexo, ni su edad, ni su raza o etnia -- más allá de contarlas y de si "
+    "hay o no un contexto romántico entre ellas.\n\n"
+    "Responde ahora solo las tres líneas, con los valores reales para esta imagen concreta."
+)
+
+# Settings por separado para cada llamada -- cada una necesita un límite
+# de tokens distinto (la respuesta correcta es mucho más corta en la
+# estructurada que en el caption) y capar cada una a su propio tamaño
+# real reduce aún más el riesgo de que una respuesta confusa se alargue
+# de más, además de acelerar cada llamada individualmente.
+#
+# "variant": None es obligatorio en AMBAS, no opcional -- descubierto en
+# ejecución real (GTX 1650, revisión pinneada del modelo, ver
+# _MODEL_REVISION): `encode_image()` en el código remoto de esta revisión
+# hace `settings["variant"]` a pelo, SIN `.get()`, en cuanto `settings`
+# no es None. Como no necesitamos usar variantes de encoder, cualquier
+# `settings` que pasemos tiene que incluir esta clave con valor None o
+# revienta con KeyError antes de generar nada -- no es un parámetro que
+# hayamos elegido usar, es un requisito de esta versión concreta del
+# modelo para poder usar settings en absoluto.
+#
+# temperature: 0.2 en el caption (algo de margen para que la frase suene
+# natural, ya que es texto libre) y 0.1 en la estructurada (ya probado
+# fiable para mantener el formato de tres opciones fijas).
+_CAPTION_SETTINGS = {"max_tokens": 45, "temperature": 0.2, "variant": None}
+_STRUCTURED_SETTINGS = {"max_tokens": 30, "temperature": 0.1, "variant": None}
+
+_DESCRIPCION_RE = re.compile(r"DESCRIPCION:[ \t]*(.+)", re.IGNORECASE)
 _PERSONAS_RE = re.compile(r"PERSONAS:[ \t]*(\S+)", re.IGNORECASE)
 _AFICION_RE = re.compile(r"AFICION:[ \t]*(.+)", re.IGNORECASE)
 _PAREJA_RE = re.compile(r"PAREJA:[ \t]*(\S+)", re.IGNORECASE)
@@ -229,20 +320,21 @@ def _lazy_load():
 
     Intento nº7, AÑADIDO cuando se pasó de correr esto en CPU a una GPU
     dedicada (NVIDIA GTX 1650, 4GB VRAM, arquitectura Turing/compute
-    capability 7.5): en GPU NO hace falta el parche de arriba (upcast a
-    float32) -- ese parche existe solo por lo lenta que es la emulación
-    software de bfloat16 en CPU de consumo. Pero tampoco vale con dejar
-    bfloat16 tal cual (que sería lo ideal en una GPU con tensor cores
-    bfloat16 nativos): esos tensor cores bfloat16 solo llegaron con Ampere
-    (compute capability >= 8.0) -- Turing es 7.5, así que bfloat16 en esta
-    GPU también se emula por software (2-4x más lento que con tensor cores
-    reales -- no tan grave como en CPU, pero tampoco la opción correcta
-    aquí). float16 sí tiene aceleración nativa completa desde Volta
-    (compute capability >= 7.0), así que es lo que se usa en GPU: se pasa
-    `torch_dtype=torch.float16` Y `device_map={"": "cuda"}` juntos a
-    `from_pretrained()` -- la FORMA DE DICCIONARIO exacta del ejemplo
-    oficial del modelo para GPU (comentada en el ejemplo oficial con
-    "Uncomment to run on GPU"), NO la forma de STRING SUELTO
+    capability 7.5): en GPU no hace falta el parche de arriba tal cual
+    (upcast A FLOAT32) -- ese parche existe solo por lo lenta que es la
+    emulación software de bfloat16 en CPU de consumo. Pero tampoco vale
+    con dejar bfloat16 tal cual (que sería lo ideal en una GPU con tensor
+    cores bfloat16 nativos): esos tensor cores bfloat16 solo llegaron con
+    Ampere (compute capability >= 8.0) -- Turing es 7.5, así que bfloat16
+    en esta GPU también se emula por software (2-4x más lento que con
+    tensor cores reales -- no tan grave como en CPU, pero tampoco la
+    opción correcta aquí). float16 sí tiene aceleración nativa completa
+    desde Volta (compute capability >= 7.0), así que es lo que se
+    persigue en GPU.
+
+    Para el `device_map`, se pasa la FORMA DE DICCIONARIO exacta del
+    ejemplo oficial del modelo para GPU (comentada en el ejemplo oficial
+    con "Uncomment to run on GPU"), NO la forma de STRING SUELTO
     (`device_map="cuda"`) que fue el intento nº1 fallido de más arriba
     (`NotImplementedError: Cannot copy out of meta tensor`) -- son dos
     invocaciones distintas de `accelerate` con comportamiento distinto: la
@@ -250,14 +342,33 @@ def _lazy_load():
     (pensada para repartir un modelo grande entre varias GPUs), que es la
     que entra en conflicto con este wrapper concreto; la de diccionario
     con un solo destino ("" = todo el modelo) es una instrucción más
-    simple ("todo aquí") que no necesita esa lógica de reparto.
+    simple ("todo aquí") que no necesita esa lógica de reparto. ESTA PARTE
+    SÍ VERIFICADA EN PRODUCCIÓN: el modelo carga correctamente en
+    `cuda:0` con esta forma.
 
-    SIN VERIFICAR TODAVÍA contra el modelo real en esta GPU concreta (bien
-    razonado por lo que documenta la propia ficha del modelo + lo que ya
-    se sabe de intentos anteriores en este mismo fichero, no probado en
-    producción) -- si esto falla, sigue el mismo patrón de depuración que
-    los intentos nº1-6: pega aquí el traceback exacto y seguimos desde
-    ahí, no se vuelve a intentar a ciegas.
+    VERIFICADO EN PRODUCCIÓN, Y RESULTÓ SER FALSO: la idea original de
+    este intento era que pasar `torch_dtype=torch.float16` junto al
+    `device_map` bastaba para que el modelo quedara en float16. El log
+    real mostró `dtype=torch.bfloat16` pese a ese kwarg -- ver "Intento
+    nº8" (docstring de `_upcast_bfloat16_tensors`) para el porqué exacto
+    y el arreglo real: `torch_dtype` de `from_pretrained()` no llega a la
+    mayoría de los pesos de este modelo, así que forzar el dtype hace
+    falta hacerlo después de cargar, con la misma máquina ya usada para
+    el caso CPU.
+
+    ACTUALIZACIÓN tras la primera ejecución real en esta GPU: la carga
+    SÍ funciona (`device_map` en forma de diccionario, sin el error del
+    intento nº1), y con el arreglo del intento nº8 el modelo queda de
+    verdad en float16. Lo que SIGUE sin resolverse: el análisis de una
+    foto individual sigue superando el timeout de 30s
+    (`_SCENE_ANALYSIS_TIMEOUT_SECONDS`) incluso en GPU -- no se sabe
+    todavía si es porque bfloat16-a-float16 no basta para bajar de 30s en
+    una GTX 1650, o si hay algo más de fondo (p. ej. la primera pasada de
+    CUDA/cuDNN "calentando" kernels, que solo afecta a la primera foto,
+    frente a un problema que afecte a todas). Si sigue pasando tras este
+    arreglo, el siguiente paso es medir cuánto tarda realmente una foto
+    sola (sin el timeout de por medio) para saber si hace falta subir el
+    timeout, bajar `max_new_tokens`, o si hay otro cuello de botella.
 
     PRESUPUESTO DE VRAM (para tener a mano si esto peta por
     `torch.cuda.OutOfMemoryError` en vez de por un error de carga): los
@@ -291,10 +402,20 @@ def _lazy_load():
     # huggingface.co/vikhyatk/moondream2 en la revisión _MODEL_REVISION
     # (ahí el device_map={"": "cuda"} aparece comentado con "# Uncomment
     # to run on GPU", es decir: para CPU, no se pasa nada de esto). Con
-    # CUDA disponible, SÍ se pasan esos dos kwargs -- ver "Intento nº7" en
-    # el docstring de esta función para el porqué exacto de la forma
-    # concreta que se usa (diccionario, no string) y del dtype elegido
-    # (float16, no bfloat16) para esta GPU en particular.
+    # CUDA disponible, SÍ se pasa `device_map` -- ver "Intento nº7" en el
+    # docstring de esta función para el porqué exacto de la forma concreta
+    # que se usa (diccionario, no string).
+    #
+    # `torch_dtype=torch.float16` se deja puesto por si acaso (no hace
+    # daño, y sí afecta a lo poco que `from_pretrained()` SÍ inicializa
+    # como parámetro/buffer registrado -- p. ej. `patch_emb`), pero NO es
+    # lo que deja el modelo en float16: eso lo hace
+    # `_upcast_bfloat16_tensors()` más abajo. Ver "Intento nº8" en su
+    # docstring -- este kwarg por sí solo no llega a la mayoría de los
+    # pesos reales del modelo (viven en dataclasses propias del código
+    # remoto, no en `nn.Parameter`), así que confiar solo en él dejaba el
+    # modelo cargado en bfloat16 pese a pedir float16 explícitamente
+    # (visto en producción: log "Moondream2 cargado: ... dtype=torch.bfloat16").
     #
     # local_files_only=True primero: aunque `revision` esté fijada a un
     # commit concreto (no "main"), `from_pretrained()` sigue haciendo por
@@ -328,7 +449,7 @@ def _lazy_load():
     # procesado y, si falla, se deja `_model = None` para que el próximo
     # intento arranque de cero.
     try:
-        _upcast_to_float32_if_cpu()
+        _upcast_bfloat16_tensors()
         _patch_vision_input_dtype()
 
         # Log explícito de dónde y en qué dtype ha quedado el modelo: sin
@@ -362,8 +483,8 @@ def _patch_vision_input_dtype():
     función `prepare_crops()` del código remoto de Moondream2
     (`vision.py`) fija `dtype=torch.bfloat16` a fuego, sin mirar en qué
     dtype está el modelo -- así que si el modelo se ha quedado en otro
-    dtype (float32 tras `_upcast_to_float32_if_cpu()` en CPU, o float16
-    en GPU -- ver "Intento nº7" en `_lazy_load()`), la primera capa
+    dtype (float32 tras `_upcast_bfloat16_tensors()` en CPU, o float16
+    en GPU -- ver "Intento nº8" en `_lazy_load()`), la primera capa
     (`patch_emb`) recibiría una entrada en bfloat16 y fallaría con un
     `RuntimeError: expected scalar type X but found BFloat16` (X = Float
     en CPU, Half en GPU).
@@ -420,27 +541,27 @@ def _patch_vision_input_dtype():
     patch_emb.forward = _forward_matching_dtype
 
 
-def _upcast_registered_tensors(model) -> None:
-    """Reasigna a float32 los parámetros y buffers que PyTorch SÍ registra
-    formalmente (`nn.Parameter`, buffers vía `register_buffer`) y que
-    estén en bfloat16. Ver el docstring de `_upcast_to_float32_if_cpu`
+def _upcast_registered_tensors(model, target_dtype) -> None:
+    """Reasigna a `target_dtype` los parámetros y buffers que PyTorch SÍ
+    registra formalmente (`nn.Parameter`, buffers vía `register_buffer`) y
+    que estén en bfloat16. Ver el docstring de `_upcast_bfloat16_tensors`
     para el porqué de hacerlo así (reasignar `.data`) en vez de
     `.to(dtype=...)`."""
     import torch
 
     for param in model.parameters():
         if param.dtype == torch.bfloat16:
-            param.data = param.data.float()
+            param.data = param.data.to(target_dtype)
     for buf in model.buffers():
         if buf.dtype == torch.bfloat16:
-            buf.data = buf.data.float()
+            buf.data = buf.data.to(target_dtype)
 
 
-def _upcast_dataclass_attr(attr_val, seen_ids: set) -> None:
+def _upcast_dataclass_attr(attr_val, seen_ids: set, target_dtype) -> None:
     """Si `attr_val` es una dataclass no vista todavía (p.ej.
     `LinearWeights`/`LayerNormWeights`, ver docstring de
-    `_upcast_to_float32_if_cpu`), reasigna a float32 cualquiera de sus
-    campos que sea un tensor en bfloat16."""
+    `_upcast_bfloat16_tensors`), reasigna a `target_dtype` cualquiera de
+    sus campos que sea un tensor en bfloat16."""
     import dataclasses
     import torch
 
@@ -450,41 +571,57 @@ def _upcast_dataclass_attr(attr_val, seen_ids: set) -> None:
     for field in dataclasses.fields(attr_val):
         value = getattr(attr_val, field.name)
         if isinstance(value, torch.Tensor) and value.dtype == torch.bfloat16:
-            setattr(attr_val, field.name, value.float())
+            setattr(attr_val, field.name, value.to(target_dtype))
 
 
-def _upcast_unregistered_dataclass_tensors(model) -> None:
+def _upcast_unregistered_dataclass_tensors(model, target_dtype) -> None:
     """Recorre a mano los atributos de cada submódulo buscando dataclasses
     colgadas como atributo normal -- no registradas por PyTorch, ver
-    docstring de `_upcast_to_float32_if_cpu` -- y sube sus tensores en
-    bfloat16 a float32."""
+    docstring de `_upcast_bfloat16_tensors` -- y sube sus tensores en
+    bfloat16 a `target_dtype`."""
     seen_ids: set = set()
     for module in model.modules():
         for attr_name, attr_val in vars(module).items():
             if attr_name.startswith("_"):
                 continue  # _parameters, _buffers, _modules, etc. -- ya cubiertos en _upcast_registered_tensors
-            _upcast_dataclass_attr(attr_val, seen_ids)
+            _upcast_dataclass_attr(attr_val, seen_ids, target_dtype)
 
 
-def _upcast_to_float32_if_cpu():
+def _upcast_bfloat16_tensors():
     """Convierte el modelo de bfloat16 (dtype con el que se descarga) a
-    float32, SOLO si no hay GPU disponible. Ver el bloque "Intento nº6"
-    en el docstring de `_lazy_load()` para el porqué -- en resumen:
+    float32 en CPU, o a float16 en GPU. Ver el bloque "Intento nº6" en el
+    docstring de `_lazy_load()` para el porqué del caso CPU -- en resumen:
     bfloat16 en CPU de consumo se emula por software y es órdenes de
-    magnitud más lento que float32 nativo. Con GPU disponible, esta
-    función no actúa -- `_lazy_load()` ya evita bfloat16 desde el propio
-    `from_pretrained()` (ver "Intento nº7" ahí: en Turing, compute
-    capability 7.5, bfloat16 tampoco tiene tensor cores nativos -- solo
-    desde Ampere -- así que se pide float16 en su lugar, que sí los
-    tiene desde Volta).
+    magnitud más lento que float32 nativo. Para el caso GPU, ver "Intento
+    nº8" ahí -- en Turing (compute capability 7.5), bfloat16 tampoco tiene
+    tensor cores nativos (solo desde Ampere), así que conviene float16 en
+    su lugar (nativo desde Volta).
 
-    Deliberadamente NO usa `_model.to(dtype=torch.float32)`: esa llamada
-    es la que causó el error "Tensor on device cpu is not on the expected
-    device meta!" documentado como intento nº4. En su lugar, reasigna
-    `.data` de cada parámetro y buffer por separado (ver
-    `_upcast_registered_tensors`) -- una operación de más bajo nivel que
-    no pasa por los hooks de `accelerate` que asumen un modelo
-    potencialmente repartido en meta device.
+    BUG ENCONTRADO en la sesión del "Intento nº8" (renombrada esta
+    función, antes `_upcast_to_float32_if_cpu`): esta función se saltaba
+    ENTERA en GPU (`if torch.cuda.is_available(): return`), asumiendo que
+    pasar `torch_dtype=torch.float16` a `from_pretrained()` en
+    `_lazy_load()` (el "Intento nº7") ya dejaba el modelo en float16. En
+    la práctica, el modelo cargó en GPU con
+    `dtype=torch.bfloat16` (confirmado por el log de "Moondream2 cargado:
+    ... dtype=torch.bfloat16" pese al `torch_dtype=torch.float16` pasado)
+    -- `torch_dtype` de `from_pretrained()` solo afecta a lo que PyTorch
+    registra formalmente como parámetro/buffer, y la mayoría de los pesos
+    de este modelo NO lo son (ver el párrafo de más abajo sobre
+    `LinearWeights`/`LayerNormWeights`) -- exactamente el mismo motivo por
+    el que ya hacía falta `_upcast_unregistered_dataclass_tensors` para
+    el caso CPU. Ahora esta función se ejecuta SIEMPRE (CPU o GPU), con
+    el dtype destino según el dispositivo, reutilizando la misma
+    maquinaria ya probada para CPU en vez de depender de un kwarg que no
+    llega a la mayoría de los tensores.
+
+    Deliberadamente NO usa `_model.to(dtype=...)`: esa llamada es la que
+    causó el error "Tensor on device cpu is not on the expected device
+    meta!" documentado como intento nº4. En su lugar, reasigna `.data` de
+    cada parámetro y buffer por separado (ver `_upcast_registered_tensors`)
+    -- una operación de más bajo nivel que no pasa por los hooks de
+    `accelerate` que asumen un modelo potencialmente repartido en meta
+    device.
 
     IMPORTANTE, descubierto investigando por qué la cuantización int8 de
     PyTorch fallaba a medias (ver commit que añade este bloque): la
@@ -504,30 +641,64 @@ def _upcast_to_float32_if_cpu():
     `LinearWeights` directamente)."""
     import torch
 
-    if torch.cuda.is_available():
-        return
+    target_dtype = torch.float32 if not torch.cuda.is_available() else torch.float16
 
     with torch.no_grad():
-        _upcast_registered_tensors(_model)
-        _upcast_unregistered_dataclass_tensors(_model)
+        _upcast_registered_tensors(_model, target_dtype)
+        _upcast_unregistered_dataclass_tensors(_model, target_dtype)
 
 
-def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | None]:
-    """Devuelve (inferencias_visuales, indicio_pareja, descripcion) para UNA
-    foto ya decodificada (PIL.Image, la misma que usa geolocation.py para el
-    embedding de DINOv2 -- no se descarga ni decodifica de nuevo). SÍNCRONA
-    y con trabajo de CPU real (como `estimate_location_from_image`): quien
-    llama debe envolverla en `asyncio.to_thread` para no bloquear el event
-    loop, ver geolocation.py.
+def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | None, str | None]:
+    """Devuelve (inferencias_visuales, indicio_pareja, descripcion_cruda,
+    descripcion_general) para UNA foto ya decodificada (PIL.Image, la
+    misma que usa geolocation.py para el embedding de DINOv2 -- no se
+    descarga ni decodifica de nuevo). SÍNCRONA y con trabajo de CPU/GPU
+    real (como `estimate_location_from_image`): quien llama debe
+    envolverla en `asyncio.to_thread` para no bloquear el event loop, ver
+    geolocation.py.
 
-    `descripcion` es la respuesta CRUDA del modelo (las tres líneas
-    PERSONAS/AFICION/PAREJA), no una redacción libre -- se devuelve tal
-    cual en vez de reformularla porque: (a) no hace falta un prompt ni un
-    parseo nuevos, y (b) es más transparente para quien vea el informe
-    (mismo criterio de "mostrar la evidencia real" que el resto del
-    proyecto) que una paráfrasis que podría no ser fiel. None si el modelo
-    no está disponible o la inferencia falla -- igual que los otros dos
-    valores devueltos.
+    Internamente hace DOS llamadas a `_model.query()` -- una con
+    `_CAPTION_QUERY` (texto libre, sin plantilla que copiar) y otra con
+    `_STRUCTURED_QUERY` (PERSONAS/AFICION/PAREJA, formato fijo) -- en vez
+    de una sola combinada, porque mezclar un campo de texto libre con
+    campos de opciones fijas en el mismo prompt hacía que Moondream2
+    copiara literalmente el ejemplo de texto libre en vez de describir la
+    imagen real (ver nota en `_CAPTION_QUERY`). Ambas llamadas reutilizan
+    el mismo `_model.encode_image(image)` para no pagar el coste de
+    codificar la foto dos veces.
+
+    `descripcion_cruda` reconstruye el mismo formato de cuatro líneas de
+    siempre (DESCRIPCION/PERSONAS/AFICION/PAREJA) a partir de las dos
+    respuestas, no una redacción libre -- se devuelve tal cual en vez de
+    reformularla porque: (a) todo el parseo (`_parse_inferences` y cía.)
+    sigue operando sobre este único formato sin cambios, y (b) es más
+    transparente para quien vea el informe (mismo criterio de "mostrar la
+    evidencia real" que el resto del proyecto) que una paráfrasis que
+    podría no ser fiel.
+
+    `descripcion_general` es SOLO el valor de la línea DESCRIPCION, ya
+    parseado (p. ej. "4 people happily eating pizza on a terrace") --
+    pensado para mostrarse tal cual como pie de foto legible, a diferencia
+    de `descripcion_cruda` (que incluye las cuatro etiquetas y está
+    pensado para la vista "qué vio la IA" de detalle).
+    EN INGLÉS, a diferencia del resto de este módulo y del resto del
+    proyecto (español) -- decisión deliberada, no un descuido: Moondream2
+    solo tiene datos de entrenamiento en inglés (confirmado por el autor
+    del modelo, ver nota en `_CAPTION_QUERY`), y pedirle generar una frase
+    libre en español producía gramática rota y palabras inventadas. Se
+    decidió mostrar el caption en inglés tal cual antes que traducirlo
+    (ver la misma nota para por qué se descartó traducir con Mistral).
+    Mismo límite ético/legal que el resto del módulo: el prompt le
+    prohíbe explícitamente mencionar raza, etnia, tono de piel, edad o
+    aspecto físico -- pero como es texto libre (a diferencia de
+    PERSONAS/PAREJA, que son una de tres opciones fijas), no hay garantía
+    sintáctica de que el modelo lo respete siempre; se confía en el
+    prompt, no en un filtro de post-procesado adicional (ver docstring de
+    cabecera del módulo, mismo criterio que ya se aplica al resto de
+    campos).
+
+    None en cualquiera de los cuatro valores si el modelo no está
+    disponible o la inferencia falla.
 
     `evidence` de cada InferredAttribute se deja vacío deliberadamente --
     quien llama (geolocation.py) rellena el permalink de la publicación,
@@ -535,8 +706,8 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
 
     Nunca lanza: cualquier fallo (dependencias no instaladas, modelo no
     descargable, respuesta con formato inesperado) se trata como "esta
-    foto no aportó nada" y devuelve ([], False, None), sin abortar el
-    análisis de las demás fotos."""
+    foto no aportó nada" y devuelve ([], False, None, None), sin abortar
+    el análisis de las demás fotos."""
     if not _scene_analysis_available():
         # Causa más habitual: no se ha instalado requirements-vision.txt
         # completo. En particular, construir el índice FAISS (ver
@@ -549,11 +720,20 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
             "timm o einops (ver requirements-vision.txt; 'pip install timm einops' "
             "si ya tienes torch/transformers instalados para la geolocalización)"
         )
-        return [], False, None
+        return [], False, None, None
 
     try:
         _lazy_load()
-        answer = _model.query(image, _QUERY)["answer"]
+        # Codificar la imagen UNA vez y reutilizarla para las dos
+        # preguntas (ver docs.moondream.ai/advanced/transformers,
+        # "If you're planning to run multiple inferences on the same
+        # image, you can pre-encode it once and reuse the encoding") --
+        # evita que el encoder de visión procese la misma foto dos veces,
+        # coste que antes se pagaba por CADA llamada a .query() si
+        # hiciéramos dos llamadas ingenuas con la imagen sin codificar.
+        encoded = _model.encode_image(image)
+        caption = _model.query(encoded, _CAPTION_QUERY, settings=_CAPTION_SETTINGS)["answer"].strip().rstrip(".")
+        structured = _model.query(encoded, _STRUCTURED_QUERY, settings=_STRUCTURED_SETTINGS)["answer"].strip()
     except Exception as exc:
         # Motivo típico si torch/transformers/timm/einops SÍ están
         # instalados (ver _scene_analysis_available arriba): falta
@@ -578,9 +758,32 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
         # bien instaladas. Ya está corregido; si reaparece tras cambiar
         # `_MODEL_REVISION` o la versión de `transformers`/`accelerate`,
         # revisar primero cómo se está pasando `device_map`.
-        return [], False, None
+        return [], False, None, None
 
-    return _parse_inferences(answer), _parse_pareja(answer), answer.strip()
+    # Se reconstruye el mismo formato combinado de siempre (DESCRIPCION +
+    # las tres líneas estructuradas) aunque ahora vengan de DOS llamadas
+    # separadas -- así _parse_inferences/_parse_pareja/_parse_personas/
+    # _parse_descripcion (todas basadas en buscar "ETIQUETA:" con regex)
+    # no necesitan ningún cambio, y la vista "qué vio la IA" del frontend
+    # sigue mostrando las cuatro líneas juntas como una unidad legible.
+    answer = f"DESCRIPCION: {caption}\n{structured}"
+    return _parse_inferences(answer), _parse_pareja(answer), answer, _parse_descripcion(answer)
+
+
+def _parse_descripcion(answer: str) -> str | None:
+    """Extrae el valor de la línea DESCRIPCION (caption general de la
+    escena). None si no se pudo parsear, o si el modelo devolvió algo
+    equivalente a "nada que describir" -- en la práctica esto último no
+    debería pasar (DESCRIPCION siempre debería tener contenido si hay
+    imagen), pero se trata igual que el resto de campos por consistencia
+    y por si acaso el modelo se desvía del formato."""
+    match = _DESCRIPCION_RE.search(answer)
+    if match is None:
+        return None
+    valor = match.group(1).strip().rstrip(".")
+    if not valor or valor.lower() in ("ninguna", "ninguno", "none", "n/a"):
+        return None
+    return valor
 
 
 def _parse_personas(answer: str) -> str | None:

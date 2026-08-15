@@ -20,6 +20,25 @@ from app.auth.instagram_oauth import router as instagram_auth_router
 from app.auth.reddit_oauth import router as reddit_auth_router
 from app.config import settings
 
+# BUG ENCONTRADO en la sesión de logs de GPU/Moondream2: sin esto, el
+# logger raíz de Python se queda en su nivel por defecto (WARNING) porque
+# en ningún sitio del proyecto se llamaba a `logging.basicConfig()` --
+# TODOS los `logger.info(...)` de la app (de este fichero y de cualquier
+# otro módulo, no solo los que confirman GPU/Moondream2 añadidos en esta
+# sesión) se descartaban en silencio, sin llegar ni siquiera a stderr.
+# Solo se veían los `logger.warning()` (p. ej. el aviso de tablas del INE
+# desactualizadas) porque WARNING sí supera el nivel por defecto. Uvicorn
+# no arregla esto: configura sus PROPIOS loggers (`uvicorn`,
+# `uvicorn.error`, `uvicorn.access` -- de ahí que "INFO: Started server
+# process..." sí se viera), pero no toca el logger raíz del que cuelgan
+# los loggers de la propia app (`logging.getLogger(__name__)` en cada
+# módulo). Tiene que ir ANTES de crear `logger = logging.getLogger(...)`
+# más abajo y antes de cualquier import que a su vez cree loggers propios.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
 logger = logging.getLogger(__name__)
 
 

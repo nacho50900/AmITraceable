@@ -336,6 +336,7 @@ async def _apply_image_geolocation(
             representative=estimate.representative,
             created_utc=post_dates_by_permalink.get(permalink),
             visual_description=geo_outcome.visual_descriptions.get(permalink),
+            visual_description_general=geo_outcome.general_descriptions.get(permalink),
         )
         for permalink, estimate in geo_outcome.results
     ]

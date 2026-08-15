@@ -169,7 +169,9 @@ class TestGenerateReportPlatformBranching:
         """La descripción cruda de Moondream2 (ver scene_analysis.py) debe
         quedar en cada ImageLocationPoint -- de ahí se incluye sola en el
         JSON del informe que ai_analysis.py le manda a la IA final, sin
-        necesitar ningún cambio en ese módulo."""
+        necesitar ningún cambio en ese módulo. Igual para la descripción
+        general (visual_description_general), campo DESCRIPCION del mismo
+        prompt ya parseado."""
 
         async def _fake_estimate(posts, progress_callback=None):
             return geolocation.GeolocationOutcome(
@@ -188,10 +190,13 @@ class TestGenerateReportPlatformBranching:
                         ),
                     ),
                 ],
-                visual_descriptions={"https://ig/1": "PERSONAS: una\nAFICION: guitarra\nPAREJA: no"},
-                # https://ig/2 no tiene entrada: la foto se analizó pero
-                # Moondream2 no dio descripción (modelo no disponible, o
-                # falló solo para esa foto).
+                visual_descriptions={
+                    "https://ig/1": "DESCRIPCION: una persona tocando la guitarra\nPERSONAS: una\nAFICION: guitarra\nPAREJA: no"
+                },
+                general_descriptions={"https://ig/1": "una persona tocando la guitarra"},
+                # https://ig/2 no tiene entrada en ninguno de los dos dicts:
+                # la foto se analizó pero Moondream2 no dio descripción
+                # (modelo no disponible, o falló solo para esa foto).
             )
 
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
@@ -205,9 +210,11 @@ class TestGenerateReportPlatformBranching:
 
         points_by_permalink = {p.permalink: p for p in report.image_location_points}
         assert points_by_permalink["https://ig/1"].visual_description == (
-            "PERSONAS: una\nAFICION: guitarra\nPAREJA: no"
+            "DESCRIPCION: una persona tocando la guitarra\nPERSONAS: una\nAFICION: guitarra\nPAREJA: no"
         )
+        assert points_by_permalink["https://ig/1"].visual_description_general == "una persona tocando la guitarra"
         assert points_by_permalink["https://ig/2"].visual_description is None
+        assert points_by_permalink["https://ig/2"].visual_description_general is None
 
     @pytest.mark.asyncio
     async def test_non_representative_photo_still_shows_on_map_but_not_used_for_residence(self, monkeypatch):

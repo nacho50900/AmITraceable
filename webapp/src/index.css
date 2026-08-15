@@ -772,13 +772,21 @@ body {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.photo-visual-description-general {
+  margin: 0;
+  padding: 10px 10px 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .photo-visual-description {
   margin: 0;
   padding: 8px 10px 10px;
   border-top: 1px solid var(--border);
   font-size: 12px;
   color: var(--text-dim);
-  white-space: pre-line; /* conserva los saltos de línea PERSONAS/AFICION/PAREJA */
+  white-space: pre-line; /* conserva los saltos de línea DESCRIPCION/PERSONAS/AFICION/PAREJA */
 }
 
 /* Apartado "Imágenes no representativas": desplegable de sección (ver
