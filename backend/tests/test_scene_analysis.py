@@ -6,8 +6,17 @@ No se descarga el modelo real (~1.8B parámetros): se mockea `_lazy_load`
 respuesta, degradación best-effort) sin dependencias pesadas.
 """
 import pytest
+from PIL import Image
 
 from app.vision import scene_analysis
+
+
+def _fake_image():
+    """Imagen PIL real y minúscula (no un objeto genérico) -- desde que
+    analyze_image_content redimensiona una COPIA de la imagen antes de
+    codificarla (ver _CAPTION_MAX_DIMENSION), necesita `.copy()` y
+    `.thumbnail()` reales, que `object()` no tiene."""
+    return Image.new("RGB", (10, 10))
 
 
 class _FakeModel:
@@ -65,7 +74,7 @@ class TestAnalyzeImageContent:
             "PERSONAS: una\nAFICION: Posible fan de baloncesto, aparece jugando\nPAREJA: no",
         )
 
-        inferences, indicio_pareja, _, _ = scene_analysis.analyze_image_content(object())
+        inferences, indicio_pareja, _, _ = scene_analysis.analyze_image_content(_fake_image())
 
         assert len(inferences) == 1
         assert inferences[0].category == "aficion"
@@ -80,7 +89,7 @@ class TestAnalyzeImageContent:
         atribuírselo."""
         _install_fake_model(monkeypatch, "PERSONAS: ninguna\nAFICION: vinilo de música visible\nPAREJA: no")
 
-        inferences, _, _, _ = scene_analysis.analyze_image_content(object())
+        inferences, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
 
         assert len(inferences) == 1
 
@@ -94,7 +103,7 @@ class TestAnalyzeImageContent:
             monkeypatch, "PERSONAS: varias\nAFICION: toca la guitarra\nPAREJA: no"
         )
 
-        inferences, _, _, _ = scene_analysis.analyze_image_content(object())
+        inferences, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
 
@@ -104,7 +113,7 @@ class TestAnalyzeImageContent:
         personas es el caso típico para esta señal."""
         _install_fake_model(monkeypatch, "PERSONAS: varias\nAFICION: ninguno\nPAREJA: si")
 
-        inferences, indicio_pareja, _, _ = scene_analysis.analyze_image_content(object())
+        inferences, indicio_pareja, _, _ = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
         assert indicio_pareja is True
@@ -112,14 +121,14 @@ class TestAnalyzeImageContent:
     def test_unparseable_personas_value_discards_aficion_by_precaution(self, monkeypatch):
         _install_fake_model(monkeypatch, "PERSONAS: no lo sé\nAFICION: toca la guitarra\nPAREJA: no")
 
-        inferences, _, _, _ = scene_analysis.analyze_image_content(object())
+        inferences, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
 
     def test_missing_personas_line_discards_aficion_by_precaution(self, monkeypatch):
         _install_fake_model(monkeypatch, "AFICION: toca la guitarra\nPAREJA: no")
 
-        inferences, _, _, _ = scene_analysis.analyze_image_content(object())
+        inferences, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
 
@@ -127,14 +136,14 @@ class TestAnalyzeImageContent:
     def test_ninguno_variants_produce_no_inference(self, monkeypatch, negative_value):
         _install_fake_model(monkeypatch, f"PERSONAS: una\nAFICION: {negative_value}\nPAREJA: no")
 
-        inferences, _, _, _ = scene_analysis.analyze_image_content(object())
+        inferences, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
 
     def test_missing_aficion_line_is_ignored_without_crashing(self, monkeypatch):
         _install_fake_model(monkeypatch, "PERSONAS: una\nPAREJA: no")
 
-        inferences, indicio_pareja, _, _ = scene_analysis.analyze_image_content(object())
+        inferences, indicio_pareja, _, _ = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -142,7 +151,7 @@ class TestAnalyzeImageContent:
     def test_missing_pareja_line_defaults_to_false(self, monkeypatch):
         _install_fake_model(monkeypatch, "PERSONAS: una\nAFICION: toca la guitarra")
 
-        inferences, indicio_pareja, _, _ = scene_analysis.analyze_image_content(object())
+        inferences, indicio_pareja, _, _ = scene_analysis.analyze_image_content(_fake_image())
 
         assert len(inferences) == 1
         assert indicio_pareja is False
@@ -150,7 +159,7 @@ class TestAnalyzeImageContent:
     def test_completely_unexpected_format_degrades_without_crashing(self, monkeypatch):
         _install_fake_model(monkeypatch, "esto no sigue el formato pedido en absoluto")
 
-        inferences, indicio_pareja, _, _ = scene_analysis.analyze_image_content(object())
+        inferences, indicio_pareja, _, _ = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -158,7 +167,7 @@ class TestAnalyzeImageContent:
     def test_dependencies_not_installed_returns_empty_without_crashing(self, monkeypatch):
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: False)
 
-        inferences, indicio_pareja, _, _ = scene_analysis.analyze_image_content(object())
+        inferences, indicio_pareja, _, _ = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -167,7 +176,7 @@ class TestAnalyzeImageContent:
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
         monkeypatch.setattr(scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _RaisingModel()))
 
-        inferences, indicio_pareja, _, _ = scene_analysis.analyze_image_content(object())
+        inferences, indicio_pareja, _, _ = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -239,7 +248,7 @@ class TestAnalyzeImageContent:
             caption_answer="a person playing basketball",
         )
 
-        _, _, description, _ = scene_analysis.analyze_image_content(object())
+        _, _, description, _ = scene_analysis.analyze_image_content(_fake_image())
 
         assert description == (
             "DESCRIPCION: a person playing basketball\n"
@@ -249,7 +258,7 @@ class TestAnalyzeImageContent:
     def test_description_is_none_when_dependencies_not_installed(self, monkeypatch):
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: False)
 
-        _, _, description, _ = scene_analysis.analyze_image_content(object())
+        _, _, description, _ = scene_analysis.analyze_image_content(_fake_image())
 
         assert description is None
 
@@ -257,7 +266,7 @@ class TestAnalyzeImageContent:
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
         monkeypatch.setattr(scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _RaisingModel()))
 
-        _, _, description, _ = scene_analysis.analyze_image_content(object())
+        _, _, description, _ = scene_analysis.analyze_image_content(_fake_image())
 
         assert description is None
 
@@ -268,14 +277,14 @@ class TestAnalyzeImageContent:
             caption_answer="4 people happily eating pizza on a terrace",
         )
 
-        _, _, _, descripcion_general = scene_analysis.analyze_image_content(object())
+        _, _, _, descripcion_general = scene_analysis.analyze_image_content(_fake_image())
 
         assert descripcion_general == "4 people happily eating pizza on a terrace"
 
     def test_descripcion_general_is_none_when_dependencies_not_installed(self, monkeypatch):
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: False)
 
-        _, _, _, descripcion_general = scene_analysis.analyze_image_content(object())
+        _, _, _, descripcion_general = scene_analysis.analyze_image_content(_fake_image())
 
         assert descripcion_general is None
 
@@ -303,11 +312,53 @@ class TestAnalyzeImageContent:
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
         monkeypatch.setattr(scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _CountingModel()))
 
-        scene_analysis.analyze_image_content(object())
+        scene_analysis.analyze_image_content(_fake_image())
 
         assert len(encode_calls) == 1
         assert len(query_calls) == 2
         assert set(query_calls) == {scene_analysis._CAPTION_QUERY, scene_analysis._STRUCTURED_QUERY}
+
+    def test_image_is_resized_before_encoding(self, monkeypatch):
+        """Optimización real (medida en producción, GTX 1650): sin
+        redimensionar antes de encode_image(), Moondream2 troceaba la
+        imagen en 8 crops locales + 1 global = 9 pasadas por el encoder de
+        visión (~33s); redimensionando a que el lado mayor mida
+        _CAPTION_MAX_DIMENSION (378, el crop_size real de esta revisión
+        del modelo, ver esa constante), pasa a 2 pasadas. Se comprueba
+        contando el tamaño de la imagen que de verdad llega a
+        encode_image(), no solo confiando en que 'debería' redimensionarse."""
+        received_sizes: list[tuple[int, int]] = []
+
+        class _SizeCheckingModel:
+            def encode_image(self, image):
+                received_sizes.append(image.size)
+                return "encoded-sentinel"
+
+            def query(self, image, question, settings=None):
+                if question == scene_analysis._CAPTION_QUERY:
+                    return {"answer": "una escena cualquiera"}
+                return {"answer": "PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no"}
+
+        monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
+        monkeypatch.setattr(
+            scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _SizeCheckingModel())
+        )
+
+        # Imagen grande (más que _CAPTION_MAX_DIMENSION en ambas
+        # dimensiones), como llegaría de verdad ya redimensionada a los
+        # 1024px de geolocation.py -- para comprobar que ESTE módulo la
+        # reduce más todavía, no que ya viniera pequeña de antes.
+        imagen_grande = Image.new("RGB", (1000, 700))
+
+        scene_analysis.analyze_image_content(imagen_grande)
+
+        assert len(received_sizes) == 1
+        width, height = received_sizes[0]
+        assert max(width, height) <= scene_analysis._CAPTION_MAX_DIMENSION
+        # La imagen original (compartida con DINOv2 en geolocation.py, ver
+        # docstring de analyze_image_content) NUNCA debe mutarse in-place:
+        # solo se redimensiona una copia.
+        assert imagen_grande.size == (1000, 700)
 
     def test_query_settings_cap_generation_length(self):
         """Red de seguridad frente al bug real que motivó separar los

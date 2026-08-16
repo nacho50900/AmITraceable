@@ -79,6 +79,8 @@ el análisis del resto de fotos ni del resto del pipeline (best-effort, ver
 import logging
 import re
 
+from PIL import Image
+
 from app.models.schemas import InferredAttribute
 
 logger = logging.getLogger(__name__)
@@ -191,6 +193,46 @@ _STRUCTURED_QUERY = (
 # fiable para mantener el formato de tres opciones fijas).
 _CAPTION_SETTINGS = {"max_tokens": 45, "temperature": 0.2, "variant": None}
 _STRUCTURED_SETTINGS = {"max_tokens": 30, "temperature": 0.1, "variant": None}
+
+# Redimensionado específico para Moondream2, aparte del que ya aplica
+# geolocation.py para DINOv2 (_MAX_QUEUED_IMAGE_DIMENSION=1024, que ese
+# modelo sí aprovecha para el matching de escenas) -- ver docstring de
+# `analyze_image_content` para por qué se hace sobre una COPIA, no sobre
+# la imagen recibida.
+#
+# El valor 378 viene directamente del código fuente real de esta revisión
+# pinneada (`_MODEL_REVISION`), no de documentación pública genérica --
+# confirmado en ejecución real (GTX 1650) leyendo config.py del propio
+# modelo vía `inspect.getsource()`:
+#
+#   class VisionConfig:
+#       crop_size: int = 378
+#       max_crops: int = 12
+#
+# `encode_image()` trocea la imagen en un crop global (reescalado
+# internamente a un tamaño fijo pequeño para dar contexto general) + N
+# crops locales solapados de alta resolución (para detalle fino) -- TODOS
+# pasan por el encoder de visión, así que el coste escala con el número
+# de crops. `select_tiling()` (misma revisión, image_crops.py) solo
+# devuelve un único crop (tiling=(1,1), rápido) si AMBAS dimensiones de
+# la imagen ya caben dentro de crop_size; si no, trocea en varios.
+#
+# Medido en producción (GTX 1650, foto 612x408 ya redimensionada a los
+# 1024px de _MAX_QUEUED_IMAGE_DIMENSION): sin este redimensionado
+# adicional, select_tiling() devolvía (2, 4) -- 8 crops locales + 1
+# global = 9 pasadas por el encoder de visión, y encode_image() tardaba
+# ~33s. Redimensionando a que el lado mayor mida 378px (manteniendo
+# aspect ratio, como aquí), select_tiling() pasa a (1, 1) -- 2 pasadas en
+# vez de 9.
+#
+# Trade-off aceptado: se pierde la capacidad de leer detalle muy fino
+# (texto pequeño, objetos lejanos) que solo aportarían los crops locales
+# -- aceptable para las señales que este módulo extrae (descripción
+# general, conteo aproximado de personas, aficiones visibles, indicio de
+# pareja), que son deliberadamente de grano grueso, no para OCR ni
+# detección de objetos pequeños. Si en el futuro se necesitara ese
+# detalle fino, subir este valor (a costa de más crops y más tiempo).
+_CAPTION_MAX_DIMENSION = 378
 
 _DESCRIPCION_RE = re.compile(r"DESCRIPCION:[ \t]*(.+)", re.IGNORECASE)
 _PERSONAS_RE = re.compile(r"PERSONAS:[ \t]*(\S+)", re.IGNORECASE)
@@ -657,6 +699,13 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
     envolverla en `asyncio.to_thread` para no bloquear el event loop, ver
     geolocation.py.
 
+    Internamente, ANTES de nada, hace una copia de `image` y la
+    redimensiona a `_CAPTION_MAX_DIMENSION` (ver esa constante para la
+    medición real que respalda el valor) -- nunca se toca `image` en sí,
+    porque geolocation.py ejecuta `estimate_location_from_image(image)` en
+    paralelo sobre el MISMO objeto para DINOv2, que sí necesita la
+    resolución mayor (`_MAX_QUEUED_IMAGE_DIMENSION` en geolocation.py).
+
     Internamente hace DOS llamadas a `_model.query()` -- una con
     `_CAPTION_QUERY` (texto libre, sin plantilla que copiar) y otra con
     `_STRUCTURED_QUERY` (PERSONAS/AFICION/PAREJA, formato fijo) -- en vez
@@ -664,8 +713,8 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
     campos de opciones fijas en el mismo prompt hacía que Moondream2
     copiara literalmente el ejemplo de texto libre en vez de describir la
     imagen real (ver nota en `_CAPTION_QUERY`). Ambas llamadas reutilizan
-    el mismo `_model.encode_image(image)` para no pagar el coste de
-    codificar la foto dos veces.
+    el mismo `_model.encode_image()` (sobre la copia ya redimensionada)
+    para no pagar el coste de codificar la foto dos veces.
 
     `descripcion_cruda` reconstruye el mismo formato de cuatro líneas de
     siempre (DESCRIPCION/PERSONAS/AFICION/PAREJA) a partir de las dos
@@ -724,14 +773,25 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
 
     try:
         _lazy_load()
-        # Codificar la imagen UNA vez y reutilizarla para las dos
-        # preguntas (ver docs.moondream.ai/advanced/transformers,
+        # Redimensionar una COPIA de la imagen antes de codificarla (ver
+        # _CAPTION_MAX_DIMENSION más arriba para el porqué del valor 378
+        # y la medición real que lo respalda). Nunca se llama .thumbnail()
+        # sobre `image` directamente: geolocation.py ejecuta
+        # estimate_location_from_image(image) y este análisis de forma
+        # CONCURRENTE (asyncio.gather + to_thread) sobre el MISMO objeto
+        # PIL.Image -- mutar `image` in-place aquí sería una condición de
+        # carrera con el otro hilo, que sigue necesitando la resolución
+        # de 1024px (_MAX_QUEUED_IMAGE_DIMENSION) para DINOv2.
+        resized = image.copy()
+        resized.thumbnail((_CAPTION_MAX_DIMENSION, _CAPTION_MAX_DIMENSION), Image.LANCZOS)
+        # Codificar la imagen (ya redimensionada) UNA vez y reutilizarla
+        # para las dos preguntas (ver docs.moondream.ai/advanced/transformers,
         # "If you're planning to run multiple inferences on the same
         # image, you can pre-encode it once and reuse the encoding") --
         # evita que el encoder de visión procese la misma foto dos veces,
         # coste que antes se pagaba por CADA llamada a .query() si
         # hiciéramos dos llamadas ingenuas con la imagen sin codificar.
-        encoded = _model.encode_image(image)
+        encoded = _model.encode_image(resized)
         caption = _model.query(encoded, _CAPTION_QUERY, settings=_CAPTION_SETTINGS)["answer"].strip().rstrip(".")
         structured = _model.query(encoded, _STRUCTURED_QUERY, settings=_STRUCTURED_SETTINGS)["answer"].strip()
     except Exception as exc:
