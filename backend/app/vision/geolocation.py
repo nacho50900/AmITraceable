@@ -424,7 +424,30 @@ async def _download_image(client, semaphore, media_url):
     """Descarga UNA foto (I/O de red). La descarga es un recurso totalmente
     distinto de la CPU que usan los dos modelos de visión -- solaparla con
     el análisis de otras fotos reduce el tiempo total, sin competir por los
-    mismos núcleos que usa torch."""
+    mismos núcleos que usa torch.
+
+    BUG REAL corregido aquí (visto en producción, no una precaución
+    teórica): `Image.open()` es PEREZOSO -- no decodifica los píxeles al
+    momento, se limita a guardar una referencia al `BytesIO` y decodifica
+    bajo demanda la PRIMERA vez que algo accede de verdad a la imagen
+    (`.convert()`, `.copy()`, iterar píxeles...). `_process_photo` pasa
+    esta MISMA imagen a `estimate_location_from_image` y
+    `analyze_image_content` EN PARALELO (`asyncio.gather`, cada una en su
+    propio hilo vía `asyncio.to_thread`) -- y esa decodificación perezosa
+    de PIL NO es segura frente a acceso concurrente desde dos hilos
+    distintos. En producción esto se manifestaba como una exclusión mutua
+    perfecta: SIEMPRE que DINOv2 conseguía una estimación, Moondream2
+    fallaba con `OSError: image file is truncated`, y viceversa -- nunca
+    los dos a la vez, porque el hilo que llegaba primero completaba la
+    decodificación, y el segundo se encontraba el stream ya parcialmente
+    consumido.
+
+    La solución: forzar la decodificación completa AQUÍ, con `.load()`,
+    mientras todavía estamos en un único hilo (el de la propia descarga) --
+    así, cuando `_process_photo` reparte la imagen entre los dos modelos,
+    ya no queda ninguna lectura perezosa pendiente sobre la que competir;
+    ambos hilos solo LEEN píxeles ya decodificados en memoria, lo cual sí
+    es seguro."""
     from PIL import Image
     import io
 
@@ -432,7 +455,9 @@ async def _download_image(client, semaphore, media_url):
         try:
             resp = await client.get(media_url)
             resp.raise_for_status()
-            return Image.open(io.BytesIO(resp.content))
+            image = Image.open(io.BytesIO(resp.content))
+            image.load()  # fuerza la decodificación completa AQUÍ, en un único hilo -- ver docstring
+            return image
         except Exception:
             return None  # imagen no descargable/decodificable: se omite, no se aborta el análisis
 
@@ -543,25 +568,6 @@ def _collect_photo_result(
     `evidence` de cada InferredAttribute (más preciso: apunta a la foto
     exacta que dio la señal, no solo a la publicación)."""
     _image, estimate, scene_inferences, indicio_pareja, description, description_general = photo_result
-
-    # DIAGNÓSTICO TEMPORAL (quitar una vez localizado el problema real):
-    # Nacho reporta que fotos con análisis de Moondream2 confirmado por
-    # log (description/description_general no vacíos) aparecen como
-    # "Sin descripción disponible" en el frontend -- es decir, se guardan
-    # aquí pero algo falla en la búsqueda posterior (report/generator.py)
-    # o en un tramo intermedio que la revisión de código no ha revelado.
-    # Este log confirma, con datos reales, exactamente qué clave se está
-    # guardando y si el valor llegó no vacío en este punto -- antes de
-    # seguir revisando código a ciegas.
-    logger.info(
-        "DIAG _collect_photo_result: permalink=%r photo_link=%r estimate_is_none=%s "
-        "description_len=%s description_general_len=%s",
-        permalink,
-        photo_link,
-        estimate is None,
-        len(description) if description else 0,
-        len(description_general) if description_general else 0,
-    )
 
     if estimate is not None:
         estimate.photo_link = photo_link

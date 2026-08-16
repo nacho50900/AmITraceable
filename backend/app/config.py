@@ -19,26 +19,28 @@ def _default_photo_analysis_concurrency() -> int:
     cambiar de servidor.
 
     No es un óptimo calculado (eso solo se puede medir empíricamente, ver
-    `app/log/performance_log.py` y `scripts/analyze_performance_log.py`): es
-    una heurística de "reparto a partes iguales" -- 2 hilos de PyTorch por
-    foto en vuelo es el punto donde, en la práctica, una sola inferencia ya
-    no se beneficia mucho de más hilos (rendimientos decrecientes), así
-    que por debajo de eso es mejor meter más fotos en paralelo que más
-    hilos por foto. Con 4 núcleos da concurrencia 2 (como el valor fijo
-    anterior); con 16 da 8. Nunca menos de 1.
+    `app/log/performance_log.py` y `scripts/analyze_performance_log.py`).
 
-    EXCEPCIÓN con GPU (CUDA disponible): esta heurística de "núcleos de
-    CPU" deja de tener sentido -- con GPU, DINOv2 y Moondream2 comparten
-    la misma VRAM (no núcleos de CPU), y cada foto en vuelo mantiene su
-    propia pasada de Moondream2 (pesos + activaciones + caché KV de la
-    generación autoregresiva) ocupando esa VRAM a la vez. En una GPU de
-    consumo con poca VRAM (p. ej. 4GB: los pesos de Moondream2 en float16
-    ya son ~3.6GB por sí solos, ver el comentario de presupuesto de VRAM
-    en app/vision/scene_analysis.py), concurrencia > 1 multiplicaría ese
-    uso y agotaría la VRAM enseguida -- así que con CUDA disponible se
-    fuerza concurrencia 1, sin mirar núcleos de CPU. Sigue siendo
-    sobreescribible con PHOTO_ANALYSIS_CONCURRENCY si algún día se
-    despliega con una GPU con VRAM de sobra para más de una foto a la vez.
+    Dos heurísticas distintas según haya GPU o no -- descubierto en
+    producción real (GTX 1650): la heurística de CPU (de abajo) se pensó
+    en la época en que Moondream2 corría en CPU (ver ADR-19 / workaround
+    de float32), donde el recurso que compartían varias fotos en vuelo
+    eran los núcleos de CPU. Con GPU, el recurso limitante deja de ser la
+    CPU: DINOv2 y Moondream2 comparten la MISMA tarjeta (a menudo con poca
+    VRAM, 4GB en este caso) -- varias fotos analizándose a la vez ahí NO
+    aportan más rendimiento real (la propia GPU serializa el trabajo de
+    todas formas), solo contención y más riesgo de quedarse sin VRAM. En
+    GPU, un análisis a la vez (concurrencia 1) es lo correcto.
+
+    Sin GPU disponible (o sin `torch` instalado -- builds sin
+    `WITH_GEOLOCATION`, que no tienen esta dependencia en absoluto, ver
+    Dockerfile), se mantiene la heurística de CPU original: "reparto a
+    partes iguales" -- 2 hilos de PyTorch por foto en vuelo es el punto
+    donde, en la práctica, una sola inferencia ya no se beneficia mucho de
+    más hilos (rendimientos decrecientes), así que por debajo de eso es
+    mejor meter más fotos en paralelo que más hilos por foto. Con 4
+    núcleos da concurrencia 2 (como el valor fijo anterior); con 16 da 8.
+    Nunca menos de 1.
     """
     try:
         import torch
@@ -46,7 +48,8 @@ def _default_photo_analysis_concurrency() -> int:
         if torch.cuda.is_available():
             return 1
     except ImportError:
-        pass  # requirements-vision.txt no instalado -- ni geolocalización ni scene_analysis se van a usar, la heurística de CPU no importa
+        pass  # sin torch instalado (build sin WITH_GEOLOCATION): sigue la heurística de CPU de abajo
+
     cpu_count = os.cpu_count() or 4
     return max(1, cpu_count // 2)
 
@@ -93,18 +96,21 @@ class Settings(BaseSettings):
     max_media: int = 200
 
     # Nº de fotos que se analizan EN PARALELO con los modelos de visión
-    # (DINOv2 + Moondream2, ver app/vision/geolocation.py). DINOv2 es
-    # rápido (solo un embedding) pero Moondream2 es lento (generación
-    # autoregresiva) -- con concurrencia 1, mientras Moondream2 trabaja en
-    # una foto, el núcleo que habría usado DINOv2 para la siguiente queda
-    # ocioso. Subir esto aprovecha esos huecos, a costa de más RAM (cada
-    # foto en vuelo mantiene su propia pasada de Moondream2 en memoria) y
-    # de competir más por los mismos núcleos. Se calcula solo a partir de
-    # los núcleos disponibles en la máquina donde arranca el proceso (ver
-    # `_default_photo_analysis_concurrency`) -- no hace falta tocar esto al
-    # cambiar de servidor. Sigue siendo sobreescribible con la variable de
-    # entorno PHOTO_ANALYSIS_CONCURRENCY si algún día conviene forzar un
-    # valor concreto (p. ej. para comparar configuraciones, ver
+    # (DINOv2 + Moondream2, ver app/vision/geolocation.py). SIN GPU
+    # (Moondream2 en CPU, ver ADR-19): DINOv2 es rápido (solo un embedding)
+    # pero Moondream2 es lento (generación autoregresiva) -- con
+    # concurrencia 1, mientras Moondream2 trabaja en una foto, el núcleo
+    # que habría usado DINOv2 para la siguiente queda ocioso. Subir esto
+    # aprovecha esos huecos, a costa de más RAM y de competir más por los
+    # mismos núcleos. CON GPU, este razonamiento deja de aplicar: DINOv2 y
+    # Moondream2 comparten la MISMA tarjeta, así que varias fotos a la vez
+    # no aportan más rendimiento, solo contención -- el valor por defecto
+    # pasa a ser 1 automáticamente si hay CUDA disponible (ver
+    # `_default_photo_analysis_concurrency`). En ambos casos, no hace
+    # falta tocar esto al cambiar de servidor -- se recalcula solo. Sigue
+    # siendo sobreescribible con la variable de entorno
+    # PHOTO_ANALYSIS_CONCURRENCY si algún día conviene forzar un valor
+    # concreto (p. ej. para comparar configuraciones, ver
     # scripts/analyze_performance_log.py).
     photo_analysis_concurrency: int = Field(default_factory=_default_photo_analysis_concurrency)
 
@@ -124,11 +130,7 @@ class Settings(BaseSettings):
     # app/vision/scene_analysis.py y `_maybe_analyze_content` en
     # geolocation.py). Desactivado por defecto: en máquinas con poca RAM
     # (menos de ~10-12GB libres) el modelo en float32 no cabe en memoria
-    # junto al resto de servicios -- ver ADR correspondiente en docs/. Con
-    # GPU (CUDA disponible), el modelo se carga en VRAM en vez de RAM (ver
-    # scene_analysis.py) -- el límite pasa a ser VRAM, no RAM del sistema;
-    # revisa el presupuesto de VRAM documentado ahí antes de activar esto
-    # en una GPU con poca memoria dedicada (4GB o menos va muy justo).
+    # junto al resto de servicios -- ver ADR correspondiente en docs/.
     # La geolocalización (DINOv2) no depende de esto y sigue funcionando
     # igual, activado o no.
     enable_scene_analysis: bool = False

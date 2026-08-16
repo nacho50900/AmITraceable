@@ -136,6 +136,86 @@ def _install_fake_embedding(monkeypatch, output_vector=None):
     )
 
 
+class TestDownloadImage:
+    """`_download_image` es compartida por DINOv2 y Moondream2, que la
+    reciben en paralelo (`_process_photo`, `asyncio.gather` con
+    `asyncio.to_thread` cada una) -- ver el bug real que motiva estos
+    tests en el docstring de `_download_image`."""
+
+    @pytest.mark.asyncio
+    async def test_forces_full_decode_before_returning(self, monkeypatch, respx_mock):
+        """Bug real corregido en producción: sin `.load()` en
+        `_download_image`, `Image.open()` deja la decodificación de
+        píxeles pendiente (perezosa) hasta que algo accede de verdad a la
+        imagen -- y como esa misma imagen se reparte entre DOS hilos
+        concurrentes (DINOv2 y Moondream2), esa decodificación perezosa
+        competía entre ambos y producía `OSError: image file is
+        truncated` en uno de los dos (casi siempre el que llegaba
+        segundo), de forma no determinista y con una exclusión mutua casi
+        perfecta observada en logs reales: cuando uno de los dos modelos
+        conseguía un resultado, el otro fallaba, y viceversa. Se comprueba
+        que `Image.load()` se llama aquí, ANTES de que la imagen se
+        reparta entre hilos, no dejándolo para más tarde."""
+        import httpx
+        from PIL import Image as PILImage
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/test.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        load_calls: list[bool] = []
+        original_load = PILImage.Image.load
+
+        def _spy_load(self):
+            load_calls.append(True)
+            return original_load(self)
+
+        monkeypatch.setattr(PILImage.Image, "load", _spy_load)
+
+        async with httpx.AsyncClient() as client:
+            semaphore = asyncio.Semaphore(1)
+            image = await geolocation._download_image(client, semaphore, "https://cdn.fake/test.jpg")
+
+        assert image is not None
+        assert len(load_calls) >= 1
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_download_failure(self, monkeypatch, respx_mock):
+        """No debe lanzar si la descarga falla -- una foto no descargable
+        se omite, no aborta el análisis de las demás (ver
+        `_process_photo`)."""
+        import httpx
+
+        respx_mock.get("https://cdn.fake/missing.jpg").mock(return_value=httpx.Response(404))
+
+        async with httpx.AsyncClient() as client:
+            semaphore = asyncio.Semaphore(1)
+            image = await geolocation._download_image(client, semaphore, "https://cdn.fake/missing.jpg")
+
+        assert image is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_undecodable_content(self, monkeypatch, respx_mock):
+        """Igual que el anterior, pero con una descarga que SÍ tiene
+        éxito (200 OK) pero cuyo contenido no es una imagen válida -- debe
+        degradarse a None en vez de propagar la excepción de PIL."""
+        import httpx
+
+        respx_mock.get("https://cdn.fake/not-an-image.jpg").mock(
+            return_value=httpx.Response(200, content=b"esto no es un jpeg valido")
+        )
+
+        async with httpx.AsyncClient() as client:
+            semaphore = asyncio.Semaphore(1)
+            image = await geolocation._download_image(client, semaphore, "https://cdn.fake/not-an-image.jpg")
+
+        assert image is None
+
+
 class TestEstimateLocationFromImage:
     def test_returns_none_when_index_not_built(self, monkeypatch):
         def _raise_not_found():
