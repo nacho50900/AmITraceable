@@ -33,6 +33,45 @@ body {
   padding: 48px 24px 80px;
 }
 
+/* --- Selector de idioma --- */
+/* Fijo arriba a la derecha de la ventana (no del .page, que está centrado
+   con max-width) para que quede en la esquina real de la pantalla tanto en
+   Landing como en Dashboard, sin desplazar el resto del contenido. */
+.language-switcher {
+  position: fixed;
+  top: 16px;
+  right: 20px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 10px;
+}
+
+.language-switcher-icon {
+  color: var(--text-dim);
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.language-switcher-select {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+}
+
+.language-switcher-select option {
+  background: var(--bg-card);
+  color: var(--text);
+}
+
 /* --- Landing --- */
 .landing h1 {
   font-size: clamp(28px, 4vw, 42px);

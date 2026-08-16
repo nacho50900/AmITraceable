@@ -149,14 +149,22 @@ _STRUCTURED_QUERY = (
     # aparte -- y capar la generación con _STRUCTURED_SETTINGS más abajo
     # como red de seguridad adicional. A diferencia de _CAPTION_QUERY
     # (texto libre), aquí SÍ funciona dar un ejemplo literal porque las
-    # tres respuestas son opciones fijas (ninguna/una/varias, si/no, o una
-    # palabra corta de afición) -- no hay contenido "copiable" que pueda
-    # colarse como respuesta real, solo forma.
-    "Analiza esta imagen y responde EXACTAMENTE en este formato de tres líneas, sin nada más, "
+    # cuatro respuestas son opciones fijas (o casi -- ver TEXTO_VISIBLE) --
+    # no hay contenido "copiable" que pueda colarse como respuesta real,
+    # solo forma.
+    #
+    # Campo TEXTO_VISIBLE añadido después: texto legible en la propia foto
+    # (carteles, camisetas, pancartas, matrículas, nombres de lugares...).
+    # Es el campo con más riesgo de fuga de privacidad de los cuatro --
+    # texto real de la foto puede incluir nombres propios (una insignia,
+    # una camiseta con un nombre bordado) -- de ahí la advertencia
+    # explícita más abajo, aparte de la general del final del prompt.
+    "Analiza esta imagen y responde EXACTAMENTE en este formato de cuatro líneas, sin nada más, "
     "como en este ejemplo (sustituyendo los valores por los reales de ESTA imagen):\n"
     "PERSONAS: varias\n"
     "AFICION: ninguno\n"
-    "PAREJA: no\n\n"
+    "PAREJA: no\n"
+    "TEXTO_VISIBLE: ninguno\n\n"
     "PERSONAS solo puede valer: 'ninguna' (no aparece ninguna persona), 'una' (aparece "
     "exactamente una persona protagonista), o 'varias' (dos o más personas de protagonismo "
     "similar, p. ej. una pareja o un grupo).\n"
@@ -165,11 +173,16 @@ _STRUCTURED_QUERY = (
     "específico.\n"
     "PAREJA solo puede valer: 'si' si la imagen muestra a dos personas besándose, en un abrazo "
     "claramente romántico, o cogidas de la mano en un contexto de pareja, o 'no' en cualquier "
-    "otro caso.\n\n"
+    "otro caso.\n"
+    "TEXTO_VISIBLE solo puede valer: el texto legible más relevante que aparezca en la imagen "
+    "(cartel, escaparate, pancarta, matrícula, nombre de una calle o un lugar), copiado tal cual, "
+    "o la palabra 'ninguno' si no hay texto legible. TEXTO_VISIBLE NUNCA puede ser el nombre "
+    "propio de una persona (en una camiseta, insignia, etiqueta con nombre, etc.), aunque se lea "
+    "con claridad -- en ese caso responde 'ninguno' para ese texto en concreto.\n\n"
     "No describas ni identifiques físicamente a ninguna persona que aparezca en la imagen -- "
     "ni su aspecto, ni su sexo, ni su edad, ni su raza o etnia -- más allá de contarlas y de si "
     "hay o no un contexto romántico entre ellas.\n\n"
-    "Responde ahora solo las tres líneas, con los valores reales para esta imagen concreta."
+    "Responde ahora solo las cuatro líneas, con los valores reales para esta imagen concreta."
 )
 
 # Settings por separado para cada llamada -- cada una necesita un límite
@@ -177,6 +190,16 @@ _STRUCTURED_QUERY = (
 # estructurada que en el caption) y capar cada una a su propio tamaño
 # real reduce aún más el riesgo de que una respuesta confusa se alargue
 # de más, además de acelerar cada llamada individualmente.
+#
+# _STRUCTURED_SETTINGS con más margen (45, antes 30) desde que se añadió
+# TEXTO_VISIBLE -- ahora son CUATRO líneas en vez de tres, y ya no hace
+# falta apurar el límite para evitar texto sobrante feo en pantalla: la
+# descripción que se MUESTRA (`descripcion_cruda`, más abajo en
+# analyze_image_content) ya no es el texto crudo del modelo, se
+# RECONSTRUYE desde los valores YA PARSEADOS -- así que cualquier cola
+# que el modelo genere de más (p. ej. empezar a copiar "PERSONAS solo
+# puede val..." tras responder bien, visto en producción) se descarta
+# automáticamente sin importar en qué punto exacto se corte.
 #
 # "variant": None es obligatorio en AMBAS, no opcional -- descubierto en
 # ejecución real (GTX 1650, revisión pinneada del modelo, ver
@@ -190,9 +213,9 @@ _STRUCTURED_QUERY = (
 #
 # temperature: 0.2 en el caption (algo de margen para que la frase suene
 # natural, ya que es texto libre) y 0.1 en la estructurada (ya probado
-# fiable para mantener el formato de tres opciones fijas).
+# fiable para mantener el formato de opciones fijas).
 _CAPTION_SETTINGS = {"max_tokens": 45, "temperature": 0.2, "variant": None}
-_STRUCTURED_SETTINGS = {"max_tokens": 30, "temperature": 0.1, "variant": None}
+_STRUCTURED_SETTINGS = {"max_tokens": 45, "temperature": 0.1, "variant": None}
 
 # Redimensionado específico para Moondream2, aparte del que ya aplica
 # geolocation.py para DINOv2 (_MAX_QUEUED_IMAGE_DIMENSION=1024, que ese
@@ -238,6 +261,7 @@ _DESCRIPCION_RE = re.compile(r"DESCRIPCION:[ \t]*(.+)", re.IGNORECASE)
 _PERSONAS_RE = re.compile(r"PERSONAS:[ \t]*(\S+)", re.IGNORECASE)
 _AFICION_RE = re.compile(r"AFICION:[ \t]*(.+)", re.IGNORECASE)
 _PAREJA_RE = re.compile(r"PAREJA:[ \t]*(\S+)", re.IGNORECASE)
+_TEXTO_VISIBLE_RE = re.compile(r"TEXTO_VISIBLE:[ \t]*(.+)", re.IGNORECASE)
 
 
 def _scene_analysis_available() -> bool:
@@ -708,28 +732,31 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
 
     Internamente hace DOS llamadas a `_model.query()` -- una con
     `_CAPTION_QUERY` (texto libre, sin plantilla que copiar) y otra con
-    `_STRUCTURED_QUERY` (PERSONAS/AFICION/PAREJA, formato fijo) -- en vez
-    de una sola combinada, porque mezclar un campo de texto libre con
-    campos de opciones fijas en el mismo prompt hacía que Moondream2
-    copiara literalmente el ejemplo de texto libre en vez de describir la
-    imagen real (ver nota en `_CAPTION_QUERY`). Ambas llamadas reutilizan
-    el mismo `_model.encode_image()` (sobre la copia ya redimensionada)
-    para no pagar el coste de codificar la foto dos veces.
+    `_STRUCTURED_QUERY` (PERSONAS/AFICION/PAREJA/TEXTO_VISIBLE, formato
+    fijo) -- en vez de una sola combinada, porque mezclar un campo de
+    texto libre con campos de opciones fijas en el mismo prompt hacía que
+    Moondream2 copiara literalmente el ejemplo de texto libre en vez de
+    describir la imagen real (ver nota en `_CAPTION_QUERY`). Ambas
+    llamadas reutilizan el mismo `_model.encode_image()` (sobre la copia
+    ya redimensionada) para no pagar el coste de codificar la foto dos
+    veces.
 
-    `descripcion_cruda` reconstruye el mismo formato de cuatro líneas de
-    siempre (DESCRIPCION/PERSONAS/AFICION/PAREJA) a partir de las dos
-    respuestas, no una redacción libre -- se devuelve tal cual en vez de
-    reformularla porque: (a) todo el parseo (`_parse_inferences` y cía.)
-    sigue operando sobre este único formato sin cambios, y (b) es más
-    transparente para quien vea el informe (mismo criterio de "mostrar la
-    evidencia real" que el resto del proyecto) que una paráfrasis que
-    podría no ser fiel.
+    `descripcion_cruda` (ver `_build_clean_summary`) se RECONSTRUYE a
+    partir de los valores YA PARSEADOS de `structured` -- ya NO es el
+    texto crudo del modelo tal cual. Dos motivos: (a) el modelo, tras
+    responder bien, a veces sigue generando y empieza a copiar fragmentos
+    de la propia explicación del prompt (visto en producción); reconstruir
+    desde valores parseados descarta esa cola sin depender de acertar el
+    `max_tokens` exacto cada vez; (b) solo interesa mostrar señales
+    POSITIVAS/informativas -- los valores negativos por defecto (afición
+    ninguna, sin pareja, sin texto visible) no aportan nada y solo
+    acumulan líneas vacías si se muestran siempre. None si no hubo NADA
+    informativo que mostrar.
 
-    `descripcion_general` es SOLO el valor de la línea DESCRIPCION, ya
-    parseado (p. ej. "4 people happily eating pizza on a terrace") --
-    pensado para mostrarse tal cual como pie de foto legible, a diferencia
-    de `descripcion_cruda` (que incluye las cuatro etiquetas y está
-    pensado para la vista "qué vio la IA" de detalle).
+    `descripcion_general` es directamente la respuesta de `_CAPTION_QUERY`
+    (`caption`, ya limpia) -- pensada para mostrarse tal cual como pie de
+    foto legible, a diferencia de `descripcion_cruda` (pensado para la
+    vista "qué vio la IA" de detalle, con las señales estructuradas).
     EN INGLÉS, a diferencia del resto de este módulo y del resto del
     proyecto (español) -- decisión deliberada, no un descuido: Moondream2
     solo tiene datos de entrenamiento en inglés (confirmado por el autor
@@ -820,14 +847,25 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
         # revisar primero cómo se está pasando `device_map`.
         return [], False, None, None
 
-    # Se reconstruye el mismo formato combinado de siempre (DESCRIPCION +
-    # las tres líneas estructuradas) aunque ahora vengan de DOS llamadas
-    # separadas -- así _parse_inferences/_parse_pareja/_parse_personas/
-    # _parse_descripcion (todas basadas en buscar "ETIQUETA:" con regex)
-    # no necesitan ningún cambio, y la vista "qué vio la IA" del frontend
-    # sigue mostrando las cuatro líneas juntas como una unidad legible.
-    answer = f"DESCRIPCION: {caption}\n{structured}"
-    return _parse_inferences(answer), _parse_pareja(answer), answer, _parse_descripcion(answer)
+    # `structured` (no un texto combinado con DESCRIPCION) es la única
+    # fuente para PERSONAS/AFICION/PAREJA/TEXTO_VISIBLE -- ya no hace
+    # falta reconstruir un texto "DESCRIPCION: {caption}\n{structured}"
+    # como antes: `caption` ya ES directamente la descripción general (no
+    # hace falta volver a parsearla de un texto reconstruido), y el bloque
+    # que se MUESTRA en el frontend (`descripcion_cruda`) se reconstruye
+    # desde los valores YA PARSEADOS, no desde texto crudo -- ver
+    # `_build_clean_summary` para los dos motivos (descarta colas de
+    # generación sobrantes Y solo muestra señales positivas).
+    descripcion_general = caption or None
+    personas = _parse_personas(structured)
+    aficion_raw = _parse_aficion_raw(structured)
+    indicio_pareja = _parse_pareja(structured)
+    texto_visible = _parse_texto_visible(structured)
+
+    inferencias = _parse_inferences(structured)
+    descripcion_cruda = _build_clean_summary(personas, aficion_raw, indicio_pareja, texto_visible)
+
+    return inferencias, indicio_pareja, descripcion_cruda, descripcion_general
 
 
 def _parse_descripcion(answer: str) -> str | None:
@@ -854,7 +892,48 @@ def _parse_personas(answer: str) -> str | None:
     return value if value in ("ninguna", "una", "varias") else None
 
 
+def _parse_aficion_raw(answer: str) -> str | None:
+    """Extrae el valor CRUDO de la línea AFICION, SIN aplicar la cautela
+    de atribución de `_parse_inferences` (que descarta la señal si
+    PERSONAS no es 'ninguna'/'una', porque con varias personas no se
+    puede saber de quién es la afición -- ver docstring de
+    `_parse_inferences`). Se usa en dos sitios con necesidades distintas:
+    `_parse_inferences` (que SÍ aplica esa cautela antes de convertirlo en
+    un InferredAttribute atribuido a la cuenta analizada) y
+    `_build_clean_summary` (que solo quiere mostrar "qué vio la IA" en el
+    frontend, sin atribuírselo a nadie como rasgo personal -- ahí la
+    cautela de atribución no aplica)."""
+    match = _AFICION_RE.search(answer)
+    if match is None:
+        return None
+    valor = match.group(1).strip().rstrip(".")
+    if not valor or valor.lower() in ("ninguno", "ninguna", "none", "n/a"):
+        return None
+    return valor
+
+
+def _parse_texto_visible(answer: str) -> str | None:
+    """Extrae el valor de la línea TEXTO_VISIBLE (texto legible en la
+    propia foto: carteles, escaparates, matrículas...). None si no se
+    pudo parsear o si el modelo respondió 'ninguno' (no hay texto
+    legible). El prompt (ver _STRUCTURED_QUERY) ya le prohíbe explícitamente
+    devolver el nombre propio de una persona aquí -- este parseo no repite
+    ese filtro (no hay forma fiable de detectar "esto es un nombre propio"
+    solo con regex), se confía en la instrucción del prompt, igual que ya
+    se hace con el resto de restricciones éticas/legales del módulo (ver
+    docstring de cabecera)."""
+    match = _TEXTO_VISIBLE_RE.search(answer)
+    if match is None:
+        return None
+    valor = match.group(1).strip().rstrip(".")
+    if not valor or valor.lower() in ("ninguno", "ninguna", "none", "n/a"):
+        return None
+    return valor
+
+
 def _parse_inferences(answer: str) -> list[InferredAttribute]:
+    inferences: list[InferredAttribute] = []
+
     # Con varias personas de protagonismo similar en la foto, no hay forma
     # de saber si la afición/actividad detectada es de la cuenta analizada
     # o de la otra persona -- ver docstring del módulo. Se descarta la
@@ -862,23 +941,38 @@ def _parse_inferences(answer: str) -> list[InferredAttribute]:
     # PERSONAS no se pudo parsear (formato inesperado), se prefiere
     # también descartar por precaución antes que asumir que es seguro
     # atribuirla.
-    if _parse_personas(answer) not in ("ninguna", "una"):
-        return []
+    if _parse_personas(answer) in ("ninguna", "una"):
+        aficion_raw = _parse_aficion_raw(answer)
+        if aficion_raw is not None:
+            inferences.append(
+                InferredAttribute(
+                    category="aficion",
+                    value=f"Posible afición/interés detectado en una foto: {aficion_raw}",
+                    confidence=0.5,
+                    evidence=[],
+                )
+            )
 
-    match = _AFICION_RE.search(answer)
-    if match is None:
-        return []
-    valor = match.group(1).strip().rstrip(".")
-    if not valor or valor.lower() in ("ninguno", "ninguna", "none", "n/a"):
-        return []
-    return [
-        InferredAttribute(
-            category="aficion",
-            value=f"Posible afición/interés detectado en una foto: {valor}",
-            confidence=0.5,
-            evidence=[],
+    # TEXTO_VISIBLE NO necesita la misma cautela de atribución que AFICION:
+    # un cartel o un nombre de lugar en la foto es verdad independientemente
+    # de cuántas personas aparezcan -- no es un rasgo personal de "quién
+    # sale en la foto", es evidencia sobre el LUGAR/CONTEXTO, más parecido
+    # a la geolocalización por imagen que a un rasgo de la cuenta analizada.
+    # Confianza más baja que AFICION (0.4 frente a 0.5): Moondream2 es un
+    # VQA general, no un motor de OCR dedicado, más propenso a leer mal un
+    # texto concreto que a describir mal una escena general.
+    texto_visible = _parse_texto_visible(answer)
+    if texto_visible is not None:
+        inferences.append(
+            InferredAttribute(
+                category="texto_visible",
+                value=f"Texto legible detectado en una foto: {texto_visible}",
+                confidence=0.4,
+                evidence=[],
+            )
         )
-    ]
+
+    return inferences
 
 
 def _parse_pareja(answer: str) -> bool:
@@ -890,3 +984,51 @@ def _parse_pareja(answer: str) -> bool:
     if match is None:
         return False
     return match.group(1).strip().lower().rstrip(".,;") in ("si", "sí", "yes", "true")
+
+
+def _build_clean_summary(
+    personas: str | None,
+    aficion_raw: str | None,
+    indicio_pareja: bool,
+    texto_visible: str | None,
+) -> str | None:
+    """Reconstruye el bloque 'qué vio la IA' que se muestra en el
+    frontend (vista de detalle de cada foto) a partir de los valores YA
+    PARSEADOS -- nunca a partir del texto crudo tal cual lo generó el
+    modelo. Dos motivos:
+
+    (1) El modelo, tras responder bien, a veces sigue generando y empieza
+    a copiar fragmentos de la propia explicación del prompt (visto en
+    producción: "PERSONAS solo puede val..." apareciendo tras las cuatro
+    líneas correctas, cortado por `_STRUCTURED_SETTINGS['max_tokens']`).
+    Reconstruir desde los valores ya parseados descarta esa cola
+    automáticamente, sin depender de acertar el `max_tokens` exacto cada
+    vez -- cada valor se extrajo con `.search()`, que coge la PRIMERA
+    aparición de cada etiqueta y ya ignora cualquier eco posterior.
+
+    (2) Solo interesa mostrar señales POSITIVAS/informativas (p. ej.
+    "Indicio de contexto de pareja: sí", "Posible afición: guitarra") --
+    los valores negativos por defecto (afición ninguna, sin pareja, sin
+    texto visible) no aportan nada al usuario y solo acumulan líneas
+    vacías si se muestran siempre. PERSONAS es la excepción: se muestra
+    siempre que se pudo parsear (incluido 'ninguna'), porque da contexto
+    básico en una sola línea -- no es una "señal negativa" en el mismo
+    sentido que las otras tres.
+
+    La descripción general (frase libre, `descripcion_general` en
+    `analyze_image_content`) NO se repite aquí -- el frontend ya la
+    muestra aparte, destacada, justo encima de este bloque.
+
+    None si no hay NADA que mostrar (PERSONAS no se pudo parsear Y las
+    otras tres son negativas) -- caso raro pero posible si el modelo se
+    desvió del formato por completo."""
+    lines = []
+    if personas is not None:
+        lines.append(f"Personas en la foto: {personas}")
+    if aficion_raw:
+        lines.append(f"Posible afición o interés: {aficion_raw}")
+    if indicio_pareja:
+        lines.append("Indicio de contexto de pareja: sí")
+    if texto_visible:
+        lines.append(f"Texto visible: {texto_visible}")
+    return "\n".join(lines) if lines else None

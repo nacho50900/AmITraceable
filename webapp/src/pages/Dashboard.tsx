@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api } from '../api';
 import HourlyActivityChart from '../components/HourlyActivityChart';
 import AiSummaryCard from '../components/AiSummaryCard';
 import DownloadReportButton from '../components/DownloadReportButton';
+import LanguageSwitcher from '../components/LanguageSwitcher';
 import LocationMap from '../components/LocationMap';
 import PopulationNarrowingTable from '../components/PopulationNarrowingTable';
 import ScoreBar from '../components/ScoreBar';
@@ -23,7 +25,8 @@ const SPINNER_PERIOD_MS = 800;
 // total_photos (ver app/vision/geolocation.py). Hay DOS líneas de fotos
 // independientes -- geolocalización (DINOv2) y análisis de contenido
 // (Moondream2), dos modelos y dos propósitos sobre la misma foto -- así que
-// se parametriza el verbo/sustantivo en vez de duplicar la función.
+// se parametriza el verbo/sustantivo (ya traducidos por el llamador) en vez
+// de duplicar la función.
 function formatPhotosLabel(
   counts: Record<string, unknown>,
   done: boolean,
@@ -56,6 +59,7 @@ function isTrackDone(counts: Record<string, unknown>): boolean {
 }
 
 const Dashboard: React.FC = () => {
+  const { t } = useTranslation();
   const [platform] = useState<Platform>(readPlatform);
   const [report, setReport] = useState<ExposureReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,7 +67,10 @@ const Dashboard: React.FC = () => {
   // Fases YA completadas del pipeline, en el orden en que han llegado por
   // el stream -- para pintar la lista de progreso en vivo (no un
   // temporizador simulado: cada línea corresponde a un evento real emitido
-  // por el backend, ver app/progress.py y analysis_router.py).
+  // por el backend, ver app/progress.py y analysis_router.py). OJO: estas
+  // fases llegan como texto libre YA en español directamente del backend
+  // (SSE), así que no se traducen aquí -- fuera del alcance de esta
+  // primera fase de i18n (solo UI estática del frontend).
   const [completedStages, setCompletedStages] = useState<string[]>([]);
   const [currentStage, setCurrentStage] = useState<string | null>(null);
   // El análisis de fotos corre en PARALELO con el resto del pipeline desde
@@ -215,7 +222,8 @@ const Dashboard: React.FC = () => {
 
   const platformLabel = platform === 'instagram' ? 'Instagram' : 'Reddit';
   const usernamePrefix = platform === 'instagram' ? '@' : 'u/';
-  const groupingLabel = platform === 'instagram' ? 'Hashtags más frecuentes' : 'Subreddits más frecuentes';
+  const groupingLabel =
+    platform === 'instagram' ? t('dashboard.groupingLabelInstagram') : t('dashboard.groupingLabelReddit');
   const groupingPrefix = platform === 'instagram' ? '#' : 'r/';
 
   if (loading) {
@@ -224,7 +232,7 @@ const Dashboard: React.FC = () => {
         <div className="progress-screen" ref={progressScreenRef}>
           <p className="progress-heading">
             <span className="spinner" aria-hidden="true" />
-            Analizando tu actividad pública en {platformLabel}…
+            {t('dashboard.analyzing', { platform: platformLabel })}
           </p>
           <div className="progress-frame">
             <ul className="progress-list">
@@ -243,13 +251,23 @@ const Dashboard: React.FC = () => {
               {geoCounts && (
                 <li className={geoDone ? 'progress-done' : 'progress-current'}>
                   <StatusIcon done={geoDone} />
-                  {formatPhotosLabel(geoCounts, geoDone, 'Geolocalizando fotos', 'Fotos geolocalizadas')}
+                  {formatPhotosLabel(
+                    geoCounts,
+                    geoDone,
+                    t('dashboard.photos.geolocatingVerb'),
+                    t('dashboard.photos.geolocatedDone'),
+                  )}
                 </li>
               )}
               {photosCounts && (
                 <li className={photosDone ? 'progress-done' : 'progress-current'}>
                   <StatusIcon done={photosDone} />
-                  {formatPhotosLabel(photosCounts, photosDone, 'Analizando fotos', 'Fotos analizadas')}
+                  {formatPhotosLabel(
+                    photosCounts,
+                    photosDone,
+                    t('dashboard.photos.analyzingVerb'),
+                    t('dashboard.photos.analyzedDone'),
+                  )}
                 </li>
               )}
             </ul>
@@ -262,8 +280,8 @@ const Dashboard: React.FC = () => {
   if (error) {
     return (
       <div className="page">
-        <p className="error">No se pudo generar el informe: {error}</p>
-        <button type="button" onClick={handleLogout}>Volver al inicio</button>
+        <p className="error">{t('dashboard.errorPrefix', { error })}</p>
+        <button type="button" onClick={handleLogout}>{t('dashboard.backToStart')}</button>
       </div>
     );
   }
@@ -283,12 +301,13 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="page dashboard">
+      <LanguageSwitcher />
       <header className="dashboard-header">
         <h1 className="dashboard-title">
           {report.avatar_url && (
             <img
               src={report.avatar_url}
-              alt={`Foto de perfil de ${report.username}`}
+              alt={t('dashboard.avatarAlt', { username: report.username })}
               className="dashboard-avatar"
               // Las URLs de foto de perfil de Reddit/Instagram pueden llevar
               // tokens firmados con expiración, o el usuario puede no tener
@@ -301,33 +320,41 @@ const Dashboard: React.FC = () => {
             />
           )}
           <span>
-            Informe de exposición de {usernamePrefix}
-            {report.username} <span className="platform-tag">({platformLabel})</span>
+            {t('dashboard.title', { prefix: usernamePrefix, username: report.username })}{' '}
+            <span className="platform-tag">({platformLabel})</span>
           </span>
         </h1>
         <div className="dashboard-header-actions">
           <DownloadReportButton report={report} />
           <button type="button" className="btn-secondary" onClick={handleLogout}>
-            Cerrar sesión y borrar datos
+            {t('dashboard.logout')}
           </button>
         </div>
       </header>
 
       <p className="meta">
-        Generado el {new Date(report.generated_at).toLocaleString()} · {report.n_posts_analyzed}{' '}
-        publicaciones/comentarios analizados
+        {t('dashboard.meta', {
+          date: new Date(report.generated_at).toLocaleString(),
+          count: report.n_posts_analyzed,
+        })}
       </p>
 
       <section className="card">
-        <h2>Score global de exposición: {report.privacy_score.overall_score.toFixed(1)} / 100</h2>
-        <ScoreBar label="Riesgo de geolocalización" value={report.privacy_score.geolocation_risk} />
-        <ScoreBar label="Datos personales inferibles" value={report.privacy_score.inferable_data_risk} />
-        <ScoreBar label="Facilidad de deanonimización" value={report.privacy_score.deanonymization_ease} />
+        <h2>{t('dashboard.overallScore', { score: report.privacy_score.overall_score.toFixed(1) })}</h2>
+        <ScoreBar label={t('dashboard.scoreLabels.geolocationRisk')} value={report.privacy_score.geolocation_risk} />
+        <ScoreBar
+          label={t('dashboard.scoreLabels.inferableDataRisk')}
+          value={report.privacy_score.inferable_data_risk}
+        />
+        <ScoreBar
+          label={t('dashboard.scoreLabels.deanonymizationEase')}
+          value={report.privacy_score.deanonymization_ease}
+        />
         <p className="note">{report.privacy_score.breakdown_explanation.identity_consistency}</p>
       </section>
 
       <section className="card">
-        <h2>Qué se puede inferir sobre ti</h2>
+        <h2>{t('dashboard.whatCanBeInferred')}</h2>
         <PopulationNarrowingTable
           steps={report.population_narrowing}
           remainingPopulationAllTraits={report.remaining_population_all_traits}
@@ -336,28 +363,25 @@ const Dashboard: React.FC = () => {
       </section>
 
       <section className="card">
-        <h2>Ubicaciones estimadas a partir de tus fotos</h2>
+        <h2>{t('dashboard.estimatedLocations')}</h2>
         {imageLocationConfidenceInsufficient && (
-          <p className="note">
-            El índice de confianza del análisis de las imágenes no es suficiente para estimar la
-            comunidad autónoma de residencia.
-          </p>
+          <p className="note">{t('dashboard.imageLocationConfidenceInsufficient')}</p>
         )}
         <LocationMap points={report.image_location_points} platform={report.platform} available={report.geolocation_available} />
       </section>
 
       <section className="card">
-        <h2>Patrón horario de actividad (UTC)</h2>
+        <h2>{t('dashboard.hourlyPattern')}</h2>
         <HourlyActivityChart hourlyData={report.fingerprint.avg_posts_per_hour} />
       </section>
 
       <section className="card">
-        <h2>Perfil de escritura</h2>
+        <h2>{t('dashboard.writingProfile')}</h2>
         <ul className="kv-list">
-          <li>Longitud media de frase: {report.fingerprint.avg_sentence_length} palabras</li>
-          <li>Riqueza de vocabulario: {report.fingerprint.vocabulary_richness}</li>
-          <li>Uso de emojis: {(report.fingerprint.emoji_usage_rate * 100).toFixed(2)}%</li>
-          <li>Idioma detectado: {report.fingerprint.detected_language}</li>
+          <li>{t('dashboard.avgSentenceLength', { value: report.fingerprint.avg_sentence_length })}</li>
+          <li>{t('dashboard.vocabularyRichness', { value: report.fingerprint.vocabulary_richness })}</li>
+          <li>{t('dashboard.emojiUsage', { value: (report.fingerprint.emoji_usage_rate * 100).toFixed(2) })}</li>
+          <li>{t('dashboard.detectedLanguage', { value: report.fingerprint.detected_language })}</li>
         </ul>
         <h3>{groupingLabel}</h3>
         <p>

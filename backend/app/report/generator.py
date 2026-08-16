@@ -5,7 +5,10 @@ y accionables a partir del score y los atributos inferidos.
 from datetime import datetime, timezone
 
 import asyncio
+import logging
 import unicodedata
+
+logger = logging.getLogger(__name__)
 
 from app.config import settings
 from app.models.schemas import (
@@ -326,20 +329,52 @@ async def _apply_image_geolocation(
         geo_outcome = await estimate_locations_for_posts(posts, progress_callback=progress_callback)
 
     post_dates_by_permalink = {post.permalink: post.created_utc for post in posts}
-    image_location_points = [
-        ImageLocationPoint(
-            permalink=permalink,
-            province=estimate.province,
-            confidence=estimate.confidence,
-            lat=estimate.lat,
-            lon=estimate.lon,
-            representative=estimate.representative,
-            created_utc=post_dates_by_permalink.get(permalink),
-            visual_description=geo_outcome.visual_descriptions.get(permalink),
-            visual_description_general=geo_outcome.general_descriptions.get(permalink),
+    image_location_points = []
+    for permalink, estimate in geo_outcome.results:
+        lookup_key = estimate.photo_link or permalink
+        visual_description = geo_outcome.visual_descriptions.get(lookup_key)
+        visual_description_general = geo_outcome.general_descriptions.get(lookup_key)
+
+        # DIAGNÓSTICO TEMPORAL (quitar una vez localizado el problema
+        # real): confirma, con datos reales, la clave EXACTA que se busca
+        # aquí y si la búsqueda encontró algo -- para compararlo con el
+        # log "DIAG _collect_photo_result" de geolocation.py (misma
+        # ejecución) y ver en qué punto exacto se pierde el dato.
+        logger.info(
+            "DIAG image_location_points: permalink=%r estimate.photo_link=%r lookup_key=%r "
+            "visual_descriptions_has_key=%s general_descriptions_has_key=%s",
+            permalink,
+            estimate.photo_link,
+            lookup_key,
+            lookup_key in geo_outcome.visual_descriptions,
+            lookup_key in geo_outcome.general_descriptions,
         )
-        for permalink, estimate in geo_outcome.results
-    ]
+
+        image_location_points.append(
+            ImageLocationPoint(
+                # Enlace a ESTA foto en concreto, no solo a la publicación
+                # (ver ImageLocationEstimate.photo_link / geolocation._photo_link)
+                # -- con varias fotos por publicación, cada punto lleva un
+                # enlace distinto (?img_index=N), en vez de todos apuntando al
+                # mismo permalink de publicación. Fallback al permalink de
+                # publicación si por lo que sea no se pudo determinar (no
+                # debería pasar en el flujo real, solo en tests que construyen
+                # ImageLocationEstimate directamente sin pasar photo_link).
+                permalink=lookup_key,
+                province=estimate.province,
+                confidence=estimate.confidence,
+                lat=estimate.lat,
+                lon=estimate.lon,
+                representative=estimate.representative,
+                # created_utc SÍ es a nivel de publicación (Instagram no da
+                # timestamps distintos por foto dentro de un carrusel) -- se
+                # sigue buscando por el permalink de PUBLICACIÓN, no por
+                # estimate.photo_link.
+                created_utc=post_dates_by_permalink.get(permalink),
+                visual_description=visual_description,
+                visual_description_general=visual_description_general,
+            )
+        )
 
     has_location = (
         demographic_findings.provincia is not None

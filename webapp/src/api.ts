@@ -1,3 +1,4 @@
+import i18n from './i18n';
 import type { AnalysisProgressEvent, AuthStatus, ExposureReport, Platform } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
@@ -17,9 +18,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     if (res.status === 503) {
-      throw new AiSummaryUnavailableError(body.detail ?? 'Análisis con IA no disponible ahora mismo.');
+      // body.detail viene del backend (siempre en español -- fuera del
+      // alcance de esta fase de i18n); solo el fallback local se traduce.
+      throw new AiSummaryUnavailableError(body.detail ?? i18n.t('api.aiUnavailable'));
     }
-    throw new Error(body.detail ?? `Error ${res.status}`);
+    throw new Error(body.detail ?? i18n.t('api.genericError', { status: res.status }));
   }
 
   return res.json() as Promise<T>;
@@ -63,7 +66,7 @@ export const api = {
       // llegamos a cerrarlo nosotros primero arriba -- readyState permite
       // distinguir ambos casos y no duplicar el error.
       if (source.readyState !== EventSource.CLOSED) {
-        onEvent({ done: true, error: 'Se perdió la conexión con el servidor durante el análisis.' });
+        onEvent({ done: true, error: i18n.t('api.streamLost') });
       }
       source.close();
     };

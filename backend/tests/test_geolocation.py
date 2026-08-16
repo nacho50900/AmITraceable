@@ -379,6 +379,123 @@ class TestEstimateLocationsForPosts:
         assert len(outcome.results) == 3
         assert all(permalink == "https://ig/carousel" for permalink, _ in outcome.results)
 
+        # Regresión del bug real: antes, las 3 fotos de este carrusel
+        # habrían compartido el MISMO permalink como único identificador
+        # -- ahora cada estimate lleva su propio photo_link, único por
+        # foto (con ?img_index=N), no solo el permalink de la publicación
+        # (que sigue siendo el mismo para las 3, correctamente, es la
+        # misma publicación).
+        photo_links = [estimate.photo_link for _permalink, estimate in outcome.results]
+        assert len(set(photo_links)) == 3, f"los photo_link deberían ser únicos por foto: {photo_links}"
+        assert sorted(photo_links) == [
+            "https://ig/carousel?img_index=1",
+            "https://ig/carousel?img_index=2",
+            "https://ig/carousel?img_index=3",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_single_photo_post_link_is_unchanged(self, monkeypatch, respx_mock):
+        """Con una sola foto en la publicación, el photo_link es el
+        permalink normal tal cual -- no tiene sentido añadir
+        ?img_index=1 a una publicación que no es un carrusel."""
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+        monkeypatch.setattr(
+            geolocation,
+            "estimate_location_from_image",
+            lambda image, k=15: geolocation.ImageLocationEstimate(
+                province="Madrid", confidence=0.7, k_neighbors=15, mean_similarity=0.6
+            ),
+        )
+
+        outcome = await geolocation.estimate_locations_for_posts(posts)
+
+        assert len(outcome.results) == 1
+        assert outcome.results[0][1].photo_link == "https://ig/1"
+
+    @pytest.mark.asyncio
+    async def test_descriptions_do_not_overwrite_between_photos_of_the_same_carousel(self, monkeypatch, respx_mock):
+        """Regresión del bug real: antes, visual_descriptions/
+        general_descriptions usaban el permalink de la PUBLICACIÓN como
+        clave -- con varias fotos del mismo carrusel dando descripción,
+        cada una sobreescribía a la anterior, y solo sobrevivía una
+        (la última en procesarse, no determinista) aplicada a TODAS las
+        fotos del carrusel. Con photo_link como clave, cada foto conserva
+        su propia descripción."""
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        monkeypatch.setattr(geolocation.settings, "enable_scene_analysis", True)
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [
+            Post(
+                type="carousel_album",
+                media_urls=["https://cdn.fake/c1.jpg", "https://cdn.fake/c2.jpg"],
+                permalink="https://ig/carousel",
+            ),
+        ]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/c1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+        respx_mock.get("https://cdn.fake/c2.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        monkeypatch.setattr(
+            geolocation,
+            "estimate_location_from_image",
+            lambda image, k=15: geolocation.ImageLocationEstimate(
+                province="Madrid", confidence=0.7, k_neighbors=15, mean_similarity=0.6
+            ),
+        )
+
+        # Cada foto (identificada por su media_url) da una descripción
+        # DISTINTA -- si el bug de sobrescritura sigue presente, al final
+        # solo quedaría UNA de las dos en los diccionarios.
+        descriptions_by_url = {
+            "https://cdn.fake/c1.jpg": ("Personas en la foto: una", "a person playing guitar"),
+            "https://cdn.fake/c2.jpg": ("Personas en la foto: varias", "a group of friends at the beach"),
+        }
+        call_count = {"n": 0}
+
+        def _fake_analyze(image):
+            # No hay forma directa de saber qué URL generó esta imagen ya
+            # descargada -- se usa el orden de llamada, que coincide con
+            # el orden de photo_units (mismo orden que media_urls).
+            url = list(descriptions_by_url.keys())[call_count["n"]]
+            call_count["n"] += 1
+            raw, general = descriptions_by_url[url]
+            return [], False, raw, general
+
+        monkeypatch.setattr(geolocation, "analyze_image_content", _fake_analyze)
+
+        outcome = await geolocation.estimate_locations_for_posts(posts)
+
+        assert outcome.general_descriptions == {
+            "https://ig/carousel?img_index=1": "a person playing guitar",
+            "https://ig/carousel?img_index=2": "a group of friends at the beach",
+        }
+        assert outcome.visual_descriptions == {
+            "https://ig/carousel?img_index=1": "Personas en la foto: una",
+            "https://ig/carousel?img_index=2": "Personas en la foto: varias",
+        }
+
     @pytest.mark.asyncio
     async def test_visual_content_analysis_runs_alongside_geolocation_on_the_same_image(self, monkeypatch, respx_mock):
         """El caso pedido: el análisis de contenido visual (aficiones,

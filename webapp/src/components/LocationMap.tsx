@@ -1,6 +1,7 @@
 import React from 'react';
 import { CircleMarker, MapContainer, Popup, TileLayer, Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
+import { useTranslation } from 'react-i18next';
 import type { ImageLocationPoint, Platform } from '../types';
 
 interface LocationMapProps {
@@ -23,27 +24,21 @@ function confidenceColor(confidence: number): string {
   return '#3aa657'; // baja -> verde (menos preocupante)
 }
 
-function formatDate(isoDate: string | null): string {
-  if (!isoDate) return 'fecha desconocida';
-  return new Date(isoDate).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
 const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }) => {
+  const { t, i18n } = useTranslation();
+  const dateLocale = i18n.language?.split('-')[0] === 'en' ? 'en-US' : 'es-ES';
+
+  function formatDate(isoDate: string | null): string {
+    if (!isoDate) return t('components.locationMap.unknownDate');
+    return new Date(isoDate).toLocaleDateString(dateLocale, { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
   if (platform !== 'instagram') {
-    return (
-      <p className="note">
-        Reddit no tiene fotos que analizar aquí -- esta sección solo aplica a Instagram.
-      </p>
-    );
+    return <p className="note">{t('components.locationMap.redditNoPhotos')}</p>;
   }
 
   if (!available) {
-    return (
-      <p className="note">
-        El índice de geolocalización por imagen no está construido en este servidor, así que
-        esta función no está disponible ahora mismo.
-      </p>
-    );
+    return <p className="note">{t('components.locationMap.indexUnavailable')}</p>;
   }
 
   // Las fotos no representativas (vecinos más parecidos repartidos por una
@@ -56,12 +51,7 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
   const nonRepresentativePoints = points.filter((p) => !p.representative);
 
   if (points.length === 0) {
-    return (
-      <p className="note">
-        No se ha podido analizar ninguna de tus fotos (puede que no tuvieras fotos públicas,
-        o que no se pudieran descargar).
-      </p>
-    );
+    return <p className="note">{t('components.locationMap.noPhotos')}</p>;
   }
 
   const mappablePoints = representativePoints.filter((p) => p.lat !== null && p.lon !== null);
@@ -75,12 +65,7 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
 
   return (
     <>
-      {representativePoints.length === 0 && (
-        <p className="note">
-          Ninguna de tus fotos analizadas fue lo bastante representativa de un lugar concreto como
-          para estimar una ubicación fiable.
-        </p>
-      )}
+      {representativePoints.length === 0 && <p className="note">{t('components.locationMap.noRepresentative')}</p>}
 
       {mappablePoints.length > 0 && (
         <MapContainer
@@ -105,21 +90,26 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
               }}
             >
               <Tooltip direction="top" offset={[0, -8]} opacity={1}>
+                {/* point.province viene del backend (nombre de provincia en
+                    español, INE); no se traduce en esta fase. */}
                 <strong>{point.province}</strong>
                 <br />
-                Confianza: {Math.round(point.confidence * 100)}%
+                {t('components.locationMap.confidence', { value: Math.round(point.confidence * 100) })}
                 <br />
                 {(point.lat as number).toFixed(4)}, {(point.lon as number).toFixed(4)}
               </Tooltip>
               <Popup>
                 <strong>{point.province}</strong>
                 <br />
-                Confianza: {Math.round(point.confidence * 100)}%
+                {t('components.locationMap.confidence', { value: Math.round(point.confidence * 100) })}
                 <br />
-                Coordenadas: {(point.lat as number).toFixed(4)}, {(point.lon as number).toFixed(4)}
+                {t('components.locationMap.coordinates', {
+                  lat: (point.lat as number).toFixed(4),
+                  lon: (point.lon as number).toFixed(4),
+                })}
                 <br />
                 <a href={point.permalink} target="_blank" rel="noreferrer">
-                  Ver publicación
+                  {t('components.locationMap.viewPost')}
                 </a>
               </Popup>
             </CircleMarker>
@@ -130,10 +120,8 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
       {representativePoints.length > 0 && (
         <>
           <p className="note">
-            Cada foto se ha comparado contra un índice de imágenes de referencia de España; el
-            resultado es una similitud visual aproximada, no una ubicación exacta. Se muestran{' '}
-            <strong>todas</strong> las fotos con una estimación representativa de un lugar
-            concreto, incluidas las de confianza baja.
+            {t('components.locationMap.comparisonNote')} <strong>{t('components.locationMap.comparisonNoteAll')}</strong>{' '}
+            {t('components.locationMap.comparisonNoteEnd')}
           </p>
 
           <ul className="image-location-list">
@@ -147,23 +135,23 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
                       rel="noreferrer"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      Ver publicación
+                      {t('components.locationMap.viewPost')}
                     </a>
                     <span>
-                      {formatDate(point.created_utc)} — {point.province} — confianza{' '}
-                      {Math.round(point.confidence * 100)}%
-                      {point.lat === null && ' (sin coordenadas para el mapa)'}
+                      {formatDate(point.created_utc)} — {point.province} —{' '}
+                      {t('components.locationMap.confidenceInline', { value: Math.round(point.confidence * 100) })}
+                      {point.lat === null && t('components.locationMap.noCoordinates')}
                     </span>
                   </summary>
                   <p className="photo-visual-description-general">
                     {point.visual_description_general
                       ? point.visual_description_general
-                      : 'Sin descripción general disponible para esta foto.'}
+                      : t('components.locationMap.noGeneralDescription')}
                   </p>
                   <p className="photo-visual-description">
                     {point.visual_description
                       ? point.visual_description
-                      : 'Sin descripción visual disponible para esta foto.'}
+                      : t('components.locationMap.noVisualDescription')}
                   </p>
                 </details>
               </li>
@@ -174,12 +162,10 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
 
       {nonRepresentativePoints.length > 0 && (
         <details className="image-location-details">
-          <summary>Imágenes no representativas ({nonRepresentativePoints.length})</summary>
-          <p className="note">
-            Estas fotos se analizaron, pero sus vecinos más parecidos en el índice están
-            repartidos por una zona demasiado amplia como para asignarles una ubicación fiable --
-            no se muestran en el mapa ni cuentan para estimar tu residencia.
-          </p>
+          <summary>
+            {t('components.locationMap.nonRepresentativeSummary', { count: nonRepresentativePoints.length })}
+          </summary>
+          <p className="note">{t('components.locationMap.nonRepresentativeNote')}</p>
           <ul className="image-location-list image-location-list-scroll">
             {nonRepresentativePoints.map((point) => (
               <li key={point.permalink}>
@@ -191,19 +177,19 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
                       rel="noreferrer"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      Ver publicación
+                      {t('components.locationMap.viewPost')}
                     </a>
                     <span>{formatDate(point.created_utc)}</span>
                   </summary>
                   <p className="photo-visual-description-general">
                     {point.visual_description_general
                       ? point.visual_description_general
-                      : 'Sin descripción general disponible para esta foto.'}
+                      : t('components.locationMap.noGeneralDescription')}
                   </p>
                   <p className="photo-visual-description">
                     {point.visual_description
                       ? point.visual_description
-                      : 'Sin descripción visual disponible para esta foto.'}
+                      : t('components.locationMap.noVisualDescription')}
                   </p>
                 </details>
               </li>

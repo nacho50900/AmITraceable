@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import type { ExposureReport } from '../types';
 import { downloadReportAsJson } from '../utils/reportToJson';
 
@@ -7,9 +8,10 @@ interface DownloadReportButtonProps {
 }
 
 const DownloadReportButton: React.FC<DownloadReportButtonProps> = ({ report }) => {
+  const { t } = useTranslation();
   return (
     <button type="button" className="download-report-button" onClick={() => downloadReportAsJson(report)}>
-      Descargar informe completo (JSON)
+      {t('components.downloadButton.label')}
     </button>
   );
 };

@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { SiInstagram, SiReddit, SiX } from 'react-icons/si';
 import { api } from '../api';
+import LanguageSwitcher from '../components/LanguageSwitcher';
 import type { Platform } from '../types';
 
 interface PlatformCardData {
@@ -10,7 +12,7 @@ interface PlatformCardData {
   // se dejan sin `platform` y el botón de conexión se deshabilita solo.
   platform?: Platform;
   name: string;
-  description: string;
+  descriptionKey: string;
   icon: React.ReactNode;
   cardClassName: string;
   comingSoon?: boolean;
@@ -19,25 +21,26 @@ interface PlatformCardData {
 // El orden de este array es el orden del mazo. Añadir una plataforma nueva
 // de verdad (cuando X tenga API disponible, por ejemplo) es rellenar su
 // `platform` y quitar `comingSoon`; el resto del componente ya funciona
-// igual para cualquier número de cartas.
+// igual para cualquier número de cartas. `name` no se traduce (son marcas),
+// solo `descriptionKey` -- ver src/i18n/locales/*.json.
 const PLATFORM_CARDS: PlatformCardData[] = [
   {
     platform: 'reddit',
     name: 'Reddit',
-    description: 'Analiza tus posts y comentarios públicos.',
+    descriptionKey: 'landing.platforms.reddit.description',
     icon: <SiReddit aria-hidden="true" />,
     cardClassName: 'platform-card--reddit',
   },
   {
     platform: 'instagram',
     name: 'Instagram',
-    description: 'Requiere cuenta Business o Creator y estar añadido como tester de la app.',
+    descriptionKey: 'landing.platforms.instagram.description',
     icon: <SiInstagram aria-hidden="true" />,
     cardClassName: 'platform-card--instagram',
   },
   {
     name: 'X',
-    description: 'Pendiente de aprobación de acceso a la API. Próximamente.',
+    descriptionKey: 'landing.platforms.x.description',
     icon: <SiX aria-hidden="true" />,
     cardClassName: 'platform-card--x',
     comingSoon: true,
@@ -79,6 +82,7 @@ function cardStyle(offset: number): React.CSSProperties {
 const SWIPE_THRESHOLD_PX = 40;
 
 const Landing: React.FC = () => {
+  const { t } = useTranslation();
   const [authError] = useState(() => new URLSearchParams(window.location.search).get('auth_error'));
   const [checking, setChecking] = useState(() => authError === null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -150,28 +154,31 @@ const Landing: React.FC = () => {
 
   return (
     <div className="page landing">
+      <LanguageSwitcher />
       <h1 className="brand-title">AmITraceable</h1>
-      <p className="subtitle">
-        ¿Cuánto se puede inferir de tu actividad pública? Herramienta educativa y defensiva de
-        análisis de exposición de identidad digital (TFG).
-      </p>
+      <p className="subtitle">{t('landing.subtitle')}</p>
 
       <div className="consent-box">
-        <h2>Antes de continuar</h2>
+        <h2>{t('landing.consentTitle')}</h2>
         <ul>
-          <li>Solo se analiza tu propia cuenta, nunca la de terceros.</li>
-          <li>Autorizas el acceso vía OAuth oficial de la plataforma, con permisos de solo lectura.</li>
-          <li>No se guarda nada: el análisis ocurre en memoria y desaparece al cerrar sesión.</li>
-          <li>Puedes revocar el acceso en cualquier momento desde tu cuenta.</li>
+          <li>{t('landing.consent.onlyOwnAccount')}</li>
+          <li>{t('landing.consent.oauth')}</li>
+          <li>{t('landing.consent.noStorage')}</li>
+          <li>{t('landing.consent.revoke')}</li>
         </ul>
       </div>
 
       {!checking && (
         <div className="platform-picker">
-          <p className="platform-picker-hint">Desliza o elige una plataforma</p>
+          <p className="platform-picker-hint">{t('landing.pickerHint')}</p>
 
           <div className="deck-row">
-            <button type="button" className="carousel-arrow" aria-label="Plataforma anterior" onClick={() => goTo(activeIndex - 1)}>
+            <button
+              type="button"
+              className="carousel-arrow"
+              aria-label={t('landing.previousPlatform')}
+              onClick={() => goTo(activeIndex - 1)}
+            >
               ‹
             </button>
 
@@ -192,19 +199,24 @@ const Landing: React.FC = () => {
                     onClick={() => !isActive && handleCardClick(index)}
                     onKeyDown={(event) => !isActive && handleCardKeyDown(event, index)}
                     role={isActive ? undefined : 'button'}
-                    aria-label={isActive ? undefined : `Seleccionar ${card.name}`}
+                    aria-label={isActive ? undefined : t('landing.selectPlatform', { name: card.name })}
                     tabIndex={isActive ? -1 : 0}
                   >
-                    {card.comingSoon && <span className="coming-soon-badge">Coming Soon</span>}
+                    {card.comingSoon && <span className="coming-soon-badge">{t('landing.comingSoonBadge')}</span>}
                     <span className="platform-card-icon">{card.icon}</span>
                     <span className="platform-card-name">{card.name}</span>
-                    <span className="platform-card-description">{card.description}</span>
+                    <span className="platform-card-description">{t(card.descriptionKey)}</span>
                   </div>
                 );
               })}
             </div>
 
-            <button type="button" className="carousel-arrow" aria-label="Siguiente plataforma" onClick={() => goTo(activeIndex + 1)}>
+            <button
+              type="button"
+              className="carousel-arrow"
+              aria-label={t('landing.nextPlatform')}
+              onClick={() => goTo(activeIndex + 1)}
+            >
               ›
             </button>
           </div>
@@ -214,7 +226,7 @@ const Landing: React.FC = () => {
               <button
                 key={card.name}
                 type="button"
-                aria-label={`Ir a la tarjeta de ${card.name}`}
+                aria-label={t('landing.goToCard', { name: card.name })}
                 className={`carousel-dot ${index === activeIndex ? 'carousel-dot--active' : ''}`}
                 onClick={() => goTo(index)}
               />
@@ -223,11 +235,11 @@ const Landing: React.FC = () => {
 
           {activeCard.comingSoon || !activeCard.platform ? (
             <button type="button" className="btn-primary deck-cta deck-cta--disabled" disabled>
-              Próximamente
+              {t('landing.comingSoonCta')}
             </button>
           ) : (
             <a className="btn-primary deck-cta" href={api.loginUrl(activeCard.platform)}>
-              Conectar con {activeCard.name} →
+              {t('landing.connectCta', { name: activeCard.name })}
             </a>
           )}
         </div>

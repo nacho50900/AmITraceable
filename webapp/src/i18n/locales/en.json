@@ -1,0 +1,149 @@
+{
+  "languageSwitcher": {
+    "label": "Language",
+    "spanish": "Español",
+    "english": "English"
+  },
+  "landing": {
+    "subtitle": "How much can be inferred from your public activity? An educational, defensive tool for analyzing your digital identity exposure (final-year thesis project).",
+    "consentTitle": "Before you continue",
+    "consent": {
+      "onlyOwnAccount": "Only your own account is analyzed, never someone else's.",
+      "oauth": "You authorize access through the platform's official OAuth, with read-only permissions.",
+      "noStorage": "Nothing is stored: the analysis happens in memory and disappears when you log out.",
+      "revoke": "You can revoke access at any time from your account."
+    },
+    "pickerHint": "Swipe or pick a platform",
+    "previousPlatform": "Previous platform",
+    "nextPlatform": "Next platform",
+    "selectPlatform": "Select {{name}}",
+    "goToCard": "Go to the {{name}} card",
+    "comingSoonBadge": "Coming Soon",
+    "comingSoonCta": "Coming soon",
+    "connectCta": "Connect with {{name}} →",
+    "platforms": {
+      "reddit": {
+        "description": "Analyzes your public posts and comments."
+      },
+      "instagram": {
+        "description": "Requires a Business or Creator account and being added as an app tester."
+      },
+      "x": {
+        "description": "Pending API access approval. Coming soon."
+      }
+    }
+  },
+  "dashboard": {
+    "analyzing": "Analyzing your public activity on {{platform}}…",
+    "photos": {
+      "geolocatingVerb": "Geolocating photos",
+      "geolocatedDone": "Photos geolocated",
+      "analyzingVerb": "Analyzing photos",
+      "analyzedDone": "Photos analyzed"
+    },
+    "errorPrefix": "Couldn't generate the report: {{error}}",
+    "backToStart": "Back to start",
+    "avatarAlt": "Profile picture of {{username}}",
+    "title": "Exposure report for {{prefix}}{{username}}",
+    "logout": "Log out and delete data",
+    "meta": "Generated on {{date}} · {{count}} posts/comments analyzed",
+    "overallScore": "Overall exposure score: {{score}} / 100",
+    "scoreLabels": {
+      "geolocationRisk": "Geolocation risk",
+      "inferableDataRisk": "Inferable personal data",
+      "deanonymizationEase": "Ease of de-anonymization"
+    },
+    "whatCanBeInferred": "What can be inferred about you",
+    "estimatedLocations": "Locations estimated from your photos",
+    "imageLocationConfidenceInsufficient": "The confidence level of the image analysis isn't high enough to estimate a region of residence.",
+    "hourlyPattern": "Hourly activity pattern (UTC)",
+    "writingProfile": "Writing profile",
+    "avgSentenceLength": "Average sentence length: {{value}} words",
+    "vocabularyRichness": "Vocabulary richness: {{value}}",
+    "emojiUsage": "Emoji usage: {{value}}%",
+    "detectedLanguage": "Detected language: {{value}}",
+    "groupingLabelInstagram": "Most frequent hashtags",
+    "groupingLabelReddit": "Most frequent subreddits"
+  },
+  "components": {
+    "scoreBar": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "veryHigh": "Very high"
+    },
+    "downloadButton": {
+      "label": "Download full report (JSON)"
+    },
+    "hourlyChart": {
+      "activity": "Activity"
+    },
+    "aiSummary": {
+      "title": "Recommendations and Conclusions",
+      "loading": "Analyzing the report with AI...",
+      "empty": "The AI reviewed your report and didn't find anything worth highlighting beyond what you already see in the rest of the dashboard.",
+      "errorPrefix": "The AI analysis couldn't be completed ({{message}}).",
+      "retry": "Retry",
+      "unexpectedError": "Unexpected error."
+    },
+    "populationNarrowing": {
+      "noData": "No explicit statements about you (age, sex, location, education...) were detected in your public text, so there's no population estimate to show here.",
+      "reductionBadgeTitle": "Percentage of the population remaining after the previous trait in the chain that this trait, on its own, rules out.",
+      "risk": {
+        "bajo": "Low",
+        "medio": "Medium",
+        "alto": "High",
+        "critico": "Critical",
+        "no_estimable": "Not estimable"
+      },
+      "source": {
+        "texto": "Text",
+        "imagen": "Image",
+        "ia": "AI (text)",
+        "ia_nombre": "AI (name)",
+        "ia_simbolica": "AI (symbolic)"
+      },
+      "sourceTitle": {
+        "texto": "Detected in text you wrote yourself",
+        "imagen": "Estimated from an image (less reliable than a self-declaration in text)",
+        "ia": "Detected by an AI model in text/bio that you wrote yourself",
+        "ia_nombre": "Estimated from the cultural convention of your account's public name, not from something you wrote -- lower reliability",
+        "ia_simbolica": "Inferred by AI from symbolic or indirect content (emojis, dates, recurring mentions...), not from an explicit self-declaration -- lower reliability"
+      },
+      "combinedSummaryPrefix": "In Spain there are",
+      "combinedSummarySuffix": "people who share your traits (all the ones detected, combined at once: sex, age, location, education, occupation, marital status -- whichever could be estimated).",
+      "footnote": "Approximate estimate based on aggregated INE distributions. When a real cross-tabulation exists (e.g. marital status by sex), that exact proportion is used; the rest of the combinations assume independence between attributes. It is not an exact headcount.",
+      "footnoteImage": " Rows marked with 📷 come from a visual analysis of your photos, not from something you wrote — they're less reliable than a text self-declaration.",
+      "footnoteNameGuess": " Rows marked with 🤖 (name) are an estimate from your account's public name, not something you declared — reliability is lower."
+    },
+    "populationPictogram": {
+      "compactAriaLabel": "Approximately {{percent}} of the population: 1 in every {{population}} people",
+      "gridAriaLabel": "Approximately {{percent}} of the population shares this trait ({{population}} people)",
+      "compactLabel": "out of {{population}}"
+    },
+    "locationMap": {
+      "unknownDate": "unknown date",
+      "redditNoPhotos": "Reddit has no photos to analyze here -- this section only applies to Instagram.",
+      "indexUnavailable": "The image geolocation index isn't built on this server, so this feature isn't available right now.",
+      "noPhotos": "None of your photos could be analyzed (you may not have had public photos, or they couldn't be downloaded).",
+      "noRepresentative": "None of your analyzed photos were representative enough of a specific place to estimate a reliable location.",
+      "confidence": "Confidence: {{value}}%",
+      "confidenceInline": "confidence {{value}}%",
+      "coordinates": "Coordinates: {{lat}}, {{lon}}",
+      "viewPost": "View post",
+      "comparisonNote": "Each photo was compared against a reference image index for Spain; the result is an approximate visual similarity, not an exact location. Shown are",
+      "comparisonNoteAll": "all",
+      "comparisonNoteEnd": "the photos with a representative estimate of a specific place, including low-confidence ones.",
+      "noCoordinates": " (no coordinates for the map)",
+      "noGeneralDescription": "No general description available for this photo.",
+      "noVisualDescription": "No visual description available for this photo.",
+      "nonRepresentativeSummary": "Non-representative images ({{count}})",
+      "nonRepresentativeNote": "These photos were analyzed, but their closest neighbors in the index are spread across too wide an area to assign a reliable location -- they're not shown on the map and don't count toward estimating your residence."
+    }
+  },
+  "api": {
+    "aiUnavailable": "AI analysis isn't available right now.",
+    "genericError": "Error {{status}}",
+    "streamLost": "Connection to the server was lost during the analysis."
+  }
+}

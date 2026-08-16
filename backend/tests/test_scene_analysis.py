@@ -93,6 +93,57 @@ class TestAnalyzeImageContent:
 
         assert len(inferences) == 1
 
+    def test_parses_texto_visible_as_inferred_attribute(self, monkeypatch):
+        _install_fake_model(
+            monkeypatch,
+            "PERSONAS: varias\nAFICION: ninguno\nPAREJA: no\nTEXTO_VISIBLE: Bar Manolo",
+        )
+
+        inferences, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+
+        assert len(inferences) == 1
+        assert inferences[0].category == "texto_visible"
+        assert "Bar Manolo" in inferences[0].value
+        assert inferences[0].confidence == 0.4
+        assert inferences[0].evidence == []
+
+    def test_texto_visible_not_gated_by_personas_unlike_aficion(self, monkeypatch):
+        """A diferencia de AFICION, TEXTO_VISIBLE no depende de saber
+        quién es la cuenta analizada -- un cartel es verdad independientemente
+        de cuántas personas salgan en la foto, así que la señal se
+        mantiene incluso con 'varias' personas (caso en el que AFICION SÍ
+        se descartaría, ver test_discards_aficion_when_several_people..)."""
+        _install_fake_model(
+            monkeypatch,
+            "PERSONAS: varias\nAFICION: ninguno\nPAREJA: no\nTEXTO_VISIBLE: Ayuntamiento de Badajoz",
+        )
+
+        inferences, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+
+        assert len(inferences) == 1
+        assert inferences[0].category == "texto_visible"
+
+    def test_aficion_and_texto_visible_can_coexist(self, monkeypatch):
+        _install_fake_model(
+            monkeypatch,
+            "PERSONAS: una\nAFICION: guitarra\nPAREJA: no\nTEXTO_VISIBLE: Bar Manolo",
+        )
+
+        inferences, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+
+        categories = {inferred.category for inferred in inferences}
+        assert categories == {"aficion", "texto_visible"}
+
+    def test_no_texto_visible_inference_when_ninguno(self, monkeypatch):
+        _install_fake_model(
+            monkeypatch,
+            "PERSONAS: varias\nAFICION: ninguno\nPAREJA: no\nTEXTO_VISIBLE: ninguno",
+        )
+
+        inferences, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+
+        assert inferences == []
+
     def test_discards_aficion_when_several_people_are_similarly_prominent(self, monkeypatch):
         """El caso que motivó este campo: con varias personas de
         protagonismo similar (p. ej. una pareja), no hay forma de saber si
@@ -199,6 +250,16 @@ class TestAnalyzeImageContent:
         assert "ethnicity" in caption_lower
         assert "age" in caption_lower
 
+    def test_texto_visible_forbids_personal_names(self, monkeypatch):
+        """TEXTO_VISIBLE es el campo con más riesgo de fuga de privacidad
+        de los cuatro (texto real de la foto puede incluir un nombre
+        propio en una camiseta, insignia, etc.) -- se comprueba que el
+        prompt se lo prohíbe EXPLÍCITAMENTE para ese campo en concreto,
+        no solo con la prohibición general del final del prompt."""
+        structured_lower = scene_analysis._STRUCTURED_QUERY.lower()
+        assert "texto_visible" in structured_lower
+        assert "nombre propio" in structured_lower
+
     def test_caption_query_forbids_race_and_physical_traits(self, monkeypatch):
         """El caption es texto libre (a diferencia de PERSONAS/PAREJA, que
         son una de tres opciones fijas), así que es el que más fácilmente
@@ -241,18 +302,57 @@ class TestAnalyzeImageContent:
         assert "describe" in scene_analysis._CAPTION_QUERY.lower()
         assert "describe en" not in scene_analysis._CAPTION_QUERY.lower()
 
-    def test_returns_the_raw_answer_as_description(self, monkeypatch):
+    def test_description_is_reconstructed_from_parsed_values_not_raw_text(self, monkeypatch):
+        """descripcion_cruda ya NO es el texto crudo del modelo -- se
+        reconstruye desde los valores ya parseados (ver
+        _build_clean_summary). Con una afición positiva, se muestra esa
+        señal; con PAREJA/TEXTO_VISIBLE negativos, esas líneas NO
+        aparecen."""
         _install_fake_model(
             monkeypatch,
-            "PERSONAS: una\nAFICION: Posible fan de baloncesto\nPAREJA: no",
+            "PERSONAS: una\nAFICION: Posible fan de baloncesto\nPAREJA: no\nTEXTO_VISIBLE: ninguno",
             caption_answer="a person playing basketball",
         )
 
         _, _, description, _ = scene_analysis.analyze_image_content(_fake_image())
 
+        assert description == "Personas en la foto: una\nPosible afición o interés: Posible fan de baloncesto"
+        # La descripción general (caption) NO se repite dentro de este bloque.
+        assert "basketball" not in description
+        # Las señales negativas por defecto no generan línea.
+        assert "pareja" not in description.lower()
+        assert "texto visible" not in description.lower()
+
+    def test_description_discards_trailing_model_garbage(self, monkeypatch):
+        """Regresión del bug real visto en producción: tras responder
+        bien las cuatro líneas, el modelo a veces sigue generando y
+        empieza a copiar fragmentos de la propia explicación del prompt
+        (p. ej. 'PERSONAS solo puede val...'). Como descripcion_cruda se
+        reconstruye desde valores YA PARSEADOS (no desde el texto crudo),
+        esa cola queda descartada automáticamente sin importar qué
+        contenga."""
+        _install_fake_model(
+            monkeypatch,
+            "PERSONAS: varias\nAFICION: ninguno\nPAREJA: no\nTEXTO_VISIBLE: ninguno\nPERSONAS solo puede val",
+            caption_answer="una escena cualquiera",
+        )
+
+        _, _, description, _ = scene_analysis.analyze_image_content(_fake_image())
+
+        assert description == "Personas en la foto: varias"
+        assert "solo puede" not in description
+
+    def test_description_shows_pareja_and_texto_visible_when_positive(self, monkeypatch):
+        _install_fake_model(
+            monkeypatch,
+            "PERSONAS: varias\nAFICION: ninguno\nPAREJA: si\nTEXTO_VISIBLE: Bar Manolo",
+            caption_answer="una escena cualquiera",
+        )
+
+        _, _, description, _ = scene_analysis.analyze_image_content(_fake_image())
+
         assert description == (
-            "DESCRIPCION: a person playing basketball\n"
-            "PERSONAS: una\nAFICION: Posible fan de baloncesto\nPAREJA: no"
+            "Personas en la foto: varias\nIndicio de contexto de pareja: sí\nTexto visible: Bar Manolo"
         )
 
     def test_description_is_none_when_dependencies_not_installed(self, monkeypatch):
@@ -410,6 +510,87 @@ class TestParsePersonas:
 
     def test_missing_line_returns_none(self):
         assert scene_analysis._parse_personas("AFICION: ninguno") is None
+
+
+class TestParseTextoVisible:
+    def test_valid_value(self):
+        assert scene_analysis._parse_texto_visible("TEXTO_VISIBLE: Bar Manolo") == "Bar Manolo"
+
+    def test_missing_line_returns_none(self):
+        assert scene_analysis._parse_texto_visible("PERSONAS: una\nAFICION: ninguno") is None
+
+    @pytest.mark.parametrize("negative_value", ["ninguno", "Ninguna", "none", "N/A", ""])
+    def test_ninguno_variants_return_none(self, negative_value):
+        assert scene_analysis._parse_texto_visible(f"TEXTO_VISIBLE: {negative_value}") is None
+
+    def test_trailing_period_is_stripped(self):
+        assert scene_analysis._parse_texto_visible("TEXTO_VISIBLE: Calle Mayor 12.") == "Calle Mayor 12"
+
+
+class TestParseAficionRaw:
+    """_parse_aficion_raw es la versión SIN la cautela de atribución de
+    _parse_inferences (que descarta la señal con varias personas en la
+    foto) -- usada tanto por _parse_inferences como por
+    _build_clean_summary, cada una con sus propias reglas sobre cuándo
+    usar el valor."""
+
+    def test_valid_value_regardless_of_personas(self):
+        # A diferencia de _parse_inferences, _parse_aficion_raw NO mira
+        # PERSONAS en absoluto -- esa cautela vive en quien la llama.
+        assert scene_analysis._parse_aficion_raw("PERSONAS: varias\nAFICION: guitarra") == "guitarra"
+
+    @pytest.mark.parametrize("negative_value", ["ninguno", "Ninguna", "none", "N/A", ""])
+    def test_ninguno_variants_return_none(self, negative_value):
+        assert scene_analysis._parse_aficion_raw(f"AFICION: {negative_value}") is None
+
+
+class TestBuildCleanSummary:
+    """_build_clean_summary reconstruye el bloque 'qué vio la IA' que se
+    muestra en el frontend -- solo señales positivas/informativas, para
+    no acumular líneas vacías tipo 'AFICION: ninguno' / 'PAREJA: no'."""
+
+    def test_only_personas_when_nothing_else_positive(self):
+        summary = scene_analysis._build_clean_summary(
+            personas="varias", aficion_raw=None, indicio_pareja=False, texto_visible=None
+        )
+        assert summary == "Personas en la foto: varias"
+
+    def test_includes_aficion_when_positive(self):
+        summary = scene_analysis._build_clean_summary(
+            personas="una", aficion_raw="guitarra", indicio_pareja=False, texto_visible=None
+        )
+        assert summary == "Personas en la foto: una\nPosible afición o interés: guitarra"
+
+    def test_includes_pareja_only_when_true(self):
+        summary_true = scene_analysis._build_clean_summary(
+            personas="varias", aficion_raw=None, indicio_pareja=True, texto_visible=None
+        )
+        assert "Indicio de contexto de pareja: sí" in summary_true
+
+        summary_false = scene_analysis._build_clean_summary(
+            personas="varias", aficion_raw=None, indicio_pareja=False, texto_visible=None
+        )
+        assert "pareja" not in summary_false.lower()
+
+    def test_includes_texto_visible_when_present(self):
+        summary = scene_analysis._build_clean_summary(
+            personas="ninguna", aficion_raw=None, indicio_pareja=False, texto_visible="Bar Manolo"
+        )
+        assert summary == "Personas en la foto: ninguna\nTexto visible: Bar Manolo"
+
+    def test_all_four_positive_at_once(self):
+        summary = scene_analysis._build_clean_summary(
+            personas="varias", aficion_raw="baloncesto", indicio_pareja=True, texto_visible="Bar Manolo"
+        )
+        assert summary == (
+            "Personas en la foto: varias\n"
+            "Posible afición o interés: baloncesto\n"
+            "Indicio de contexto de pareja: sí\n"
+            "Texto visible: Bar Manolo"
+        )
+
+    def test_none_when_nothing_at_all(self):
+        assert scene_analysis._build_clean_summary(None, None, False, None) is None
 
 
 class TestSceneAnalysisAvailable:

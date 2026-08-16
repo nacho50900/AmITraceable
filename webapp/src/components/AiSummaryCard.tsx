@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AiSummaryUnavailableError, api } from '../api';
 import type { ExposureReport } from '../types';
 
@@ -9,6 +10,7 @@ interface AiSummaryCardProps {
 type Status = 'loading' | 'success' | 'empty' | 'unavailable' | 'error';
 
 const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<Status>('loading');
   const [verdict, setVerdict] = useState<string>('');
   const [conclusions, setConclusions] = useState<string[]>([]);
@@ -30,7 +32,7 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
         setMessage(err.message);
         setStatus('unavailable');
       } else {
-        setMessage(err instanceof Error ? err.message : 'Error inesperado.');
+        setMessage(err instanceof Error ? err.message : t('components.aiSummary.unexpectedError'));
         setStatus('error');
       }
     }
@@ -45,12 +47,16 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
 
   return (
     <section className="card ai-summary-card">
-      <h2>Recomendaciones y Conclusiones</h2>
+      <h2>{t('components.aiSummary.title')}</h2>
 
-      {status === 'loading' && <p className="note">Analizando el informe con IA...</p>}
+      {status === 'loading' && <p className="note">{t('components.aiSummary.loading')}</p>}
 
       {status === 'success' && (
         <>
+          {/* verdict y conclusions vienen del backend (Mistral) ya
+              generados en un idioma fijo -- traducir contenido generado
+              por IA queda fuera del alcance de esta primera fase de i18n
+              (solo UI estática). */}
           {verdict && <p className="ai-verdict">{verdict}</p>}
           {conclusions.length > 0 && (
             <ul className="ai-conclusions-list">
@@ -62,21 +68,16 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
         </>
       )}
 
-      {status === 'empty' && (
-        <p className="note">
-          La IA ha revisado tu informe y no ha encontrado ninguna conclusión que merezca la
-          pena destacar más allá de lo que ya ves en el resto del dashboard.
-        </p>
-      )}
+      {status === 'empty' && <p className="note">{t('components.aiSummary.empty')}</p>}
 
       {status === 'unavailable' && <p className="note">{message}</p>}
 
       {status === 'error' && (
         <p className="note error-text">
-          No se ha podido completar el análisis con IA ({message}).
+          {t('components.aiSummary.errorPrefix', { message })}
           <br />
           <button type="button" className="btn-secondary" onClick={runAnalysis}>
-            Reintentar
+            {t('components.aiSummary.retry')}
           </button>
         </p>
       )}

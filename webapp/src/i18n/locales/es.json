@@ -1,0 +1,149 @@
+{
+  "languageSwitcher": {
+    "label": "Idioma",
+    "spanish": "Español",
+    "english": "English"
+  },
+  "landing": {
+    "subtitle": "¿Cuánto se puede inferir de tu actividad pública? Herramienta educativa y defensiva de análisis de exposición de identidad digital (TFG).",
+    "consentTitle": "Antes de continuar",
+    "consent": {
+      "onlyOwnAccount": "Solo se analiza tu propia cuenta, nunca la de terceros.",
+      "oauth": "Autorizas el acceso vía OAuth oficial de la plataforma, con permisos de solo lectura.",
+      "noStorage": "No se guarda nada: el análisis ocurre en memoria y desaparece al cerrar sesión.",
+      "revoke": "Puedes revocar el acceso en cualquier momento desde tu cuenta."
+    },
+    "pickerHint": "Desliza o elige una plataforma",
+    "previousPlatform": "Plataforma anterior",
+    "nextPlatform": "Siguiente plataforma",
+    "selectPlatform": "Seleccionar {{name}}",
+    "goToCard": "Ir a la tarjeta de {{name}}",
+    "comingSoonBadge": "Coming Soon",
+    "comingSoonCta": "Próximamente",
+    "connectCta": "Conectar con {{name}} →",
+    "platforms": {
+      "reddit": {
+        "description": "Analiza tus posts y comentarios públicos."
+      },
+      "instagram": {
+        "description": "Requiere cuenta Business o Creator y estar añadido como tester de la app."
+      },
+      "x": {
+        "description": "Pendiente de aprobación de acceso a la API. Próximamente."
+      }
+    }
+  },
+  "dashboard": {
+    "analyzing": "Analizando tu actividad pública en {{platform}}…",
+    "photos": {
+      "geolocatingVerb": "Geolocalizando fotos",
+      "geolocatedDone": "Fotos geolocalizadas",
+      "analyzingVerb": "Analizando fotos",
+      "analyzedDone": "Fotos analizadas"
+    },
+    "errorPrefix": "No se pudo generar el informe: {{error}}",
+    "backToStart": "Volver al inicio",
+    "avatarAlt": "Foto de perfil de {{username}}",
+    "title": "Informe de exposición de {{prefix}}{{username}}",
+    "logout": "Cerrar sesión y borrar datos",
+    "meta": "Generado el {{date}} · {{count}} publicaciones/comentarios analizados",
+    "overallScore": "Score global de exposición: {{score}} / 100",
+    "scoreLabels": {
+      "geolocationRisk": "Riesgo de geolocalización",
+      "inferableDataRisk": "Datos personales inferibles",
+      "deanonymizationEase": "Facilidad de deanonimización"
+    },
+    "whatCanBeInferred": "Qué se puede inferir sobre ti",
+    "estimatedLocations": "Ubicaciones estimadas a partir de tus fotos",
+    "imageLocationConfidenceInsufficient": "El índice de confianza del análisis de las imágenes no es suficiente para estimar la comunidad autónoma de residencia.",
+    "hourlyPattern": "Patrón horario de actividad (UTC)",
+    "writingProfile": "Perfil de escritura",
+    "avgSentenceLength": "Longitud media de frase: {{value}} palabras",
+    "vocabularyRichness": "Riqueza de vocabulario: {{value}}",
+    "emojiUsage": "Uso de emojis: {{value}}%",
+    "detectedLanguage": "Idioma detectado: {{value}}",
+    "groupingLabelInstagram": "Hashtags más frecuentes",
+    "groupingLabelReddit": "Subreddits más frecuentes"
+  },
+  "components": {
+    "scoreBar": {
+      "low": "Bajo",
+      "medium": "Medio",
+      "high": "Alto",
+      "veryHigh": "Muy alto"
+    },
+    "downloadButton": {
+      "label": "Descargar informe completo (JSON)"
+    },
+    "hourlyChart": {
+      "activity": "Actividad"
+    },
+    "aiSummary": {
+      "title": "Recomendaciones y Conclusiones",
+      "loading": "Analizando el informe con IA...",
+      "empty": "La IA ha revisado tu informe y no ha encontrado ninguna conclusión que merezca la pena destacar más allá de lo que ya ves en el resto del dashboard.",
+      "errorPrefix": "No se ha podido completar el análisis con IA ({{message}}).",
+      "retry": "Reintentar",
+      "unexpectedError": "Error inesperado."
+    },
+    "populationNarrowing": {
+      "noData": "No se han detectado declaraciones explícitas sobre ti (edad, sexo, ubicación, estudios...) en tu texto público, así que no hay una estimación de población que mostrar aquí.",
+      "reductionBadgeTitle": "Porcentaje de la población que quedaba tras el rasgo anterior de la cadena que este rasgo, por sí solo, deja fuera.",
+      "risk": {
+        "bajo": "Bajo",
+        "medio": "Medio",
+        "alto": "Alto",
+        "critico": "Crítico",
+        "no_estimable": "No estimable"
+      },
+      "source": {
+        "texto": "Texto",
+        "imagen": "Imagen",
+        "ia": "IA (texto)",
+        "ia_nombre": "IA (nombre)",
+        "ia_simbolica": "IA (simbólico)"
+      },
+      "sourceTitle": {
+        "texto": "Detectado en texto que escribiste tú mismo/a",
+        "imagen": "Estimado a partir de una imagen (menor fiabilidad que una autodeclaración de texto)",
+        "ia": "Detectado por un modelo de IA en texto/biografía que escribiste tú mismo/a",
+        "ia_nombre": "Estimado por convención cultural del nombre público de tu cuenta, no por algo que hayas escrito -- fiabilidad menor",
+        "ia_simbolica": "Inferido por IA a partir de contenido simbólico o indirecto (emojis, fechas, menciones recurrentes...), no de una autodeclaración explícita -- fiabilidad menor"
+      },
+      "combinedSummaryPrefix": "En España hay",
+      "combinedSummarySuffix": "personas que comparten tus rasgos (todos los detectados, combinados a la vez: sexo, edad, ubicación, estudios, ocupación, estado civil -- los que se hayan podido estimar).",
+      "footnote": "Estimación aproximada a partir de distribuciones agregadas del INE. Cuando existe una tabla cruzada real (p. ej. estado civil según sexo), se usa esa proporción exacta; el resto de combinaciones asume independencia entre atributos. No es un recuento exacto de personas.",
+      "footnoteImage": " Las filas marcadas con 📷 vienen de un análisis visual de tus fotos, no de algo que hayas escrito — son menos fiables que una autodeclaración de texto.",
+      "footnoteNameGuess": " Las filas marcadas con 🤖 (nombre) son una estimación por el nombre público de tu cuenta, no algo que hayas declarado — la fiabilidad es menor."
+    },
+    "populationPictogram": {
+      "compactAriaLabel": "Aproximadamente {{percent}} de la población: 1 de cada {{population}} personas",
+      "gridAriaLabel": "Aproximadamente {{percent}} de la población comparte esta característica ({{population}} personas)",
+      "compactLabel": "de {{population}}"
+    },
+    "locationMap": {
+      "unknownDate": "fecha desconocida",
+      "redditNoPhotos": "Reddit no tiene fotos que analizar aquí -- esta sección solo aplica a Instagram.",
+      "indexUnavailable": "El índice de geolocalización por imagen no está construido en este servidor, así que esta función no está disponible ahora mismo.",
+      "noPhotos": "No se ha podido analizar ninguna de tus fotos (puede que no tuvieras fotos públicas, o que no se pudieran descargar).",
+      "noRepresentative": "Ninguna de tus fotos analizadas fue lo bastante representativa de un lugar concreto como para estimar una ubicación fiable.",
+      "confidence": "Confianza: {{value}}%",
+      "confidenceInline": "confianza {{value}}%",
+      "coordinates": "Coordenadas: {{lat}}, {{lon}}",
+      "viewPost": "Ver publicación",
+      "comparisonNote": "Cada foto se ha comparado contra un índice de imágenes de referencia de España; el resultado es una similitud visual aproximada, no una ubicación exacta. Se muestran",
+      "comparisonNoteAll": "todas",
+      "comparisonNoteEnd": "las fotos con una estimación representativa de un lugar concreto, incluidas las de confianza baja.",
+      "noCoordinates": " (sin coordenadas para el mapa)",
+      "noGeneralDescription": "Sin descripción general disponible para esta foto.",
+      "noVisualDescription": "Sin descripción visual disponible para esta foto.",
+      "nonRepresentativeSummary": "Imágenes no representativas ({{count}})",
+      "nonRepresentativeNote": "Estas fotos se analizaron, pero sus vecinos más parecidos en el índice están repartidos por una zona demasiado amplia como para asignarles una ubicación fiable -- no se muestran en el mapa ni cuentan para estimar tu residencia."
+    }
+  },
+  "api": {
+    "aiUnavailable": "Análisis con IA no disponible ahora mismo.",
+    "genericError": "Error {{status}}",
+    "streamLost": "Se perdió la conexión con el servidor durante el análisis."
+  }
+}

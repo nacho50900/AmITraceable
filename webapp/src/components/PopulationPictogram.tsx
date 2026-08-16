@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface PopulationPictogramProps {
   /** Fracción 0-1 (remaining_population / población total de España), ya
@@ -43,13 +44,16 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({
   remainingPopulation,
   size = 'small',
 }) => {
+  const { t, i18n } = useTranslation();
+  const numberLocale = i18n.language?.split('-')[0] === 'en' ? 'en-US' : 'es-ES';
+
   if (proportion === null || proportion <= 0 || remainingPopulation === null) {
     return null;
   }
 
   const percentLabel = proportion * 100 >= 1 ? `${Math.round(proportion * 100)}%` : `${(proportion * 100).toFixed(2)}%`;
   const totalFigures = Math.round(1 / proportion);
-  const populationLabel = remainingPopulation.toLocaleString('es-ES');
+  const populationLabel = remainingPopulation.toLocaleString(numberLocale);
   const isLarge = size === 'large';
 
   if (totalFigures > MAX_FIGURES) {
@@ -58,7 +62,10 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({
       <div
         className={`pictogram pictogram-compact ${isLarge ? 'pictogram-lg' : ''}`}
         role="img"
-        aria-label={`Aproximadamente ${percentLabel} de la población: 1 de cada ${populationLabel} personas`}
+        aria-label={t('components.populationPictogram.compactAriaLabel', {
+          percent: percentLabel,
+          population: populationLabel,
+        })}
       >
         <img
           src="/monigote_selected.png"
@@ -66,7 +73,9 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({
           className="pictogram-figure"
           style={{ width: compactSize, height: compactSize }}
         />
-        <span className="pictogram-compact-label">de {populationLabel}</span>
+        <span className="pictogram-compact-label">
+          {t('components.populationPictogram.compactLabel', { population: populationLabel })}
+        </span>
       </div>
     );
   }
@@ -77,7 +86,10 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({
     <div
       className={`pictogram ${isLarge ? 'pictogram-lg' : ''}`}
       role="img"
-      aria-label={`Aproximadamente ${percentLabel} de la población comparte esta característica (${populationLabel} personas)`}
+      aria-label={t('components.populationPictogram.gridAriaLabel', {
+        percent: percentLabel,
+        population: populationLabel,
+      })}
     >
       <span className="pictogram-percent">{percentLabel}</span>
       <div className="pictogram-grid">
