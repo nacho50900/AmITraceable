@@ -1,4 +1,4 @@
-# AmITraceable — Análisis de Exposición de Identidad Digital (TFG)
+# Análisis de Exposición de Identidad Digital (TFG)
 
 <div align="center">
 
