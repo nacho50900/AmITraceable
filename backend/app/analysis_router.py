@@ -105,7 +105,9 @@ async def _build_report(
         from app.vision.geolocation import estimate_locations_for_posts
 
         geolocation_task = asyncio.create_task(
-            estimate_locations_for_posts(profile.posts, progress_callback=progress_callback)
+            estimate_locations_for_posts(
+                profile.posts, avatar_url=profile.avatar_url, progress_callback=progress_callback
+            )
         )
         # `asyncio.create_task` solo PROGRAMA la tarea -- no le cede el
         # control de verdad. El resto de este bloque (build_fingerprint,

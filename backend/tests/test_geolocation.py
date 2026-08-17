@@ -136,86 +136,6 @@ def _install_fake_embedding(monkeypatch, output_vector=None):
     )
 
 
-class TestDownloadImage:
-    """`_download_image` es compartida por DINOv2 y Moondream2, que la
-    reciben en paralelo (`_process_photo`, `asyncio.gather` con
-    `asyncio.to_thread` cada una) -- ver el bug real que motiva estos
-    tests en el docstring de `_download_image`."""
-
-    @pytest.mark.asyncio
-    async def test_forces_full_decode_before_returning(self, monkeypatch, respx_mock):
-        """Bug real corregido en producción: sin `.load()` en
-        `_download_image`, `Image.open()` deja la decodificación de
-        píxeles pendiente (perezosa) hasta que algo accede de verdad a la
-        imagen -- y como esa misma imagen se reparte entre DOS hilos
-        concurrentes (DINOv2 y Moondream2), esa decodificación perezosa
-        competía entre ambos y producía `OSError: image file is
-        truncated` en uno de los dos (casi siempre el que llegaba
-        segundo), de forma no determinista y con una exclusión mutua casi
-        perfecta observada en logs reales: cuando uno de los dos modelos
-        conseguía un resultado, el otro fallaba, y viceversa. Se comprueba
-        que `Image.load()` se llama aquí, ANTES de que la imagen se
-        reparta entre hilos, no dejándolo para más tarde."""
-        import httpx
-        from PIL import Image as PILImage
-
-        tiny_jpeg = bytes.fromhex(
-            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
-            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
-            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
-            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
-        )
-        respx_mock.get("https://cdn.fake/test.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
-
-        load_calls: list[bool] = []
-        original_load = PILImage.Image.load
-
-        def _spy_load(self):
-            load_calls.append(True)
-            return original_load(self)
-
-        monkeypatch.setattr(PILImage.Image, "load", _spy_load)
-
-        async with httpx.AsyncClient() as client:
-            semaphore = asyncio.Semaphore(1)
-            image = await geolocation._download_image(client, semaphore, "https://cdn.fake/test.jpg")
-
-        assert image is not None
-        assert len(load_calls) >= 1
-
-    @pytest.mark.asyncio
-    async def test_returns_none_on_download_failure(self, monkeypatch, respx_mock):
-        """No debe lanzar si la descarga falla -- una foto no descargable
-        se omite, no aborta el análisis de las demás (ver
-        `_process_photo`)."""
-        import httpx
-
-        respx_mock.get("https://cdn.fake/missing.jpg").mock(return_value=httpx.Response(404))
-
-        async with httpx.AsyncClient() as client:
-            semaphore = asyncio.Semaphore(1)
-            image = await geolocation._download_image(client, semaphore, "https://cdn.fake/missing.jpg")
-
-        assert image is None
-
-    @pytest.mark.asyncio
-    async def test_returns_none_on_undecodable_content(self, monkeypatch, respx_mock):
-        """Igual que el anterior, pero con una descarga que SÍ tiene
-        éxito (200 OK) pero cuyo contenido no es una imagen válida -- debe
-        degradarse a None en vez de propagar la excepción de PIL."""
-        import httpx
-
-        respx_mock.get("https://cdn.fake/not-an-image.jpg").mock(
-            return_value=httpx.Response(200, content=b"esto no es un jpeg valido")
-        )
-
-        async with httpx.AsyncClient() as client:
-            semaphore = asyncio.Semaphore(1)
-            image = await geolocation._download_image(client, semaphore, "https://cdn.fake/not-an-image.jpg")
-
-        assert image is None
-
-
 class TestEstimateLocationFromImage:
     def test_returns_none_when_index_not_built(self, monkeypatch):
         def _raise_not_found():
@@ -459,31 +379,16 @@ class TestEstimateLocationsForPosts:
         assert len(outcome.results) == 3
         assert all(permalink == "https://ig/carousel" for permalink, _ in outcome.results)
 
-        # Regresión del bug real: antes, las 3 fotos de este carrusel
-        # habrían compartido el MISMO permalink como único identificador
-        # -- ahora cada estimate lleva su propio photo_link, único por
-        # foto (con ?img_index=N), no solo el permalink de la publicación
-        # (que sigue siendo el mismo para las 3, correctamente, es la
-        # misma publicación).
-        photo_links = [estimate.photo_link for _permalink, estimate in outcome.results]
-        assert len(set(photo_links)) == 3, f"los photo_link deberían ser únicos por foto: {photo_links}"
-        assert sorted(photo_links) == [
-            "https://ig/carousel?img_index=1",
-            "https://ig/carousel?img_index=2",
-            "https://ig/carousel?img_index=3",
-        ]
-
     @pytest.mark.asyncio
-    async def test_single_photo_post_link_is_unchanged(self, monkeypatch, respx_mock):
-        """Con una sola foto en la publicación, el photo_link es el
-        permalink normal tal cual -- no tiene sentido añadir
-        ?img_index=1 a una publicación que no es un carrusel."""
+    async def test_avatar_url_is_analyzed_as_one_more_photo_keyed_by_its_own_url(self, monkeypatch, respx_mock):
+        """La foto de perfil (avatar_url) se analiza con el mismo pipeline
+        que cualquier otra foto -- se identifica en el resultado porque su
+        "permalink" es la propia URL de la imagen, no la de una
+        publicación (no hay página de publicación para una foto de
+        perfil, ver docstring de estimate_locations_for_posts)."""
         import httpx
 
         monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
-
-        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
-        posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]
 
         tiny_jpeg = bytes.fromhex(
             "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
@@ -491,90 +396,32 @@ class TestEstimateLocationsForPosts:
             "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
             "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
         )
-        respx_mock.get("https://cdn.fake/1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+        respx_mock.get("https://cdn.fake/avatar.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
         monkeypatch.setattr(
             geolocation,
             "estimate_location_from_image",
             lambda image, k=15: geolocation.ImageLocationEstimate(
-                province="Madrid", confidence=0.7, k_neighbors=15, mean_similarity=0.6
+                province="Asturias", confidence=0.6, k_neighbors=15, mean_similarity=0.5
             ),
         )
 
-        outcome = await geolocation.estimate_locations_for_posts(posts)
+        outcome = await geolocation.estimate_locations_for_posts([], avatar_url="https://cdn.fake/avatar.jpg")
 
         assert len(outcome.results) == 1
-        assert outcome.results[0][1].photo_link == "https://ig/1"
+        permalink, estimate = outcome.results[0]
+        assert permalink == "https://cdn.fake/avatar.jpg"
+        assert estimate.province == "Asturias"
 
     @pytest.mark.asyncio
-    async def test_descriptions_do_not_overwrite_between_photos_of_the_same_carousel(self, monkeypatch, respx_mock):
-        """Regresión del bug real: antes, visual_descriptions/
-        general_descriptions usaban el permalink de la PUBLICACIÓN como
-        clave -- con varias fotos del mismo carrusel dando descripción,
-        cada una sobreescribía a la anterior, y solo sobrevivía una
-        (la última en procesarse, no determinista) aplicada a TODAS las
-        fotos del carrusel. Con photo_link como clave, cada foto conserva
-        su propia descripción."""
-        import httpx
-
+    async def test_no_avatar_url_means_no_extra_photo_unit(self, monkeypatch):
+        """avatar_url=None (por defecto) no debe añadir ninguna entrada
+        extra -- mismo comportamiento que antes de esta funcionalidad."""
         monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
-        monkeypatch.setattr(geolocation.settings, "enable_scene_analysis", True)
 
-        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
-        posts = [
-            Post(
-                type="carousel_album",
-                media_urls=["https://cdn.fake/c1.jpg", "https://cdn.fake/c2.jpg"],
-                permalink="https://ig/carousel",
-            ),
-        ]
+        outcome = await geolocation.estimate_locations_for_posts([])
 
-        tiny_jpeg = bytes.fromhex(
-            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
-            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
-            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
-            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
-        )
-        respx_mock.get("https://cdn.fake/c1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
-        respx_mock.get("https://cdn.fake/c2.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
-
-        monkeypatch.setattr(
-            geolocation,
-            "estimate_location_from_image",
-            lambda image, k=15: geolocation.ImageLocationEstimate(
-                province="Madrid", confidence=0.7, k_neighbors=15, mean_similarity=0.6
-            ),
-        )
-
-        # Cada foto (identificada por su media_url) da una descripción
-        # DISTINTA -- si el bug de sobrescritura sigue presente, al final
-        # solo quedaría UNA de las dos en los diccionarios.
-        descriptions_by_url = {
-            "https://cdn.fake/c1.jpg": ("Personas en la foto: una", "a person playing guitar"),
-            "https://cdn.fake/c2.jpg": ("Personas en la foto: varias", "a group of friends at the beach"),
-        }
-        call_count = {"n": 0}
-
-        def _fake_analyze(image):
-            # No hay forma directa de saber qué URL generó esta imagen ya
-            # descargada -- se usa el orden de llamada, que coincide con
-            # el orden de photo_units (mismo orden que media_urls).
-            url = list(descriptions_by_url.keys())[call_count["n"]]
-            call_count["n"] += 1
-            raw, general = descriptions_by_url[url]
-            return [], False, raw, general
-
-        monkeypatch.setattr(geolocation, "analyze_image_content", _fake_analyze)
-
-        outcome = await geolocation.estimate_locations_for_posts(posts)
-
-        assert outcome.general_descriptions == {
-            "https://ig/carousel?img_index=1": "a person playing guitar",
-            "https://ig/carousel?img_index=2": "a group of friends at the beach",
-        }
-        assert outcome.visual_descriptions == {
-            "https://ig/carousel?img_index=1": "Personas en la foto: una",
-            "https://ig/carousel?img_index=2": "Personas en la foto: varias",
-        }
+        assert outcome.results == []
 
     @pytest.mark.asyncio
     async def test_visual_content_analysis_runs_alongside_geolocation_on_the_same_image(self, monkeypatch, respx_mock):

@@ -329,15 +329,28 @@ async def _apply_image_geolocation(
     post_dates_by_permalink = {post.permalink: post.created_utc for post in posts}
     image_location_points = [
         ImageLocationPoint(
-            permalink=permalink,
+            # Enlace a ESTA foto en concreto, no solo a la publicación (ver
+            # ImageLocationEstimate.photo_link / geolocation._photo_link)
+            # -- con varias fotos por publicación (carrusel), cada punto
+            # lleva un enlace distinto (?img_index=N), en vez de todos
+            # apuntando al mismo permalink de publicación. Fallback al
+            # permalink de publicación si por lo que sea no se pudo
+            # determinar (no debería pasar en el flujo real, solo en tests
+            # que construyen ImageLocationEstimate directamente sin pasar
+            # photo_link).
+            permalink=estimate.photo_link or permalink,
             province=estimate.province,
             confidence=estimate.confidence,
             lat=estimate.lat,
             lon=estimate.lon,
             representative=estimate.representative,
+            # created_utc SÍ es a nivel de publicación (Instagram no da
+            # timestamps distintos por foto dentro de un carrusel) -- se
+            # sigue buscando por el permalink de PUBLICACIÓN, no por
+            # estimate.photo_link.
             created_utc=post_dates_by_permalink.get(permalink),
-            visual_description=geo_outcome.visual_descriptions.get(permalink),
-            visual_description_general=geo_outcome.general_descriptions.get(permalink),
+            visual_description=geo_outcome.visual_descriptions.get(estimate.photo_link or permalink),
+            visual_description_general=geo_outcome.general_descriptions.get(estimate.photo_link or permalink),
         )
         for permalink, estimate in geo_outcome.results
     ]

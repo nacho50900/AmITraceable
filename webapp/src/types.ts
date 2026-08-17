@@ -91,6 +91,13 @@ export interface ImageLocationPoint {
   // físico de ninguna persona (restricción del prompt en el backend).
   // null en los mismos casos que `visual_description`.
   visual_description_general: string | null;
+  // True si esta entrada es la foto de perfil, no una publicación (ver
+  // app/vision/geolocation.py::estimate_locations_for_posts). En ese caso
+  // `permalink` es la URL directa de la imagen, no la de una publicación
+  // de Instagram -- el frontend la etiqueta como "Foto de perfil" en vez
+  // de "Ver publicación". Opcional: ausente en informes generados por una
+  // versión anterior del backend (fallback: se trata como false).
+  is_profile_picture?: boolean;
 }
 
 export interface ExposureReport {

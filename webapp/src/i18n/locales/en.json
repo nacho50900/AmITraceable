@@ -281,7 +281,8 @@
       "noGeneralDescription": "No general description available for this photo.",
       "noVisualDescription": "No visual description available for this photo.",
       "nonRepresentativeSummary": "Non-representative images ({{count}})",
-      "nonRepresentativeNote": "These photos were analyzed, but their closest neighbors in the index are spread across too wide an area to assign a reliable location -- they're not shown on the map and don't count toward estimating your residence."
+      "nonRepresentativeNote": "These photos were analyzed, but their closest neighbors in the index are spread across too wide an area to assign a reliable location -- they're not shown on the map and don't count toward estimating your residence.",
+      "profilePictureLabel": "Profile picture"
     }
   },
   "api": {

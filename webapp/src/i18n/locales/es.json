@@ -281,7 +281,8 @@
       "noGeneralDescription": "Sin descripción general disponible para esta foto.",
       "noVisualDescription": "Sin descripción visual disponible para esta foto.",
       "nonRepresentativeSummary": "Imágenes no representativas ({{count}})",
-      "nonRepresentativeNote": "Estas fotos se analizaron, pero sus vecinos más parecidos en el índice están repartidos por una zona demasiado amplia como para asignarles una ubicación fiable -- no se muestran en el mapa ni cuentan para estimar tu residencia."
+      "nonRepresentativeNote": "Estas fotos se analizaron, pero sus vecinos más parecidos en el índice están repartidos por una zona demasiado amplia como para asignarles una ubicación fiable -- no se muestran en el mapa ni cuentan para estimar tu residencia.",
+      "profilePictureLabel": "Foto de perfil"
     }
   },
   "api": {

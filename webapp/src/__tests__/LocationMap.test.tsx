@@ -325,4 +325,63 @@ describe('LocationMap', () => {
     const scrollList = container.querySelector('.image-location-list.image-location-list-scroll');
     expect(scrollList).toBeInTheDocument();
   });
+
+  describe('foto de perfil (is_profile_picture)', () => {
+    test('con permalink: se muestra como enlace con la etiqueta "Foto de perfil", no "Ver publicación"', () => {
+      const points = [
+        makePoint({ is_profile_picture: true, permalink: 'https://cdn.fake/avatar.jpg', created_utc: null }),
+      ];
+      render(<LocationMap points={points} platform="instagram" available={true} />);
+
+      const links = screen.getAllByRole('link', { name: 'Foto de perfil' });
+      expect(links.length).toBeGreaterThan(0);
+      links.forEach((link) => expect(link).toHaveAttribute('href', 'https://cdn.fake/avatar.jpg'));
+      expect(screen.queryByText('Ver publicación')).not.toBeInTheDocument();
+    });
+
+    test('sin permalink: texto suelto "Foto de perfil", sin enlace', () => {
+      // Sin lat/lon: no entra en el mapa (que también renderizaría un
+      // enlace en el popup), así que solo aparece en la lista principal.
+      const points = [
+        makePoint({ is_profile_picture: true, permalink: '', lat: null, lon: null, created_utc: null }),
+      ];
+      const { container } = render(<LocationMap points={points} platform="instagram" available={true} />);
+
+      expect(screen.getByText('Foto de perfil')).toBeInTheDocument();
+      expect(container.querySelector('.photo-details summary a')).not.toBeInTheDocument();
+      expect(container.querySelector('.photo-link-label')).toBeInTheDocument();
+    });
+
+    test('foto normal (is_profile_picture ausente/false): sigue diciendo "Ver publicación"', () => {
+      const points = [makePoint()];
+      render(<LocationMap points={points} platform="instagram" available={true} />);
+
+      expect(screen.getAllByRole('link', { name: 'Ver publicación' }).length).toBeGreaterThan(0);
+      expect(screen.queryByText('Foto de perfil')).not.toBeInTheDocument();
+    });
+
+    test('en el mapa (popup), la foto de perfil con link también dice "Foto de perfil"', () => {
+      const points = [makePoint({ is_profile_picture: true, permalink: 'https://cdn.fake/avatar.jpg' })];
+      render(<LocationMap points={points} platform="instagram" available={true} />);
+
+      const popup = within(screen.getByTestId('popup'));
+      expect(popup.getByRole('link', { name: 'Foto de perfil' })).toHaveAttribute(
+        'href',
+        'https://cdn.fake/avatar.jpg',
+      );
+    });
+
+    test('foto de perfil no representativa: también se etiqueta correctamente en esa lista', () => {
+      const points = [
+        makePoint({
+          is_profile_picture: true,
+          representative: false,
+          permalink: 'https://cdn.fake/avatar.jpg',
+        }),
+      ];
+      render(<LocationMap points={points} platform="instagram" available={true} />);
+
+      expect(screen.getByRole('link', { name: 'Foto de perfil' })).toBeInTheDocument();
+    });
+  });
 });

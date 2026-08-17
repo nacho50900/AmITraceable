@@ -124,6 +124,61 @@ class TestGenerateReportPlatformBranching:
         assert set(location_steps[0].evidence) == {"https://ig/1", "https://ig/2"}
 
     @pytest.mark.asyncio
+    async def test_carousel_photos_get_their_own_visual_description_by_photo_link(self, monkeypatch):
+        """Regresión: dos fotos del MISMO carrusel comparten `permalink`
+        (el de la publicación), pero cada una tiene su propio `photo_link`
+        (ver ImageLocationEstimate.photo_link / geolocation._photo_link,
+        con ?img_index=N). `_apply_image_geolocation` debe buscar
+        visual_description/visual_description_general por `photo_link`,
+        NO por `permalink` -- si busca por `permalink`, las dos fotos del
+        carrusel comparten clave y la búsqueda falla para ambas (bug real,
+        visto en producción: "Sin descripción disponible" en todas las
+        fotos de un carrusel pese a que Moondream2 sí las analizó)."""
+
+        async def _fake_estimate(posts, progress_callback=None):
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[
+                    (
+                        "https://ig/carousel",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.5, k_neighbors=15, mean_similarity=0.6,
+                            photo_link="https://ig/carousel?img_index=1",
+                        ),
+                    ),
+                    (
+                        "https://ig/carousel",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.5, k_neighbors=15, mean_similarity=0.6,
+                            photo_link="https://ig/carousel?img_index=2",
+                        ),
+                    ),
+                ],
+                visual_descriptions={
+                    "https://ig/carousel?img_index=1": "Personas en la foto: una",
+                    "https://ig/carousel?img_index=2": "Personas en la foto: varias",
+                },
+                general_descriptions={
+                    "https://ig/carousel?img_index=1": "a person at a beach",
+                    "https://ig/carousel?img_index=2": "two people at a restaurant",
+                },
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+
+        report = await generate_report(
+            "instagram", "user",
+            [_post(platform="instagram", permalink="https://ig/carousel", media_urls=["https://cdn/1.jpg", "https://cdn/2.jpg"])],
+            _fingerprint(), [], _score(),
+        )
+
+        points_by_link = {p.permalink: p for p in report.image_location_points}
+        assert points_by_link["https://ig/carousel?img_index=1"].visual_description == "Personas en la foto: una"
+        assert points_by_link["https://ig/carousel?img_index=1"].visual_description_general == "a person at a beach"
+        assert points_by_link["https://ig/carousel?img_index=2"].visual_description == "Personas en la foto: varias"
+        assert points_by_link["https://ig/carousel?img_index=2"].visual_description_general == "two people at a restaurant"
+
+    @pytest.mark.asyncio
     async def test_image_location_points_include_the_post_publication_date(self, monkeypatch):
         async def _fake_estimate(posts, progress_callback=None):
             return geolocation.GeolocationOutcome(

@@ -907,6 +907,14 @@ body {
   flex-shrink: 0;
 }
 
+/* Mismo hueco de layout que el enlace "Ver publicación"/"Foto de perfil",
+   pero sin subrayado ni color de enlace -- se usa cuando no hay ninguna
+   URL a la que enlazar (ver PhotoLink en LocationMap.tsx). */
+.photo-details summary .photo-link-label {
+  flex-shrink: 0;
+  color: var(--text-dim);
+}
+
 .photo-details summary span {
   min-width: 0;
   flex: 1 1 auto;

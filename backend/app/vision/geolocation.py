@@ -105,53 +105,6 @@ class ImageLocationEstimate:
     # por sí sola (ni en grupo con otras igual de dispersas) la conclusión
     # de dónde vive la persona.
     representative: bool = True
-    # Enlace a ESTA foto en concreto, distinto del permalink de la
-    # publicación cuando la publicación tiene varias fotos (carrusel) --
-    # ver `_photo_link()`. None si no se pudo determinar (no debería
-    # pasar en el flujo real, ver `estimate_locations_for_posts`, pero
-    # los tests que construyen ImageLocationEstimate directamente sin
-    # pasar este campo lo dejan en None; `report/generator.py` hace
-    # fallback al permalink de la publicación en ese caso). Con una sola
-    # foto en la publicación, coincide con el permalink normal.
-    photo_link: str | None = None
-
-
-def _photo_link(permalink: str, index: int, total: int) -> str:
-    """Enlace a UNA foto concreta dentro de una publicación -- si la
-    publicación tiene varias fotos (carrusel), el permalink normal de
-    Instagram siempre apunta a la primera; para enlazar a una foto
-    concreta, Instagram soporta el parámetro `?img_index=N` en la propia
-    URL del post (1-indexado, igual que la numeración que ve el usuario
-    dentro de la propia app).
-
-    NOTA: no se ha podido verificar de forma 100% fiable que Instagram
-    siga soportando este parámetro tal cual en la web actual -- si algún
-    enlace generado no salta a la foto correcta, confirmarlo abriendo una
-    publicación de carrusel real y comprobando si la URL cambia al pasar
-    de una foto a otra.
-
-    Con una sola foto en la publicación (total <= 1) se devuelve el
-    permalink tal cual, sin tocarlo -- no tiene sentido añadir
-    `?img_index=1` a una publicación de una sola foto, y evita ensuciar
-    innecesariamente el enlace más común (la mayoría de publicaciones no
-    son carruseles).
-
-    Este valor es la clave real que arregla dos problemas a la vez (ver
-    `estimate_locations_for_posts`/`_collect_photo_result`):
-    (1) antes, todas las fotos de un mismo carrusel compartían el MISMO
-    permalink como clave en `visual_descriptions`/`general_descriptions`
-    (dos diccionarios) -- con varias fotos analizadas del mismo carrusel,
-    cada nueva descripción SOBREESCRIBÍA a la anterior en el diccionario,
-    así que solo sobrevivía la última en procesarse (no determinista, por
-    la concurrencia) y esa MISMA descripción se aplicaba a TODAS las fotos
-    de ese carrusel en el informe final, aunque fueran fotos distintas.
-    (2) el frontend usaba `point.permalink` como `key` de React (ver
-    LocationMap.tsx) -- con permalinks repetidos entre fotos del mismo
-    carrusel, React tenía colisiones de key silenciosas."""
-    if total <= 1:
-        return permalink
-    separator = "&" if "?" in permalink else "?"
-    return f"{permalink}{separator}img_index={index}"
 
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -424,30 +377,7 @@ async def _download_image(client, semaphore, media_url):
     """Descarga UNA foto (I/O de red). La descarga es un recurso totalmente
     distinto de la CPU que usan los dos modelos de visión -- solaparla con
     el análisis de otras fotos reduce el tiempo total, sin competir por los
-    mismos núcleos que usa torch.
-
-    BUG REAL corregido aquí (visto en producción, no una precaución
-    teórica): `Image.open()` es PEREZOSO -- no decodifica los píxeles al
-    momento, se limita a guardar una referencia al `BytesIO` y decodifica
-    bajo demanda la PRIMERA vez que algo accede de verdad a la imagen
-    (`.convert()`, `.copy()`, iterar píxeles...). `_process_photo` pasa
-    esta MISMA imagen a `estimate_location_from_image` y
-    `analyze_image_content` EN PARALELO (`asyncio.gather`, cada una en su
-    propio hilo vía `asyncio.to_thread`) -- y esa decodificación perezosa
-    de PIL NO es segura frente a acceso concurrente desde dos hilos
-    distintos. En producción esto se manifestaba como una exclusión mutua
-    perfecta: SIEMPRE que DINOv2 conseguía una estimación, Moondream2
-    fallaba con `OSError: image file is truncated`, y viceversa -- nunca
-    los dos a la vez, porque el hilo que llegaba primero completaba la
-    decodificación, y el segundo se encontraba el stream ya parcialmente
-    consumido.
-
-    La solución: forzar la decodificación completa AQUÍ, con `.load()`,
-    mientras todavía estamos en un único hilo (el de la propia descarga) --
-    así, cuando `_process_photo` reparte la imagen entre los dos modelos,
-    ya no queda ninguna lectura perezosa pendiente sobre la que competir;
-    ambos hilos solo LEEN píxeles ya decodificados en memoria, lo cual sí
-    es seguro."""
+    mismos núcleos que usa torch."""
     from PIL import Image
     import io
 
@@ -455,9 +385,7 @@ async def _download_image(client, semaphore, media_url):
         try:
             resp = await client.get(media_url)
             resp.raise_for_status()
-            image = Image.open(io.BytesIO(resp.content))
-            image.load()  # fuerza la decodificación completa AQUÍ, en un único hilo -- ver docstring
-            return image
+            return Image.open(io.BytesIO(resp.content))
         except Exception:
             return None  # imagen no descargable/decodificable: se omite, no se aborta el análisis
 
@@ -542,7 +470,6 @@ async def _process_photo(client, download_semaphore, analysis_semaphore, media_u
 
 def _collect_photo_result(
     permalink: str,
-    photo_link: str,
     photo_result: tuple,
     results: list,
     visual_inferences: list,
@@ -554,36 +481,25 @@ def _collect_photo_result(
     en las listas/diccionarios compartidos de `estimate_locations_for_posts`.
     Extraído a su propia función para que el bucle principal se limite a
     orquestar -- consumir la tarea, delegar el volcado, emitir progreso --
-    en vez de acumular aquí varias ramas `if` seguidas.
-
-    Dos claves distintas a propósito, cada una a su nivel:
-    `permalink` es el de la PUBLICACIÓN (varias fotos de un carrusel
-    comparten el mismo) -- se usa para `partner_signal_permalinks`, que es
-    una señal a nivel de publicación ("esta cuenta muestra indicios de
-    pareja"), no de foto concreta. `photo_link` (ver `_photo_link`) es
-    ÚNICO por foto -- se usa como clave de `results`/
-    `visual_descriptions`/`general_descriptions` (arregla el bug real de
-    que, antes, varias fotos del mismo carrusel se sobrescribían entre sí
-    al compartir la misma clave, ver docstring de `_photo_link`) y para
-    `evidence` de cada InferredAttribute (más preciso: apunta a la foto
-    exacta que dio la señal, no solo a la publicación)."""
+    en vez de acumular aquí varias ramas `if` seguidas."""
     _image, estimate, scene_inferences, indicio_pareja, description, description_general = photo_result
 
     if estimate is not None:
-        estimate.photo_link = photo_link
         results.append((permalink, estimate))
     for inferred in scene_inferences:
-        inferred.evidence.append(photo_link)
+        inferred.evidence.append(permalink)
         visual_inferences.append((permalink, inferred))
     if indicio_pareja:
         partner_signal_permalinks.add(permalink)
     if description:
-        visual_descriptions[photo_link] = description
+        visual_descriptions[permalink] = description
     if description_general:
-        general_descriptions[photo_link] = description_general
+        general_descriptions[permalink] = description_general
 
 
-async def estimate_locations_for_posts(posts: list, progress_callback=None) -> GeolocationOutcome:
+async def estimate_locations_for_posts(
+    posts: list, avatar_url: str | None = None, progress_callback=None
+) -> GeolocationOutcome:
     """
     Orquestación de alto nivel: para CADA foto de CADA SocialPost de tipo
     imagen (todas las de un carrusel, no solo la primera -- ver
@@ -600,16 +516,17 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
     lo hace el llamador (ver `report/generator.py`). También devuelve las
     inferencias de contenido visual y qué fotos dieron señal de pareja.
 
-    Cada `ImageLocationEstimate` en `results` lleva además su propio
-    `photo_link` (ver `_photo_link`) -- un enlace a esa foto EN CONCRETO,
-    no solo a la publicación, con `?img_index=N` cuando la publicación
-    tiene varias fotos. Antes de esto, `visual_descriptions`/
-    `general_descriptions` usaban el permalink de la publicación como
-    clave -- con varias fotos del mismo carrusel analizadas, cada
-    descripción nueva SOBREESCRIBÍA a la anterior, así que todas las fotos
-    de un carrusel acababan mostrando la descripción de UNA sola foto
-    (la última en procesarse, no determinista). Usar `photo_link` (único
-    por foto) como clave en su lugar arregla esto de raíz.
+    `avatar_url`, si se da, se analiza como UNA foto más de este mismo
+    pipeline (mismo tratamiento que cualquier otra: geolocalización +
+    análisis de contenido), usando la propia URL de la foto de perfil como
+    "permalink" -- no hay una página de publicación a la que enlazar, así
+    que el llamador (`report/generator.py`) usa esta igualdad
+    (`permalink == avatar_url`) para reconocer esta entrada en concreto y
+    tratarla de forma especial: se muestra en el listado del frontend como
+    "Foto de perfil" en vez de "Ver publicación", y se EXCLUYE del cálculo
+    de consenso de residencia (`_infer_home_region`) -- un primer plano o
+    selfie de perfil no es necesariamente representativo de dónde vive la
+    persona, mismo criterio ya aplicado a las fotos de viaje (ver ADR-16).
 
     Se ejecuta en segundo plano de forma best-effort: si el índice no
     existe (no se ha corrido scripts/build_faiss_index.py) o falla la
@@ -632,19 +549,17 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
 
     results: list[tuple[str, ImageLocationEstimate]] = []
     # Una entrada por FOTO, no por publicación: un carrusel con 5 fotos
-    # aporta 5 entradas aquí, todas con el mismo permalink DE PUBLICACIÓN
-    # (el índice/total dentro del carrusel se llevan aparte, para poder
-    # construir un enlace específico a cada foto -- ver `_photo_link`) --
-    # así se analizan TODAS las fotos, no solo la primera. Ver
-    # InstagramClient._extract_media_urls().
-    photo_units: list[tuple[str, str, int, int]] = []  # (permalink, media_url, index, total)
-    for post in posts:
-        if post.type not in ("image", "carousel_album"):
-            continue
-        media_urls = getattr(post, "media_urls", None) or []
-        post_total = len(media_urls)
-        for photo_index, url in enumerate(media_urls, start=1):
-            photo_units.append((post.permalink, url, photo_index, post_total))
+    # aporta 5 entradas aquí, todas con el mismo permalink (el de la
+    # publicación) -- así se analizan TODAS las fotos, no solo la primera.
+    # Ver InstagramClient._extract_media_urls().
+    photo_units = [
+        (post.permalink, url)
+        for post in posts
+        if post.type in ("image", "carousel_album")
+        for url in (getattr(post, "media_urls", None) or [])
+    ]
+    if avatar_url:
+        photo_units.append((avatar_url, avatar_url))
     total = len(photo_units)
 
     if total == 0 or not index_available:
@@ -699,15 +614,13 @@ async def estimate_locations_for_posts(posts: list, progress_callback=None) -> G
             asyncio.create_task(
                 _process_photo(client, download_semaphore, analysis_semaphore, media_url, timing)
             )
-            for _permalink, media_url, _index, _post_total in photo_units
+            for _permalink, media_url in photo_units
         ]
 
-        for i, (permalink, _media_url, photo_index, post_total) in enumerate(photo_units, start=1):
+        for i, (permalink, _media_url) in enumerate(photo_units, start=1):
             photo_result = await photo_tasks[i - 1]
-            photo_link = _photo_link(permalink, photo_index, post_total)
             _collect_photo_result(
                 permalink,
-                photo_link,
                 photo_result,
                 results,
                 visual_inferences,

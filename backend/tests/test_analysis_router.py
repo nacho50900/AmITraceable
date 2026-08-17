@@ -279,7 +279,7 @@ class TestGeolocationRunsConcurrentlyFromTheStart:
     async def test_photo_task_gets_a_real_turn_before_synchronous_stages_finish(self, monkeypatch):
         order = []
 
-        async def _fake_estimate_locations(posts, progress_callback=None):
+        async def _fake_estimate_locations(posts, avatar_url=None, progress_callback=None):
             order.append("geo:started")
             return geolocation.GeolocationOutcome(index_available=True, results=[])
 
@@ -311,3 +311,32 @@ class TestGeolocationRunsConcurrentlyFromTheStart:
         # ANTES de que el trabajo síncrono del resto del pipeline termine
         # -- no solo haberse "creado" sin más.
         assert order == ["geo:started", "fingerprint:done"]
+
+    @pytest.mark.asyncio
+    async def test_profile_avatar_url_is_forwarded_to_the_background_geolocation_task(
+        self, monkeypatch, patch_spacy_model
+    ):
+        received = {}
+
+        async def _fake_estimate_locations(posts, avatar_url=None, progress_callback=None):
+            received["avatar_url"] = avatar_url
+            return geolocation.GeolocationOutcome(index_available=True, results=[])
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate_locations)
+
+        profile = SocialProfile(
+            platform="instagram",
+            username="fake_user",
+            posts=[
+                SocialPost(
+                    id="p1", platform="instagram", type="image", group="viajes", tags=["viajes"],
+                    text="Foto", created_utc=datetime(2025, 1, 1, tzinfo=timezone.utc),
+                    score=1, permalink="https://ig/1", media_urls=[],
+                )
+            ],
+            avatar_url="https://cdn.fake/avatar.jpg",
+        )
+
+        await analysis_router._build_report(profile)
+
+        assert received["avatar_url"] == "https://cdn.fake/avatar.jpg"

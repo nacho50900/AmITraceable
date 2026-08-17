@@ -136,7 +136,7 @@ class PopulationEstimate(BaseModel):
 
 
 class ImageLocationPoint(BaseModel):
-    permalink: str  # enlace a la foto que generó esta estimación
+    permalink: str  # enlace a la foto que generó esta estimación (o la URL directa de la foto de perfil, ver is_profile_picture)
     province: str
     confidence: float  # 0-1, proporción de vecinos del índice que coincidieron
     lat: float | None
@@ -148,6 +148,16 @@ class ImageLocationPoint(BaseModel):
     # un apartado de "imágenes no representativas" con solo el enlace a la
     # publicación, sin pintarla como punto en el mapa.
     representative: bool = True
+    # True si esta entrada es la foto de perfil, no una publicación (ver
+    # `estimate_locations_for_posts` en app/vision/geolocation.py). El
+    # frontend la etiqueta como "Foto de perfil" en vez de "Ver
+    # publicación", y `permalink` en ese caso es la URL directa de la
+    # imagen (no hay página de publicación a la que enlazar). Se excluye
+    # del cálculo de consenso de residencia (ver
+    # report/generator.py::_apply_image_geolocation) igual que las fotos
+    # de viaje: no es necesariamente representativa de dónde vive la
+    # persona.
+    is_profile_picture: bool = False
     # Fecha de la publicación (post.created_utc), para poder distinguir a
     # simple vista fotos que si no fuera por esto se verían todas iguales en
     # el listado (sobre todo las "no representativas", que solo muestran el

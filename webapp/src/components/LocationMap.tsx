@@ -24,6 +24,35 @@ function confidenceColor(confidence: number): string {
   return '#3aa657'; // baja -> verde (menos preocupante)
 }
 
+// La foto de perfil no tiene página de publicación a la que enlazar (no es
+// un post) -- `permalink`, en ese caso, es la URL directa de la propia
+// imagen (ver app/vision/geolocation.py::estimate_locations_for_posts). Si
+// por lo que sea no hay ninguna URL utilizable, se muestra el texto suelto
+// "Foto de perfil" sin enlace, en vez de un enlace roto.
+function PhotoLink({
+  point,
+  t,
+  onClick,
+}: {
+  point: ImageLocationPoint;
+  t: (key: string, opts?: Record<string, unknown>) => string;
+  onClick?: (e: React.MouseEvent) => void;
+}) {
+  const label = point.is_profile_picture
+    ? t('components.locationMap.profilePictureLabel')
+    : t('components.locationMap.viewPost');
+
+  if (point.is_profile_picture && !point.permalink) {
+    return <span className="photo-link-label">{label}</span>;
+  }
+
+  return (
+    <a href={point.permalink} target="_blank" rel="noreferrer" onClick={onClick}>
+      {label}
+    </a>
+  );
+}
+
 const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }) => {
   const { t, i18n } = useTranslation();
   const dateLocale = i18n.language?.split('-')[0] === 'en' ? 'en-US' : 'es-ES';
@@ -108,9 +137,7 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
                   lon: (point.lon as number).toFixed(4),
                 })}
                 <br />
-                <a href={point.permalink} target="_blank" rel="noreferrer">
-                  {t('components.locationMap.viewPost')}
-                </a>
+                <PhotoLink point={point} t={t} />
               </Popup>
             </CircleMarker>
           ))}
@@ -129,14 +156,7 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
               <li key={point.permalink}>
                 <details className="photo-details">
                   <summary>
-                    <a
-                      href={point.permalink}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {t('components.locationMap.viewPost')}
-                    </a>
+                    <PhotoLink point={point} t={t} onClick={(e) => e.stopPropagation()} />
                     <span>
                       {formatDate(point.created_utc)} — {point.province} —{' '}
                       {t('components.locationMap.confidenceInline', { value: Math.round(point.confidence * 100) })}
@@ -171,14 +191,7 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
               <li key={point.permalink}>
                 <details className="photo-details">
                   <summary>
-                    <a
-                      href={point.permalink}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {t('components.locationMap.viewPost')}
-                    </a>
+                    <PhotoLink point={point} t={t} onClick={(e) => e.stopPropagation()} />
                     <span>{formatDate(point.created_utc)}</span>
                   </summary>
                   <p className="photo-visual-description-general">
