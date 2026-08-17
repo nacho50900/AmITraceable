@@ -31,6 +31,44 @@
       "x": {
         "description": "Pendiente de aprobación de acceso a la API. Próximamente."
       }
+    },
+    "guide": {
+      "title": "Cómo usar la aplicación con cada red social",
+      "subtitle": "Antes de conectar tu cuenta, esto es lo que la aplicación lee y lo que no, y lo que tienes que preparar en cada plataforma.",
+      "reads": "La aplicación SÍ lee:",
+      "doesNotRead": "La aplicación NO lee:",
+      "todo": "Qué tienes que hacer:",
+      "unavailable": "Instrucciones no disponibles todavía -- esta integración no está operativa por ahora.",
+      "reddit": {
+        "name": "Reddit"
+      },
+      "instagram": {
+        "name": "Instagram",
+        "reads": [
+          "Tu biografía (bio) y tu nombre de usuario público.",
+          "Tus publicaciones públicas: fotos y el texto de cada descripción (caption).",
+          "Los hashtags que usas.",
+          "La fecha y hora de tus publicaciones (para el patrón horario de actividad).",
+          "El contenido visual de tus fotos (para estimar una ubicación aproximada y el contexto de la escena), sin usar reconocimiento facial en ningún momento."
+        ],
+        "doesNotRead": [
+          "Mensajes directos (DMs).",
+          "Tu lista de seguidores o de cuentas que sigues.",
+          "Comentarios de otras personas en tus publicaciones, ni contenido de otras cuentas.",
+          "Historias (stories) ni otro contenido efímero.",
+          "No hace reconocimiento facial ni clasifica rasgos étnicos o físicos -- excluido explícitamente por diseño (RGPD art. 9.1 y 4.2).",
+          "No guarda nada de forma permanente: todo el análisis ocurre en memoria y desaparece al cerrar sesión."
+        ],
+        "todo": [
+          "Convierte tu cuenta de Instagram en cuenta Business o Creator (Ajustes → Cuenta → Cambiar a cuenta profesional).",
+          "Date de alta como desarrollador/a en Meta for Developers (developers.facebook.com) con la misma cuenta de Meta vinculada a tu Instagram.",
+          "Contacta con el desarrollador de esta aplicación (indícale tu usuario) para que te añada al proyecto en Meta for Developers.",
+          "Acepta la invitación de rol que recibirás -- sin aceptarla, Meta no deja que la aplicación acceda a tu cuenta aunque ya sea profesional."
+        ]
+      },
+      "x": {
+        "name": "X"
+      }
     }
   },
   "dashboard": {
@@ -106,7 +144,10 @@
       "ubicacion_comunidad_autonoma": "Vive en comunidad autónoma: {{value}}"
     },
     "attributeValue": {
-      "sexo": { "hombre": "hombre", "mujer": "mujer" },
+      "sexo": {
+        "hombre": "hombre",
+        "mujer": "mujer"
+      },
       "estado_civil": {
         "casado": "Casado/a",
         "con_pareja": "Tiene pareja (sin estar casado/a)",
@@ -114,7 +155,10 @@
         "soltero": "Soltero/a (sin pareja actualmente)",
         "viudo": "Viudo/a"
       },
-      "nacionalidad": { "espanola": "española", "extranjera": "extranjera" },
+      "nacionalidad": {
+        "espanola": "española",
+        "extranjera": "extranjera"
+      },
       "situacion_laboral": {
         "activo": "trabaja actualmente",
         "parado": "en desempleo",

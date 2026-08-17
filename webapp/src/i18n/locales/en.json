@@ -31,6 +31,44 @@
       "x": {
         "description": "Pending API access approval. Coming soon."
       }
+    },
+    "guide": {
+      "title": "How to use the app with each social network",
+      "subtitle": "Before connecting your account, here's what the app reads and doesn't, and what you need to set up on each platform.",
+      "reads": "The app DOES read:",
+      "doesNotRead": "The app does NOT read:",
+      "todo": "What you need to do:",
+      "unavailable": "No instructions yet -- this integration isn't working right now.",
+      "reddit": {
+        "name": "Reddit"
+      },
+      "instagram": {
+        "name": "Instagram",
+        "reads": [
+          "Your bio and public username.",
+          "Your public posts: photos and each caption's text.",
+          "The hashtags you use.",
+          "The date and time of your posts (for the hourly activity pattern).",
+          "The visual content of your photos (to estimate an approximate location and scene context) -- never using facial recognition."
+        ],
+        "doesNotRead": [
+          "Direct messages (DMs).",
+          "Your followers or following list.",
+          "Other people's comments on your posts, or content from other accounts.",
+          "Stories or other ephemeral content.",
+          "It does not do facial recognition or classify ethnic/physical traits -- explicitly excluded by design (GDPR Art. 9.1 and 4.2).",
+          "Nothing is stored permanently: the whole analysis happens in memory and disappears when you log out."
+        ],
+        "todo": [
+          "Switch your Instagram account to a Business or Creator account (Settings → Account → Switch to professional account).",
+          "Sign up as a developer on Meta for Developers (developers.facebook.com) with the same Meta account linked to your Instagram.",
+          "Contact this app's developer (tell them your username) so they can add you to the Meta for Developers project.",
+          "Accept the role invitation you'll receive -- without accepting it, Meta won't let the app access your account even if it's a professional one."
+        ]
+      },
+      "x": {
+        "name": "X"
+      }
     }
   },
   "dashboard": {
@@ -106,7 +144,10 @@
       "ubicacion_comunidad_autonoma": "Lives in region: {{value}}"
     },
     "attributeValue": {
-      "sexo": { "hombre": "male", "mujer": "female" },
+      "sexo": {
+        "hombre": "male",
+        "mujer": "female"
+      },
       "estado_civil": {
         "casado": "Married",
         "con_pareja": "In a relationship (not married)",
@@ -114,7 +155,10 @@
         "soltero": "Single (no partner currently)",
         "viudo": "Widowed"
       },
-      "nacionalidad": { "espanola": "Spanish", "extranjera": "foreign" },
+      "nacionalidad": {
+        "espanola": "Spanish",
+        "extranjera": "foreign"
+      },
       "situacion_laboral": {
         "activo": "currently working",
         "parado": "unemployed",

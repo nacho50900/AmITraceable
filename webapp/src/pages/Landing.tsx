@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { SiInstagram, SiReddit, SiX } from 'react-icons/si';
 import { api } from '../api';
 import LanguageSwitcher from '../components/LanguageSwitcher';
+import PlatformGuideAccordion from '../components/PlatformGuideAccordion';
 import type { Platform } from '../types';
 
 interface PlatformCardData {
@@ -249,6 +250,8 @@ const Landing: React.FC = () => {
           )}
         </div>
       )}
+
+      <PlatformGuideAccordion />
     </div>
   );
 };

@@ -72,6 +72,117 @@ body {
   color: var(--text);
 }
 
+/* --- Guía "archivador" por plataforma (Landing, debajo del carrusel) --- */
+.platform-guide {
+  margin-top: 56px;
+  max-width: 640px;
+}
+
+.platform-guide h2 {
+  font-size: 1.3rem;
+  margin-bottom: 6px;
+}
+
+.platform-guide-subtitle {
+  color: var(--text-dim);
+  margin: 0 0 22px;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.platform-guide-archive {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Cada <details> es una "pestaña" de archivador: cerrada por defecto, con
+   un borde de color de marca a la izquierda (mismo color que su tarjeta
+   en el carrusel de arriba, para que se lean como el mismo objeto). */
+.platform-guide-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.platform-guide-item--reddit {
+  border-left-color: #ff4500;
+}
+
+.platform-guide-item--instagram {
+  border-left-color: #dc2743;
+}
+
+.platform-guide-item--x {
+  border-left-color: #5b6cf0;
+}
+
+.platform-guide-item summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.platform-guide-item summary::-webkit-details-marker,
+.platform-guide-item summary::marker {
+  display: none;
+  content: '';
+}
+
+.platform-guide-item-icon {
+  display: flex;
+  align-items: center;
+  font-size: 1.15rem;
+  color: var(--text-dim);
+}
+
+.platform-guide-item-name {
+  flex: 1;
+}
+
+.platform-guide-item-chevron {
+  color: var(--text-dim);
+  font-size: 1.3rem;
+  transition: transform 0.2s ease;
+}
+
+.platform-guide-item[open] .platform-guide-item-chevron {
+  transform: rotate(90deg);
+}
+
+.platform-guide-item-content {
+  padding: 4px 18px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.platform-guide-item-content h3 {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  margin: 16px 0 8px;
+}
+
+.platform-guide-item-content ul,
+.platform-guide-item-content ol {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.platform-guide-item-content li {
+  line-height: 1.5;
+  font-size: 0.92rem;
+}
+
 /* --- Landing --- */
 .landing h1 {
   font-size: clamp(28px, 4vw, 42px);

@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { api } from '../api';
@@ -20,7 +20,7 @@ describe('Landing', () => {
   test('muestra el aviso de consentimiento y las tres cartas de plataforma', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: false });
 
-    render(
+    const { container } = render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Landing />
       </MemoryRouter>,
@@ -29,10 +29,17 @@ describe('Landing', () => {
     expect(screen.getByText('AmITraceable')).toBeInTheDocument();
     expect(screen.getByText(/Solo se analiza tu propia cuenta/i)).toBeInTheDocument();
 
+    // Acotado al mazo de cartas: "Reddit"/"Instagram"/"X" también aparecen
+    // como cabecera de cada pestaña en la guía "archivador" de más abajo
+    // (ver PlatformGuideAccordion), así que una consulta sin acotar
+    // encontraría más de una coincidencia.
     await waitFor(() => {
-      expect(screen.getByText('Reddit')).toBeInTheDocument();
-      expect(screen.getByText('Instagram')).toBeInTheDocument();
-      expect(screen.getByText('X')).toBeInTheDocument();
+      const deck = container.querySelector('.card-deck');
+      expect(deck).not.toBeNull();
+      const withinDeck = within(deck as HTMLElement);
+      expect(withinDeck.getByText('Reddit')).toBeInTheDocument();
+      expect(withinDeck.getByText('Instagram')).toBeInTheDocument();
+      expect(withinDeck.getByText('X')).toBeInTheDocument();
     });
   });
 
