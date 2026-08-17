@@ -6,6 +6,7 @@ docs/build
 webapp/.env
 backend/.env
 .vscode/
+.idea/
 
 # Python
 __pycache__/
