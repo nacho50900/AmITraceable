@@ -720,4 +720,356 @@ logging activado -- sin rotación ni purga automática por ahora, asumible
 para el volumen de análisis de un TFG pero a revisar si esto se
 convirtiera en un despliegue de uso continuado.
 
+=== ADR-21: Prompt de Moondream2 dividido en dos llamadas (caption en inglés + estructurado en español)
+
+*Contexto*: el prompt original de `scene_analysis.py` combinaba un campo
+de descripción general (DESCRIPCION) y tres campos de opciones fijas
+(PERSONAS/AFICION/PAREJA) en una única llamada a `_model.query()`, con
+placeholders `<explicación entre corchetes>` inline en la misma línea que
+cada etiqueta. Probado con hardware real (GTX 1650) esto falló de dos
+formas distintas, ambas confirmadas con la respuesta cruda del modelo, no
+solo sospechadas:
+
+1. El modelo devolvía literalmente el texto del placeholder como si fuera
+la respuesta ("AFICION: una actividad, deporte, instrumento musical...")
+en vez de sustituirlo por un valor real -- fallo de instruction-following
+típico de un VQA de ~1.8B cuando la etiqueta, la explicación de las
+opciones y el valor esperado se mezclan en la misma línea.
+2. Corregido lo anterior (separando un ejemplo literal de líneas de la
+explicación de qué valores son válidos, en párrafos aparte), el campo de
+texto libre (DESCRIPCION) seguía fallando: el modelo copiaba literalmente
+la frase de ejemplo dada ("varias personas charlando alrededor de una
+mesa"), y en un caso la repitió una segunda vez tras terminar las otras
+tres líneas. Investigado el porqué: el propio autor del modelo confirma
+en la discusión "OCR and multi-Language support?" de
+`huggingface.co/vikhyatk/moondream2/discussions/22` que *"the training
+data is currently english-only"* -- pedirle generar una frase libre en
+ESPAÑOL lo sacaba de su dominio de entrenamiento, produciendo gramática
+rota y palabras inventadas (p. ej. "comengan", que no existe).
+
+*Alternativas consideradas*: seguir puliendo el prompt español (varios
+intentos reales, cada uno con fallos nuevos: ejemplos más cortos, más
+énfasis en "sé concreto", listas de ejemplos enumerados -- estos últimos
+acabaron literalmente citados en la respuesta, ver docstring de
+`_CAPTION_QUERY`); traducir el caption con Mistral tras generarlo en
+inglés (descartado: reintroduciría el mismo límite de tasa del tier
+gratuito de Mistral que motivó pasar a un modelo local en primer lugar,
+ver ADR-17, salvo que se batchee a una llamada por informe en vez de por
+foto -- no implementado).
+
+*Decisión*: separar en DOS llamadas independientes a `_model.query()`,
+reutilizando la misma imagen ya codificada
+(`_model.encode_image()`, ver ADR-22 para el porqué de codificar una
+copia redimensionada, no la original):
+
+- `_CAPTION_QUERY` (inglés): una única pregunta de texto libre, sin
+  plantilla ni ejemplo de contenido que copiar -- solo una instrucción
+  directa ("Describe what's happening..."), que es además el uso para el
+  que Moondream2 está pensado (VQA/captioning de una sola pregunta, no un
+  formato estructurado de varios campos). El caption resultante se
+  muestra tal cual, EN INGLÉS, en vez de traducirse -- única excepción de
+  idioma en un proyecto por lo demás en español, documentada
+  explícitamente en el código para que no se confunda con un descuido.
+- `_STRUCTURED_QUERY` (español): PERSONAS/AFICION/PAREJA/TEXTO_VISIBLE
+  (ver ADR-23), formato de tres... ahora cuatro líneas fijas con ejemplo
+  literal -- aquí SÍ funciona el ejemplo porque las respuestas son
+  opciones cerradas (o casi), sin contenido libre que el modelo pueda
+  colar como respuesta real.
+
+Además, `settings={"variant": None, ...}` es obligatorio en ambas
+llamadas, no opcional -- descubierto en ejecución real: `encode_image()`
+en esta revisión pinneada del modelo hace `settings["variant"]` sin
+`.get()`, así que cualquier `settings` sin esa clave revienta con
+`KeyError` antes de generar nada. No es un parámetro elegido, es un
+requisito de esta revisión concreta para poder pasar `settings` en
+absoluto (controla selección de variante LoRA, no relacionado con
+calidad de imagen).
+
+*Consecuencias*: (+) el caption pasó de texto sin sentido ("En una escena
+real, los personas... Se manejan y comengan a comer") a descripciones
+coherentes y fieles a la foto real ("A group of friends gathers for an
+outdoor meal, sharing food and drinks in a casual, relaxed atmosphere");
+(+) PERSONAS/AFICION/PAREJA/TEXTO_VISIBLE siguen en español, consistente
+con el resto del proyecto; (-) el informe mezcla dos idiomas en un mismo
+campo del pipeline (caption en inglés, señales estructuradas en español)
+-- documentado explícitamente en vez de ocultado, y limitado a un único
+campo visible (`visual_description_general`); (-) dos llamadas al modelo
+en vez de una, mitigado reutilizando la misma imagen ya codificada (no se
+paga el coste de codificarla dos veces).
+
+=== ADR-22: Redimensionado dedicado al `crop_size` de Moondream2, independiente del usado por DINOv2
+
+*Contexto*: `encode_image()` de Moondream2 no hace una sola pasada por el
+encoder de visión -- trocea la imagen en un crop global (reescalado
+internamente a un tamaño base fijo) más varios crops locales solapados de
+alta resolución (`prepare_crops()`/`select_tiling()` en el código remoto
+del modelo), y CADA crop pasa por el encoder. Medido en producción real
+(GTX 1650, revisión pinneada del modelo, leyendo `config.py` de esa
+revisión vía `inspect.getsource()` en vez de asumir valores de la
+documentación pública): `crop_size=378`, `max_crops=12`. Una foto de
+612x408 (ya redimensionada al tope de 1024px que usa
+`_MAX_QUEUED_IMAGE_DIMENSION` para DINOv2, ver ADR-9) generaba un tiling
+de `(2, 4)` -- 8 crops locales + 1 global = *9 pasadas* por el encoder de
+visión, y `encode_image()` por sí solo tardaba ~33s (el 78% del tiempo
+total de análisis por foto).
+
+*Alternativas consideradas*: bajar `_MAX_QUEUED_IMAGE_DIMENSION` de
+geolocation.py de 1024 a un valor menor para las dos rutas a la vez
+(descartado: DINOv2 se beneficia de más resolución para el matching de
+escenas contra el índice FAISS, ver ADR-9 -- bajar el tope global
+degradaría esa geolocalización sin necesidad, solo para resolver un
+problema exclusivo de Moondream2); tocar directamente
+`modelo.config.vision.crop_size`/`max_crops` tras cargar el modelo, para
+forzar menos crops sin redimensionar nada (descartado: exige mutar
+config interna de un modelo con `trust_remote_code=True`, sin garantía de
+que otros campos dependientes -- tamaño de buffers, máscaras de atención
+-- se recalculen de forma consistente; mayor riesgo que beneficio frente
+a la alternativa elegida).
+
+*Decisión*: `_CAPTION_MAX_DIMENSION = 378` en `scene_analysis.py`,
+aplicado sobre una COPIA de la imagen (`image.copy()` +
+`.thumbnail((378, 378))`) justo antes de `encode_image()` -- nunca sobre
+la imagen original, que sigue compartida con DINOv2 en el mismo hilo
+concurrente (ver ADR-24 para por qué mutar la imagen compartida sería
+además una condición de carrera). Con ambas dimensiones por debajo de
+`crop_size`, `select_tiling()` devuelve `(1, 1)`: un único crop local +
+el global, 2 pasadas en vez de 9.
+
+*Justificación*: el crop global ya reescala internamente a un tamaño
+similar para dar "contexto general" de la escena, que es precisamente lo
+que este módulo necesita (descripción general, conteo aproximado de
+personas, aficiones visibles, indicio de pareja) -- los crops locales
+adicionales solo aportan detalle fino (texto pequeño, objetos lejanos),
+irrelevante para estas señales de grano grueso.
+
+*Consecuencias*: (+) medido en producción real: `encode_image()` bajó de
+~33s a ~12s en la primera prueba (imagen aún con crops múltiples por
+redimensionado insuficiente) y a ~12.3s con el redimensionado a 378px ya
+aplicado, con encode+dos llamadas bajando de ~52s a ~25s en total,
+cruzando el umbral crítico de `_SCENE_ANALYSIS_TIMEOUT_SECONDS=30s` (ver
+ADR-17) -- antes de esto, el análisis de contenido probablemente
+descartaba SIEMPRE por timeout en este hardware, silenciosamente, sin que
+se notara en la interfaz; (+) como beneficio no buscado, el caption
+también mejoró en calidad (menos ruido al combinar información de menos
+crops); (-) se pierde capacidad de leer detalle muy fino en la foto --
+aceptable para las señales de este módulo, pero relevante si en el futuro
+se necesitara ese nivel de detalle (p. ej. para el campo TEXTO_VISIBLE,
+ver ADR-23, cuyo acierto en texto pequeño podría verse afectado); (-) el
+valor 378 es específico de la revisión pinneada del modelo -- si
+`_MODEL_REVISION` cambia alguna vez, hay que reconfirmar `crop_size` leyendo
+el `config.py` real de la nueva revisión, no asumir que se mantiene.
+
+=== ADR-23: Campo TEXTO_VISIBLE, enlace por foto en publicaciones con varias imágenes, y descripción visual reconstruida solo con señales positivas
+
+*Contexto*: tres necesidades detectadas en uso real de la aplicación, con
+soluciones relacionadas entre sí (todas tocan `scene_analysis.py` y/o
+`geolocation.py`):
+
+1. Se quería extraer texto legible de la propia foto (carteles,
+   escaparates, nombres de lugares) como señal adicional -- motivado por
+   un caso real observado antes de este trabajo (un topónimo español
+   visible en una foto).
+2. Publicaciones de Instagram con varias fotos (`carousel_album`)
+   generaban una entrada de `ImageLocationPoint` por foto, pero
+   `visual_descriptions`/`general_descriptions` (dos diccionarios en
+   `GeolocationOutcome`) usaban el permalink de la PUBLICACIÓN como
+   clave -- compartido por todas las fotos del mismo carrusel. Con varias
+   fotos de un mismo carrusel analizadas, cada descripción nueva
+   SOBREESCRIBÍA a la anterior en el diccionario, así que todas las fotos
+   de un carrusel acababan mostrando la descripción de una sola foto (la
+   última en procesarse, no determinista por la concurrencia) -- bug real
+   confirmado con datos de producción, no solo una hipótesis. Además, el
+   enlace mostrado en el frontend para cualquier foto de un carrusel
+   apuntaba siempre a la primera (el permalink de Instagram por defecto
+   apunta ahí), sin forma de distinguir la foto 1 de la foto 20 de la
+   misma publicación.
+3. La vista de detalle "qué vio la IA" en el frontend mostraba las cuatro
+   líneas estructuradas SIEMPRE, incluidas las negativas por defecto
+   (`AFICION: ninguno`, `PAREJA: no`, `TEXTO_VISIBLE: ninguno`) -- ruido
+   visual sin valor informativo en la mayoría de fotos, más una cola
+   ocasional de texto generado de más por el modelo tras responder bien
+   (p. ej. "PERSONAS solo puede val...", cortado por el límite de
+   tokens).
+
+*Decisión*: tres cambios relacionados, no independientes entre sí:
+
+- *TEXTO_VISIBLE* como cuarta línea de `_STRUCTURED_QUERY` (ver ADR-21),
+  con una salvaguarda EXPLÍCITA propia (no solo la prohibición general del
+  final del prompt): nunca puede ser el nombre propio de una persona
+  (camiseta, insignia, etiqueta con nombre...), aunque se lea con
+  claridad -- en ese caso el modelo debe responder "ninguno" para ese
+  campo. Se expone como `InferredAttribute(category="texto_visible",
+  confidence=0.4)` -- confianza menor que AFICION (0.5) porque Moondream2
+  es un VQA general, no un motor de OCR dedicado. A diferencia de
+  AFICION, NO se descarta con varias personas en la foto: un cartel es
+  verdad independientemente de quién salga en la imagen, es evidencia
+  sobre el lugar/contexto, no un rasgo personal atribuible a una persona
+  concreta (ver ADR-18 para el porqué de esa cautela en AFICION).
+- *`_photo_link()`* (`geolocation.py`): enlace a una foto CONCRETA,
+  usando el parámetro `?img_index=N` de Instagram (1-indexado) cuando la
+  publicación tiene más de una foto; con una sola foto, el permalink
+  normal sin modificar. Nuevo campo `ImageLocationEstimate.photo_link`
+  (al final de la clase, con default `None`, para no desplazar
+  construcciones posicionales existentes). `visual_descriptions`/
+  `general_descriptions` pasan a indexarse por `photo_link` (único por
+  foto) en vez del permalink de publicación (compartido) -- arregla el
+  bug de sobrescritura de raíz. `partner_signal_permalinks` se mantiene a
+  nivel de PUBLICACIÓN a propósito (una señal de pareja no necesita
+  precisión por foto). `ImageLocationPoint.permalink` final usa
+  `estimate.photo_link` (con fallback al permalink de publicación).
+- *`_build_clean_summary()`* (`scene_analysis.py`): el bloque "qué vio la
+  IA" mostrado en el frontend deja de ser el texto crudo del modelo --
+  se RECONSTRUYE desde los valores YA PARSEADOS de PERSONAS/AFICION/
+  PAREJA/TEXTO_VISIBLE, mostrando solo señales positivas/informativas
+  (afición si no es "ninguno", pareja si es "sí", texto visible si lo
+  hay; PERSONAS se muestra siempre como contexto básico, no es una señal
+  "negativa" en el mismo sentido). Como efecto colateral beneficioso,
+  cualquier cola de texto que el modelo genere de más tras responder bien
+  queda descartada automáticamente, sin depender de acertar el
+  `max_tokens` exacto cada vez.
+
+*Consecuencias*: (+) arregla un bug real de pérdida de datos (descripciones
+de carrusel sobrescritas); (+) el enlace de cada foto salta a la foto
+correcta dentro de su carrusel (pendiente de verificación 100% fiable por
+Nacho -- no se pudo confirmar por búsqueda que Instagram siga soportando
+`?img_index=` en la web actual, ver nota en `_photo_link()`); (+) la vista
+de detalle deja de acumular líneas vacías, y el artefacto de cola de texto
+desaparece sin depender de tuning fino de tokens; (+) como beneficio
+colateral, arregla también una colisión de `key` de React en
+`LocationMap.tsx` (usaba `point.permalink` como key -- con permalinks
+repetidos entre fotos del mismo carrusel, ya era un bug silencioso
+independiente); (-) `TEXTO_VISIBLE` añade una nueva categoría de
+`InferredAttribute` (`"texto_visible"`) al informe -- sin componente de
+frontend dedicado que la muestre aparte (viaja igual que `"aficion"`, sin
+UI propia por ahora); (-) el fallback `estimate.photo_link or permalink`
+en `report/generator.py` es necesario solo para tests que construyen
+`ImageLocationEstimate` directamente sin pasar `photo_link` -- en el flujo
+real siempre se rellena.
+
+=== ADR-24: Condición de carrera de PIL entre DINOv2 y Moondream2 sobre la misma imagen
+
+*Contexto*: tras resolver ADR-21/ADR-22 (Moondream2 funcionando de forma
+fiable y rápida), apareció un patrón nuevo en producción: analizando
+publicaciones reales, exactamente cuando `estimate_location_from_image`
+(DINOv2) conseguía una estimación de ubicación para una foto, Moondream2
+fallaba para esa MISMA foto con `OSError: image file is truncated (N
+bytes not processed)` -- y viceversa, nunca los dos con éxito a la vez.
+Confirmado con logging de diagnóstico temporal añadido expresamente para
+esto (ver `_collect_photo_result` y la construcción de
+`image_location_points` en un momento de este trabajo, ya retirado):
+exclusión mutua perfecta entre los dos modelos para la misma imagen.
+
+*Diagnóstico*: `_process_photo` (`geolocation.py`) pasa la MISMA imagen
+PIL a `estimate_location_from_image` y `analyze_image_content` EN
+PARALELO (`asyncio.gather`, cada una en su propio hilo vía
+`asyncio.to_thread`). `_download_image` hacía `Image.open(io.BytesIO(...))`
+sin forzar la decodificación -- PIL es PEREZOSO por diseño: no decodifica
+los píxeles al abrir, solo guarda una referencia al buffer subyacente y
+decodifica bajo demanda la primera vez que algo accede de verdad a la
+imagen (`.convert()`, `.copy()`, iterar píxeles...). Esa decodificación
+perezosa NO es segura frente a acceso concurrente desde dos hilos
+distintos sobre el MISMO objeto: el hilo que llega primero completa la
+lectura, el segundo se encuentra el stream ya parcialmente consumido y
+recibe justo el error observado.
+
+*Alternativas consideradas*: descargar una copia independiente de la
+imagen por cada modelo (dos descargas de red por foto en vez de una --
+descartado: duplica tráfico de red y trabajo de decodificación sin
+necesidad); serializar los dos análisis (perder la ganancia de
+`asyncio.gather`, aunque como se documenta en ADR-25 esa ganancia ya era
+mínima en GPU compartida -- descartado igualmente, porque no ataca la
+causa real y arrastraría el mismo riesgo si en el futuro alguno de los
+dos modelos corriera en un dispositivo distinto donde sí hubiera
+paralelismo real que aprovechar).
+
+*Decisión*: forzar la decodificación completa con `image.load()`
+inmediatamente después de `Image.open()`, dentro de `_download_image`,
+mientras todavía se está en un único hilo (el de la propia descarga) --
+antes de que la imagen se reparta entre los dos hilos concurrentes de
+`_process_photo`. A partir de ahí, ambos hilos solo LEEN píxeles ya
+decodificados en memoria (vía `.convert()`/`.copy()`, que no mutan el
+objeto original), lo cual sí es seguro.
+
+*Consecuencias*: (+) ambos modelos consiguen resultado para la misma foto
+de forma consistente, confirmado en producción tras el fix ("todas las
+fotos analizadas"); (+) cambio de una línea, sin tocar la arquitectura de
+concurrencia existente; (-) el bug era preexistente a todo el trabajo de
+ADR-21/ADR-22, no introducido por ellos -- simplemente quedaba enmascarado
+porque Moondream2 casi nunca completaba un análisis antes (prompts rotos,
+timeouts por crops múltiples), así que la exclusión mutua entre los dos
+modelos no era observable; al arreglar lo demás, se hizo visible. Sirve
+como recordatorio de que arreglar un cuello de botella puede destapar
+bugs que ya estaban ahí, no solo mejorar el rendimiento.
+
+=== ADR-25: Concurrencia de fotos consciente de GPU (actualiza ADR-20), paralelismo físico por CUDA streams evaluado y descartado
+
+*Contexto*: `_default_photo_analysis_concurrency()` (ver ADR-20) calcula
+`photo_analysis_concurrency` a partir de `os.cpu_count() // 2` --
+heurística pensada para cuando Moondream2 corría en CPU (ver ADR-19),
+donde varias fotos en vuelo competían por núcleos de CPU. Con GPU, el
+recurso limitante deja de ser la CPU: DINOv2 y Moondream2 comparten la
+MISMA tarjeta (GTX 1650, 4GB VRAM en la máquina de desarrollo) -- varias
+fotos analizándose a la vez ahí no aportan throughput real (la propia GPU
+serializa el trabajo de todas formas, ver más abajo) y sí añaden riesgo
+real de agotar VRAM.
+
+Aparte, surgió la pregunta de si DINOv2 y Moondream2 podrían llegar a
+ejecutarse en paralelo FÍSICO de verdad dentro de una misma foto (no solo
+concurrencia a nivel de `asyncio`, que no implica paralelismo de cómputo
+real en una GPU compartida vía CUDA: el driver serializa el trabajo de
+los dos hilos sobre el mismo dispositivo, así que el tiempo total de
+`asyncio.gather` en la práctica es aproximadamente la SUMA de ambos
+tiempos, no el máximo -- contra la intuición de que "asíncrono" implica
+"en paralelo").
+
+*Alternativas consideradas para paralelismo real*: `torch.cuda.Stream()`
+por modelo, para que el planificador de la GPU pueda intercalar trabajo
+de verdad entre ambos. Evaluado y DESCARTADO por tres motivos concretos,
+no solo por precaución genérica: (a) la VRAM ya está ajustada (picos de
+~4.2-4.9GB medidos con Moondream2 en solitario en una tarjeta de 4GB --
+paralelismo real aumentaría el riesgo de quedarse sin memoria, justo lo
+contrario de lo deseable en producción); (b) una GPU pequeña sin margen
+de cómputo ocioso que aprovechar tiene poco que ganar con streams (el
+beneficio de esta técnica depende de que haya capacidad sobrante que un
+segundo trabajo pueda usar mientras el primero espera, memoria
+principalmente); (c) el techo de mejora teórico es pequeño de todas
+formas -- DINOv2 es rápido (~1-2s, una sola pasada de embedding) frente a
+Moondream2 (~15-25s tras ADR-22), así que aunque se solapara DINOv2 a la
+perfección dentro de la ventana de Moondream2, el ahorro máximo posible
+son esos 1-2s, no una fracción relevante del total. Gestionar streams a
+mano añade además sincronización manual, superficie de error real (se
+acaba de arreglar un race condition genuino de PIL en este mismo
+pipeline, ver ADR-24) para un beneficio marginal.
+
+*Decisión*: dos cambios, ninguno de ellos implementación de paralelismo
+físico real.
+
+1. `_default_photo_analysis_concurrency()` comprueba `torch.cuda.is_available()`
+primero (import envuelto en `try/except ImportError`, para no romper
+builds sin `WITH_GEOLOCATION` que no tienen `torch` instalado en
+absoluto, ver ADR-15): si hay CUDA disponible, devuelve `1`
+incondicionalmente, sin mirar `os.cpu_count()`. Sin GPU (o sin `torch`),
+se mantiene la heurística de CPU original de ADR-20 sin cambios.
+2. Documentar explícitamente (aquí) que no se implementa paralelismo
+físico real vía CUDA streams, y por qué -- para que quede como decisión
+consciente y razonada en la memoria del TFG, no como una limitación no
+explorada.
+
+*Consecuencias*: (+) elimina la contención de GPU entre varias fotos
+compitiendo por la misma tarjeta; (+) decisión autocalibrada, igual
+criterio que ADR-20 -- no hace falta tocar nada al cambiar de máquina,
+sea con GPU o sin ella; (+) la concurrencia 1 en GPU es coherente con la
+explicación de por qué `asyncio.gather` no da paralelismo físico en un
+único dispositivo -- no tiene sentido reservar más de un hueco de
+concurrencia para un recurso que de todas formas se sirve en fila; (-) el
+tiempo total por foto en GPU no mejora con esta decisión (nunca lo hizo,
+`asyncio.gather` no aportaba paralelismo real ahí) -- lo que mejora es
+evitar que MÚLTIPLES fotos compitan a la vez por la misma tarjeta, un
+problema distinto; (-) si en el futuro se despliega en una GPU con VRAM y
+cómputo sobrados, esta decisión (concurrencia 1 fija) sería
+conservadora de más -- documentado como punto a revisitar si cambia el
+hardware objetivo, igual que CUDA streams queda como opción válida a
+reconsiderar en ese escenario, no descartada para siempre.
+
+
 

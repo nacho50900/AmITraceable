@@ -166,7 +166,11 @@ imágenes; `instagram_client.py` pide explícitamente el campo `children`
 de la API y extrae TODAS las imágenes del carrusel, no solo la primera
 -- así `vision/geolocation.py` y `vision/scene_analysis.py` analizan cada
 imagen del carrusel por separado, en vez de perder la información de las
-demás.
+demás. Cada foto de un carrusel recibe además su propio enlace
+(`?img_index=N`, ver `_photo_link()` en `geolocation.py`) en vez de que
+todas apunten al mismo permalink de la publicación -- necesario también
+para que las descripciones visuales de cada foto no se sobrescriban entre
+sí (bug real corregido, ver ADR-23 en <<section-design-decisions>>).
 
 Interfaces::
 Clase `RedditClient`/`InstagramClient` con método asíncrono
@@ -432,12 +436,20 @@ Propósito/Responsabilidad::
 Analiza el CONTENIDO visual de cada foto de Instagram -- no *dónde* se
 tomó (eso es `geolocation.py`), sino *qué hay* en ella -- mediante
 Moondream2, un modelo de visión-lenguaje (VQA) pequeño (~1.8B parámetros)
-que se ejecuta localmente vía `transformers`. Se le hace UNA sola
-pregunta combinada por foto, con una respuesta de formato fijo en tres
-líneas (`PERSONAS`, `AFICION`, `PAREJA`) que se parsea como texto plano
-en vez de pedir JSON estructurado -- los modelos locales pequeños son
-mucho menos fiables generando JSON complejo bien formado que uno grande,
-así que un formato de líneas fijas es más robusto ante variaciones.
+que se ejecuta localmente vía `transformers`. Se le hacen DOS preguntas
+separadas por foto, reutilizando la misma imagen ya codificada
+(`_model.encode_image()`, sobre una copia redimensionada a 378px --
+el `crop_size` real de esta revisión del modelo, ver ADR-22 en
+<<section-design-decisions>> -- no la imagen a la resolución de 1024px
+que usa DINOv2): un caption de texto libre EN INGLÉS (Moondream2 solo
+tiene datos de entrenamiento en inglés) y una respuesta de formato fijo
+en cuatro líneas (`PERSONAS`, `AFICION`, `PAREJA`, `TEXTO_VISIBLE`) en
+ESPAÑOL, parseada como texto plano en vez de JSON estructurado -- los
+modelos locales pequeños son mucho menos fiables generando JSON complejo
+bien formado que uno grande. Mezclar ambos tipos de respuesta (texto
+libre + opciones fijas) en un único prompt combinado provocaba que el
+modelo copiara literalmente el ejemplo dado en vez de describir la
+imagen real; separarlas en dos llamadas lo resolvió (ver ADR-21).
 
 Límite ético/legal deliberado::
 El modelo nunca debe identificar, nombrar, ni describir físicamente a
@@ -447,6 +459,11 @@ tercero sería tratar datos personales de alguien que nunca dio su
 consentimiento. Lo único que se extrae son señales sobre la PROPIA cuenta
 analizada (p. ej. "aparece en actitud romántica" -> indicio de que la
 cuenta tiene pareja), nunca información sobre quién es la otra persona.
+El campo `TEXTO_VISIBLE` (texto legible en la propia foto: carteles,
+escaparates, nombres de lugares) tiene la misma restricción repetida
+explícitamente en su propio prompt: nunca puede ser el nombre propio de
+una persona, aunque se lea con claridad en una camiseta o insignia (ver
+ADR-23).
 
 Ambigüedad de varias personas en la misma foto::
 El modelo no tiene forma de saber cuál de las personas de una foto es la
@@ -463,26 +480,36 @@ que la señal de AFICIÓN se descarta en ese caso (`_parse_inferences`). La
 señal de PAREJA, en cambio, no necesita resolver esa ambigüedad: da igual
 cuál de las dos personas sea la cuenta analizada, el mero hecho de que la
 cuenta publique una foto con contexto romántico ya es la señal, así que
-esa sí se mantiene con varias personas.
+esa sí se mantiene con varias personas. TEXTO_VISIBLE tampoco tiene este
+problema: un cartel es verdad independientemente de quién salga en la
+foto, es evidencia sobre el lugar/contexto, no un rasgo personal
+atribuible a una persona concreta.
 
 Integración con el resto del pipeline::
 No se llama directamente desde `report/generator.py`: la invoca
 `vision/geolocation.py` por cada foto (ver más arriba), que ya descarga
-la imagen para su propio análisis y evita así una segunda descarga. Sus
-resultados viajan en `GeolocationOutcome.visual_inferences` (aficiones,
-como `InferredAttribute` normales, con su `confidence`/`evidence` igual
-que las inferencias de texto) y `GeolocationOutcome.partner_signal_permalinks`
+la imagen para su propio análisis y evita así una segunda descarga --
+forzando la decodificación completa en el momento de la descarga
+(`image.load()`), no de forma perezosa, porque DINOv2 y Moondream2 leen
+la MISMA imagen en paralelo (ver ADR-24 en <<section-design-decisions>>
+para el bug real que motivó esto). Sus resultados viajan en
+`GeolocationOutcome.visual_inferences` (aficiones y texto visible, como
+`InferredAttribute` normales, con su `confidence`/`evidence` igual que
+las inferencias de texto), `GeolocationOutcome.partner_signal_permalinks`
 (que `report/generator.py` usa para rellenar `estado_civil = "con_pareja"`,
-`source = "imagen"`, solo si el texto no dio ya un estado civil).
+`source = "imagen"`, solo si el texto no dio ya un estado civil) y
+`GeolocationOutcome.visual_descriptions`/`general_descriptions` (la
+descripción legible por foto que se muestra en el frontend, indexada por
+el enlace específico de cada foto, no por el permalink de la publicación
+-- ver ADR-23).
 
 Degradación::
 Igual que `geolocation.py`: si `torch`/`transformers` no están instalados
 o la inferencia falla para una foto concreta, esa foto simplemente no
-aporta señal (no rompe el resto del análisis). A diferencia del modelo de
-geolocalización, Moondream2 NO se precarga en el `lifespan` del
-contenedor (ver `main.py`) -- se carga de forma perezosa en la primera
-foto que lo necesita, así que esa primera foto de cada proceso es más
-lenta que las siguientes.
+aporta señal (no rompe el resto del análisis). Igual que el modelo de
+geolocalización, Moondream2 SÍ se precarga en el `lifespan` del
+contenedor (ver `main.py`, condicionado a `ENABLE_SCENE_ANALYSIS`) --
+ninguno de los dos espera a la primera foto real para cargarse.
 
 Ubicación::
 `backend/app/vision/scene_analysis.py`.

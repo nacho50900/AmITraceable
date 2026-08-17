@@ -291,18 +291,33 @@ Decisiones de diseño relevantes:
   descartó por el volumen de llamadas que requiere -- una por cada foto
   analizada, no una por informe -- frente al límite del tier gratuito;
   ver ADR-17.
-* **Una sola pregunta combinada, formato de texto fijo, no JSON**: los
-  modelos VQA locales pequeños son mucho menos fiables generando JSON
-  bien formado que uno grande, así que se pide una respuesta de tres
-  líneas fijas (`PERSONAS`/`AFICION`/`PAREJA`) y se parsea como texto --
-  más robusto ante variaciones de formato que decodificar un JSON que
-  podría no serlo.
+* **Dos llamadas separadas, no una combinada**: un caption de texto libre
+  EN INGLÉS (`_CAPTION_QUERY` -- Moondream2 solo tiene datos de
+  entrenamiento en inglés, generar texto libre en español producía
+  gramática rota) más una llamada estructurada en español, de cuatro
+  líneas fijas (`PERSONAS`/`AFICION`/`PAREJA`/`TEXTO_VISIBLE`) que se
+  parsea como texto, no JSON -- los modelos VQA locales pequeños son
+  mucho menos fiables generando JSON bien formado que uno grande. Mezclar
+  ambas cosas en un único prompt hacía que el modelo copiara literalmente
+  el ejemplo de texto libre en vez de describir la imagen real; ver
+  ADR-21.
+* **Redimensionado propio, distinto del de `geolocation.py`**: antes de
+  codificar la imagen, se reescala una copia a 378px (el `crop_size` real
+  de esta revisión del modelo) -- por debajo de ese tamaño, el modelo usa
+  un único crop en vez de trocear la imagen en varios para alta
+  resolución, bajando drásticamente el tiempo de `encode_image()`. El
+  tope de 1024px que usa DINOv2 para geolocalización no se toca; ver
+  ADR-22.
 * **Límite ético/legal deliberado**: el modelo nunca identifica, nombra,
   ni describe físicamente a ninguna persona de la foto -- el
   consentimiento OAuth de este proyecto cubre solo a la cuenta
   analizada. Solo se extraen señales sobre la PROPIA cuenta (p. ej.
   "aparece en actitud romántica" -> indicio de pareja), nunca
-  información sobre la identidad de un tercero.
+  información sobre la identidad de un tercero. El campo TEXTO_VISIBLE
+  (texto legible en la propia foto: carteles, escaparates, nombres de
+  lugares) tiene la misma restricción explícita en su propio prompt:
+  nunca puede ser el nombre propio de una persona, aunque se lea con
+  claridad; ver ADR-23.
 * **Atribución descartada cuando hay varias personas en la foto**: el
   modelo no puede saber cuál de las personas de una foto es la cuenta
   analizada. Con una persona (o ninguna), la señal de afición se atribuye
@@ -311,29 +326,42 @@ Decisiones de diseño relevantes:
   descarta -- podría ser la otra persona quien practica esa afición, no
   la cuenta analizada. La señal de pareja no tiene este problema (da
   igual cuál de las dos personas sea la cuenta analizada, la señal es la
-  misma) y se mantiene; ver ADR-18.
+  misma) y se mantiene; ver ADR-18. TEXTO_VISIBLE tampoco tiene este
+  problema -- un cartel es verdad independientemente de quién salga en la
+  foto, es evidencia sobre el lugar/contexto, no un rasgo personal; ver
+  ADR-23.
 * **Comparte descarga con `geolocation.py`, no la duplica**: no se llama
   por separado desde `report/generator.py` -- lo invoca
   `vision/geolocation.py` por cada foto, reutilizando la misma imagen que
-  ya descargó para su propio análisis. Sus resultados viajan como campos
-  extra de `GeolocationOutcome` (`visual_inferences`,
-  `partner_signal_permalinks`).
+  ya descargó para su propio análisis (con la decodificación forzada en
+  el momento de la descarga, no de forma perezosa -- necesario porque
+  ambos modelos leen la imagen EN PARALELO; ver ADR-24). Sus resultados
+  viajan como campos extra de `GeolocationOutcome` (`visual_inferences`,
+  `partner_signal_permalinks`, `visual_descriptions`,
+  `general_descriptions`).
 * **Mismas dependencias que la geolocalización, mismo build-arg**:
   `torch`/`transformers` (más `timm`/`einops`/`pyvips-binary`) viven en
   el mismo `requirements-vision.txt`, instalado con el mismo
   `--build-arg WITH_GEOLOCATION=true` -- no hay un flag independiente
   para activar solo uno de los dos módulos.
-* **Carga perezosa, a diferencia de la geolocalización**: el modelo de
-  geolocalización se precarga en el `lifespan` del contenedor; Moondream2
-  no -- se carga en la primera foto que lo necesita, así que esa primera
-  foto de cada proceso es más lenta que las siguientes.
+* **Sí se precarga, igual que la geolocalización**: el `lifespan` del
+  contenedor precarga Moondream2 al arrancar (condicionado a
+  `ENABLE_SCENE_ANALYSIS`, ver `app/main.py`), igual que el modelo de
+  geolocalización -- ninguno de los dos espera a la primera foto real
+  para cargarse.
 * **Alimenta dos sitios distintos del informe**: las aficiones/actividades
-  se añaden a `inferred_attributes` como `InferredAttribute` normales
-  (con su `confidence`/`evidence`, igual que las inferencias de texto);
-  la señal de pareja, en cambio, alimenta `estado_civil`
+  (y ahora también el texto visible) se añaden a `inferred_attributes`
+  como `InferredAttribute` normales (con su `confidence`/`evidence`,
+  igual que las inferencias de texto); la señal de pareja, en cambio,
+  alimenta `estado_civil`
   (`scoring/k_anonymity.py` -> tabla de estrechamiento de población), y
   solo si el texto no dio ya un estado civil (`ai_attribute_extraction.py`
   tiene prioridad, ver <<section-design-decisions>>).
+* **Enlace específico por foto en publicaciones con varias imágenes**:
+  cada foto de un carrusel de Instagram tiene su propio enlace
+  (`?img_index=N`), no solo el permalink de la publicación -- necesario
+  también para no perder la descripción individual de cada foto, que
+  antes se sobrescribía entre fotos del mismo carrusel; ver ADR-23.
 
 === Análisis del informe con IA (módulo opcional)
 
