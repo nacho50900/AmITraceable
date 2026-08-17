@@ -36,7 +36,7 @@ describe('Landing', () => {
     });
   });
 
-  test('el botón de conexión apunta a la plataforma activa (Reddit por defecto)', async () => {
+  test('la carta de Reddit muestra "Coming Soon" y el botón queda deshabilitado (integración desactivada temporalmente)', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: false });
 
     render(
@@ -45,11 +45,18 @@ describe('Landing', () => {
       </MemoryRouter>,
     );
 
-    const cta = await screen.findByText(/Conectar con Reddit/i);
-    expect(cta.closest('a')).toHaveAttribute('href', 'http://localhost:3000/auth/reddit/login');
+    // Reddit es la carta activa por defecto (primera del mazo). El CTA de
+    // debajo del mazo corresponde SIEMPRE a la carta activa (Reddit aquí),
+    // así que solo hay un botón "Próximamente" aunque el badge "Coming
+    // Soon" pueda aparecer más de una vez en pantalla (con 3 cartas, la
+    // adyacente -X- también es visible al mismo tiempo y también está
+    // desactivada -- ver el siguiente test).
+    const disabledCta = await screen.findByRole('button', { name: /Próximamente/i });
+    expect(disabledCta).toBeDisabled();
+    expect(screen.queryByText(/Conectar con Reddit/i)).not.toBeInTheDocument();
   });
 
-  test('la flecha "siguiente" cambia la plataforma activa a Instagram', async () => {
+  test('el botón de conexión apunta a la plataforma activa (Instagram, tras avanzar desde Reddit)', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: false });
 
     render(
@@ -58,14 +65,14 @@ describe('Landing', () => {
       </MemoryRouter>,
     );
 
-    await screen.findByText(/Conectar con Reddit/i);
+    await screen.findByRole('button', { name: /Próximamente/i });
     fireEvent.click(screen.getByRole('button', { name: /Siguiente plataforma/i }));
 
     const cta = await screen.findByText(/Conectar con Instagram/i);
     expect(cta.closest('a')).toHaveAttribute('href', 'http://localhost:3000/auth/instagram/login');
   });
 
-  test('la carta de X muestra "Coming Soon" y el botón queda deshabilitado', async () => {
+  test('la carta de X también muestra "Coming Soon" y el botón queda deshabilitado', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: false });
 
     render(
@@ -74,14 +81,18 @@ describe('Landing', () => {
       </MemoryRouter>,
     );
 
-    await screen.findByText(/Conectar con Reddit/i);
+    await screen.findByRole('button', { name: /Próximamente/i }); // Reddit, activa por defecto
     const nextButton = screen.getByRole('button', { name: /Siguiente plataforma/i });
     fireEvent.click(nextButton); // -> Instagram
     fireEvent.click(nextButton); // -> X
 
-    expect(await screen.findByText('Coming Soon')).toBeInTheDocument();
-
+    // Ahora Reddit e Instagram son las cartas adyacentes visibles; solo
+    // Reddit sigue mostrando su propio badge "Coming Soon" (Instagram no
+    // está desactivada) -- junto con la de X (activa), hay 2 badges en
+    // pantalla, no una única.
+    expect(await screen.findAllByText('Coming Soon')).toHaveLength(2);
     const disabledCta = screen.getByRole('button', { name: /Próximamente/i });
     expect(disabledCta).toBeDisabled();
+    expect(screen.queryByText(/Conectar con X/i)).not.toBeInTheDocument();
   });
 });

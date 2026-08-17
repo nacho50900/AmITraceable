@@ -30,6 +30,11 @@ const PLATFORM_CARDS: PlatformCardData[] = [
     descriptionKey: 'landing.platforms.reddit.description',
     icon: <SiReddit aria-hidden="true" />,
     cardClassName: 'platform-card--reddit',
+    // Desactivado temporalmente: la integración de Reddit no funciona
+    // ahora mismo. `platform` se deja tal cual (no se borra) para que
+    // reactivarlo sea solo quitar esta línea, sin tener que rehacer nada
+    // más de la tarjeta.
+    comingSoon: true,
   },
   {
     platform: 'instagram',
