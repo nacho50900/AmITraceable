@@ -17,6 +17,7 @@ import httpx
 from app.config import settings
 from app.models.schemas import SocialPost, SocialProfile
 from app.progress import ProgressCallback, emit_progress
+from app import stages
 
 REDDIT_API_BASE = "https://oauth.reddit.com"
 
@@ -33,7 +34,7 @@ class RedditClient:
             me = await self._get_me(client)
 
             posts = await self._fetch_submitted(client, limit=settings.max_posts)
-            await emit_progress(progress_callback, "Leyendo publicaciones...", posts_analyzed=len(posts))
+            await emit_progress(progress_callback, stages.READING_POSTS, posts_analyzed=len(posts))
 
             comments = await self._fetch_comments(client, limit=settings.max_comments)
             await emit_progress(

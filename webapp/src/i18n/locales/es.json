@@ -63,7 +63,106 @@
     "emojiUsage": "Uso de emojis: {{value}}%",
     "detectedLanguage": "Idioma detectado: {{value}}",
     "groupingLabelInstagram": "Hashtags más frecuentes",
-    "groupingLabelReddit": "Subreddits más frecuentes"
+    "groupingLabelReddit": "Subreddits más frecuentes",
+    "stages": {
+      "connecting": "Conectando con la plataforma...",
+      "reading_posts": "Leyendo publicaciones...",
+      "analyzing_writing_style": "Analizando tu forma de escribir...",
+      "detecting_attributes": "Detectando atributos personales...",
+      "computing_score": "Calculando el riesgo de privacidad...",
+      "searching_ai_self_disclosures": "Buscando autodeclaraciones con IA...",
+      "generating_report": "Generando el informe final..."
+    },
+    "noteCodes": {
+      "sexo_estimado_por_nombre": "Estimado por convención cultural del nombre público de la cuenta, no por una autodeclaración explícita: fiabilidad menor (nombres unisex, apodos o transliteraciones pueden dar una estimación incorrecta).",
+      "no_ine_data_for_value": "No hay dato de referencia del INE para este valor concreto en la tabla actual.",
+      "estado_civil_ia_simbolica": "Inferido por IA a partir de contenido simbólico o indirecto (emojis, fechas, menciones recurrentes...), no de una autodeclaración explícita: fiabilidad menor que el resto de rasgos de esta lista.",
+      "estado_civil_ia_simbolica_exact_combo": "Inferido por IA a partir de contenido simbólico o indirecto (emojis, fechas, menciones recurrentes...), no de una autodeclaración explícita: fiabilidad menor que el resto de rasgos de esta lista. Al conocerse también el sexo, se usa el porcentaje EXACTO de esa combinación concreta (estado civil condicionado a sexo, tabla real del INE), no una aproximación multiplicando proporciones independientes.",
+      "edad_repartida_uniformemente": "Estimado repartiendo uniformemente la proporción de INE por tramos quinquenales entre las edades de cada tramo (no hay tabla año a año descargable directamente).",
+      "location_no_population_data": "No hay dato de población de referencia para este municipio/provincia en la tabla actual.",
+      "location_note_base": "Asume distribución de edad/sexo similar a la media nacional (aproximación).",
+      "location_note_imagen": "Asume distribución de edad/sexo similar a la media nacional (aproximación). Ubicación estimada a partir de una imagen, no de texto autodeclarado: menor fiabilidad que una autodeclaración explícita.",
+      "situacion_laboral_note": "Distinto del sector profesional (ocupación): aquí es si la persona trabaja, busca trabajo, está jubilada o estudia.",
+      "tipo_hogar_note": "Proporción de HOGARES del INE usada como aproximación de la proporción de personas -- misma limitación ya asumida para ubicación.",
+      "lengua_no_estimable": "Solo se puede acotar si también se conoce la comunidad autónoma de residencia (esta lengua es casi residual fuera de su territorio cooficial, así que una proporción nacional no aportaría nada útil).",
+      "lengua_within_ccaa": "Proporción calculada SOLO dentro de la comunidad autónoma ya conocida (no a nivel nacional).",
+      "universidad_no_estimable": "Requeriría el nº de alumnos/egresados de esa universidad y titulación concretos (trabajo futuro): dato no incluido en esta versión.",
+      "empresa_no_estimable": "Requeriría el nº de empleados de esa empresa concreta (trabajo futuro): dato no incluido en esta versión."
+    },
+    "attribute": {
+      "sexo": "Sexo: {{value}}",
+      "edad": "Edad: {{value}} años",
+      "estado_civil": "{{value}}",
+      "estudios": "Estudió: {{value}}",
+      "ocupacion": "Ocupación: {{value}}",
+      "nacionalidad": "Nacionalidad: {{value}}",
+      "situacion_laboral": "Situación laboral: {{value}}",
+      "tipo_hogar": "Tipo de hogar: {{value}}",
+      "lengua_materna": "Lengua materna/habitual: {{value}}",
+      "universidad": "Universidad: {{value}}",
+      "empresa": "Empresa: {{value}}",
+      "ubicacion_municipio": "Vive en municipio: {{value}}",
+      "ubicacion_provincia": "Vive en provincia: {{value}}",
+      "ubicacion_comunidad_autonoma": "Vive en comunidad autónoma: {{value}}"
+    },
+    "attributeValue": {
+      "sexo": { "hombre": "hombre", "mujer": "mujer" },
+      "estado_civil": {
+        "casado": "Casado/a",
+        "con_pareja": "Tiene pareja (sin estar casado/a)",
+        "divorciado": "Divorciado/a o separado/a",
+        "soltero": "Soltero/a (sin pareja actualmente)",
+        "viudo": "Viudo/a"
+      },
+      "nacionalidad": { "espanola": "española", "extranjera": "extranjera" },
+      "situacion_laboral": {
+        "activo": "trabaja actualmente",
+        "parado": "en desempleo",
+        "jubilado": "jubilado/a o pensionista",
+        "estudiante": "estudiante",
+        "otro_inactivo": "inactivo/a (labores del hogar u otra situación)"
+      },
+      "tipo_hogar": {
+        "unipersonal": "vive solo/a",
+        "pareja_sin_hijos": "vive en pareja, sin hijos en el hogar",
+        "pareja_con_hijos": "vive en pareja, con hijos en el hogar",
+        "monoparental": "familia monoparental (un solo progenitor con hijos)"
+      },
+      "lengua_materna": {
+        "catalan": "catalán",
+        "euskera": "euskera",
+        "gallego": "gallego",
+        "valenciano": "valenciano"
+      },
+      "estudios": {
+        "medicina": "Medicina",
+        "enfermeria": "Enfermería",
+        "derecho": "Derecho",
+        "ingenieria informatica": "Ingeniería Informática",
+        "ingenieria industrial": "Ingeniería Industrial",
+        "administracion de empresas": "Administración de Empresas",
+        "psicologia": "Psicología",
+        "magisterio": "Magisterio",
+        "arquitectura": "Arquitectura",
+        "farmacia": "Farmacia",
+        "biologia": "Biología",
+        "periodismo": "Periodismo",
+        "economia": "Economía",
+        "veterinaria": "Veterinaria"
+      },
+      "ocupacion": {
+        "docente": "Docente",
+        "sanitario": "Sanitario",
+        "desarrollador de software": "Desarrollador De Software",
+        "ingeniero": "Ingeniero",
+        "abogado": "Abogado",
+        "comercial": "Comercial",
+        "hosteleria": "Hostelería",
+        "administracion publica": "Administración Pública",
+        "construccion": "Construcción",
+        "transporte": "Transporte"
+      }
+    }
   },
   "components": {
     "scoreBar": {

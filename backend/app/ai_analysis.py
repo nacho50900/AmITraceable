@@ -120,7 +120,31 @@ class AiAnalysisUnavailable(Exception):
     la traduce a una respuesta clara para el frontend, nunca a un 500 opaco."""
 
 
-async def analyze_report_with_ai(report: ExposureReport) -> dict:
+# Instrucción de idioma añadida al prompt de sistema cuando `lang != "es"`.
+# Se genera directamente en el idioma pedido en la MISMA llamada, en vez de
+# traducir el veredicto/conclusiones después con una segunda llamada: el
+# prompt ya está calibrado en español (ver docstring del módulo y ADR-17),
+# y añadir una llamada de traducción aparte solo suma latencia, un segundo
+# punto de fallo, y cuota extra del tier gratuito, sin ganar fiabilidad
+# frente a pedirle directamente al modelo que responda en otro idioma
+# (algo que los LLM instruction-tuned actuales hacen de forma fiable).
+_LANGUAGE_INSTRUCTIONS = {
+    "en": (
+        "\n\nIMPORTANTE: a pesar de que el resto de estas instrucciones esté en "
+        "español, responde en INGLÉS -- tanto 'veredicto' como cada elemento de "
+        "'conclusiones' deben estar en inglés. Las claves del JSON siguen siendo "
+        "literalmente 'veredicto' y 'conclusiones' (no las traduzcas), solo su "
+        "contenido de texto va en inglés."
+    ),
+}
+
+# Idiomas soportados por el selector de la webapp (ver webapp/src/i18n) --
+# cualquier otro valor de `lang` se ignora silenciosamente y se sirve en
+# español, el idioma por defecto/fallback en todo el proyecto.
+SUPPORTED_LANGUAGES = frozenset({"es", *_LANGUAGE_INSTRUCTIONS.keys()})
+
+
+async def analyze_report_with_ai(report: ExposureReport, lang: str = "es") -> dict:
     if not settings.mistral_api_key:
         raise AiAnalysisUnavailable(
             "El análisis con IA no está configurado en este servidor (falta MISTRAL_API_KEY)."
@@ -131,10 +155,12 @@ async def analyze_report_with_ai(report: ExposureReport) -> dict:
     # se reenvían los posts originales.
     report_json = report.model_dump_json(indent=2)
 
+    system_prompt = _SYSTEM_PROMPT + _LANGUAGE_INSTRUCTIONS.get(lang, "")
+
     payload = {
         "model": settings.mistral_model,
         "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {
                 "role": "user",
                 "content": (

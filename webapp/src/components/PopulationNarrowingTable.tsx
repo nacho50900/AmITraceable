@@ -26,6 +26,47 @@ function formatPopulation(value: number | null, locale: string): string {
   return value.toLocaleString(locale);
 }
 
+// `category` + `value_raw` (+ `location_level` solo para ubicación) le
+// llegan del backend separados desde app/scoring/k_anonymity.py
+// (PopulationNarrowingStep) precisamente para poder traducir la plantilla
+// aquí sin tocar el valor cuando ese valor es un nombre propio (topónimo,
+// universidad, empresa). Si el backend es una versión anterior sin estos
+// campos (`value_raw` ausente), se usa `attribute_label` tal cual, ya en
+// español, como fallback -- nunca se intenta parsear esa frase.
+function buildAttributeLabel(
+  step: PopulationEstimate,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  i18nExists: (key: string) => boolean,
+): string {
+  if (!step.value_raw) return step.attribute_label;
+
+  const templateKey =
+    step.category === 'ubicacion' && step.location_level
+      ? `ubicacion_${step.location_level}`
+      : step.category;
+  const templateI18nKey = `dashboard.attribute.${templateKey}`;
+  if (!i18nExists(templateI18nKey)) return step.attribute_label;
+
+  const valueI18nKey = `dashboard.attributeValue.${step.category}.${step.value_raw}`;
+  // Solo se traduce el VALOR cuando es de un conjunto cerrado con entrada
+  // en el diccionario (sexo, estado civil, estudios...) -- nombres propios
+  // (universidad, empresa, topónimos) y números (edad) se interpolan tal
+  // cual, sin buscar traducción.
+  const value = i18nExists(valueI18nKey) ? t(valueI18nKey) : step.value_raw;
+
+  return t(templateI18nKey, { value });
+}
+
+function buildNote(
+  step: PopulationEstimate,
+  t: (key: string) => string,
+  i18nExists: (key: string) => boolean,
+): string | null {
+  if (!step.note_code) return step.note;
+  const noteI18nKey = `dashboard.noteCodes.${step.note_code}`;
+  return i18nExists(noteI18nKey) ? t(noteI18nKey) : step.note;
+}
+
 const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({
   steps,
   remainingPopulationAllTraits,
@@ -43,42 +84,43 @@ const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({
   return (
     <>
       <div className="population-narrowing-list">
-        {steps.map((step) => (
-          <div className="population-step" key={`${step.category}-${step.attribute_label}`}>
-            <div className="population-step-header">
-              {/* attribute_label lo genera el backend (categoría inferida en
-                  español); traducirlo queda fuera del alcance de esta fase. */}
-              <strong>{step.attribute_label}</strong>
-              <div className="population-step-badges">
-                {step.reduction_percent !== null && (
+        {steps.map((step) => {
+          const label = buildAttributeLabel(step, t, i18n.exists.bind(i18n));
+          const note = buildNote(step, t, i18n.exists.bind(i18n));
+          return (
+            <div className="population-step" key={`${step.category}-${step.attribute_label}`}>
+              <div className="population-step-header">
+                <strong>{label}</strong>
+                <div className="population-step-badges">
+                  {step.reduction_percent !== null && (
+                    <span
+                      className="reduction-badge"
+                      title={t('components.populationNarrowing.reductionBadgeTitle')}
+                    >
+                      -{step.reduction_percent}%
+                    </span>
+                  )}
                   <span
-                    className="reduction-badge"
-                    title={t('components.populationNarrowing.reductionBadgeTitle')}
+                    className="risk-pill"
+                    style={{ background: RISK_COLORS[step.risk_level], color: '#fff' }}
                   >
-                    -{step.reduction_percent}%
+                    {t(`components.populationNarrowing.risk.${step.risk_level}`)}
                   </span>
-                )}
-                <span
-                  className="risk-pill"
-                  style={{ background: RISK_COLORS[step.risk_level], color: '#fff' }}
-                >
-                  {t(`components.populationNarrowing.risk.${step.risk_level}`)}
-                </span>
-                <span
-                  className="source-badge"
-                  title={t(`components.populationNarrowing.sourceTitle.${step.source}`)}
-                >
-                  {SOURCE_ICONS[step.source]} {t(`components.populationNarrowing.source.${step.source}`)}
-                </span>
+                  <span
+                    className="source-badge"
+                    title={t(`components.populationNarrowing.sourceTitle.${step.source}`)}
+                  >
+                    {SOURCE_ICONS[step.source]} {t(`components.populationNarrowing.source.${step.source}`)}
+                  </span>
+                </div>
               </div>
+
+              {note && <p className="note-inline">{note}</p>}
+
+              <span className="population-fallback">{formatPopulation(step.remaining_population, numberLocale)}</span>
             </div>
-
-            {/* step.note también viene del backend, ya en español. */}
-            {step.note && <p className="note-inline">{step.note}</p>}
-
-            <span className="population-fallback">{formatPopulation(step.remaining_population, numberLocale)}</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {remainingPopulationAllTraits !== null && (

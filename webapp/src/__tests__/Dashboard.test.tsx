@@ -120,8 +120,8 @@ describe('Dashboard', () => {
   test('muestra las fases de progreso en vivo mientras el análisis está en curso', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
     mockStream([
-      { done: false, stage: 'Conectando con la plataforma...' },
-      { done: false, stage: 'Leyendo publicaciones...' },
+      { done: false, stage: 'connecting' },
+      { done: false, stage: 'reading_posts' },
       { done: false, stage: 'Analizando vocabulario...' },
     ]);
     renderDashboard();
@@ -138,9 +138,9 @@ describe('Dashboard', () => {
   test('fase de fotos (track paralelo): contador en vivo, no se duplica, y pasa a completada al llegar al total', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
     mockStream([
-      { done: false, stage: 'Leyendo publicaciones...' },
+      { done: false, stage: 'reading_posts' },
       { done: false, stage: 'Analizando fotos...', photos_analyzed: 1, total_photos: 3, track: 'fotos' },
-      { done: false, stage: 'Detectando atributos personales...' },
+      { done: false, stage: 'detecting_attributes' },
       { done: false, stage: 'Analizando fotos...', photos_analyzed: 2, total_photos: 3, track: 'fotos' },
       { done: false, stage: 'Analizando fotos...', photos_analyzed: 3, total_photos: 3, track: 'fotos' },
     ]);
@@ -161,7 +161,7 @@ describe('Dashboard', () => {
   test('fase de geolocalización (track distinto de "fotos"): su propia línea, con su propio contador', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
     mockStream([
-      { done: false, stage: 'Leyendo publicaciones...' },
+      { done: false, stage: 'reading_posts' },
       {
         done: false,
         stage: 'Geolocalizando fotos...',
@@ -207,7 +207,7 @@ describe('Dashboard', () => {
   test('todos los spinners visibles giran sincronizados (mismo transform en todo momento)', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
     mockStream([
-      { done: false, stage: 'Leyendo publicaciones...' },
+      { done: false, stage: 'reading_posts' },
       { done: false, stage: 'Analizando fotos...', photos_analyzed: 1, total_photos: 3, track: 'fotos' },
     ]);
     const { container } = renderDashboard();
@@ -237,9 +237,9 @@ describe('Dashboard', () => {
   test('el listado revela las fases completadas de una en una, no todas de golpe', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
     mockStream([
-      { done: false, stage: 'Conectando con la plataforma...' },
-      { done: false, stage: 'Leyendo publicaciones...' },
-      { done: false, stage: 'Analizando tu forma de escribir...' },
+      { done: false, stage: 'connecting' },
+      { done: false, stage: 'reading_posts' },
+      { done: false, stage: 'analyzing_writing_style' },
     ]);
     renderDashboard();
 

@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from app import stages
 from app.models.schemas import InferredAttribute, PrivacyScore, SocialPost, WritingFingerprint
 from app.report import generator
 from app.report.generator import _build_recommendations, generate_report
@@ -215,68 +216,6 @@ class TestGenerateReportPlatformBranching:
         assert points_by_permalink["https://ig/1"].visual_description_general == "una persona tocando la guitarra"
         assert points_by_permalink["https://ig/2"].visual_description is None
         assert points_by_permalink["https://ig/2"].visual_description_general is None
-
-    @pytest.mark.asyncio
-    async def test_image_location_points_use_photo_link_when_present(self, monkeypatch):
-        """El permalink final de cada ImageLocationPoint debe ser el
-        enlace ESPECÍFICO a esa foto (estimate.photo_link, con
-        ?img_index=N para carruseles -- ver geolocation._photo_link), no
-        siempre el permalink de la publicación -- así dos fotos de la
-        MISMA publicación (carrusel) generan dos puntos con enlaces
-        distintos, cada uno saltando a su foto correcta."""
-
-        async def _fake_estimate(posts, progress_callback=None):
-            estimate_1 = geolocation.ImageLocationEstimate(
-                province="Madrid", confidence=0.5, k_neighbors=15, mean_similarity=0.6
-            )
-            estimate_1.photo_link = "https://ig/carousel?img_index=1"
-            estimate_2 = geolocation.ImageLocationEstimate(
-                province="Madrid", confidence=0.3, k_neighbors=15, mean_similarity=0.5
-            )
-            estimate_2.photo_link = "https://ig/carousel?img_index=2"
-            return geolocation.GeolocationOutcome(
-                index_available=True,
-                results=[("https://ig/carousel", estimate_1), ("https://ig/carousel", estimate_2)],
-                visual_descriptions={
-                    "https://ig/carousel?img_index=1": "Personas en la foto: una",
-                    "https://ig/carousel?img_index=2": "Personas en la foto: varias",
-                },
-                general_descriptions={
-                    "https://ig/carousel?img_index=1": "a person playing guitar",
-                    "https://ig/carousel?img_index=2": "a group of friends at the beach",
-                },
-            )
-
-        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
-
-        posts = [
-            _post(
-                i=1,
-                platform="instagram",
-                media_urls=["https://cdn/c1.jpg", "https://cdn/c2.jpg"],
-                permalink="https://ig/carousel",
-            ),
-        ]
-
-        report = await generate_report("instagram", "user", posts, _fingerprint(), [], _score())
-
-        points_by_permalink = {p.permalink: p for p in report.image_location_points}
-        assert set(points_by_permalink.keys()) == {
-            "https://ig/carousel?img_index=1",
-            "https://ig/carousel?img_index=2",
-        }
-        assert points_by_permalink["https://ig/carousel?img_index=1"].visual_description_general == (
-            "a person playing guitar"
-        )
-        assert points_by_permalink["https://ig/carousel?img_index=2"].visual_description_general == (
-            "a group of friends at the beach"
-        )
-        # created_utc sigue resolviéndose a nivel de PUBLICACIÓN (mismo
-        # post para ambos puntos), no se rompe por tener enlaces distintos.
-        assert (
-            points_by_permalink["https://ig/carousel?img_index=1"].created_utc
-            == points_by_permalink["https://ig/carousel?img_index=2"].created_utc
-        )
 
     @pytest.mark.asyncio
     async def test_non_representative_photo_still_shows_on_map_but_not_used_for_residence(self, monkeypatch):
@@ -731,7 +670,10 @@ class TestGenerateReportProgress:
             progress_callback=on_progress,
         )
 
-        assert "Generando el informe final..." in events
+        # Antes emitía el texto en español ya renderizado; desde la
+        # internacionalización de la webapp (frontend/i18n) se emite un
+        # código estable (ver app/stages.py) que el frontend traduce.
+        assert stages.GENERATING_REPORT in events
 
     @pytest.mark.asyncio
     async def test_uses_already_launched_geolocation_task_instead_of_calling_again(self, monkeypatch):

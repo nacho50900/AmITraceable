@@ -112,6 +112,19 @@ class PopulationEstimate(BaseModel):
     # detectada por IA) | "ia_nombre" (estimación de sexo por nombre público, no autodeclaración)
     source: str = "texto"
     note: str | None = None
+    # Código estable (ver app/note_codes.py) para que el frontend traduzca
+    # `note` sin parsear la frase en español; `note` se conserva tal cual
+    # para logs y la descarga JSON del informe. None si este paso no lleva
+    # nota.
+    note_code: str | None = None
+    # Valor "en crudo" del atributo, sin la plantilla de `attribute_label`
+    # ya montada (p.ej. "hombre", "24", "León") -- ver docstring del campo
+    # homónimo en scoring/k_anonymity.py.PopulationNarrowingStep.
+    value_raw: str | None = None
+    # Solo relevante cuando category == "ubicacion": "municipio" | "provincia"
+    # | "comunidad_autonoma" -- distingue qué plantilla de traducción usar
+    # en el frontend (los tres comparten category="ubicacion").
+    location_level: str | None = None
     # remaining_population / TOTAL_POPULATION_ES -- ya calculado en el backend para
     # que el frontend no tenga que conocer esa constante (pictograma de población).
     proportion: float | None = None

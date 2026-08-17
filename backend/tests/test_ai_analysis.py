@@ -230,3 +230,44 @@ class TestAnalyzeReportWithAi:
         await analyze_report_with_ai(_make_report())
 
         assert route.calls[0].request.headers["Authorization"] == "Bearer secret-123"
+
+
+class TestAnalyzeReportWithAiLanguage:
+    """`lang` decide en qué idioma responde la IA -- se añade una instrucción
+    al prompt de sistema en la MISMA llamada (ver docstring de
+    _LANGUAGE_INSTRUCTIONS), no una segunda llamada de traducción."""
+
+    @pytest.mark.asyncio
+    async def test_default_lang_es_does_not_alter_the_system_prompt(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        route = respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content()))
+
+        await analyze_report_with_ai(_make_report())
+
+        sent_payload = json.loads(route.calls[0].request.content)
+        assert sent_payload["messages"][0]["content"] == ai_analysis._SYSTEM_PROMPT
+
+    @pytest.mark.asyncio
+    async def test_lang_en_appends_english_instruction_to_system_prompt(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        route = respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content()))
+
+        await analyze_report_with_ai(_make_report(), lang="en")
+
+        sent_payload = json.loads(route.calls[0].request.content)
+        system_content = sent_payload["messages"][0]["content"]
+        assert system_content.startswith(ai_analysis._SYSTEM_PROMPT)
+        assert "INGLÉS" in system_content
+
+    @pytest.mark.asyncio
+    async def test_unsupported_lang_falls_back_to_spanish_silently(self, monkeypatch, respx_mock):
+        """Un valor de `lang` desconocido (typo, idioma no soportado por la
+        webapp) no debe romper la llamada -- es una preferencia, no un
+        contrato; se sirve en español sin más."""
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        route = respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content()))
+
+        await analyze_report_with_ai(_make_report(), lang="fr")
+
+        sent_payload = json.loads(route.calls[0].request.content)
+        assert sent_payload["messages"][0]["content"] == ai_analysis._SYSTEM_PROMPT

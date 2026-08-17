@@ -78,9 +78,17 @@ export const api = {
   // tier gratuito) dé conclusiones priorizadas. Si no está disponible,
   // lanza AiSummaryUnavailableError en vez de un Error genérico.
   aiSummary: (report: ExposureReport): Promise<{ verdict: string; conclusions: string[] }> =>
-    request<{ verdict: string; conclusions: string[] }>('/api/analyze/ai-summary', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(report),
-    }),
+    // Se manda el idioma de UI actual (ver src/i18n) como query param, para
+    // que Mistral genere el veredicto/conclusiones DIRECTAMENTE en ese
+    // idioma en la misma llamada -- ver docstring de
+    // `_LANGUAGE_INSTRUCTIONS` en backend/app/ai_analysis.py sobre por qué
+    // no se traduce después en vez de generar directo.
+    request<{ verdict: string; conclusions: string[] }>(
+      `/api/analyze/ai-summary?lang=${encodeURIComponent(i18n.language?.split('-')[0] ?? 'es')}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(report),
+      },
+    ),
 };

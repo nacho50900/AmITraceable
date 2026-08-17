@@ -40,6 +40,7 @@ import httpx
 from app.config import settings
 from app.models.schemas import SocialPost, SocialProfile
 from app.progress import ProgressCallback, emit_progress
+from app import stages
 
 IG_GRAPH_BASE = "https://graph.instagram.com"
 
@@ -55,7 +56,7 @@ class InstagramClient:
         async with httpx.AsyncClient(base_url=IG_GRAPH_BASE) as client:
             me = await self._get_me(client)
             media_items = await self._fetch_media(client, limit=settings.max_media)
-            await emit_progress(progress_callback, "Leyendo publicaciones...", posts_analyzed=len(media_items))
+            await emit_progress(progress_callback, stages.READING_POSTS, posts_analyzed=len(media_items))
 
         return SocialProfile(
             platform="instagram",

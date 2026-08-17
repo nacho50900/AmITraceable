@@ -208,7 +208,7 @@ def _make_report() -> ExposureReport:
 
 class TestAiSummaryEndpoint:
     def test_success_returns_verdict_and_conclusions(self, monkeypatch):
-        async def _fake_analyze(report):
+        async def _fake_analyze(report, lang="es"):
             return {"verdict": "Riesgo bajo en general.", "conclusions": ["Conclusión 1", "Conclusión 2"]}
 
         monkeypatch.setattr(analysis_router, "analyze_report_with_ai", _fake_analyze)
@@ -219,7 +219,7 @@ class TestAiSummaryEndpoint:
         assert resp.json() == {"verdict": "Riesgo bajo en general.", "conclusions": ["Conclusión 1", "Conclusión 2"]}
 
     def test_unavailable_returns_503_not_500(self, monkeypatch):
-        async def _fake_analyze(report):
+        async def _fake_analyze(report, lang="es"):
             raise AiAnalysisUnavailable("no configurado")
 
         monkeypatch.setattr(analysis_router, "analyze_report_with_ai", _fake_analyze)
@@ -232,6 +232,36 @@ class TestAiSummaryEndpoint:
     def test_malformed_body_returns_422(self):
         resp = client.post("/api/analyze/ai-summary", json={"not": "a valid report"})
         assert resp.status_code == 422
+
+    def test_lang_query_param_is_forwarded_to_analyze_report_with_ai(self, monkeypatch):
+        received = {}
+
+        async def _fake_analyze(report, lang="es"):
+            received["lang"] = lang
+            return {"verdict": "", "conclusions": []}
+
+        monkeypatch.setattr(analysis_router, "analyze_report_with_ai", _fake_analyze)
+
+        resp = client.post(
+            "/api/analyze/ai-summary?lang=en", json=_make_report().model_dump(mode="json")
+        )
+
+        assert resp.status_code == 200
+        assert received["lang"] == "en"
+
+    def test_lang_defaults_to_es_when_not_given(self, monkeypatch):
+        received = {}
+
+        async def _fake_analyze(report, lang="es"):
+            received["lang"] = lang
+            return {"verdict": "", "conclusions": []}
+
+        monkeypatch.setattr(analysis_router, "analyze_report_with_ai", _fake_analyze)
+
+        resp = client.post("/api/analyze/ai-summary", json=_make_report().model_dump(mode="json"))
+
+        assert resp.status_code == 200
+        assert received["lang"] == "es"
 
 
 class TestGeolocationRunsConcurrentlyFromTheStart:

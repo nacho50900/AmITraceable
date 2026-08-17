@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom';
-import { render, screen } from '@testing-library/react';
-import { describe, expect, test } from 'vitest';
+import { act, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, test } from 'vitest';
+import i18n from '../i18n';
 import PopulationNarrowingTable from '../components/PopulationNarrowingTable';
 import type { PopulationEstimate } from '../types';
 
@@ -162,6 +163,101 @@ describe('PopulationNarrowingTable', () => {
       });
 
       expect(container.querySelectorAll('.pictogram-lg')).toHaveLength(1);
+    });
+  });
+
+  describe('traducción de attribute_label/note vía category+value_raw+note_code', () => {
+    afterEach(async () => {
+      await act(async () => {
+        await i18n.changeLanguage('es');
+      });
+    });
+
+    test('con value_raw: construye el label a partir de la plantilla + valor traducido (conjunto cerrado)', () => {
+      renderTable([
+        makeStep({
+          attribute_label: 'Sexo: mujer',
+          category: 'sexo',
+          value_raw: 'mujer',
+        }),
+      ]);
+
+      expect(screen.getByText('Sexo: mujer')).toBeInTheDocument();
+    });
+
+    test('ubicación: usa location_level para elegir la plantilla correcta entre las tres', () => {
+      renderTable([
+        makeStep({
+          attribute_label: 'texto viejo que no debería verse',
+          category: 'ubicacion',
+          location_level: 'comunidad_autonoma',
+          value_raw: 'Canarias',
+        }),
+      ]);
+
+      expect(screen.getByText('Vive en comunidad autónoma: Canarias')).toBeInTheDocument();
+    });
+
+    test('nombre propio (universidad): el valor se interpola tal cual, sin buscar traducción', () => {
+      renderTable([
+        makeStep({
+          attribute_label: 'texto viejo',
+          category: 'universidad',
+          value_raw: 'Universidad De Oviedo',
+        }),
+      ]);
+
+      expect(screen.getByText('Universidad: Universidad De Oviedo')).toBeInTheDocument();
+    });
+
+    test('sin value_raw (backend antiguo): usa attribute_label tal cual, sin romper', () => {
+      renderTable([makeStep({ attribute_label: 'Sexo: mujer', category: 'sexo', value_raw: null })]);
+
+      expect(screen.getByText('Sexo: mujer')).toBeInTheDocument();
+    });
+
+    test('note_code: traduce la nota sin depender del texto en español de note', () => {
+      renderTable([
+        makeStep({
+          category: 'sexo',
+          value_raw: 'hombre',
+          note: 'texto viejo en español que no debería verse',
+          note_code: 'sexo_estimado_por_nombre',
+        }),
+      ]);
+
+      expect(
+        screen.getByText(/Estimado por convención cultural del nombre público de la cuenta/),
+      ).toBeInTheDocument();
+    });
+
+    test('note_code desconocido: cae de vuelta a note tal cual', () => {
+      renderTable([
+        makeStep({
+          category: 'sexo',
+          value_raw: 'hombre',
+          note: 'nota original',
+          note_code: 'codigo_que_no_existe',
+        }),
+      ]);
+
+      expect(screen.getByText('nota original')).toBeInTheDocument();
+    });
+
+    test('cambiar el idioma a inglés traduce plantilla y valor de conjunto cerrado', async () => {
+      renderTable([
+        makeStep({
+          attribute_label: 'Sexo: mujer',
+          category: 'sexo',
+          value_raw: 'mujer',
+        }),
+      ]);
+
+      await act(async () => {
+        await i18n.changeLanguage('en');
+      });
+
+      expect(screen.getByText('Sex: female')).toBeInTheDocument();
     });
   });
 });

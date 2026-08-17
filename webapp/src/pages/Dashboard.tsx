@@ -67,10 +67,12 @@ const Dashboard: React.FC = () => {
   // Fases YA completadas del pipeline, en el orden en que han llegado por
   // el stream -- para pintar la lista de progreso en vivo (no un
   // temporizador simulado: cada línea corresponde a un evento real emitido
-  // por el backend, ver app/progress.py y analysis_router.py). OJO: estas
-  // fases llegan como texto libre YA en español directamente del backend
-  // (SSE), así que no se traducen aquí -- fuera del alcance de esta
-  // primera fase de i18n (solo UI estática del frontend).
+  // por el backend, ver app/progress.py y analysis_router.py). Desde que
+  // el backend emite CÓDIGOS de fase (ver app/stages.py) en vez de texto
+  // ya renderizado en español, se guarda el código tal cual y se traduce
+  // solo al pintar (t('dashboard.stages.' + code)), con el propio código
+  // como fallback por si llega uno que el frontend todavía no conoce
+  // (backend más nuevo que el frontend desplegado).
   const [completedStages, setCompletedStages] = useState<string[]>([]);
   const [currentStage, setCurrentStage] = useState<string | null>(null);
   // El análisis de fotos corre en PARALELO con el resto del pipeline desde
@@ -239,13 +241,13 @@ const Dashboard: React.FC = () => {
               {completedStages.map((stage, i) => (
                 <li key={`${stage}-${i}`} className="progress-done">
                   <span className="progress-icon progress-icon-done" aria-hidden="true">✓</span>
-                  {stage}
+                  {t(`dashboard.stages.${stage}`, { defaultValue: stage })}
                 </li>
               ))}
               {currentStage && (
                 <li className="progress-current">
                   <span className="spinner spinner-sm" aria-hidden="true" />
-                  {currentStage}
+                  {t(`dashboard.stages.${currentStage}`, { defaultValue: currentStage })}
                 </li>
               )}
               {geoCounts && (

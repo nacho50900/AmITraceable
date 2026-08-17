@@ -63,7 +63,106 @@
     "emojiUsage": "Emoji usage: {{value}}%",
     "detectedLanguage": "Detected language: {{value}}",
     "groupingLabelInstagram": "Most frequent hashtags",
-    "groupingLabelReddit": "Most frequent subreddits"
+    "groupingLabelReddit": "Most frequent subreddits",
+    "stages": {
+      "connecting": "Connecting to the platform...",
+      "reading_posts": "Reading posts...",
+      "analyzing_writing_style": "Analyzing your writing style...",
+      "detecting_attributes": "Detecting personal attributes...",
+      "computing_score": "Computing privacy risk...",
+      "searching_ai_self_disclosures": "Searching for AI-detected self-disclosures...",
+      "generating_report": "Generating the final report..."
+    },
+    "noteCodes": {
+      "sexo_estimado_por_nombre": "Estimated from the cultural convention of the account's public name, not from an explicit self-declaration: lower reliability (unisex names, nicknames, or transliterations can lead to an incorrect estimate).",
+      "no_ine_data_for_value": "There's no INE reference data for this specific value in the current table.",
+      "estado_civil_ia_simbolica": "Inferred by AI from symbolic or indirect content (emojis, dates, recurring mentions...), not from an explicit self-declaration: lower reliability than the rest of the traits on this list.",
+      "estado_civil_ia_simbolica_exact_combo": "Inferred by AI from symbolic or indirect content (emojis, dates, recurring mentions...), not from an explicit self-declaration: lower reliability than the rest of the traits on this list. Since sex is also known, the EXACT percentage for that specific combination is used (marital status conditioned on sex, real INE cross-table), not an approximation multiplying independent proportions.",
+      "edad_repartida_uniformemente": "Estimated by evenly spreading the INE proportion across five-year brackets among the ages within each bracket (there's no year-by-year table available directly).",
+      "location_no_population_data": "There's no reference population data for this municipality/province in the current table.",
+      "location_note_base": "Assumes an age/sex distribution similar to the national average (approximation).",
+      "location_note_imagen": "Assumes an age/sex distribution similar to the national average (approximation). Location estimated from an image, not from self-declared text: lower reliability than an explicit self-declaration.",
+      "situacion_laboral_note": "Different from occupation (professional sector): this is about whether the person works, is looking for work, is retired, or studies.",
+      "tipo_hogar_note": "INE HOUSEHOLD proportion used as an approximation of the proportion of people -- same limitation already assumed for location.",
+      "lengua_no_estimable": "This can only be narrowed down if the region of residence is also known (this language is nearly residual outside its co-official territory, so a national proportion wouldn't add anything useful).",
+      "lengua_within_ccaa": "Proportion calculated ONLY within the already-known region (not nationwide).",
+      "universidad_no_estimable": "Would require the number of students/graduates of that specific university and degree (future work): data not included in this version.",
+      "empresa_no_estimable": "Would require the number of employees of that specific company (future work): data not included in this version."
+    },
+    "attribute": {
+      "sexo": "Sex: {{value}}",
+      "edad": "Age: {{value}} years old",
+      "estado_civil": "{{value}}",
+      "estudios": "Studied: {{value}}",
+      "ocupacion": "Occupation: {{value}}",
+      "nacionalidad": "Nationality: {{value}}",
+      "situacion_laboral": "Employment status: {{value}}",
+      "tipo_hogar": "Household type: {{value}}",
+      "lengua_materna": "Native/habitual language: {{value}}",
+      "universidad": "University: {{value}}",
+      "empresa": "Company: {{value}}",
+      "ubicacion_municipio": "Lives in municipality: {{value}}",
+      "ubicacion_provincia": "Lives in province: {{value}}",
+      "ubicacion_comunidad_autonoma": "Lives in region: {{value}}"
+    },
+    "attributeValue": {
+      "sexo": { "hombre": "male", "mujer": "female" },
+      "estado_civil": {
+        "casado": "Married",
+        "con_pareja": "In a relationship (not married)",
+        "divorciado": "Divorced or separated",
+        "soltero": "Single (no partner currently)",
+        "viudo": "Widowed"
+      },
+      "nacionalidad": { "espanola": "Spanish", "extranjera": "foreign" },
+      "situacion_laboral": {
+        "activo": "currently working",
+        "parado": "unemployed",
+        "jubilado": "retired or pensioner",
+        "estudiante": "student",
+        "otro_inactivo": "not in the labor force (homemaker or other situation)"
+      },
+      "tipo_hogar": {
+        "unipersonal": "lives alone",
+        "pareja_sin_hijos": "lives with a partner, no children in the household",
+        "pareja_con_hijos": "lives with a partner, with children in the household",
+        "monoparental": "single-parent family (one parent with children)"
+      },
+      "lengua_materna": {
+        "catalan": "Catalan",
+        "euskera": "Basque",
+        "gallego": "Galician",
+        "valenciano": "Valencian"
+      },
+      "estudios": {
+        "medicina": "Medicine",
+        "enfermeria": "Nursing",
+        "derecho": "Law",
+        "ingenieria informatica": "Computer Engineering",
+        "ingenieria industrial": "Industrial Engineering",
+        "administracion de empresas": "Business Administration",
+        "psicologia": "Psychology",
+        "magisterio": "Teacher Training",
+        "arquitectura": "Architecture",
+        "farmacia": "Pharmacy",
+        "biologia": "Biology",
+        "periodismo": "Journalism",
+        "economia": "Economics",
+        "veterinaria": "Veterinary Science"
+      },
+      "ocupacion": {
+        "docente": "Teacher",
+        "sanitario": "Healthcare worker",
+        "desarrollador de software": "Software Developer",
+        "ingeniero": "Engineer",
+        "abogado": "Lawyer",
+        "comercial": "Sales",
+        "hosteleria": "Hospitality",
+        "administracion publica": "Public Administration",
+        "construccion": "Construction",
+        "transporte": "Transportation"
+      }
+    }
   },
   "components": {
     "scoreBar": {

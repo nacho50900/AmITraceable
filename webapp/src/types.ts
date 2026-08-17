@@ -39,6 +39,18 @@ export interface PopulationEstimate {
   evidence: string[];
   source: 'texto' | 'imagen' | 'ia' | 'ia_nombre' | 'ia_simbolica';
   note: string | null;
+  // Código estable (ver app/note_codes.py) para traducir `note` sin
+  // parsear la frase en español; `note` se conserva para logs/descarga
+  // JSON. Opcional: ausente en informes generados por una versión anterior
+  // del backend (fallback: se muestra `note` tal cual).
+  note_code?: string | null;
+  // Valor "en crudo" del atributo, sin la plantilla de `attribute_label` ya
+  // montada (p.ej. "hombre", "24", "León") -- ver docstring del campo
+  // homónimo en app/scoring/k_anonymity.py. Opcional, mismo fallback que
+  // `note_code`: si falta, se muestra `attribute_label` tal cual.
+  value_raw?: string | null;
+  // Solo relevante cuando category === 'ubicacion'.
+  location_level?: 'municipio' | 'provincia' | 'comunidad_autonoma' | null;
   // remaining_population / poblacion total de España, ya calculado en el
   // backend (ver app/scoring/k_anonymity.py) para no duplicar esa
   // constante aquí. null si remaining_population también lo es.

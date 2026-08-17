@@ -51,6 +51,7 @@ from app.data.ine_reference import (
     TOTAL_POPULATION_ES,
 )
 from app.nlp.demographic_extraction import DemographicFindings
+from app import note_codes
 
 
 @dataclass
@@ -66,6 +67,25 @@ class PopulationNarrowingStep:
     # app/nlp/ai_attribute_extraction.py)
     source: str = "texto"
     note: str | None = None
+    # Código estable (ver app/note_codes.py) para que el frontend traduzca
+    # `note` sin tener que parsear la frase en español -- `note` se
+    # conserva tal cual para logs/descarga JSON. None si este paso no
+    # lleva nota (la mayoría no la llevan).
+    note_code: str | None = None
+    # Valor "en crudo" de este atributo, sin la plantilla de `attribute_label`
+    # ya montada (p.ej. "hombre", "24", "León") -- para que el frontend
+    # pueda traducir la plantilla ("Sexo: ", "Vive en municipio: "...) e
+    # interpolar el valor, en vez de traducir `attribute_label` ya unido
+    # (que mezclaría plantilla y valor, y a veces el valor es un nombre
+    # propio -- universidad, empresa, topónimo -- que no debe traducirse).
+    value_raw: str | None = None
+    # Solo relevante cuando category == "ubicacion": "municipio" | "provincia" |
+    # "comunidad_autonoma" -- necesario porque los tres comparten `category`
+    # pero cada uno usa una plantilla de traducción distinta en el frontend
+    # ("Vive en municipio:" / "Vive en provincia:" / "Vive en comunidad
+    # autónoma:"), y esa distinción no se puede recuperar de `value_raw` ni
+    # de `source`.
+    location_level: str | None = None
     # remaining_population / TOTAL_POPULATION_ES, ya calculado aquí para que el
     # frontend no tenga que conocer ni duplicar esa constante (usado para el
     # pictograma de población, ver PopulationPictogram.tsx). None si remaining_population
@@ -135,6 +155,8 @@ def _apply_proportion(
     evidence: list[str],
     source: str = "texto",
     note: str | None = None,
+    note_code: str | None = None,
+    value_raw: str | None = None,
 ) -> tuple[float, PopulationNarrowingStep | None]:
     """Multiplica `remaining` por una proporción marginal del INE (asumiendo
     independencia respecto a los atributos ya aplicados) y construye el
@@ -148,6 +170,8 @@ def _apply_proportion(
             evidence=evidence,
             source=source,
             note="No hay dato de referencia del INE para este valor concreto en la tabla actual.",
+            note_code=note_codes.NO_INE_DATA_FOR_VALUE,
+            value_raw=value_raw,
         )
 
     new_remaining = remaining * proportion
@@ -159,6 +183,8 @@ def _apply_proportion(
         evidence=evidence,
         source=source,
         note=note,
+        note_code=note_code,
+        value_raw=value_raw,
         proportion=new_remaining / TOTAL_POPULATION_ES,
         # `proportion` (el parámetro, no el campo del step) YA ES el factor
         # marginal de este rasgo por sí solo -- new_remaining/remaining --
@@ -173,12 +199,14 @@ def _step_sexo(findings: DemographicFindings, remaining: float) -> tuple[float, 
         return remaining, None
     source = findings.source.get("sexo", "texto")
     note = None
+    note_code = None
     if source == "ia_nombre":
         note = (
             "Estimado por convención cultural del nombre público de la cuenta, no por una "
             "autodeclaración explícita: fiabilidad menor (nombres unisex, apodos o "
             "transliteraciones pueden dar una estimación incorrecta)."
         )
+        note_code = note_codes.SEXO_ESTIMADO_POR_NOMBRE
     return _apply_proportion(
         remaining,
         SEX_DISTRIBUTION.get(findings.sexo),
@@ -187,6 +215,10 @@ def _step_sexo(findings: DemographicFindings, remaining: float) -> tuple[float, 
         findings.evidence.get("sexo", []),
         source=source,
         note=note,
+        note_code=note_code,
+        # "hombre"/"mujer" -- conjunto cerrado, el frontend lo traduce con
+        # su propia tabla (mismo patrón que risk_level/source).
+        value_raw=findings.sexo,
     )
 
 
@@ -221,12 +253,14 @@ def _step_relacion(findings: DemographicFindings, remaining: float) -> tuple[flo
         "menciones recurrentes...), no de una autodeclaración explícita: fiabilidad menor "
         "que el resto de rasgos de esta lista."
     )
+    note_code = note_codes.ESTADO_CIVIL_IA_SIMBOLICA
     if exact:
         note += (
             " Al conocerse también el sexo, se usa el porcentaje EXACTO de esa combinación "
             "concreta (estado civil condicionado a sexo, tabla real del INE), no una "
             "aproximación multiplicando proporciones independientes."
         )
+        note_code = note_codes.ESTADO_CIVIL_IA_SIMBOLICA_EXACT_COMBO
 
     return _apply_proportion(
         remaining,
@@ -236,6 +270,8 @@ def _step_relacion(findings: DemographicFindings, remaining: float) -> tuple[flo
         findings.evidence.get("estado_civil", []),
         source=findings.source.get("estado_civil", "ia_simbolica"),
         note=note,
+        note_code=note_code,
+        value_raw=findings.estado_civil,
     )
 
 
@@ -252,10 +288,16 @@ def _step_edad(findings: DemographicFindings, remaining: float) -> tuple[float, 
         note="Estimado repartiendo uniformemente la proporción de INE por tramos "
              "quinquenales entre las edades de cada tramo (no hay tabla año a año "
              "descargable directamente); ver ine_reference.py.",
+        note_code=note_codes.EDAD_REPARTIDA_UNIFORMEMENTE,
+        # Un número no necesita traducción; se manda como string para que
+        # el frontend lo interpole igual que el resto de `value_raw`.
+        value_raw=str(findings.edad),
     )
 
 
-def _location_no_estimable_step(label: str, evidence: list[str], source: str) -> PopulationNarrowingStep:
+def _location_no_estimable_step(
+    label: str, evidence: list[str], source: str, value_raw: str, location_level: str
+) -> PopulationNarrowingStep:
     return PopulationNarrowingStep(
         attribute_label=label,
         category="ubicacion",
@@ -264,17 +306,23 @@ def _location_no_estimable_step(label: str, evidence: list[str], source: str) ->
         evidence=evidence,
         source=source,
         note="No hay dato de población de referencia para este municipio/provincia en la tabla actual.",
+        note_code=note_codes.LOCATION_NO_POPULATION_DATA,
+        value_raw=value_raw,
+        location_level=location_level,
     )
 
 
-def _location_note(source: str) -> str:
+def _location_note(source: str) -> tuple[str, str]:
+    """Devuelve (note, note_code). `imagen` es la única condición que altera
+    el mensaje -- mismo patrón que el resto de notas de este módulo."""
     base = "Asume distribución de edad/sexo similar a la media nacional (aproximación)."
     if source == "imagen":
         base += (
             " Ubicación estimada a partir de una imagen, no de texto autodeclarado: "
             "menor fiabilidad que una autodeclaración explícita."
         )
-    return base
+        return base, note_codes.LOCATION_NOTE_IMAGEN
+    return base, note_codes.LOCATION_NOTE_BASE
 
 
 def _step_location(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
@@ -295,17 +343,19 @@ def _step_location(findings: DemographicFindings, remaining: float) -> tuple[flo
     """
     if findings.municipio:
         location, table = findings.municipio, MUNICIPALITY_POPULATION
-        evidence_key = "municipio"
-        label = f"Vive en municipio: {location.title()}"
+        evidence_key = location_level = "municipio"
+        display_value = location.title()
+        label = f"Vive en municipio: {display_value}"
     elif findings.provincia:
         location, table = findings.provincia, PROVINCE_POPULATION
-        evidence_key = "provincia"
-        label = f"Vive en provincia: {location.title()}"
+        evidence_key = location_level = "provincia"
+        display_value = location.title()
+        label = f"Vive en provincia: {display_value}"
     elif findings.comunidad_autonoma:
         location, table = findings.comunidad_autonoma, CCAA_POPULATION
-        evidence_key = "comunidad_autonoma"
-        display_name = AUTONOMOUS_COMMUNITY_DISPLAY_NAMES.get(location, location.title())
-        label = f"Vive en comunidad autónoma: {display_name}"
+        evidence_key = location_level = "comunidad_autonoma"
+        display_value = AUTONOMOUS_COMMUNITY_DISPLAY_NAMES.get(location, location.title())
+        label = f"Vive en comunidad autónoma: {display_value}"
     else:
         return remaining, None
 
@@ -314,9 +364,10 @@ def _step_location(findings: DemographicFindings, remaining: float) -> tuple[flo
 
     population = table.get(location)
     if population is None:
-        return remaining, _location_no_estimable_step(label, evidence, source)
+        return remaining, _location_no_estimable_step(label, evidence, source, display_value, location_level)
 
     new_remaining = population * (remaining / TOTAL_POPULATION_ES)
+    note, note_code = _location_note(source)
     return new_remaining, PopulationNarrowingStep(
         attribute_label=label,
         category="ubicacion",
@@ -324,7 +375,12 @@ def _step_location(findings: DemographicFindings, remaining: float) -> tuple[flo
         risk_level=_risk_level(new_remaining),
         evidence=evidence,
         source=source,
-        note=_location_note(source),
+        note=note,
+        note_code=note_code,
+        # Topónimo -- nombre propio, el frontend lo interpola tal cual, sin
+        # traducirlo (ver docstring de `value_raw` en PopulationNarrowingStep).
+        value_raw=display_value,
+        location_level=location_level,
         # new_remaining / remaining = population / TOTAL_POPULATION_ES (se
         # simplifica el factor remaining/TOTAL_POPULATION_ES de ambos
         # lados) -- es el factor marginal de esta ubicación por sí sola.
@@ -342,6 +398,7 @@ def _step_estudios(findings: DemographicFindings, remaining: float) -> tuple[flo
         "estudios",
         findings.evidence.get("estudios", []),
         source=findings.source.get("estudios", "texto"),
+        value_raw=findings.estudios,
     )
 
 
@@ -355,6 +412,7 @@ def _step_ocupacion(findings: DemographicFindings, remaining: float) -> tuple[fl
         "ocupacion",
         findings.evidence.get("ocupacion", []),
         source=findings.source.get("ocupacion", "texto"),
+        value_raw=findings.ocupacion,
     )
 
 
@@ -374,6 +432,7 @@ def _step_nacionalidad(findings: DemographicFindings, remaining: float) -> tuple
         "nacionalidad",
         findings.evidence.get("nacionalidad", []),
         source=findings.source.get("nacionalidad", "texto"),
+        value_raw=findings.nacionalidad,
     )
 
 
@@ -400,6 +459,8 @@ def _step_situacion_laboral(
         source=findings.source.get("situacion_laboral", "texto"),
         note="Distinto del sector profesional (ocupación): aquí es si la persona trabaja, "
              "busca trabajo, está jubilada o estudia.",
+        note_code=note_codes.SITUACION_LABORAL_NOTE,
+        value_raw=findings.situacion_laboral,
     )
 
 
@@ -423,6 +484,8 @@ def _step_tipo_hogar(findings: DemographicFindings, remaining: float) -> tuple[f
         source=findings.source.get("tipo_hogar", "texto"),
         note="Proporción de HOGARES del INE usada como aproximación de la proporción de "
              "personas (ver ine_reference.py) -- misma limitación ya asumida para ubicación.",
+        note_code=note_codes.TIPO_HOGAR_NOTE,
+        value_raw=findings.tipo_hogar,
     )
 
 
@@ -471,6 +534,8 @@ def _step_lengua(findings: DemographicFindings, remaining: float) -> tuple[float
             note="Solo se puede acotar si también se conoce la comunidad autónoma de "
                  "residencia (esta lengua es casi residual fuera de su territorio "
                  "cooficial, así que una proporción nacional no aportaría nada útil).",
+            note_code=note_codes.LENGUA_NO_ESTIMABLE,
+            value_raw=findings.lengua_materna,
         )
 
     return _apply_proportion(
@@ -482,6 +547,8 @@ def _step_lengua(findings: DemographicFindings, remaining: float) -> tuple[float
         source=source,
         note="Proporción calculada SOLO dentro de la comunidad autónoma ya conocida "
              "(P(lengua | comunidad autónoma), no a nivel nacional).",
+        note_code=note_codes.LENGUA_WITHIN_CCAA,
+        value_raw=findings.lengua_materna,
     )
 
 
@@ -500,6 +567,9 @@ def _step_universidad(findings: DemographicFindings) -> PopulationNarrowingStep 
         evidence=findings.evidence.get("universidad", []),
         note="Requeriría el nº de alumnos/egresados de esa universidad y titulación "
              "concretos (trabajo futuro): dato no incluido en esta versión.",
+        note_code=note_codes.UNIVERSIDAD_NO_ESTIMABLE,
+        # Nombre propio -- no se traduce, el frontend lo interpola tal cual.
+        value_raw=findings.universidad.title(),
     )
 
 
@@ -514,6 +584,8 @@ def _step_empresa(findings: DemographicFindings) -> PopulationNarrowingStep | No
         evidence=findings.evidence.get("empresa", []),
         note="Requeriría el nº de empleados de esa empresa concreta (trabajo futuro): "
              "dato no incluido en esta versión.",
+        note_code=note_codes.EMPRESA_NO_ESTIMABLE,
+        value_raw=findings.empresa,
     )
 
 

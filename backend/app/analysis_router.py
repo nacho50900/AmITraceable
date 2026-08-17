@@ -33,6 +33,7 @@ from app.progress import ProgressCallback, emit_progress
 from app.reddit_client import RedditClient
 from app.report.generator import generate_report
 from app.scoring.privacy_score import compute_score
+from app import stages
 
 router = APIRouter(prefix="/api", tags=["analysis"])
 
@@ -124,15 +125,15 @@ async def _build_report(
         pipeline_start = time.monotonic()
 
         async with timed_stage("huella_escritura"):
-            await emit_progress(progress_callback, "Analizando tu forma de escribir...")
+            await emit_progress(progress_callback, stages.ANALYZING_WRITING_STYLE)
             fingerprint = build_fingerprint(profile.posts)
 
         async with timed_stage("deteccion_atributos"):
-            await emit_progress(progress_callback, "Detectando atributos personales...")
+            await emit_progress(progress_callback, stages.DETECTING_ATTRIBUTES)
             inferred_attributes = infer_attributes(profile.posts)
 
         async with timed_stage("scoring"):
-            await emit_progress(progress_callback, "Calculando el riesgo de privacidad...")
+            await emit_progress(progress_callback, stages.COMPUTING_SCORE)
             score = compute_score(profile.posts, fingerprint, inferred_attributes)
 
         report = await generate_report(
@@ -186,11 +187,17 @@ async def _build_report(
         503: {"description": "El análisis con IA no está disponible (sin API key, cuota agotada, o error del proveedor)."},
     },
 )
-async def ai_summary(report: Annotated[ExposureReport, Body(...)]):
+async def ai_summary(report: Annotated[ExposureReport, Body(...)], lang: str = "es"):
     """
     Endpoint AISLADO del pipeline principal: recibe un ExposureReport ya
     generado (el mismo JSON que el frontend ya tiene tras el análisis, se
     lo reenvía tal cual) y pide a Mistral AI conclusiones priorizadas.
+
+    `lang` (query param, "es" por defecto): idioma del veredicto/
+    conclusiones generados por la IA -- ver `ai_analysis.SUPPORTED_LANGUAGES`.
+    El frontend manda aquí su idioma de UI actual (ver webapp/src/i18n). Un
+    valor no soportado se ignora silenciosamente y se sirve en español, no
+    es un error -- este parámetro es una preferencia, no un contrato.
 
     Deliberadamente NO se recalcula ni se vuelve a tocar sesión/tokens de
     Reddit o Instagram aquí -- este endpoint solo sabe leer un informe ya
@@ -213,7 +220,7 @@ async def ai_summary(report: Annotated[ExposureReport, Body(...)]):
     lo deshaga sin darse cuenta en el futuro.
     """
     try:
-        result = await analyze_report_with_ai(report)
+        result = await analyze_report_with_ai(report, lang=lang)
     except AiAnalysisUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -293,7 +300,7 @@ async def analyze_stream(platform: str, request: Request):
 
     async def run_pipeline() -> None:
         try:
-            await on_progress("Conectando con la plataforma...", {})
+            await on_progress(stages.CONNECTING, {})
             fetch_start = time.monotonic()
             profile = await client.fetch_profile(progress_callback=on_progress)
             fetch_seconds = time.monotonic() - fetch_start

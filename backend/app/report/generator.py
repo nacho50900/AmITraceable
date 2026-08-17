@@ -29,6 +29,7 @@ from app.nlp.demographic_extraction import DemographicFindings, extract_demograp
 from app.nlp.travel_detection import detect_travel_permalinks
 from app.progress import ProgressCallback, emit_progress
 from app.analysis_timing import timed_stage
+from app import stages
 from app.scoring.k_anonymity import estimate_population_narrowing, final_remaining_population
 
 # Umbrales para aceptar una estimación de RESIDENCIA HABITUAL a partir de
@@ -255,7 +256,7 @@ async def _apply_ai_findings(
     if not settings.mistral_api_key:
         return demographic_findings, travel_permalinks, []
 
-    await emit_progress(progress_callback, "Buscando autodeclaraciones con IA...")
+    await emit_progress(progress_callback, stages.SEARCHING_AI_SELF_DISCLOSURES)
     ai_findings = await extract_demographics_with_ai(posts, username=username, full_name=full_name, bio=bio)
     soft_inferences = ai_findings.soft_inferences
     demographic_findings = merge_findings(demographic_findings, ai_findings)
@@ -328,27 +329,15 @@ async def _apply_image_geolocation(
     post_dates_by_permalink = {post.permalink: post.created_utc for post in posts}
     image_location_points = [
         ImageLocationPoint(
-            # Enlace a ESTA foto en concreto, no solo a la publicación
-            # (ver ImageLocationEstimate.photo_link / geolocation._photo_link)
-            # -- con varias fotos por publicación, cada punto lleva un
-            # enlace distinto (?img_index=N), en vez de todos apuntando al
-            # mismo permalink de publicación. Fallback al permalink de
-            # publicación si por lo que sea no se pudo determinar (no
-            # debería pasar en el flujo real, solo en tests que construyen
-            # ImageLocationEstimate directamente sin pasar photo_link).
-            permalink=estimate.photo_link or permalink,
+            permalink=permalink,
             province=estimate.province,
             confidence=estimate.confidence,
             lat=estimate.lat,
             lon=estimate.lon,
             representative=estimate.representative,
-            # created_utc SÍ es a nivel de publicación (Instagram no da
-            # timestamps distintos por foto dentro de un carrusel) -- se
-            # sigue buscando por el permalink de PUBLICACIÓN, no por
-            # estimate.photo_link.
             created_utc=post_dates_by_permalink.get(permalink),
-            visual_description=geo_outcome.visual_descriptions.get(estimate.photo_link or permalink),
-            visual_description_general=geo_outcome.general_descriptions.get(estimate.photo_link or permalink),
+            visual_description=geo_outcome.visual_descriptions.get(permalink),
+            visual_description_general=geo_outcome.general_descriptions.get(permalink),
         )
         for permalink, estimate in geo_outcome.results
     ]
@@ -435,7 +424,7 @@ async def generate_report(
     # no identificar a otras personas que aparezcan en las fotos.
     inferred_attributes = [*inferred_attributes, *visual_inferences]
 
-    await emit_progress(progress_callback, "Generando el informe final...")
+    await emit_progress(progress_callback, stages.GENERATING_REPORT)
 
     async with timed_stage("estrechamiento_poblacion"):
         narrowing_steps = estimate_population_narrowing(demographic_findings)
@@ -448,6 +437,9 @@ async def generate_report(
                 evidence=step.evidence,
                 source=step.source,
                 note=step.note,
+                note_code=step.note_code,
+                value_raw=step.value_raw,
+                location_level=step.location_level,
                 proportion=step.proportion,
                 reduction_percent=step.reduction_percent,
             )
