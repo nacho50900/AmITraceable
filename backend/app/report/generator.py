@@ -286,6 +286,7 @@ async def _apply_image_geolocation(
     travel_permalinks: set[str],
     geolocation_task: "asyncio.Task | None",
     progress_callback: ProgressCallback | None,
+    avatar_url: str | None,
 ) -> tuple[list[ImageLocationPoint], bool, list[InferredAttribute]]:
     """Geolocalización por imagen: solo se usa como ubicación PARA EL
     CÁLCULO DE POBLACIÓN si el texto no dio ya una provincia/municipio/
@@ -324,7 +325,9 @@ async def _apply_image_geolocation(
     else:
         from app.vision.geolocation import estimate_locations_for_posts
 
-        geo_outcome = await estimate_locations_for_posts(posts, progress_callback=progress_callback)
+        geo_outcome = await estimate_locations_for_posts(
+            posts, avatar_url=avatar_url, progress_callback=progress_callback
+        )
 
     post_dates_by_permalink = {post.permalink: post.created_utc for post in posts}
     image_location_points = [
@@ -351,6 +354,15 @@ async def _apply_image_geolocation(
             created_utc=post_dates_by_permalink.get(permalink),
             visual_description=geo_outcome.visual_descriptions.get(estimate.photo_link or permalink),
             visual_description_general=geo_outcome.general_descriptions.get(estimate.photo_link or permalink),
+            # `permalink` aquí es el de la publicación SINTÉTICA que
+            # estimate_locations_for_posts crea para el avatar -- que es
+            # literalmente `avatar_url` (ver su docstring) -- así que
+            # compararlo contra el propio `avatar_url` basta para
+            # identificar el punto de la foto de perfil. Antes este campo
+            # existía en el schema y en el frontend (LocationMap.tsx) pero
+            # nunca se rellenaba aquí -- por eso nunca se veía la etiqueta
+            # "Foto de perfil" pese a que la foto SÍ se analizaba.
+            is_profile_picture=(avatar_url is not None and permalink == avatar_url),
         )
         for permalink, estimate in geo_outcome.results
     ]
@@ -429,7 +441,7 @@ async def generate_report(
     # de que el paralelismo está funcionando.
     async with timed_stage("espera_geolocalizacion_fotos"):
         image_location_points, geolocation_available, visual_inferences = await _apply_image_geolocation(
-            platform, posts, demographic_findings, travel_permalinks, geolocation_task, progress_callback
+            platform, posts, demographic_findings, travel_permalinks, geolocation_task, progress_callback, avatar_url
         )
     # Igual que las inferencias blandas de texto: se AÑADEN a lo que ya
     # había (regex + texto por IA), nunca lo sustituyen. Ver

@@ -90,7 +90,7 @@ class TestGenerateReportPlatformBranching:
         misma comunidad con >80% de confianza (ver HIGH_CONFIDENCE* en
         report/generator.py)."""
 
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[
@@ -135,7 +135,7 @@ class TestGenerateReportPlatformBranching:
         visto en producción: "Sin descripción disponible" en todas las
         fotos de un carrusel pese a que Moondream2 sí las analizó)."""
 
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[
@@ -180,7 +180,7 @@ class TestGenerateReportPlatformBranching:
 
     @pytest.mark.asyncio
     async def test_image_location_points_include_the_post_publication_date(self, monkeypatch):
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[
@@ -229,7 +229,7 @@ class TestGenerateReportPlatformBranching:
         general (visual_description_general), campo DESCRIPCION del mismo
         prompt ya parseado."""
 
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[
@@ -282,7 +282,7 @@ class TestGenerateReportPlatformBranching:
         NO debe poder decidir, ni siquiera junto con otra foto igual de
         dispersa, la conclusión de dónde vive la persona."""
 
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[
@@ -328,7 +328,7 @@ class TestGenerateReportPlatformBranching:
 
     @pytest.mark.asyncio
     async def test_representative_photo_propagates_representative_true(self, monkeypatch):
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[
@@ -357,7 +357,7 @@ class TestGenerateReportPlatformBranching:
         una sola foto con 95% de confianza es suficiente por sí sola: hace
         falta consenso entre varias fotos (ver report/generator.py)."""
 
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[
@@ -386,7 +386,7 @@ class TestGenerateReportPlatformBranching:
         (pero ninguna llega al 80%) también deben bastar -- es la otra vía
         de consenso, pensada para "muchas fotos aunque ninguna destaque"."""
 
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[
@@ -416,7 +416,7 @@ class TestGenerateReportPlatformBranching:
         """Justo por debajo del umbral de "muchas fotos" (3 en vez de 4):
         no debe asumirse la ubicación."""
 
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[
@@ -446,7 +446,7 @@ class TestGenerateReportPlatformBranching:
         debe contar como señal de residencia, aunque su confianza de
         geolocalización sea altísima -- ni sola ni sumando con otra."""
 
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[
@@ -490,7 +490,7 @@ class TestGenerateReportPlatformBranching:
         provincias sin más información -- debe quedar estimable a nivel de
         comunidad autónoma en vez de "no_estimable"."""
 
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[
@@ -531,7 +531,7 @@ class TestGenerateReportPlatformBranching:
         ambigüedad, así que debe resolver directamente a provincia (más
         específico que quedarse a nivel de comunidad autónoma)."""
 
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[
@@ -568,7 +568,7 @@ class TestGenerateReportPlatformBranching:
         completa, sin provincia), la inferencia por consenso de fotos NO
         debe pisarlo, aunque hubiera consenso suficiente para otra zona."""
 
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[
@@ -604,7 +604,7 @@ class TestGenerateReportPlatformBranching:
 
     @pytest.mark.asyncio
     async def test_instagram_text_location_takes_priority_over_image(self, monkeypatch):
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[
@@ -641,7 +641,7 @@ class TestGenerateReportPlatformBranching:
         (no llega ni de lejos al umbral de consenso, ver HIGH_CONFIDENCE*/
         MODERATE_CONFIDENCE* en report/generator.py)."""
 
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[
@@ -668,7 +668,7 @@ class TestGenerateReportPlatformBranching:
 
     @pytest.mark.asyncio
     async def test_geolocation_available_reflects_index_state(self, monkeypatch):
-        async def _fake_unavailable(posts, progress_callback=None):
+        async def _fake_unavailable(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(index_available=False, results=[])
 
         monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_unavailable)
@@ -902,7 +902,7 @@ class TestVisualAnalysisReachesTheReport:
 
     @pytest.mark.asyncio
     async def test_visual_inferences_are_appended_to_inferred_attributes(self, monkeypatch):
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[],
@@ -939,7 +939,7 @@ class TestVisualAnalysisReachesTheReport:
         dijera nada sobre pareja -- debe rellenar estado_civil con
         source='imagen', igual que la ubicación por imagen cuando el
         texto no dio ninguna."""
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[],
@@ -977,7 +977,7 @@ class TestVisualAnalysisReachesTheReport:
 
         monkeypatch.setattr(generator, "extract_demographics_with_ai", _fake_ai_extraction)
 
-        async def _fake_estimate(posts, progress_callback=None):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(
                 index_available=True,
                 results=[],
