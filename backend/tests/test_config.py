@@ -57,3 +57,21 @@ class TestDefaultPhotoAnalysisConcurrency:
         monkeypatch.setattr(config.os, "cpu_count", lambda: None)
 
         assert config._default_photo_analysis_concurrency() == 2  # max(1, 4 // 2)
+
+
+class TestSceneAnalysisTimeoutSeconds:
+    """Ver docstring de Settings.scene_analysis_timeout_seconds: 60s por
+    defecto (no 30s), y configurable por variable de entorno -- visto en
+    producción que 30s deja un margen demasiado ajustado en GPUs modestas
+    (p. ej. ~25s de inferencia real en una GTX 1650), provocando que casi
+    toda foto se descartara sin descripción."""
+
+    def test_default_is_60_not_the_original_30(self):
+        assert config.settings.scene_analysis_timeout_seconds == 60
+
+    def test_configurable_via_env_var(self, monkeypatch):
+        monkeypatch.setenv("SCENE_ANALYSIS_TIMEOUT_SECONDS", "90")
+
+        fresh_settings = config.Settings()
+
+        assert fresh_settings.scene_analysis_timeout_seconds == 90

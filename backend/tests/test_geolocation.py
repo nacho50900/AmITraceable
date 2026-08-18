@@ -677,15 +677,15 @@ class TestEstimateLocationsForPosts:
         huggingface_hub de varios segundos cada uno), la geolocalización
         de ESA MISMA foto (DINOv2, ya calculada) no debe quedarse
         esperando indefinidamente -- `asyncio.wait_for` debe cortar tras
-        `_SCENE_ANALYSIS_TIMEOUT_SECONDS` y degradar a "sin descripción",
-        dejando que el resto del resultado de la foto salga con
-        normalidad."""
+        `Settings.scene_analysis_timeout_seconds` y degradar a "sin
+        descripción", dejando que el resto del resultado de la foto salga
+        con normalidad."""
         import time
         import httpx
 
         monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
         monkeypatch.setattr(geolocation.settings, "enable_scene_analysis", True)
-        monkeypatch.setattr(geolocation, "_SCENE_ANALYSIS_TIMEOUT_SECONDS", 0.05)
+        monkeypatch.setattr(geolocation.settings, "scene_analysis_timeout_seconds", 0.05)
 
         monkeypatch.setattr(
             geolocation, "estimate_location_from_image",

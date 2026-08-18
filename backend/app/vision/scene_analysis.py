@@ -140,9 +140,9 @@ _STRUCTURED_QUERY = (
     # vez de sustituirla por un valor real) -- fallo de instruction-
     # following típico de VQA pequeños cuando la etiqueta, la explicación
     # de las opciones y el valor esperado se mezclan en una sola línea.
-    # Esto también explica por qué el análisis superaba el timeout de 30s
-    # (`_SCENE_ANALYSIS_TIMEOUT_SECONDS` en geolocation.py) incluso en
-    # GPU: al "confundirse", el modelo generaba varios cientos de tokens
+    # Esto también explica por qué el análisis superaba el timeout
+    # configurado (entonces 30s, ver Settings.scene_analysis_timeout_seconds
+    # en config.py) incluso en GPU: al "confundirse", el modelo generaba varios cientos de tokens
     # de texto repetido en vez de líneas cortas. La solución: separar un
     # EJEMPLO literal de líneas (que el modelo solo tiene que "copiar la
     # forma de") de la explicación de qué valores son válidos, en párrafos
@@ -426,9 +426,12 @@ def _lazy_load():
     SÍ funciona (`device_map` en forma de diccionario, sin el error del
     intento nº1), y con el arreglo del intento nº8 el modelo queda de
     verdad en float16. Lo que SIGUE sin resolverse: el análisis de una
-    foto individual sigue superando el timeout de 30s
-    (`_SCENE_ANALYSIS_TIMEOUT_SECONDS`) incluso en GPU -- no se sabe
-    todavía si es porque bfloat16-a-float16 no basta para bajar de 30s en
+    foto individual sigue superando el timeout de 30s (el valor de
+    entonces; ver Settings.scene_analysis_timeout_seconds en config.py,
+    subido después a 60s por defecto y hecho configurable por variable de
+    entorno tras confirmarse este mismo problema en producción) incluso en
+    GPU -- no se sabe todavía si es porque bfloat16-a-float16 no basta para
+    bajar de 30s en
     una GTX 1650, o si hay algo más de fondo (p. ej. la primera pasada de
     CUDA/cuDNN "calentando" kernels, que solo afecta a la primera foto,
     frente a un problema que afecte a todas). Si sigue pasando tras este

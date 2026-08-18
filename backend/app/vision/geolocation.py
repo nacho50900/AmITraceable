@@ -64,17 +64,6 @@ _MODEL_NAME = "facebook/dinov2-small"
 _MAX_NEIGHBOR_SPREAD_KM = 300.0
 _MIN_NEIGHBORS_WITH_COORDS_FOR_SPREAD_CHECK = 3
 
-# Tiempo máximo que se deja a Moondream2 (análisis de CONTENIDO visual,
-# app/vision/scene_analysis.py) por foto antes de rendirse y seguir sin
-# descripción -- ver docstring de `_maybe_analyze_content` en
-# estimate_locations_for_posts() sobre por qué hace falta un límite
-# explícito (visto en producción: reintentos de red de huggingface_hub de
-# ~10s cada uno, que sin este límite bloqueaban también la geolocalización
-# -- DINOv2 -- de esa misma foto). A nivel de módulo (no dentro de la
-# función) para que sea fácil de ajustar en un test o, si hiciera falta,
-# desde fuera.
-_SCENE_ANALYSIS_TIMEOUT_SECONDS = 30
-
 # Carga perezosa: el modelo/índice solo se cargan la primera vez que se usan,
 # para no penalizar el arranque de la app cuando este módulo no se necesita.
 _model = None
@@ -487,16 +476,19 @@ async def _maybe_analyze_content(image):
        sin más demora."""
     if not settings.enable_scene_analysis:
         return [], False, None, None
+    timeout_seconds = settings.scene_analysis_timeout_seconds
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(analyze_image_content, image),
-            timeout=_SCENE_ANALYSIS_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
         )
     except TimeoutError:
         logger.warning(
             "Análisis de contenido visual descartado para una foto: "
-            "superó los %ss (ver _SCENE_ANALYSIS_TIMEOUT_SECONDS)",
-            _SCENE_ANALYSIS_TIMEOUT_SECONDS,
+            "superó los %ss (ver Settings.scene_analysis_timeout_seconds, "
+            "configurable con la variable de entorno "
+            "SCENE_ANALYSIS_TIMEOUT_SECONDS).",
+            timeout_seconds,
         )
         return [], False, None, None
 

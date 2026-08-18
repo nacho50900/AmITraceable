@@ -135,6 +135,27 @@ class Settings(BaseSettings):
     # igual, activado o no.
     enable_scene_analysis: bool = False
 
+    # Tiempo máximo (segundos) que se deja a Moondream2 analizar UNA foto
+    # antes de rendirse y seguir sin descripción para esa foto concreta
+    # (ver `_maybe_analyze_content` en app/vision/geolocation.py). El valor
+    # original (30s) se fijó para protegerse de un problema concreto
+    # (reintentos de red de huggingface_hub de ~10s cada uno bloqueando
+    # también la geolocalización de la misma foto), NO de una medición real
+    # de cuánto tarda la inferencia -- en la práctica, en una GPU modesta
+    # (p. ej. GTX 1650, 4GB VRAM) una foto puede tardar ~25s solo en
+    # inferencia, dejando un margen tan ajustado que cualquier variación
+    # (carga del sistema, otra foto compitiendo por la GPU) hace que se
+    # descarte casi toda foto -- visto en producción como "todas las fotos
+    # sin descripción" pese a que el modelo funciona bien. 60s da margen
+    # razonable en hardware modesto sin dejar de proteger contra el
+    # problema original (un colgado de red sigue detectándose mucho antes).
+    # Configurable por variable de entorno (no repartido por un script de
+    # calibración automática -- una sola foto de prueba corrida una vez no
+    # sería representativa de la carga real, con varias fotos compitiendo
+    # por la misma GPU a la vez) para poder ajustarlo sin tocar código
+    # según el hardware de cada despliegue concreto.
+    scene_analysis_timeout_seconds: int = 60
+
     # Interruptor GENERAL de los logs de rendimiento (ver
     # app/log/performance_log.py y app/log/analysis_run_log.py): activado por
     # defecto porque son datos puramente técnicos, sin nada personal (ver
