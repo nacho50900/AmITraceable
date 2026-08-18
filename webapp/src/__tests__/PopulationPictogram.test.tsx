@@ -36,13 +36,17 @@ describe('PopulationPictogram', () => {
     expect(screen.getByText('10%')).toBeInTheDocument();
   });
 
-  test('proporción muy pequeña (menos del 1%, más de 100 monigotes): modo compacto con el número absoluto', () => {
+  test('proporción muy pequeña (menos del 1%, más de 100 monigotes): modo compacto con "1 de cada X"', () => {
     const { container } = render(<PopulationPictogram proportion={0.0035} remainingPopulation={170000} />);
     const images = container.querySelectorAll('img');
 
     expect(images).toHaveLength(1);
     expect(images[0]).toHaveAttribute('src', '/monigote_selected.png');
-    expect(screen.getByText('de 170.000')).toBeInTheDocument();
+    // El icono representa la PROPORCIÓN (1 de cada 286 españoles al azar),
+    // no el total absoluto de personas -- ese total ya se muestra por
+    // separado en PopulationNarrowingTable.tsx, no aquí.
+    expect(screen.getByText('1 de cada 286')).toBeInTheDocument();
+    expect(screen.queryByText(/170.000/)).not.toBeInTheDocument();
   });
 
   test('proporción en el límite (exactamente 100 monigotes): sigue en modo rejilla', () => {
@@ -57,9 +61,12 @@ describe('PopulationPictogram', () => {
     expect(screen.getByRole('img', { name: /25% de la población/ })).toBeInTheDocument();
   });
 
-  test('formatea el número absoluto con separador de miles en español (modo compacto)', () => {
-    render(<PopulationPictogram proportion={0.001} remainingPopulation={49128} />);
-    expect(screen.getByText('de 49.128')).toBeInTheDocument();
+  test('formatea el ratio "1 de cada X" con separador de miles en español (modo compacto)', () => {
+    // proportion=0.0001 -> totalFigures=10.000, el primer valor "redondo"
+    // que el locale es-ES agrupa con separador de miles (para 1.000-9.999
+    // no lo hace, es el comportamiento real de Intl.NumberFormat('es-ES')).
+    render(<PopulationPictogram proportion={0.0001} remainingPopulation={4912} />);
+    expect(screen.getByText('1 de cada 10.000')).toBeInTheDocument();
   });
 
   describe('size="large"', () => {

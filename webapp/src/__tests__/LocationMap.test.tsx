@@ -197,7 +197,7 @@ describe('LocationMap', () => {
     const points = [makePoint({ representative: false, permalink: 'https://instagram.com/p/no-rep' })];
     render(<LocationMap points={points} platform="instagram" available={true} />);
 
-    expect(screen.getByText(/Imágenes no representativas/i)).toBeInTheDocument();
+    expect(screen.getByText(/Imágenes no geolocalizables/i)).toBeInTheDocument();
     const link = screen.getByRole('link', { name: 'Ver publicación' });
     expect(link).toHaveAttribute('href', 'https://instagram.com/p/no-rep');
   });
@@ -222,7 +222,7 @@ describe('LocationMap', () => {
 
   test('sin apartado de no representativas cuando todas las fotos son representativas', () => {
     render(<LocationMap points={[makePoint()]} platform="instagram" available={true} />);
-    expect(screen.queryByText(/Imágenes no representativas/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Imágenes no geolocalizables/i)).not.toBeInTheDocument();
   });
 
   test('todas las fotos analizadas son no representativas: no se muestra mapa ni lista principal, solo el aviso y el apartado aparte', () => {
@@ -233,7 +233,7 @@ describe('LocationMap', () => {
     expect(
       screen.getByText(/Ninguna de tus fotos analizadas fue lo bastante representativa/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Imágenes no representativas/i)).toBeInTheDocument();
+    expect(screen.getByText(/Imágenes no geolocalizables/i)).toBeInTheDocument();
   });
 
   test('el apartado de no representativas muestra el número de fotos en el título del desplegable', () => {
@@ -244,7 +244,7 @@ describe('LocationMap', () => {
     ];
     render(<LocationMap points={points} platform="instagram" available={true} />);
 
-    expect(screen.getByText('Imágenes no representativas (3)')).toBeInTheDocument();
+    expect(screen.getByText('Imágenes no geolocalizables (3)')).toBeInTheDocument();
   });
 
   test('el apartado de no representativas es un <details> desplegable (colapsado por defecto)', () => {

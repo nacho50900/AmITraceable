@@ -260,9 +260,9 @@
       "footnoteNameGuess": " Las filas marcadas con 🤖 (nombre) son una estimación por el nombre público de tu cuenta, no algo que hayas declarado — la fiabilidad es menor."
     },
     "populationPictogram": {
-      "compactAriaLabel": "Aproximadamente {{percent}} de la población: 1 de cada {{population}} personas",
+      "compactAriaLabel": "Aproximadamente {{percent}} de la población: 1 de cada {{ratio}} personas",
       "gridAriaLabel": "Aproximadamente {{percent}} de la población comparte esta característica ({{population}} personas)",
-      "compactLabel": "de {{population}}"
+      "compactLabel": "1 de cada {{ratio}}"
     },
     "locationMap": {
       "unknownDate": "fecha desconocida",
@@ -280,7 +280,7 @@
       "noCoordinates": " (sin coordenadas para el mapa)",
       "noGeneralDescription": "Sin descripción general disponible para esta foto.",
       "noVisualDescription": "Sin descripción visual disponible para esta foto.",
-      "nonRepresentativeSummary": "Imágenes no representativas ({{count}})",
+      "nonRepresentativeSummary": "Imágenes no geolocalizables ({{count}})",
       "nonRepresentativeNote": "Estas fotos se analizaron, pero sus vecinos más parecidos en el índice están repartidos por una zona demasiado amplia como para asignarles una ubicación fiable -- no se muestran en el mapa ni cuentan para estimar tu residencia.",
       "profilePictureLabel": "Foto de perfil"
     }

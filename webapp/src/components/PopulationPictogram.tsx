@@ -58,13 +58,23 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({
 
   if (totalFigures > MAX_FIGURES) {
     const compactSize = isLarge ? 220 : 20;
+    // El icono compacto representa la PROPORCIÓN ("1 de cada X"), no el
+    // total absoluto de personas -- ese total ya se muestra por separado
+    // encima, en la frase "En España hay X personas..." (ver
+    // PopulationNarrowingTable.tsx). Mostrar aquí también el total
+    // absoluto (p. ej. "de 17.838") es tanto redundante como
+    // semánticamente incorrecto: el monigote no representa "eres 1 de
+    // 17.838 personas", representa "1 de cada X españoles al azar tiene
+    // tus rasgos" -- X es `totalFigures` (1/proportion), no
+    // `remainingPopulation`.
+    const ratioLabel = totalFigures.toLocaleString(numberLocale);
     return (
       <div
         className={`pictogram pictogram-compact ${isLarge ? 'pictogram-lg' : ''}`}
         role="img"
         aria-label={t('components.populationPictogram.compactAriaLabel', {
           percent: percentLabel,
-          population: populationLabel,
+          ratio: ratioLabel,
         })}
       >
         <img
@@ -74,7 +84,7 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({
           style={{ width: compactSize, height: compactSize }}
         />
         <span className="pictogram-compact-label">
-          {t('components.populationPictogram.compactLabel', { population: populationLabel })}
+          {t('components.populationPictogram.compactLabel', { ratio: ratioLabel })}
         </span>
       </div>
     );
