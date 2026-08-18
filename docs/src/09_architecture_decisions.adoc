@@ -1071,5 +1071,111 @@ conservadora de más -- documentado como punto a revisitar si cambia el
 hardware objetivo, igual que CUDA streams queda como opción válida a
 reconsiderar en ese escenario, no descartada para siempre.
 
+=== ADR-26: Backend internacionalizable por códigos estables, no por texto ya renderizado en español
 
+*Contexto*: al añadir selección de idioma (español/inglés) en la webapp
+(`react-i18next`, ver `webapp/src/i18n`), quedó fuera del alcance inicial
+todo el texto que el backend generaba ya renderizado en español:
+1) los nombres de fase del stream de progreso SSE (`"Leyendo
+publicaciones..."`, `"Analizando tu forma de escribir..."`, ver
+`app/progress.py`); 2) las notas explicativas de cada escalón de
+`estimate_population_narrowing` (`PopulationNarrowingStep.note`, ver
+`app/scoring/k_anonymity.py`); 3) `attribute_label`, que mezclaba en un
+único string una plantilla y un valor (`f"Sexo: {findings.sexo}"`,
+`f"Universidad: {findings.universidad.title()}"`); y 4) el veredicto y
+las conclusiones que genera Mistral AI (`app/ai_analysis.py`), el único
+caso de texto realmente libre de los cuatro.
 
+*Alternativas consideradas*: traducir en el frontend el texto en español
+tal y como llega, con una tabla de búsqueda (`{"Leyendo publicaciones...":
+"Reading posts..."}`) o parseando con regex los casos con un valor
+interpolado (`"Sexo: (.+)"`) -- descartado para (1)-(3): funciona
+mientras el backend no cambie ni una coma de redacción, pero se rompe en
+silencio (sin error, solo deja de traducir) en cuanto alguien retoque el
+texto en español sin saber que el frontend depende literalmente de esa
+cadena; y para `attribute_label` en concreto, además, algunos valores son
+nombres propios (universidad, empresa, topónimos) que NO deben
+traducirse, y una regex no puede distinguir eso de forma fiable. Para (4)
+(veredicto/conclusiones de la IA), traducir con una segunda llamada
+(a Mistral otra vez, o a un servicio de traducción como DeepL) --
+descartado: añade latencia, un segundo punto de fallo, y consume cuota
+extra del tier gratuito de Mistral en cada informe, para un texto que ya
+sale bien calibrado en español (ver ADR-10) sin ninguna ganancia de
+fiabilidad frente a pedirle directamente al modelo que responda en otro
+idioma en la misma llamada.
+
+*Decisión*: dos patrones distintos según el tipo de contenido, ambos
+aditivos (nunca se elimina el campo en español existente, para no romper
+nada que ya dependa de él -- logs, la descarga JSON del informe, un
+frontend desplegado con una versión anterior sin estos campos):
+
+1. *Conjuntos cerrados de texto fijo* (fases del SSE, notas de
+`k_anonymity.py`, y la plantilla de `attribute_label` separada de su
+valor) -- el backend emite un CÓDIGO estable e independiente de idioma
+junto al texto en español ya existente, mismo patrón ya usado para
+`risk_level`/`source`. Concretamente: `app/stages.py` (7 códigos para
+`stage`), `app/note_codes.py` (14 códigos para `note_code`), y en
+`PopulationNarrowingStep`/`PopulationEstimate` dos campos nuevos,
+`value_raw` (el valor sin la plantilla de `attribute_label` ya montada)
+y `location_level` (`"municipio"|"provincia"|"comunidad_autonoma"`,
+necesario porque los tres comparten `category="ubicacion"` pero cada uno
+usa una plantilla distinta). El frontend traduce con
+`t('dashboard.attribute.' + template, { value })`, traduciendo también
+`value` solo cuando pertenece a un conjunto cerrado con entrada en el
+diccionario (sexo, estado civil, estudios...); nombres propios y números
+se interpolan tal cual. Si un campo nuevo no viene (backend antiguo) o la
+clave de traducción no existe todavía, se usa el texto en español
+existente (`attribute_label`/`note`/el propio código) como fallback, sin
+romper -- ver `buildAttributeLabel`/`buildNote` en
+`PopulationNarrowingTable.tsx` y el `defaultValue` en `Dashboard.tsx`.
+
+2. *Texto libre generado por IA* (veredicto/conclusiones) -- se genera
+DIRECTAMENTE en el idioma pedido, en la misma llamada. El endpoint
+`POST /analyze/ai-summary` acepta un query param `lang` (webapp manda su
+idioma de UI actual); `analyze_report_with_ai` añade una instrucción de
+idioma al prompt de sistema ya calibrado
+(`_LANGUAGE_INSTRUCTIONS`) cuando `lang != "es"`. Un valor de `lang` no
+soportado (`SUPPORTED_LANGUAGES`) se ignora silenciosamente y se sirve en
+español -- es una preferencia, no un contrato.
+
+*Justificación*: los códigos son la solución correcta para conjuntos
+cerrados y pequeños porque el frontend ya tenía la infraestructura de
+traducción montada (mismo patrón que `risk_level`/`source`) y el coste es
+puramente mecánico -- ningún prompt ni cálculo cambia, solo se etiqueta
+mejor lo que ya existía. Generar directo en el idioma pedido es la
+solución correcta para la IA porque los modelos instruction-tuned
+actuales siguen instrucciones de idioma de forma fiable sin necesitar
+recalibrar el prompt semántico, y evita el coste/riesgo de una segunda
+llamada.
+
+*Consecuencias*: (+) el frontend queda con todo el contenido generado por
+el backend traducible, cerrando el hueco que dejó explícitamente
+pendiente la introducción de i18n en la webapp; (+) diseño aditivo y con
+fallback en cada punto -- un backend desplegado con una versión anterior
+(sin `note_code`/`value_raw`/`location_level`, o sin soporte de `lang` en
+el endpoint de IA) sigue funcionando, solo sin traducir esas partes
+concretas, nunca rompe; (+) tests de backend y frontend en verde sin
+modificar ningún test existente salvo por los mocks que usaban
+literalmente el texto en español antiguo del stream SSE (que ahora usan
+el código correspondiente); (-) cualquier fase, nota o categoría de
+atributo NUEVA que se añada en el backend en el futuro necesita también
+su entrada correspondiente en `webapp/src/i18n/locales/{es,en}.json`, o
+se mostrará en español por el mecanismo de fallback -- no es un error,
+pero si se olvida, esa pieza concreta queda sin traducir hasta que
+alguien lo note; (-) el prompt de Mistral no está EXPLÍCITAMENTE
+calibrado ni evaluado en inglés (ver ADR-10 sobre la calibración en
+español), así que la calidad del veredicto/conclusiones en inglés
+depende de la capacidad multilingüe general del modelo, no de un ajuste
+propio -- validar eso con casos reales queda como trabajo futuro si se
+decide dar más peso al público angloparlante.
+
+*Nota de proceso*: esta decisión se implementó y documentó originalmente
+como "ADR-21", pero se perdió de este fichero al fusionarse con otra
+tanda de cambios (ADR-21 a ADR-25 actuales, sobre Moondream2) preparada
+en paralelo en otra sesión, sin que ninguna de las dos partes lo
+detectara hasta una revisión posterior del estado del repo. Se
+recupera aquí con el número que le corresponde en la secuencia actual
+(ADR-26). Motivo documentado en el registro de trabajo (sección 49) como
+lección para evitar que se repita: re-clonar el repo antes de tocar
+ficheros que otra sesión pueda haber tocado en paralelo, en vez de
+asumir que la copia local sigue siendo la última.

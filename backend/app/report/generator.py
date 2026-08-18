@@ -105,13 +105,25 @@ class _HomeRegionCandidate:
 def _filter_and_resolve_estimates(
     results: list[tuple[str, object]],
     travel_permalinks: set[str],
+    avatar_url: str | None = None,
 ) -> list[tuple[str, str, str, float]]:
-    """Paso 1-2 de `_infer_home_region`: descarta fotos de viaje, no
-    representativas, o cuya región no se reconoce; para el resto, devuelve
-    (permalink, nivel, clave, confianza)."""
+    """Paso 1-2 de `_infer_home_region`: descarta fotos de viaje, la foto
+    de perfil (si hay), no representativas, o cuya región no se reconoce;
+    para el resto, devuelve (permalink, nivel, clave, confianza).
+
+    La foto de perfil se descarta del CONSENSO DE RESIDENCIA por el mismo
+    motivo que las fotos de viaje: no es necesariamente representativa de
+    dónde vive la persona (puede ser una foto de cualquier sitio, de
+    cualquier momento) -- pero SÍ sigue apareciendo en
+    `image_location_points` con su confianza real, igual que las de viaje
+    (ver `ImageLocationPoint.is_profile_picture` en app/models/schemas.py,
+    que documenta esta exclusión -- este es el sitio donde se aplica de
+    verdad)."""
     resolved: list[tuple[str, str, str, float]] = []
     for permalink, estimate in results:
         if permalink in travel_permalinks:
+            continue
+        if avatar_url is not None and permalink == avatar_url:
             continue
         if not getattr(estimate, "representative", True):
             continue
@@ -178,24 +190,26 @@ def _infer_home_region(
     # docstring) -- aquí solo se necesita "algo con .province/.confidence".
     results: list[tuple[str, object]],
     travel_permalinks: set[str],
+    avatar_url: str | None = None,
 ) -> _HomeRegionCandidate | None:
     """Decide si hay consenso suficiente entre varias fotos para dar por
     buena una comunidad autónoma (o provincia) como residencia habitual.
     Orquesta los pasos 1-6 (ver los docstrings de cada helper):
 
-    1-2. `_filter_and_resolve_estimates`: descarta fotos de viaje, no
-         representativas (dispersión geográfica excesiva entre sus vecinos
-         más parecidos, ver `ImageLocationEstimate.representative` en
-         app/vision/geolocation.py) o sin región reconocible -- SOLO para
-         esta conclusión de residencia: siguen apareciendo en
-         `image_location_points` con su confianza real.
+    1-2. `_filter_and_resolve_estimates`: descarta fotos de viaje, la foto
+         de perfil, no representativas (dispersión geográfica excesiva
+         entre sus vecinos más parecidos, ver
+         `ImageLocationEstimate.representative` en app/vision/geolocation.py)
+         o sin región reconocible -- SOLO para esta conclusión de
+         residencia: siguen apareciendo en `image_location_points` con su
+         confianza real.
     3.   `_group_by_ccaa`: agrupa las fotos restantes por comunidad autónoma.
     4.   `_qualifying_groups`: filtra los grupos con consenso suficiente.
     5.   Si varios grupos cumplen (raro), gana el que tenga más fotos de
          señal válida; en empate, el de mayor confianza media.
     6.   `_pick_specificity`: decide provincia vs. comunidad autónoma.
     """
-    resolved = _filter_and_resolve_estimates(results, travel_permalinks)
+    resolved = _filter_and_resolve_estimates(results, travel_permalinks, avatar_url)
     if not resolved:
         return None
 
@@ -373,7 +387,7 @@ async def _apply_image_geolocation(
         or demographic_findings.comunidad_autonoma is not None
     )
     if not has_location:
-        home_candidate = _infer_home_region(geo_outcome.results, travel_permalinks)
+        home_candidate = _infer_home_region(geo_outcome.results, travel_permalinks, avatar_url)
         if home_candidate is not None:
             _apply_home_candidate(demographic_findings, home_candidate)
 

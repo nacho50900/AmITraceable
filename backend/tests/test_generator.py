@@ -482,6 +482,55 @@ class TestGenerateReportPlatformBranching:
         assert location_steps == []
 
     @pytest.mark.asyncio
+    async def test_avatar_photo_excluded_from_home_region_consensus(self, monkeypatch):
+        """Bug real encontrado y corregido: ImageLocationPoint.is_profile_picture
+        y su docstring (schemas.py) documentaban que la foto de perfil se
+        excluye del consenso de residencia 'igual que las fotos de viaje',
+        pero `_infer_home_region`/`_filter_and_resolve_estimates` no tenían
+        ningún mecanismo real para hacerlo -- la exclusión solo existía en
+        el comentario, no en el código. Aquí: 1 foto de publicación real +
+        la foto de perfil, las dos con alta confianza y la MISMA provincia
+        -- si la foto de perfil contara, ya habría consenso con solo esa
+        combinación; NO debe contar, así que no hay consenso (hace falta
+        más de 1 foto de publicación real, ver HIGH_CONFIDENCE_MIN_PHOTOS)."""
+
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
+            avatar_estimate = geolocation.ImageLocationEstimate(
+                province="Madrid", confidence=0.95, k_neighbors=15, mean_similarity=0.9
+            )
+            avatar_estimate.photo_link = "https://cdn/avatar.jpg"
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[
+                    (
+                        "https://ig/1",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.95, k_neighbors=15, mean_similarity=0.9
+                        ),
+                    ),
+                    ("https://cdn/avatar.jpg", avatar_estimate),
+                ],
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+
+        posts = [_post(platform="instagram", media_urls=["https://cdn/1.jpg"], permalink="https://ig/1")]
+
+        report = await generate_report(
+            "instagram", "user", posts, _fingerprint(), [], _score(), avatar_url="https://cdn/avatar.jpg"
+        )
+
+        # Ambas fotos siguen apareciendo en el mapa (con su confianza real)...
+        assert len(report.image_location_points) == 2
+        avatar_point = next(p for p in report.image_location_points if p.is_profile_picture)
+        assert avatar_point.permalink == "https://cdn/avatar.jpg"
+        # ...pero NO hay consenso de residencia: solo 1 foto de publicación
+        # real cuenta (la del avatar se excluye), y HIGH_CONFIDENCE_MIN_PHOTOS
+        # exige más de 1 para dar la ubicación por buena.
+        location_steps_avatar_test = [s for s in report.population_narrowing if s.category == "ubicacion"]
+        assert location_steps_avatar_test == []
+
+    @pytest.mark.asyncio
     async def test_image_estimate_of_multi_province_ccaa_falls_back_to_comunidad_autonoma(self, monkeypatch):
         """Caso real que motivó este cambio: OSV-5M/Nominatim devuelve la
         región en inglés y a nivel de comunidad autónoma ("Canary Islands"),
