@@ -311,3 +311,30 @@ class TestMotherTongue:
         findings = extract_demographics([_post("Me encanta cocinar los domingos")])
         assert findings.lengua_materna is None
 
+
+class TestSymbolicAttributes:
+    def test_detects_zodiac_emoji_and_religion_symbol(self):
+        text = "✡️🙏🙏 siempre con fé ♈ soy 4/9/09 heterosexual"
+        findings = extract_demographics([_post(text)])
+        assert findings.religion == "judaismo"
+        assert findings.signo_zodiacal == "aries (21 mar - 19 abr)"
+        assert findings.orientacion_sexual == "heterosexual"
+        assert findings.source["religion"] == "texto"
+        assert findings.source["signo_zodiacal"] == "texto"
+        assert findings.source["orientacion_sexual"] == "texto"
+
+    def test_detects_common_sexuality_typos(self):
+        findings = extract_demographics([_post("Soy heterosexuial y me gusta la vida")])
+        assert findings.orientacion_sexual == "heterosexual"
+
+    def test_detects_zodiac_name_and_religious_self_id(self):
+        findings = extract_demographics([_post("Soy aries y soy judia")])
+        assert findings.signo_zodiacal == "aries (21 mar - 19 abr)"
+        assert findings.religion == "judaismo"
+
+    def test_detects_accented_and_common_religious_and_zodiac_variants(self):
+        findings = extract_demographics([_post("Soy judía, soy cáncer y heterosexuial")])
+        assert findings.religion == "judaismo"
+        assert findings.signo_zodiacal == "cancer (21 jun - 22 jul)"
+        assert findings.orientacion_sexual == "heterosexual"
+

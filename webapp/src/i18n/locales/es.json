@@ -80,6 +80,7 @@
       "analyzedDone": "Fotos analizadas"
     },
     "errorPrefix": "No se pudo generar el informe: {{error}}",
+    "cancelAnalysis": "Cancelar análisis",
     "backToStart": "Volver al inicio",
     "avatarAlt": "Foto de perfil de {{username}}",
     "title": "Informe de exposición de {{prefix}}{{username}}",

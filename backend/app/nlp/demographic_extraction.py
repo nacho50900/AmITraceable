@@ -119,12 +119,12 @@ class DemographicFindings:
     orientacion_sexual: str | None = None
     # Signo zodiacal autodeclarado o indicado mediante emoji zodiacal
     # (♈ Aries, ♉ Tauro, …). Incluye el margen de fechas de nacimiento
-    # que implica, p. ej. "aries (21 mar - 19 abr)". Solo lo rellena la IA
-    # (el emoji por sí solo no es suficiente texto para regex).
+    # que implica, p. ej. "aries (21 mar - 19 abr)". También puede
+    # detectarse con una mención textual explícita del signo, no solo con el
+    # emoji.
     signo_zodiacal: str | None = None
     # Creencia religiosa autodeclarada o indicada mediante emoji/símbolo
-    # (✡️ judaísmo, ☪️ islam, ✝️/🕊️ cristianismo, etc.). Solo lo rellena
-    # la IA.
+    # (✡️ judaísmo, ☪️ islam, ✝️/🕊️ cristianismo, etc.).
     religion: str | None = None
     # permalinks de los posts que dispararon cada detección, para trazabilidad
     evidence: dict[str, list[str]] = field(default_factory=dict)
@@ -211,11 +211,16 @@ _LANGUAGE_VALENCIANO_RE = re.compile(r"\b(mi lengua materna es el valenciano|hab
 
 
 # Orientación sexual: se cubren las autodeclaraciones explícitas más
-# comunes en bios de redes sociales.
+# comunes en bios de redes sociales, incluyendo variantes ortográficas y
+# expresiones frecuentes en textos cortos.
 _SEXUALITY_RE = re.compile(
-    r"\b(soy heterosexual|soy hetero|soy gay|soy lesbiana|soy bisexual|"
-    r"soy pansexual|soy asexual|soy homosexual|"
-    r"heterosexual|homosexual|bisexual|pansexual|asexual)\b",
+    r"\b(?:soy\s+)?(?:"
+    r"hetero(?:\s*[- ]?\s*sex(?:ual|uial|uel))?|"
+    r"heterosexual|heterosexuial|heterosexuel|"
+    r"gay|lesbiana|bisexual|pansexual|asexual|homosexual|"
+    r"bi(?:\s*[- ]?\s*sexual|sexu(?:al|uial|uel))|"
+    r"queer"
+    r")\b",
     re.I,
 )
 # Mapa de emojis zodiacales a (nombre_signo, rango_fechas). Se mantiene como
@@ -233,6 +238,59 @@ _ZODIAC_EMOJI_MAP: dict[str, tuple[str, str]] = {
     "\u2651": ("capricornio", "22 dic - 19 ene"),  # ♑
     "\u2652": ("acuario",     "20 ene - 18 feb"),  # ♒
     "\u2653": ("piscis",      "19 feb - 20 mar"),  # ♓
+}
+_ZODIAC_TEXT_MAP: dict[str, str] = {name: f"{name} ({rango})" for name, rango in _ZODIAC_EMOJI_MAP.values()}
+_ZODIAC_TEXT_RE = re.compile(
+    r"\b(?:soy\s+)?(?:aries|tauro|geminis|cancer|leo|virgo|libra|escorpio|"
+    r"sagitario|capricornio|acuario|piscis)\b",
+    re.I,
+)
+
+_RELIGION_EMOJI_MAP: dict[str, str] = {
+    "✡": "judaismo",
+    "✡️": "judaismo",
+    "🔯": "judaismo",
+    "☪": "islam",
+    "☪️": "islam",
+    "✝": "cristianismo",
+    "✝️": "cristianismo",
+    "☦": "cristianismo",
+    "☸": "budismo",
+    "☸️": "budismo",
+    "🕉": "hinduismo",
+    "🕉️": "hinduismo",
+    "ॐ": "hinduismo",
+    "📿": "catolicismo",
+    "🕊": "cristianismo",
+    "🕊️": "cristianismo",
+}
+_RELIGION_TEXT_RE = re.compile(
+    r"\b(?:soy\s+)?(?:jud[ií]o|jud[ií]a|judio|judia|musulm[aá]n|musulmana|"
+    r"cat[oó]lico|cat[oó]lica|catolico|catolica|cristiano|cristiana|budista|"
+    r"hinduista|ateo|atea|agn[oó]stico|agn[oó]stica|islam|juda[ií]smo)\b",
+    re.I,
+)
+_RELIGION_TEXT_MAP = {
+    "judio": "judaismo",
+    "judia": "judaismo",
+    "judío": "judaismo",
+    "judía": "judaismo",
+    "judaismo": "judaismo",
+    "musulman": "islam",
+    "musulmana": "islam",
+    "islam": "islam",
+    "catolico": "catolicismo",
+    "catolica": "catolicismo",
+    "catolico": "catolicismo",
+    "catolica": "catolicismo",
+    "cristiano": "cristianismo",
+    "cristiana": "cristianismo",
+    "budista": "budismo",
+    "hinduista": "hinduismo",
+    "ateo": "ateismo",
+    "atea": "ateismo",
+    "agnostico": "agnosticismo",
+    "agnostica": "agnosticismo",
 }
 
 
@@ -256,6 +314,7 @@ def extract_demographics(posts: list[SocialPost]) -> DemographicFindings:
         _try_detect_lengua_materna(text, post.permalink, findings)
         _try_detect_orientacion_sexual(text, post.permalink, findings)
         _try_detect_signo_zodiacal(text, post.permalink, findings)
+        _try_detect_religion(text, post.permalink, findings)
 
     _detect_household_type(posts, findings)
     _mark_all_detected_as_texto(findings)
@@ -270,7 +329,7 @@ def _mark_all_detected_as_texto(findings: DemographicFindings) -> None:
         "sexo", "edad", "provincia", "municipio", "comunidad_autonoma",
         "estudios", "ocupacion", "universidad", "empresa",
         "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
-        "orientacion_sexual", "signo_zodiacal",
+        "orientacion_sexual", "signo_zodiacal", "religion",
     ):
         if getattr(findings, attr_name) is not None:
             findings.source[attr_name] = "texto"
@@ -559,8 +618,8 @@ def _try_detect_orientacion_sexual(text: str, permalink: str, findings: Demograp
 
 
 def _try_detect_signo_zodiacal(text: str, permalink: str, findings: DemographicFindings) -> None:
-    """Detecta emojis de signos zodiacales en el texto y almacena el
-    signo junto con su rango de fechas de nacimiento implícito."""
+    """Detecta emojis o nombres de signos zodiacales en el texto y almacena
+    el signo junto con su rango de fechas de nacimiento implícito."""
     if findings.signo_zodiacal is not None:
         return
 
@@ -569,3 +628,41 @@ def _try_detect_signo_zodiacal(text: str, permalink: str, findings: DemographicF
             findings.signo_zodiacal = f"{signo} ({rango})"
             findings.evidence.setdefault("signo_zodiacal", []).append(permalink)
             return
+
+    normalized_text = _strip_accents(text.lower())
+    match = _ZODIAC_TEXT_RE.search(normalized_text)
+    if not match:
+        return
+
+    raw_name = match.group(0).strip()
+    sign = raw_name.split()[-1]
+    value = _ZODIAC_TEXT_MAP.get(sign)
+    if value is None:
+        return
+    findings.signo_zodiacal = value
+    findings.evidence.setdefault("signo_zodiacal", []).append(permalink)
+
+
+def _try_detect_religion(text: str, permalink: str, findings: DemographicFindings) -> None:
+    """Detecta símbolos o menciones explícitas de religión en texto."""
+    if findings.religion is not None:
+        return
+
+    for emoji_char, religion in _RELIGION_EMOJI_MAP.items():
+        if emoji_char in text:
+            findings.religion = religion
+            findings.evidence.setdefault("religion", []).append(permalink)
+            return
+
+    normalized_text = _strip_accents(text.lower())
+    match = _RELIGION_TEXT_RE.search(normalized_text)
+    if not match:
+        return
+
+    raw = match.group(0).strip()
+    religion = _RELIGION_TEXT_MAP.get(raw.split()[-1])
+    if religion is None:
+        return
+
+    findings.religion = religion
+    findings.evidence.setdefault("religion", []).append(permalink)
