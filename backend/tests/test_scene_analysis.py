@@ -511,6 +511,18 @@ class TestParsePersonas:
     def test_missing_line_returns_none(self):
         assert scene_analysis._parse_personas("AFICION: ninguno") is None
 
+    def test_prompt_example_for_personas_is_not_the_biased_varias_value(self):
+        """Regresión: el ejemplo de PERSONAS en `_STRUCTURED_QUERY` era
+        "varias" -- el único valor "positivo" entre los cuatro campos del
+        ejemplo (los otros tres son ninguno/no/ninguno) -- y en producción
+        Moondream2 marcaba "varias" de forma sistemática incluso en fotos
+        con una sola persona, un fallo de instruction-following ya
+        documentado en este módulo (VQA pequeños que copian el ejemplo en
+        vez de sustituirlo). Debe ser "ninguna", coherente con el resto."""
+        example_section = scene_analysis._STRUCTURED_QUERY.split("\n\n")[0]
+        assert "PERSONAS: ninguna" in example_section
+        assert "PERSONAS: varias" not in example_section
+
 
 class TestParseTextoVisible:
     def test_valid_value(self):

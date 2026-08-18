@@ -57,8 +57,8 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
   const { t, i18n } = useTranslation();
   const dateLocale = i18n.language?.split('-')[0] === 'en' ? 'en-US' : 'es-ES';
 
-  function formatDate(isoDate: string | null): string {
-    if (!isoDate) return t('components.locationMap.unknownDate');
+  function formatDate(isoDate: string | null): string | null {
+    if (!isoDate) return null;
     return new Date(isoDate).toLocaleDateString(dateLocale, { day: 'numeric', month: 'short', year: 'numeric' });
   }
 
@@ -158,7 +158,7 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
                   <summary>
                     <PhotoLink point={point} t={t} onClick={(e) => e.stopPropagation()} />
                     <span>
-                      {formatDate(point.created_utc)} — {point.province} —{' '}
+                      {point.created_utc && <>{formatDate(point.created_utc)} — </>}{point.province} —{' '}
                       {t('components.locationMap.confidenceInline', { value: Math.round(point.confidence * 100) })}
                       {point.lat === null && t('components.locationMap.noCoordinates')}
                     </span>

@@ -161,7 +161,19 @@ _STRUCTURED_QUERY = (
     # explícita más abajo, aparte de la general del final del prompt.
     "Analiza esta imagen y responde EXACTAMENTE en este formato de cuatro líneas, sin nada más, "
     "como en este ejemplo (sustituyendo los valores por los reales de ESTA imagen):\n"
-    "PERSONAS: varias\n"
+    # PERSONAS usa aquí el mismo valor "nulo"/negativo que los otros tres
+    # campos (ninguno/no/ninguno) -- antes decía "varias", el único valor
+    # "positivo" de los cuatro del ejemplo. Visto en producción: Moondream2
+    # marcaba "varias" de forma sistemática incluso en fotos con una sola
+    # persona, un fallo de instruction-following ya documentado en este
+    # mismo módulo para VQA pequeños (copian el ejemplo en vez de
+    # sustituirlo, ver la nota sobre _STRUCTURED_QUERY más abajo) -- que
+    # con "varias" como ejemplo sesga sistemáticamente hacia ese valor
+    # cuando el modelo "se confunde" y copia en vez de razonar sobre esta
+    # imagen en concreto. "ninguna" es coherente con el resto de ejemplos y
+    # no favorece a priori ninguno de los otros dos valores reales (una
+    # persona / varias).
+    "PERSONAS: ninguna\n"
     "AFICION: ninguno\n"
     "PAREJA: no\n"
     "TEXTO_VISIBLE: ninguno\n\n"

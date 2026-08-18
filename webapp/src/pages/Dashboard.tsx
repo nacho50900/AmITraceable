@@ -274,6 +274,14 @@ const Dashboard: React.FC = () => {
               )}
             </ul>
           </div>
+          <div className="progress-actions">
+            <button className="btn-secondary" onClick={() => {
+              stopStreamRef.current?.();
+              navigate('/');
+            }}>
+              {t('dashboard.cancelAnalysis')}
+            </button>
+          </div>
         </div>
       </div>
     );

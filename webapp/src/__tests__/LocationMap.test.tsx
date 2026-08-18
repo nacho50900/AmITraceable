@@ -271,11 +271,13 @@ describe('LocationMap', () => {
     expect(screen.getByText(/2 ene 2023/)).toBeInTheDocument();
   });
 
-  test('fecha desconocida cuando created_utc es null, sin romper el resto de la fila', () => {
-    const points = [makePoint({ created_utc: null })];
+  test('sin fecha cuando created_utc es null, sin romper el resto de la fila', () => {
+    const points = [makePoint({ created_utc: null, province: 'Madrid' })];
     render(<LocationMap points={points} platform="instagram" available={true} />);
 
-    expect(screen.getByText(/fecha desconocida/)).toBeInTheDocument();
+    // Comprobamos que sí se muestra el resto (provincia) y no se muestra 'fecha desconocida'
+    expect(screen.getByText(/Madrid/)).toBeInTheDocument();
+    expect(screen.queryByText(/fecha desconocida/i)).not.toBeInTheDocument();
   });
 
   test('cada foto (representativa o no) es un <details> propio, colapsado por defecto', () => {

@@ -251,7 +251,7 @@ const Landing: React.FC = () => {
         </div>
       )}
 
-      <PlatformGuideAccordion />
+      <PlatformGuideAccordion activePlatform={activeCard.name.toLowerCase()} />
     </div>
   );
 };

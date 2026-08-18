@@ -28,7 +28,7 @@ body {
 }
 
 .page {
-  max-width: 880px;
+  max-width: 1000px;
   margin: 0 auto;
   padding: 48px 24px 80px;
 }
@@ -42,13 +42,27 @@ body {
   top: 16px;
   right: 20px;
   z-index: 10;
+}
+
+.language-switcher-button {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
   display: flex;
   align-items: center;
   gap: 6px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 4px 10px;
+  height: 32px;
+  transition: background 0.15s ease;
+}
+
+.language-switcher-button:hover {
+  background: var(--bg-card-hover);
 }
 
 .language-switcher-icon {
@@ -57,25 +71,59 @@ body {
   flex-shrink: 0;
 }
 
-.language-switcher-select {
+.language-switcher-chevron {
+  color: var(--text-dim);
+  font-size: 18px;
+  flex-shrink: 0;
+  margin-left: -2px; /* Pull it slightly closer to the text */
+}
+
+
+
+.language-switcher-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  margin: 0;
+  list-style: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.language-switcher-menu-item {
+  width: 100%;
+  text-align: left;
   background: transparent;
   border: none;
+  border-radius: 4px;
+  padding: 8px 12px;
   color: var(--text);
   font-family: var(--sans);
   font-size: 13px;
   cursor: pointer;
-  outline: none;
+  transition: background 0.15s ease;
 }
 
-.language-switcher-select option {
-  background: var(--bg-card);
-  color: var(--text);
+.language-switcher-menu-item:hover,
+.language-switcher-menu-item:focus {
+  background: var(--bg-card-hover);
+}
+
+.language-switcher-menu-item--active {
+  font-weight: 600;
+  color: var(--accent);
 }
 
 /* --- Guía "archivador" por plataforma (Landing, debajo del carrusel) --- */
 .platform-guide {
   margin-top: 56px;
-  max-width: 640px;
 }
 
 .platform-guide h2 {
@@ -90,75 +138,77 @@ body {
   line-height: 1.5;
 }
 
-.platform-guide-archive {
+.platform-guide-tabs {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
 }
 
-/* Cada <details> es una "pestaña" de archivador: cerrada por defecto, con
-   un borde de color de marca a la izquierda (mismo color que su tarjeta
-   en el carrusel de arriba, para que se lean como el mismo objeto). */
-.platform-guide-item {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
+.platform-guide-tab-list {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
 
-.platform-guide-item--reddit {
-  border-left-color: #ff4500;
-}
-
-.platform-guide-item--instagram {
-  border-left-color: #dc2743;
-}
-
-.platform-guide-item--x {
-  border-left-color: #5b6cf0;
-}
-
-.platform-guide-item summary {
+.platform-guide-tab {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 14px 18px;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-bottom: 3px solid transparent;
+  border-radius: 8px 8px 0 0;
   cursor: pointer;
   font-weight: 600;
-  list-style: none;
+  color: var(--text-dim);
+  transition: all 0.2s ease;
+  white-space: nowrap;
 }
 
-.platform-guide-item summary::-webkit-details-marker,
-.platform-guide-item summary::marker {
-  display: none;
-  content: '';
+.platform-guide-tab:hover {
+  background: var(--bg-card-hover);
+  color: var(--text);
+}
+
+.platform-guide-tab--active {
+  color: var(--text);
+  background: var(--bg);
+  border-bottom-color: var(--border);
+}
+
+.platform-guide-tab.platform-guide-item--reddit.platform-guide-tab--active {
+  border-bottom-color: #ff4500;
+}
+
+.platform-guide-tab.platform-guide-item--instagram.platform-guide-tab--active {
+  border-bottom-color: #dc2743;
+}
+
+.platform-guide-tab.platform-guide-item--x.platform-guide-tab--active {
+  border-bottom-color: #5b6cf0;
 }
 
 .platform-guide-item-icon {
   display: flex;
   align-items: center;
   font-size: 1.15rem;
-  color: var(--text-dim);
 }
 
 .platform-guide-item-name {
   flex: 1;
 }
 
-.platform-guide-item-chevron {
-  color: var(--text-dim);
-  font-size: 1.3rem;
-  transition: transform 0.2s ease;
-}
-
-.platform-guide-item[open] .platform-guide-item-chevron {
-  transform: rotate(90deg);
+.platform-guide-tab-content-container {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0 8px 8px 8px;
+  padding: 18px;
 }
 
 .platform-guide-item-content {
-  padding: 4px 18px 18px;
-  border-top: 1px solid var(--border);
+  /* removed top padding and border as they are handled by container */
 }
 
 .platform-guide-item-content h3 {
@@ -231,8 +281,33 @@ body {
   text-decoration: none;
   font-weight: 600;
   padding: 14px 28px;
+  border: none;
+  cursor: pointer;
   border-radius: 6px;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.btn-secondary {
+  display: inline-block;
+  background: transparent;
+  color: var(--text-dim);
+  text-decoration: none;
+  font-weight: 600;
+  padding: 10px 20px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+
+.progress-actions {
+  margin-top: 16px;
+  text-align: center;
 }
 
 .btn-primary:hover {
