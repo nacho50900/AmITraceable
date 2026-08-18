@@ -123,19 +123,23 @@ _ALL_FIELDS = (
     "estudios", "ocupacion", "universidad", "empresa",
     "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
     # A diferencia de los anteriores (autodeclaraciones explícitas que la
-    # regex TAMBIÉN podría detectar), este SOLO lo rellena la IA -- pero
-    # reutiliza el mismo mecanismo de merge (copiar si regex_findings lo
-    # tiene a None, que siempre será el caso) para no duplicar lógica.
+    # regex TAMBIÉN podría detectar), estos SOLO los rellena la IA -- pero
+    # reutilizan el mismo mecanismo de merge (copiar si regex_findings lo
+    # tiene a None) para no duplicar lógica.
     "estado_civil",
+    "orientacion_sexual",
+    "signo_zodiacal",
+    "religion",
 )
 
 _SYSTEM_PROMPT = (
     "Eres un extractor de datos. Se te da: (1) el nombre público y la biografía de una "
     "cuenta, y (2) una lista de sus publicaciones, cada una precedida por su "
     "identificador entre corchetes, p. ej. [abc123] texto de la publicación. En la "
-    "biografía y las publicaciones, busca ÚNICAMENTE autodeclaraciones EXPLÍCITAS en "
+    "biografía y las publicaciones, busca AUTOD ECLARACIONES EXPLÍCITAS en "
     "primera persona sobre la propia persona -- nunca sobre otras personas mencionadas, y "
-    "nunca inferencias o suposiciones tuyas. Responde EXCLUSIVAMENTE con un JSON con esta "
+    "nunca inferencias o suposiciones tuyas, EXCEPTO en los campos marcados como "
+    "'simbólico/indirecto' más abajo. Responde EXCLUSIVAMENTE con un JSON con esta "
     "forma exacta, sin texto adicional ni backticks:\n"
     '{"sexo": "hombre"|"mujer"|null, "edad": <entero>|null, "provincia": <string>|null, '
     '"municipio": <string>|null, "comunidad_autonoma": <string>|null, "estudios": <string>|null, '
@@ -147,6 +151,9 @@ _SYSTEM_PROMPT = (
     '"sexo_por_nombre": "hombre"|"mujer"|null, '
     '"fotos_de_viaje": [<identificador_de_publicacion>, ...], '
     '"estado_civil": "soltero"|"con_pareja"|"casado"|"divorciado"|"viudo"|null, '
+    '"orientacion_sexual": <string>|null, '
+    '"signo_zodiacal": <string>|null, '
+    '"religion": <string>|null, '
     '"inferencias_blandas": [{"categoria": <string>, "valor": <string>, "confianza": <0-1>, '
     '"evidencia": <identificador_de_publicacion_o_bio>}, ...], '
     '"evidence": {"<nombre_de_campo>": "<identificador_de_publicacion_o_bio>"}}\n'
@@ -183,6 +190,30 @@ _SYSTEM_PROMPT = (
     "objetivo es señalar publicaciones que NO deben usarse para deducir dónde vive la "
     "persona habitualmente, aunque la foto en sí esté geolocalizada con confianza. Si un "
     "texto no da ninguna pista de viaje/vacaciones, NO lo incluyas en esa lista.\n"
+    "'orientacion_sexual': detecta si la persona DECLARA EXPLICITAMENTE su orientación "
+    "sexual (p. ej. 'soy heterosexual', 'heterosexual', 'soy gay', 'soy lesbiana', "
+    "'soy bisexual', 'soy pansexual', 'soy asexual'). Devuelve el valor en minúscula "
+    "('heterosexual', 'gay', 'lesbiana', 'bisexual', 'pansexual', 'asexual', 'homosexual'). "
+    "NO lo infieras del estilo de escritura ni de emojis ambiguos -- solo autodeclaración "
+    "literal. Usa null si no hay declaración.\n"
+    "'signo_zodiacal': detecta si el texto o la biografía contiene un emoji de signo "
+    "zodiacal o una mención explícita del signo (p. ej. \"soy aries\", \"soy escorpio\"). "
+    "Los emojis zodiacales y sus rangos de nacimiento son: "
+    "♈ Aries (21 mar - 19 abr), ♉ Tauro (20 abr - 20 may), ♊ Géminis (21 may - 20 jun), "
+    "♋ Cáncer (21 jun - 22 jul), ♌ Leo (23 jul - 22 ago), ♍ Virgo (23 ago - 22 sep), "
+    "♎ Libra (23 sep - 22 oct), ♏ Escorpio (23 oct - 21 nov), ♐ Sagitario (22 nov - 21 dic), "
+    "♑ Capricornio (22 dic - 19 ene), ♒ Acuario (20 ene - 18 feb), ♓ Piscis (19 feb - 20 mar). "
+    "Si detectas un emoji o mención, devuelve el nombre del signo y su rango, "
+    "p. ej. 'aries (21 mar - 19 abr)'. Usa null si no hay ninguna señal.\n"
+    "'religion': detecta si la persona indica explícitamente (texto o emoji) su creencia "
+    "religiosa. Los principales símbolos: 🔯 o ✡️ = judaísmo; ☪️ o ☪ = islam; ✝️ o ✝ o ☦ = "
+    "cristianismo; ☸️ o ☸ = budismo; 🕉️ o ॐ = hinduismo; ☪ = paínismo/Wicca; "
+    "🧹 = brujeria/magia; un rosario 📿 puede indicar catolicismo o islam. Además, "
+    "menciones literales como 'soy judío/a', 'soy musulmán/a', 'soy católico/a', "
+    "'soy cristiano/a', 'soy budista', 'soy ateo/a', 'soy agnóstico/a', etc. "
+    "Devuelve el nombre de la religión en minúscula ('judaismo', 'islam', 'catolicismo', "
+    "'cristianismo', 'budismo', 'hinduismo', 'ateismo', 'agnosticismo'...). "
+    "Usa null si no hay ninguna señal clara.\n"
     "'inferencias_blandas' es DISTINTO de todo lo anterior: aquí SÍ debes razonar, como lo "
     "haría una persona observadora, sobre contenido SIMBÓLICO O INDIRECTO -- combinaciones "
     "de emojis, fechas sueltas, estilo de escritura, jerga -- que sugieran algo sobre la vida "
@@ -296,11 +327,9 @@ async def _call_mistral(prompt_text: str) -> dict:
         ],
         "temperature": 0.0,
         "response_format": {"type": "json_object"},
-        # Subido de 500 a 800: el nuevo campo "inferencias_blandas" (hasta
-        # 5 elementos con categoría/valor/confianza/evidencia cada uno)
-        # necesita más espacio en la respuesta que los campos anteriores,
-        # todos ellos mucho más cortos (strings sueltos o null).
-        "max_tokens": 800,
+        # Subido de 800 a 1000: los nuevos campos orientacion_sexual,
+        # signo_zodiacal y religion añaden más espacio en la respuesta JSON.
+        "max_tokens": 1000,
     }
     headers = {"Authorization": f"Bearer {settings.mistral_api_key}"}
 
@@ -548,6 +577,12 @@ def _to_findings(parsed: dict) -> DemographicFindings:
     _set_exact_enum(findings, parsed, "lengua_materna", _LANGUAGE_VALUES, evidence_map)
     _set_travel_permalinks(findings, parsed)
     _set_estado_civil(findings, parsed, evidence_map)
+    # Nuevos campos: orientacion_sexual, signo_zodiacal, religion
+    for field in ("orientacion_sexual", "signo_zodiacal", "religion"):
+        value = parsed.get(field)
+        if isinstance(value, str) and value.strip():
+            setattr(findings, field, value.strip().lower())
+            _set_evidence(findings, field, evidence_map)
 
     findings.soft_inferences = _parse_soft_inferences(parsed)
 

@@ -111,6 +111,21 @@ class DemographicFindings:
     # secas) para que el informe deje claro que es una inferencia
     # simbólica de fiabilidad menor, no una autodeclaración.
     estado_civil: str | None = None
+    # Orientación sexual autodeclarada explícitamente (p. ej. "soy
+    # heterosexual", "soy gay"). Detectada por regex si aparece literal;
+    # también puede ser rellenada por la IA si viene de inferencia directa
+    # del texto. Valores libres en minúscula: "heterosexual", "gay",
+    # "lesbiana", "bisexual", "pansexual", "asexual", "homosexual".
+    orientacion_sexual: str | None = None
+    # Signo zodiacal autodeclarado o indicado mediante emoji zodiacal
+    # (♈ Aries, ♉ Tauro, …). Incluye el margen de fechas de nacimiento
+    # que implica, p. ej. "aries (21 mar - 19 abr)". Solo lo rellena la IA
+    # (el emoji por sí solo no es suficiente texto para regex).
+    signo_zodiacal: str | None = None
+    # Creencia religiosa autodeclarada o indicada mediante emoji/símbolo
+    # (✡️ judaísmo, ☪️ islam, ✝️/🕊️ cristianismo, etc.). Solo lo rellena
+    # la IA.
+    religion: str | None = None
     # permalinks de los posts que dispararon cada detección, para trazabilidad
     evidence: dict[str, list[str]] = field(default_factory=dict)
     # procedencia de cada dato detectado: "texto" (autodeclaración escrita,
@@ -195,6 +210,32 @@ _LANGUAGE_GALLEGO_RE = re.compile(r"\b(mi lengua materna es el gallego|hablo gal
 _LANGUAGE_VALENCIANO_RE = re.compile(r"\b(mi lengua materna es el valenciano|hablo valenciano)\b", re.I)
 
 
+# Orientación sexual: se cubren las autodeclaraciones explícitas más
+# comunes en bios de redes sociales.
+_SEXUALITY_RE = re.compile(
+    r"\b(soy heterosexual|soy hetero|soy gay|soy lesbiana|soy bisexual|"
+    r"soy pansexual|soy asexual|soy homosexual|"
+    r"heterosexual|homosexual|bisexual|pansexual|asexual)\b",
+    re.I,
+)
+# Mapa de emojis zodiacales a (nombre_signo, rango_fechas). Se mantiene como
+# dict (no regex) porque los emojis son caracteres Unicode puntuales.
+_ZODIAC_EMOJI_MAP: dict[str, tuple[str, str]] = {
+    "\u2648": ("aries",       "21 mar - 19 abr"),  # ♈
+    "\u2649": ("tauro",       "20 abr - 20 may"),  # ♉
+    "\u264a": ("geminis",     "21 may - 20 jun"),  # ♊
+    "\u264b": ("cancer",      "21 jun - 22 jul"),  # ♋
+    "\u264c": ("leo",         "23 jul - 22 ago"),  # ♌
+    "\u264d": ("virgo",       "23 ago - 22 sep"),  # ♍
+    "\u264e": ("libra",       "23 sep - 22 oct"),  # ♎
+    "\u264f": ("escorpio",    "23 oct - 21 nov"),  # ♏
+    "\u2650": ("sagitario",   "22 nov - 21 dic"),  # ♐
+    "\u2651": ("capricornio", "22 dic - 19 ene"),  # ♑
+    "\u2652": ("acuario",     "20 ene - 18 feb"),  # ♒
+    "\u2653": ("piscis",      "19 feb - 20 mar"),  # ♓
+}
+
+
 def extract_demographics(posts: list[SocialPost]) -> DemographicFindings:
     findings = DemographicFindings()
 
@@ -213,6 +254,8 @@ def extract_demographics(posts: list[SocialPost]) -> DemographicFindings:
         _try_detect_nacionalidad(text, post.permalink, findings)
         _try_detect_situacion_laboral(text, post.permalink, findings)
         _try_detect_lengua_materna(text, post.permalink, findings)
+        _try_detect_orientacion_sexual(text, post.permalink, findings)
+        _try_detect_signo_zodiacal(text, post.permalink, findings)
 
     _detect_household_type(posts, findings)
     _mark_all_detected_as_texto(findings)
@@ -227,6 +270,7 @@ def _mark_all_detected_as_texto(findings: DemographicFindings) -> None:
         "sexo", "edad", "provincia", "municipio", "comunidad_autonoma",
         "estudios", "ocupacion", "universidad", "empresa",
         "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
+        "orientacion_sexual", "signo_zodiacal",
     ):
         if getattr(findings, attr_name) is not None:
             findings.source[attr_name] = "texto"
@@ -477,3 +521,51 @@ def _match_location(text: str, permalink: str, findings: DemographicFindings) ->
     else:
         findings.comunidad_autonoma = ccaa
         findings.evidence.setdefault("comunidad_autonoma", []).append(permalink)
+
+
+def _try_detect_orientacion_sexual(text: str, permalink: str, findings: DemographicFindings) -> None:
+    """Detecta autodeclaraciones explícitas de orientación sexual.
+    El match más específico ('soy heterosexual') tiene preferencia
+    sobre el token suelto ('heterosexual'), ya que el token suelto podría
+    aparecer al hablar de otra persona; se toma el primer grupo capturado."""
+    if findings.orientacion_sexual is not None:
+        return
+
+    match = _SEXUALITY_RE.search(text)
+    if not match:
+        return
+
+    raw = match.group(0).lower()
+    # Normalizar a valor canónico
+    if "hetero" in raw:
+        value = "heterosexual"
+    elif "gay" in raw:
+        value = "gay"
+    elif "lesbiana" in raw:
+        value = "lesbiana"
+    elif "bisexual" in raw:
+        value = "bisexual"
+    elif "pansexual" in raw:
+        value = "pansexual"
+    elif "asexual" in raw:
+        value = "asexual"
+    elif "homosexual" in raw:
+        value = "homosexual"
+    else:
+        return
+
+    findings.orientacion_sexual = value
+    findings.evidence.setdefault("orientacion_sexual", []).append(permalink)
+
+
+def _try_detect_signo_zodiacal(text: str, permalink: str, findings: DemographicFindings) -> None:
+    """Detecta emojis de signos zodiacales en el texto y almacena el
+    signo junto con su rango de fechas de nacimiento implícito."""
+    if findings.signo_zodiacal is not None:
+        return
+
+    for emoji_char, (signo, rango) in _ZODIAC_EMOJI_MAP.items():
+        if emoji_char in text:
+            findings.signo_zodiacal = f"{signo} ({rango})"
+            findings.evidence.setdefault("signo_zodiacal", []).append(permalink)
+            return
