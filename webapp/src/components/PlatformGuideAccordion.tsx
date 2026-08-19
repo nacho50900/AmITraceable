@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SiInstagram, SiReddit, SiX } from 'react-icons/si';
 
@@ -37,74 +37,75 @@ const PlatformGuideAccordion: React.FC<Props> = ({ activePlatform }) => {
     }
   }, [activePlatform]);
 
+  const activeItem = GUIDE_ITEMS.find((item) => item.key === selectedTab) ?? GUIDE_ITEMS[0];
+
   return (
     <section className="platform-guide">
       <h2>{t('landing.guide.title')}</h2>
       <p className="platform-guide-subtitle">{t('landing.guide.subtitle')}</p>
 
       <div className="platform-guide-tabs">
+        {/* Las pestañas son botones simples de tamaño fijo: no contienen el
+            contenido, así que seleccionar una no altera su propio tamaño
+            ni el de las demás. */}
         <div className="platform-guide-tab-list" role="tablist">
           {GUIDE_ITEMS.map((item) => {
             const isActive = item.key === selectedTab;
             return (
-              <details
+              <button
                 key={item.key}
-                className={`platform-guide-item ${item.className}`}
+                type="button"
+                id={`platform-guide-tab-${item.key}`}
+                role="tab"
+                aria-selected={isActive}
+                aria-controls="platform-guide-panel"
+                className={`platform-guide-tab ${item.className} ${isActive ? 'platform-guide-tab--active' : ''}`}
+                onClick={() => setSelectedTab(item.key)}
               >
-                <summary
-                  id={`platform-guide-tab-${item.key}`}
-                  role="tab"
-                  aria-selected={isActive}
-                  aria-controls={`platform-guide-content-${item.key}`}
-                  tabIndex={0}
-                  className={`platform-guide-tab ${item.className} ${isActive ? 'platform-guide-tab--active' : ''}`}
-                  onClick={(event) => {
-                    // Prevent native toggle; preserve original behaviour where
-                    // clicking selects the tab but does not automatically open the <details>.
-                    event.preventDefault();
-                    setSelectedTab(item.key);
-                  }}
-                >
-                  <span className="platform-guide-item-icon">{item.icon}</span>
-                  <span className="platform-guide-item-name">{t(`landing.guide.${item.key}.name`)}</span>
-                </summary>
-
-                <div
-                  id={`platform-guide-content-${item.key}`}
-                  role="tabpanel"
-                  aria-labelledby={`platform-guide-tab-${item.key}`}
-                  className="platform-guide-item-content"
-                >
-                  {item.available ? (
-                    <>
-                      <h3>{t('landing.guide.reads')}</h3>
-                      <ul>
-                        {(t(`landing.guide.${item.key}.reads`, { returnObjects: true }) as string[]).map((line, idx) => (
-                          <li key={`${item.key}-reads-${idx}`}>{line}</li>
-                        ))}
-                      </ul>
-
-                      <h3>{t('landing.guide.doesNotRead')}</h3>
-                      <ul>
-                        {(t(`landing.guide.${item.key}.doesNotRead`, { returnObjects: true }) as string[]).map((line, idx) => (
-                          <li key={`${item.key}-doesNotRead-${idx}`}>{line}</li>
-                        ))}
-                      </ul>
-
-                      <h3>{t('landing.guide.todo')}</h3>
-                      <ol>
-                        {(t(`landing.guide.${item.key}.todo`, { returnObjects: true }) as string[]).map((line, idx) => (
-                          <li key={`${item.key}-todo-${idx}`}>{line}</li>
-                        ))}
-                      </ol>
-                    </>
-                  ) : (
-                    <p className="note">{t('landing.guide.unavailable')}</p>
-                  )}
-                </div>
-              </details>
+                <span className="platform-guide-item-icon">{item.icon}</span>
+                <span className="platform-guide-item-name">{t(`landing.guide.${item.key}.name`)}</span>
+              </button>
             );
           })}
+        </div>
+
+        {/* Panel único, con fondo propio, pegado a las pestañas (border-radius
+            0 en la esquina superior izquierda para que "continúe" la pestaña
+            activa). */}
+        <div
+          id="platform-guide-panel"
+          role="tabpanel"
+          aria-labelledby={`platform-guide-tab-${activeItem.key}`}
+          className="platform-guide-tab-content-container"
+        >
+          <div className="platform-guide-item-content">
+            {activeItem.available ? (
+              <>
+                <h3>{t('landing.guide.reads')}</h3>
+                <ul>
+                  {(t(`landing.guide.${activeItem.key}.reads`, { returnObjects: true }) as string[]).map((line, idx) => (
+                    <li key={`${activeItem.key}-reads-${idx}`}>{line}</li>
+                  ))}
+                </ul>
+
+                <h3>{t('landing.guide.doesNotRead')}</h3>
+                <ul>
+                  {(t(`landing.guide.${activeItem.key}.doesNotRead`, { returnObjects: true }) as string[]).map((line, idx) => (
+                    <li key={`${activeItem.key}-doesNotRead-${idx}`}>{line}</li>
+                  ))}
+                </ul>
+
+                <h3>{t('landing.guide.todo')}</h3>
+                <ol>
+                  {(t(`landing.guide.${activeItem.key}.todo`, { returnObjects: true }) as string[]).map((line, idx) => (
+                    <li key={`${activeItem.key}-todo-${idx}`}>{line}</li>
+                  ))}
+                </ol>
+              </>
+            ) : (
+              <p className="note">{t('landing.guide.unavailable')}</p>
+            )}
+          </div>
         </div>
       </div>
     </section>

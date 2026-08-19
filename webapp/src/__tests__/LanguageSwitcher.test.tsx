@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, test } from 'vitest';
 import i18n, { LANGUAGE_STORAGE_KEY } from '../i18n';
 import LanguageSwitcher from '../components/LanguageSwitcher';
@@ -14,35 +15,52 @@ describe('LanguageSwitcher', () => {
     });
   });
 
-  test('por defecto muestra español seleccionado, sin banderas', () => {
+  test('por defecto muestra el botón en español, con Español marcado en el menú, sin banderas', async () => {
+    const user = userEvent.setup();
     render(<LanguageSwitcher />);
 
-    const select = screen.getByLabelText('Idioma') as HTMLSelectElement;
-    expect(select.value).toBe('es');
-    expect(screen.getByText('Español')).toBeInTheDocument();
-    expect(screen.getByText('English')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Idioma' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Idioma' }));
+
+    const spanishOption = screen.getByRole('option', { name: 'Español' });
+    expect(spanishOption).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('option', { name: 'English' })).toHaveAttribute('aria-selected', 'false');
+
     // Ningún emoji de bandera ni atributo relacionado con banderas.
     expect(screen.queryByText(/🇪🇸|🇬🇧|🇺🇸/)).not.toBeInTheDocument();
   });
 
   test('elegir English cambia el idioma de i18next y lo persiste en localStorage', async () => {
+    const user = userEvent.setup();
     render(<LanguageSwitcher />);
 
-    await act(async () => {
-      fireEvent.change(screen.getByLabelText('Idioma'), { target: { value: 'en' } });
-    });
+    await user.click(screen.getByRole('button', { name: 'Idioma' }));
+    await user.click(screen.getByRole('option', { name: 'English' }));
 
     expect(i18n.language).toBe('en');
     expect(window.localStorage.getItem(LANGUAGE_STORAGE_KEY)).toBe('en');
   });
 
-  test('tras cambiar a inglés, el propio selector se re-renderiza en inglés', async () => {
+  test('tras cambiar a inglés, el propio botón se re-renderiza en inglés', async () => {
+    const user = userEvent.setup();
     render(<LanguageSwitcher />);
 
-    await act(async () => {
-      fireEvent.change(screen.getByLabelText('Idioma'), { target: { value: 'en' } });
-    });
+    await user.click(screen.getByRole('button', { name: 'Idioma' }));
+    await user.click(screen.getByRole('option', { name: 'English' }));
 
-    expect(screen.getByLabelText('Language')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Language' })).toBeInTheDocument();
+  });
+
+  test('el menú se cierra tras seleccionar un idioma', async () => {
+    const user = userEvent.setup();
+    render(<LanguageSwitcher />);
+
+    await user.click(screen.getByRole('button', { name: 'Idioma' }));
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('option', { name: 'English' }));
+
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 });
