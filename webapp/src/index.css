@@ -170,13 +170,15 @@ body {
 }
 
 .platform-guide-tab {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-bottom: 3px solid transparent;
+  border-top: 5px solid transparent;
+  border-bottom: 3px solid var(--bg);
   border-radius: 8px 8px 0 0;
   cursor: pointer;
   font-weight: 600;
@@ -194,19 +196,44 @@ body {
 .platform-guide-tab--active {
   color: var(--text);
   background: var(--bg-card);
-  border-bottom-color: var(--border);
+  border-bottom-color: transparent;
+}
+
+/* Curvas cóncavas donde la pestaña activa se une al panel: el panel
+   "invade" las esquinas inferiores de la pestaña con dos cuartos de
+   círculo abiertos hacia afuera, dando el efecto de fusión pestaña→panel. */
+.platform-guide-tab--active::before,
+.platform-guide-tab--active::after {
+  content: '';
+  position: absolute;
+  bottom: -3px;
+  width: 10px;
+  height: 10px;
+  background: var(--bg-card);
+}
+
+.platform-guide-tab--active::before {
+  left: -10px;
+  border-bottom-right-radius: 10px;
+  box-shadow: 4px 4px 0 4px var(--bg-card);
+}
+
+.platform-guide-tab--active::after {
+  right: -10px;
+  border-bottom-left-radius: 10px;
+  box-shadow: -4px 4px 0 4px var(--bg-card);
 }
 
 .platform-guide-tab.platform-guide-item--reddit.platform-guide-tab--active {
-  border-bottom-color: #ff4500;
+  border-top-color: #ff4500;
 }
 
 .platform-guide-tab.platform-guide-item--instagram.platform-guide-tab--active {
-  border-bottom-color: #dc2743;
+  border-top-color: #dc2743;
 }
 
 .platform-guide-tab.platform-guide-item--x.platform-guide-tab--active {
-  border-bottom-color: #5b6cf0;
+  border-top-color: #5b6cf0;
 }
 
 .platform-guide-item-icon {
