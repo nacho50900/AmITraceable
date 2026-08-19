@@ -40,7 +40,7 @@ function PhotoLink({
 }) {
   const label = point.is_profile_picture
     ? t('components.locationMap.profilePictureLabel')
-    : t('components.locationMap.viewPost');
+    : point.visual_description_general || t('components.locationMap.viewPost');
 
   if (point.is_profile_picture && !point.permalink) {
     return <span className="photo-link-label">{label}</span>;
@@ -166,11 +166,6 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
                       {point.lat === null && t('components.locationMap.noCoordinates')}
                     </span>
                   </summary>
-                  <p className="photo-visual-description-general">
-                    {point.visual_description_general
-                      ? point.visual_description_general
-                      : t('components.locationMap.noGeneralDescription')}
-                  </p>
                   <p className="photo-visual-description">
                     {point.visual_description
                       ? point.visual_description
@@ -197,11 +192,6 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
                     <PhotoLink point={point} t={t} onClick={(e) => e.stopPropagation()} />
                     <span>{formatDate(point.created_utc)}</span>
                   </summary>
-                  <p className="photo-visual-description-general">
-                    {point.visual_description_general
-                      ? point.visual_description_general
-                      : t('components.locationMap.noGeneralDescription')}
-                  </p>
                   <p className="photo-visual-description">
                     {point.visual_description
                       ? point.visual_description

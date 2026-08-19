@@ -76,6 +76,11 @@ body {
   opacity: 0.7;
 }
 
+.language-switcher-button--open {
+  border-radius: 999px 999px 0 0;
+  border-bottom-color: transparent;
+}
+
 .language-switcher-icon {
   display: flex;
   align-items: center;
@@ -101,15 +106,16 @@ body {
 
 .language-switcher-menu {
   position: absolute;
-  top: calc(100% + 8px);
+  top: 100%;
   right: 0;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-top: none;
+  border-radius: 0 0 16px 16px;
   padding: 6px;
   margin: 0;
   list-style: none;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.18);
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -177,7 +183,7 @@ body {
   padding: 10px 16px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-top: 5px solid transparent;
+  border-top: 4.5px solid transparent;
   border-bottom: 3px solid var(--bg);
   border-radius: 8px 8px 0 0;
   cursor: pointer;
@@ -199,29 +205,29 @@ body {
   border-bottom-color: transparent;
 }
 
-/* Curvas cóncavas donde la pestaña activa se une al panel: el panel
-   "invade" las esquinas inferiores de la pestaña con dos cuartos de
-   círculo abiertos hacia afuera, dando el efecto de fusión pestaña→panel. */
+/* Curvas cóncavas donde la pestaña activa se une al panel: un anillo de
+   1px (color --border) trazado con radial-gradient centrado en la esquina
+   de contacto. Transparente por dentro y por fuera -- solo pinta la línea
+   curva, sin relleno sólido que tape el hueco de detrás (antes se veían
+   cuadrados porque el relleno y la sombra usaban el mismo color plano). */
 .platform-guide-tab--active::before,
 .platform-guide-tab--active::after {
   content: '';
   position: absolute;
-  bottom: -3px;
-  width: 10px;
-  height: 10px;
-  background: var(--bg-card);
+  top: 100%;
+  width: 8px;
+  height: 8px;
+  pointer-events: none;
 }
 
 .platform-guide-tab--active::before {
-  left: -10px;
-  border-bottom-right-radius: 10px;
-  box-shadow: 4px 4px 0 4px var(--bg-card);
+  left: -8px;
+  background: radial-gradient(circle 8px at 0% 0%, transparent 7px, var(--border) 7px 8px, transparent 8px);
 }
 
 .platform-guide-tab--active::after {
-  right: -10px;
-  border-bottom-left-radius: 10px;
-  box-shadow: -4px 4px 0 4px var(--bg-card);
+  right: -8px;
+  background: radial-gradient(circle 8px at 100% 0%, transparent 7px, var(--border) 7px 8px, transparent 8px);
 }
 
 .platform-guide-tab.platform-guide-item--reddit.platform-guide-tab--active {

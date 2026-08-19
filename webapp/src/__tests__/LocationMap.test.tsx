@@ -102,7 +102,7 @@ describe('LocationMap', () => {
     render(<LocationMap points={points} platform="instagram" available={true} />);
 
     const list = screen.getByRole('list');
-    expect(within(list).getAllByRole('link', { name: 'Ver publicación' })).toHaveLength(2);
+    expect(within(list).getAllByRole('link')).toHaveLength(2);
     expect(screen.getByText(/confianza 90%/)).toBeInTheDocument();
     expect(screen.getByText(/confianza 10%/)).toBeInTheDocument();
   });
@@ -115,7 +115,7 @@ describe('LocationMap', () => {
     render(<LocationMap points={points} platform="instagram" available={true} />);
 
     expect(screen.getAllByTestId('circle-marker')).toHaveLength(1);
-    expect(within(screen.getByRole('list')).getAllByRole('link', { name: 'Ver publicación' })).toHaveLength(2);
+    expect(within(screen.getByRole('list')).getAllByRole('link')).toHaveLength(2);
   });
 
   test('el centro del mapa es la media de lat/lon de los puntos con coordenadas', () => {
@@ -175,7 +175,7 @@ describe('LocationMap', () => {
       />
     );
 
-    const links = screen.getAllByRole('link', { name: 'Ver publicación' });
+    const links = screen.getAllByRole('link');
     expect(links[0]).toHaveAttribute('href', 'https://instagram.com/p/xyz');
     expect(links[0]).toHaveAttribute('target', '_blank');
   });
@@ -198,7 +198,7 @@ describe('LocationMap', () => {
     render(<LocationMap points={points} platform="instagram" available={true} />);
 
     expect(screen.getByText(/Imágenes no geolocalizables/i)).toBeInTheDocument();
-    const link = screen.getByRole('link', { name: 'Ver publicación' });
+    const link = screen.getByRole('link');
     expect(link).toHaveAttribute('href', 'https://instagram.com/p/no-rep');
   });
 
@@ -211,9 +211,9 @@ describe('LocationMap', () => {
 
     expect(screen.getAllByTestId('circle-marker')).toHaveLength(1);
     const [mainList, nonRepresentativeList] = screen.getAllByRole('list');
-    expect(within(mainList).getAllByRole('link', { name: 'Ver publicación' })).toHaveLength(1);
+    expect(within(mainList).getAllByRole('link')).toHaveLength(1);
     expect(within(mainList).getByRole('link')).toHaveAttribute('href', 'https://instagram.com/p/rep');
-    expect(within(nonRepresentativeList).getAllByRole('link', { name: 'Ver publicación' })).toHaveLength(1);
+    expect(within(nonRepresentativeList).getAllByRole('link')).toHaveLength(1);
     expect(within(nonRepresentativeList).getByRole('link')).toHaveAttribute(
       'href',
       'https://instagram.com/p/no-rep',
@@ -306,18 +306,25 @@ describe('LocationMap', () => {
     expect(screen.getByText(/Sin descripción visual disponible/)).toBeInTheDocument();
   });
 
-  test('al desplegar una foto se ve la descripción general', () => {
-    const points = [makePoint({ visual_description_general: '4 personas comiendo pizza alegremente en una terraza' })];
+  test('el título de la foto es la descripción general de Moondream2, y enlaza a la publicación', () => {
+    const points = [
+      makePoint({
+        visual_description_general: '4 personas comiendo pizza alegremente en una terraza',
+        permalink: 'https://instagram.com/p/pizza',
+      }),
+    ];
     render(<LocationMap points={points} platform="instagram" available={true} />);
 
-    expect(screen.getByText('4 personas comiendo pizza alegremente en una terraza')).toBeInTheDocument();
+    const links = screen.getAllByRole('link', { name: '4 personas comiendo pizza alegremente en una terraza' });
+    expect(links.length).toBeGreaterThan(0);
+    links.forEach((link) => expect(link).toHaveAttribute('href', 'https://instagram.com/p/pizza'));
   });
 
-  test('sin descripción general (null): muestra el aviso en vez de dejarlo vacío', () => {
+  test('sin descripción general (null): el título cae de vuelta a "Ver publicación"', () => {
     const points = [makePoint({ visual_description_general: null })];
     render(<LocationMap points={points} platform="instagram" available={true} />);
 
-    expect(screen.getByText(/Sin descripción general disponible/)).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Ver publicación' }).length).toBeGreaterThan(0);
   });
 
   test('el apartado de no representativas tiene la clase de scroll con altura máxima', () => {
@@ -354,11 +361,11 @@ describe('LocationMap', () => {
       expect(container.querySelector('.photo-link-label')).toBeInTheDocument();
     });
 
-    test('foto normal (is_profile_picture ausente/false): sigue diciendo "Ver publicación"', () => {
+    test('foto normal (is_profile_picture ausente/false): usa la descripción de Moondream2, no "Foto de perfil"', () => {
       const points = [makePoint()];
       render(<LocationMap points={points} platform="instagram" available={true} />);
 
-      expect(screen.getAllByRole('link', { name: 'Ver publicación' }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole('link', { name: 'una persona tocando la guitarra' }).length).toBeGreaterThan(0);
       expect(screen.queryByText('Foto de perfil')).not.toBeInTheDocument();
     });
 
