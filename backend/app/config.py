@@ -41,12 +41,50 @@ def _default_photo_analysis_concurrency() -> int:
     mejor meter más fotos en paralelo que más hilos por foto. Con 4
     núcleos da concurrencia 2 (como el valor fijo anterior); con 16 da 8.
     Nunca menos de 1.
-    """
+
+    BUG REAL encontrado en producción (GTX 1650, Docker Desktop + WSL2):
+    esta función se ejecuta en cuanto se importa `app.config` por primera
+    vez en el proceso (`settings = Settings()` al final de este fichero) --
+    es decir, en el primer `from app.config import settings` de CUALQUIER
+    módulo, normalmente bastante ANTES de que `_lifespan()` (app/main.py)
+    llegue a su propio log explícito de `torch.cuda.is_available()`. Si en
+    ese primer instante el paso de la GPU al contenedor (passthrough de
+    Docker Desktop/WSL2) todavía no está listo -- se ha visto en la
+    práctica, no es solo teoría -- `torch.cuda.is_available()` puede
+    devolver `False` de forma transitoria, aunque la GPU sí esté disponible
+    unos segundos después. Confirmado con datos reales del log de
+    rendimiento (`scripts/analyze_performance_log.py`): una ejecución
+    quedó con `configured_concurrency=10` (heurística de CPU, en una
+    máquina de 20 núcleos) mientras Moondream2 SÍ terminó cargando en GPU
+    (visto en el log de arranque de esa misma sesión) -- 10 análisis a la
+    vez peleándose por los 4GB de VRAM de una GTX 1650, resultado: ~184s
+    de media por foto (frente a los ~23s habituales con concurrencia 1),
+    disparando el timeout configurado (`scene_analysis_timeout_seconds`)
+    en la mayoría de fotos.
+
+    Como `Settings()` (y por tanto esta función) solo se ejecuta UNA VEZ
+    por vida del proceso, no hay forma de "corregir" la decisión más
+    tarde dentro del mismo arranque -- la única forma de que un problema
+    de detección real (no un falso negativo transitorio) no deje el
+    proceso entero mal configurado es descartar esa posibilidad AQUÍ, con
+    unos pocos reintentos baratos y espaciados, antes de asumir "no hay
+    GPU" y caer a la heurística de CPU. El coste (como mucho ~1s añadido
+    al arranque, y solo si el primer intento falla) es insignificante
+    frente al de una ejecución entera degradada silenciosamente."""
     try:
+        import time
+
         import torch
 
-        if torch.cuda.is_available():
-            return 1
+        # Hasta 3 intentos (uno inmediato + 2 reintentos espaciados 0.5s)
+        # antes de asumir que de verdad no hay GPU. Un `True` en
+        # cualquier intento basta -- no tiene sentido seguir esperando si
+        # ya se confirmó que la GPU está lista.
+        for attempt in range(3):
+            if torch.cuda.is_available():
+                return 1
+            if attempt < 2:
+                time.sleep(0.5)
     except ImportError:
         pass  # sin torch instalado (build sin WITH_GEOLOCATION): sigue la heurística de CPU de abajo
 
@@ -167,6 +205,28 @@ class Settings(BaseSettings):
     # ninguno de los dos logs escribe nada, sin que el análisis en sí se
     # vea afectado.
     enable_performance_logging: bool = True
+
+    # Offload de DINOv2 a una GPU "compartida" (integrada en el procesador,
+    # vía DirectML) cuando la máquina tiene, ADEMÁS de la GPU dedicada que
+    # ya usa Moondream2, una segunda GPU distinta -- ver docstring completo
+    # de `_select_dinov2_device()` en app/vision/geolocation.py para todas
+    # las condiciones que se comprueban antes de activarse de verdad
+    # (nunca revienta nada si no se cumplen: cae al comportamiento de
+    # siempre, DINOv2 en la misma GPU dedicada que Moondream2).
+    #
+    # DESACTIVADO por defecto (a diferencia de otros flags de este
+    # fichero) -- a propósito, NO es un descuido. `torch-directml` (el
+    # paquete que hace falta para esto, ver requirements-igpu.txt) fija
+    # una versión concreta de `torch` como dependencia, incompatible con
+    # el rango + build CUDA (`cu121`) que ya usa este proyecto para
+    # Moondream2 (ver requirements-vision.txt) -- instalarlo sin comprobar
+    # antes en la máquina real podría reinstalar `torch` con otra
+    # versión/build y romper el CUDA de Moondream2 en el proceso, que es
+    # justo el problema de contención de GPU que esto intenta evitar.
+    # Actívalo (`ENABLE_IGPU_OFFLOAD=true` en `.env`) solo después de
+    # probar `pip install torch-directml` en un entorno aparte y
+    # confirmar que no toca la versión/build de `torch` ya instalada.
+    enable_igpu_offload: bool = False
 
 
 settings = Settings()

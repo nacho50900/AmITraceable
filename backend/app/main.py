@@ -100,6 +100,31 @@ async def _lifespan(app: FastAPI):
                 torch.cuda.get_device_name(0),
                 torch.version.cuda,
             )
+            # Aviso de discrepancia: `concurrency` (arriba) se decidió en
+            # `_default_photo_analysis_concurrency()` (config.py) la
+            # PRIMERA VEZ que se importó `app.config` en este proceso --
+            # normalmente antes de llegar aquí. Esa función ya reintenta
+            # `torch.cuda.is_available()` varias veces para blindarse
+            # contra una GPU que tarda en aparecer (passthrough de Docker
+            # Desktop/WSL2), pero si aun así hubiera quedado desincronizada
+            # (p. ej. la GPU tardó más de lo que cubren esos reintentos),
+            # esto lo deja bien visible en el log en vez de descubrirse
+            # solo al analizar tiempos por foto muy por encima de lo
+            # normal. `Settings` es un singleton fijado UNA vez por vida
+            # del proceso (`settings = Settings()` en config.py) -- no hay
+            # forma de corregirlo en caliente, hace falta reiniciar el
+            # backend (`docker compose restart backend`).
+            if concurrency != 1:
+                logger.warning(
+                    "GPU detectada pero photo_analysis_concurrency=%d (valor de "
+                    "heuristica de CPU, se esperaba 1 con GPU) -- probable carrera "
+                    "en el arranque: la GPU no estaba lista cuando se decidio este "
+                    "valor. Los analisis de fotos competiran por la VRAM "
+                    "innecesariamente y pueden superar el timeout configurado. "
+                    "Reinicia el backend (docker compose restart backend) para "
+                    "que se recalcule.",
+                    concurrency,
+                )
         else:
             logger.info(
                 "GPU no detectada (torch.cuda.is_available()=False) -- los modelos "

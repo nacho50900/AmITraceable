@@ -86,11 +86,19 @@ def _make_fake_torch(output_vector):
 @pytest.fixture(autouse=True)
 def reset_module_globals(monkeypatch):
     """Cada test debe partir de _model/_processor/_index/_index_meta
-    limpios, para que _lazy_load() se comporte de forma predecible."""
+    limpios, para que _lazy_load() se comporte de forma predecible.
+    _device se deja en "cpu" (en vez de None) y _dml_failed en False: así
+    ningún test dispara por accidente la rama de reintento en DirectML de
+    estimate_location_from_image (pensada solo para cuando _device es de
+    verdad un dispositivo torch_directml, ver _select_dinov2_device) --
+    esa rama tiene su propia clase de tests más abajo, que fija _device
+    explícitamente a un objeto que no es str."""
     monkeypatch.setattr(geolocation, "_model", None)
     monkeypatch.setattr(geolocation, "_processor", None)
     monkeypatch.setattr(geolocation, "_index", None)
     monkeypatch.setattr(geolocation, "_index_meta", None)
+    monkeypatch.setattr(geolocation, "_device", "cpu")
+    monkeypatch.setattr(geolocation, "_dml_failed", False)
     yield
 
 
@@ -952,3 +960,188 @@ class TestEstimateLocationsForPosts:
 
         assert outcome.index_available is False
         assert outcome.results == []
+
+class TestSelectDinov2Device:
+    """Tests de _select_dinov2_device() -- ver su docstring para el
+    razonamiento completo. Offload a iGPU (DirectML) desactivado por
+    defecto (Settings.enable_igpu_offload=False) -- estos tests lo
+    activan explícitamente vía monkeypatch."""
+
+    def test_returns_cpu_when_no_cuda(self, monkeypatch):
+        fake_torch = SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False))
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+        monkeypatch.setattr(geolocation.settings, "enable_igpu_offload", True)  # no debería importar sin CUDA
+
+        assert geolocation._select_dinov2_device() == "cpu"
+
+    def test_returns_cuda_when_offload_disabled(self, monkeypatch):
+        """Comportamiento de siempre: offload desactivado (el valor por
+        defecto) -- DINOv2 comparte la GPU dedicada con Moondream2,
+        aunque haya un torch_directml instalado y funcional."""
+        fake_torch = SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: True, get_device_name=lambda i: "NVIDIA GeForce GTX 1650")
+        )
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+        monkeypatch.setattr(geolocation.settings, "enable_igpu_offload", False)
+
+        assert geolocation._select_dinov2_device() == "cuda"
+
+    def test_offloads_to_directml_device_when_distinct_igpu_found(self, monkeypatch):
+        fake_torch = SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: True, get_device_name=lambda i: "NVIDIA GeForce GTX 1650")
+        )
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+        monkeypatch.setattr(geolocation.settings, "enable_igpu_offload", True)
+
+        sentinel_dml_device = object()
+        fake_directml = SimpleNamespace(
+            device_count=lambda: 2,
+            device_name=lambda i: ["NVIDIA GeForce GTX 1650", "Intel(R) Iris(R) Xe Graphics"][i],
+            device=lambda i: sentinel_dml_device,
+        )
+        monkeypatch.setitem(sys.modules, "torch_directml", fake_directml)
+
+        assert geolocation._select_dinov2_device() is sentinel_dml_device
+
+    def test_stays_on_cuda_when_only_one_gpu_visible(self, monkeypatch):
+        """Offload activado, pero solo hay una GPU en la máquina (el
+        único dispositivo DirectML visible es la misma dedicada) -- no
+        hay nada que "liberar", se mantiene el comportamiento de
+        siempre."""
+        fake_torch = SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: True, get_device_name=lambda i: "NVIDIA GeForce GTX 1650")
+        )
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+        monkeypatch.setattr(geolocation.settings, "enable_igpu_offload", True)
+
+        fake_directml = SimpleNamespace(
+            device_count=lambda: 1,
+            device_name=lambda i: "NVIDIA GeForce GTX 1650",
+            device=lambda i: object(),
+        )
+        monkeypatch.setitem(sys.modules, "torch_directml", fake_directml)
+
+        assert geolocation._select_dinov2_device() == "cuda"
+
+    def test_stays_on_cuda_when_torch_directml_not_installed(self, monkeypatch):
+        fake_torch = SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: True, get_device_name=lambda i: "NVIDIA GeForce GTX 1650")
+        )
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+        monkeypatch.setattr(geolocation.settings, "enable_igpu_offload", True)
+        monkeypatch.setitem(sys.modules, "torch_directml", None)  # fuerza ImportError
+
+        assert geolocation._select_dinov2_device() == "cuda"
+
+    def test_stays_on_cuda_when_directml_detection_raises(self, monkeypatch):
+        """Cualquier fallo inesperado en la detección (driver roto, lo
+        que sea) degrada al comportamiento de siempre en vez de tumbar la
+        carga del modelo."""
+        fake_torch = SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: True, get_device_name=lambda i: "NVIDIA GeForce GTX 1650")
+        )
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+        monkeypatch.setattr(geolocation.settings, "enable_igpu_offload", True)
+
+        def _raise():
+            raise RuntimeError("driver DirectML roto")
+
+        fake_directml = SimpleNamespace(device_count=_raise)
+        monkeypatch.setitem(sys.modules, "torch_directml", fake_directml)
+
+        assert geolocation._select_dinov2_device() == "cuda"
+
+
+class TestEstimateLocationFromImageDirectMLFallback:
+    """_device puede ser un objeto DirectML (no un str "cuda"/"cpu") si
+    _select_dinov2_device() hizo offload a la iGPU -- estos tests cubren
+    el camino de recuperación cuando un forward pass ahí falla (operador
+    sin soporte, ver docstring de estimate_location_from_image)."""
+
+    def test_falls_back_to_cpu_and_retries_once_on_directml_failure(self, monkeypatch):
+        meta = pd.DataFrame({"id": ["1"], "lat": [40.0], "lon": [-3.7], "region": ["Madrid"]})
+        _install_fake_index(monkeypatch, meta, search_indices=[0])
+
+        fake_torch, fake_outputs = _make_fake_torch([0.1] * 384)
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+        sentinel_dml_device = object()
+        monkeypatch.setattr(geolocation, "_device", sentinel_dml_device)
+
+        calls = {"n": 0}
+
+        class _FakeModel:
+            def __call__(self, **kwargs):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise RuntimeError("operador no soportado en DirectML")
+                return fake_outputs
+
+            def to(self, device):
+                # Confirma que el reintento mueve el modelo a CPU, nunca
+                # de vuelta a la GPU dedicada (evitar reintroducir la
+                # contención con Moondream2 que el offload evita).
+                assert device == "cpu"
+                return self
+
+        monkeypatch.setattr(geolocation, "_model", _FakeModel())
+        monkeypatch.setattr(
+            geolocation, "_processor", lambda images, return_tensors: SimpleNamespace(to=lambda d: {})
+        )
+
+        result = geolocation.estimate_location_from_image(_FakeImage(), k=1)
+
+        assert result is not None
+        assert result.province == "Madrid"
+        assert calls["n"] == 2  # 1er intento (DirectML, falla) + reintento (CPU, funciona)
+        assert geolocation._device == "cpu"  # se queda en CPU para el resto del proceso
+        assert geolocation._dml_failed is True
+
+    def test_returns_none_if_cpu_retry_also_fails(self, monkeypatch):
+        meta = pd.DataFrame({"id": ["1"], "lat": [40.0], "lon": [-3.7], "region": ["Madrid"]})
+        _install_fake_index(monkeypatch, meta, search_indices=[0])
+
+        fake_torch, _ = _make_fake_torch([0.1] * 384)
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+        monkeypatch.setattr(geolocation, "_device", object())
+
+        class _FakeModel:
+            def __call__(self, **kwargs):
+                raise RuntimeError("sigue fallando")
+
+            def to(self, device):
+                return self
+
+        monkeypatch.setattr(geolocation, "_model", _FakeModel())
+        monkeypatch.setattr(
+            geolocation, "_processor", lambda images, return_tensors: SimpleNamespace(to=lambda d: {})
+        )
+
+        assert geolocation.estimate_location_from_image(_FakeImage(), k=1) is None
+
+    def test_does_not_retry_a_second_time_once_dml_already_marked_failed(self, monkeypatch):
+        """Si _dml_failed ya es True (una foto anterior ya provocó la
+        caída permanente a CPU), un fallo posterior se trata como fallo
+        normal de esa foto -- no vuelve a intentar la rama de reintento
+        (ya no tiene sentido, _device ya debería ser "cpu")."""
+        meta = pd.DataFrame({"id": ["1"], "lat": [40.0], "lon": [-3.7], "region": ["Madrid"]})
+        _install_fake_index(monkeypatch, meta, search_indices=[0])
+
+        fake_torch, _ = _make_fake_torch([0.1] * 384)
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+        monkeypatch.setattr(geolocation, "_device", object())
+        monkeypatch.setattr(geolocation, "_dml_failed", True)
+
+        calls = {"n": 0}
+
+        def _raise(**kwargs):
+            calls["n"] += 1
+            raise RuntimeError("modelo roto")
+
+        monkeypatch.setattr(geolocation, "_model", _raise)
+        monkeypatch.setattr(
+            geolocation, "_processor", lambda images, return_tensors: SimpleNamespace(to=lambda d: {})
+        )
+
+        assert geolocation.estimate_location_from_image(_FakeImage(), k=1) is None
+        assert calls["n"] == 1  # ni un solo reintento
