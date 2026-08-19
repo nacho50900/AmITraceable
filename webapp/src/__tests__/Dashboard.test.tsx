@@ -271,6 +271,25 @@ describe('Dashboard', () => {
     expect(screen.getByRole('button', { name: 'Volver al inicio' })).toBeInTheDocument();
   });
 
+  test('botón "Cancelar análisis" durante la carga hace logout y navega a "/"', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    const stop = neverEmits();
+    vi.mocked(api.logout).mockResolvedValue({ status: 'ok' });
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Cancelar análisis' })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: 'Cancelar análisis' }));
+
+    await waitFor(() => {
+      expect(stop).toHaveBeenCalled();
+      expect(api.logout).toHaveBeenCalledWith('reddit');
+      expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
+    });
+  });
+
   test('botón "Volver al inicio" tras un error hace logout y navega a "/"', async () => {
     const user = userEvent.setup();
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
@@ -283,7 +302,7 @@ describe('Dashboard', () => {
 
     await waitFor(() => {
       expect(api.logout).toHaveBeenCalledWith('reddit');
-      expect(mockNavigate).toHaveBeenCalledWith('/');
+      expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
     });
   });
 
@@ -299,7 +318,7 @@ describe('Dashboard', () => {
 
     await waitFor(() => {
       expect(api.logout).toHaveBeenCalledWith('reddit');
-      expect(mockNavigate).toHaveBeenCalledWith('/');
+      expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
     });
   });
 

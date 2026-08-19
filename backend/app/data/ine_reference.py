@@ -126,6 +126,82 @@ def stale_tables(as_of: date | None = None) -> list[tuple[str, date, int]]:
 # Continua de Población / Censo Anual de Población).
 TOTAL_POPULATION_ES = 49_128_297
 
+# REFERENCIAS CONTEXTUALES DE TERCEROS (NO DEL INE, NO USADAS PARA
+# k-anonimato): estas cifras tienen un uso estrictamente contextual en la
+# sección de "información inferida" del informe, para ayudar al usuario a
+# situar qué tan raro/normal es un atributo, no para calcular riesgo de
+# reidentificación estadístico. Las tablas oficiales del INE siguen siendo
+# la fuente prioritaria para age/sex/province/studies/occupation.
+#
+# FUENTES DOCUMENTADAS Y ENFOCADO A ESPAÑA (NO a Europa general):
+# 1) Religiones / afiliación religiosa en España:
+#    - CIS (Centro de Investigaciones Sociológicas): barómetros de opinión y
+#      religión en España, que reportan la composición religiosa del país.
+#    - FCJE (Federación de Comunidades Judías de España): comunidad judía en
+#      España, estimada en decenas de miles (no es censo del INE, pero sí es la
+#      referencia española más directa para la comunidad judía).
+#    - Para islam y catolicismo, la referencia primaria es la encuesta del CIS
+#      y datos de observatorios religiosos españoles, no un censo del INE por
+#      confesión.
+# 2) Signo zodiacal:
+#    - no existe un censo o encuesta oficial del INE por signo zodiacal. Por
+#      eso se usa una contextualización matemática: con una natalidad distribuida
+#      sin sesgo fuerte por mes, cada signo es aprox. 1/12 del total.
+# 3) Orientación sexual:
+#    - no hay variable oficial del INE sobre orientación sexual. La referencia
+#      fiable en España es la evidencia sociológica/encuestas LGBT+ españolas y
+#      europeas, que situan la población LGBTIQ+ en torno a ~4-8%, y la
+#      mayoría de la población en la categoría heterosexual.
+#
+# IMPORTANTÍSIMO: estas cantidades son CONTEXTUALES, NO oficiales del INE, y
+# NO se usan en `k_anonymity.py` ni en `remaining_population` para riesgo de
+# reidentificación. Se usan solo para mostrar en el informe: "si la población
+# de España es N, este atributo afecta a X personas aproximadas".
+#
+# Fórmula de conteo contextual:
+#   personas_aproximadas = TOTAL_POPULATION_ES * porcentaje
+# Ejemplo: 49_128_297 * 0.001 = ~49_128 personas (judíos en España, orden de
+# magnitud aproximado según fuentes comunitarias y barómetros).
+RELIGION_DISTRIBUTION = {
+    "judaismo": 0.001,      # ~0,1% = ~49k personas en España (fuente comunitaria: FCJE / contexto religioso español)
+    "islam": 0.022,         # ~2,2% = ~1,1M personas en España (fuente: CIS/observatorios religiosos)
+    "catolicismo": 0.63,    # ~63% ≈ 31M personas (contexto religioso español, CIS)
+    "cristianismo": 0.67,   # ~67% (contexto general de identidad cristiana, no censo oficial)
+    "budismo": 0.005,       # ~0,5% ≈ 245k personas
+    "hinduismo": 0.003,     # ~0,3% ≈ 147k personas
+    "ateismo": 0.18,        # ~18% ≈ 8,8M personas
+    "agnosticismo": 0.08,   # ~8% ≈ 3,9M personas
+}
+
+# Signo zodiacal: distribución contextual uniforme en España por fecha de
+# nacimiento, no oficial.
+ZODIAC_DISTRIBUTION = {
+    "aries": 0.0833,
+    "tauro": 0.0833,
+    "geminis": 0.0833,
+    "cancer": 0.0833,
+    "leo": 0.0833,
+    "virgo": 0.0833,
+    "libra": 0.0833,
+    "escorpio": 0.0833,
+    "sagitario": 0.0833,
+    "capricornio": 0.0833,
+    "acuario": 0.0833,
+    "piscis": 0.0833,
+}
+
+# Orientación sexual: referencia contextual para España, no oficial. La
+# mayoría es heterosexual y una minoría LGBTIQ+ se mueve alrededor del 4-8%.
+SEXUAL_ORIENTATION_DISTRIBUTION = {
+    "heterosexual": 0.94,
+    "gay": 0.022,
+    "lesbiana": 0.015,
+    "bisexual": 0.017,
+    "pansexual": 0.002,
+    "asexual": 0.002,
+    "homosexual": 0.028,
+}
+
 # Reparto por sexo. Aproximado (España tiene ligera mayoría femenina por
 # esperanza de vida más alta en edades avanzadas).
 SEX_DISTRIBUTION = {

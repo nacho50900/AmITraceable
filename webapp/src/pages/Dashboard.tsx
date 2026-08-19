@@ -218,8 +218,20 @@ const Dashboard: React.FC = () => {
   }, [loading]);
 
   const handleLogout = async () => {
-    await api.logout(platform);
-    navigate('/');
+    try {
+      await api.logout(platform);
+    } finally {
+      navigate('/', { replace: true });
+    }
+  };
+
+  const handleCancelAnalysis = async () => {
+    stopStreamRef.current?.();
+    try {
+      await api.logout(platform);
+    } finally {
+      navigate('/', { replace: true });
+    }
   };
 
   const platformLabel = platform === 'instagram' ? 'Instagram' : 'Reddit';
@@ -275,10 +287,7 @@ const Dashboard: React.FC = () => {
             </ul>
           </div>
           <div className="progress-actions">
-            <button className="btn-secondary" onClick={() => {
-              stopStreamRef.current?.();
-              navigate('/');
-            }}>
+            <button className="btn-secondary" type="button" onClick={handleCancelAnalysis}>
               {t('dashboard.cancelAnalysis')}
             </button>
           </div>

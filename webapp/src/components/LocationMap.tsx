@@ -107,9 +107,9 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          {mappablePoints.map((point) => (
+          {mappablePoints.map((point, idx) => (
             <CircleMarker
-              key={point.permalink}
+              key={point.permalink ?? `mappable-${idx}`}
               center={[point.lat as number, point.lon as number]}
               radius={8 + point.confidence * 10}
               pathOptions={{
@@ -118,27 +118,29 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
                 fillOpacity: 0.5,
               }}
             >
-              <Tooltip direction="top" offset={[0, -8]} opacity={1}>
-                {/* point.province viene del backend (nombre de provincia en
-                    español, INE); no se traduce en esta fase. */}
-                <strong>{point.province}</strong>
-                <br />
-                {t('components.locationMap.confidence', { value: Math.round(point.confidence * 100) })}
-                <br />
-                {(point.lat as number).toFixed(4)}, {(point.lon as number).toFixed(4)}
-              </Tooltip>
-              <Popup>
-                <strong>{point.province}</strong>
-                <br />
-                {t('components.locationMap.confidence', { value: Math.round(point.confidence * 100) })}
-                <br />
-                {t('components.locationMap.coordinates', {
-                  lat: (point.lat as number).toFixed(4),
-                  lon: (point.lon as number).toFixed(4),
-                })}
-                <br />
-                <PhotoLink point={point} t={t} />
-              </Popup>
+              {point.created_utc ? (
+               <>
+                 <Tooltip direction="top" offset={[0, -8]} opacity={1}>
+                   {/* point.province viene del backend (nombre de provincia en
+                       español, INE); no se traduce en esta fase. */}
+                   <strong>{point.province}</strong>
+                   <br />
+                   {t('components.locationMap.confidence', { value: Math.round(point.confidence * 100) })}
+                   <br />
+                   {(point.lat as number).toFixed(4)}, {(point.lon as number).toFixed(4)}
+                 </Tooltip>
+                 <Popup>
+                   {t('components.locationMap.confidence', { value: Math.round(point.confidence * 100) })}
+                   <br />
+                   {t('components.locationMap.coordinates', {
+                     lat: (point.lat as number).toFixed(4),
+                     lon: (point.lon as number).toFixed(4),
+                   })}
+                   <br />
+                   <PhotoLink point={point} t={t} />
+                 </Popup>
+               </>
+              ) : null}
             </CircleMarker>
           ))}
         </MapContainer>
@@ -152,13 +154,14 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
           </p>
 
           <ul className="image-location-list">
-            {representativePoints.map((point) => (
-              <li key={point.permalink}>
+            {representativePoints.map((point, idx) => (
+                          <li key={point.permalink ?? `rep-${idx}`}>
                 <details className="photo-details">
                   <summary>
                     <PhotoLink point={point} t={t} onClick={(e) => e.stopPropagation()} />
                     <span>
-                      {point.created_utc && <>{formatDate(point.created_utc)} — </>}{point.province} —{' '}
+                      {point.province && <>{point.province}{' — '}</>}
+                      {point.created_utc && <>{formatDate(point.created_utc)} — </>}
                       {t('components.locationMap.confidenceInline', { value: Math.round(point.confidence * 100) })}
                       {point.lat === null && t('components.locationMap.noCoordinates')}
                     </span>
@@ -187,8 +190,8 @@ const LocationMap: React.FC<LocationMapProps> = ({ points, platform, available }
           </summary>
           <p className="note">{t('components.locationMap.nonRepresentativeNote')}</p>
           <ul className="image-location-list image-location-list-scroll">
-            {nonRepresentativePoints.map((point) => (
-              <li key={point.permalink}>
+            {nonRepresentativePoints.map((point, idx) => (
+                          <li key={point.permalink ?? `nonrep-${idx}`}>
                 <details className="photo-details">
                   <summary>
                     <PhotoLink point={point} t={t} onClick={(e) => e.stopPropagation()} />

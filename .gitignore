@@ -16,6 +16,7 @@ __pycache__/
 coverage.xml
 venv/
 .venv/
+.kilo/
 
 # Datos y artefactos del módulo de geolocalización por imagen (regenerables,
 # ver users/scripts/download_osv5m_spain.py y build_faiss_index.py -- no se

@@ -80,6 +80,7 @@
       "analyzedDone": "Photos analyzed"
     },
     "errorPrefix": "Couldn't generate the report: {{error}}",
+    "cancelAnalysis": "Cancel analysis",
     "backToStart": "Back to start",
     "avatarAlt": "Profile picture of {{username}}",
     "title": "Exposure report for {{prefix}}{{username}}",
