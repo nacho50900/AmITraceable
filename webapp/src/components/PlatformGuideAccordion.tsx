@@ -37,8 +37,6 @@ const PlatformGuideAccordion: React.FC<Props> = ({ activePlatform }) => {
     }
   }, [activePlatform]);
 
-  const activeItem = GUIDE_ITEMS.find(i => i.key === selectedTab) || GUIDE_ITEMS[0];
-
   return (
     <section className="platform-guide">
       <h2>{t('landing.guide.title')}</h2>
@@ -49,49 +47,64 @@ const PlatformGuideAccordion: React.FC<Props> = ({ activePlatform }) => {
           {GUIDE_ITEMS.map((item) => {
             const isActive = item.key === selectedTab;
             return (
-              <button
+              <details
                 key={item.key}
-                role="tab"
-                aria-selected={isActive}
-                className={`platform-guide-tab ${item.className} ${isActive ? 'platform-guide-tab--active' : ''}`}
-                onClick={() => setSelectedTab(item.key)}
+                className={`platform-guide-item ${item.className}`}
               >
-                <span className="platform-guide-item-icon">{item.icon}</span>
-                <span className="platform-guide-item-name">{t(`landing.guide.${item.key}.name`)}</span>
-              </button>
+                <summary
+                  id={`platform-guide-tab-${item.key}`}
+                  role="tab"
+                  aria-selected={isActive}
+                  aria-controls={`platform-guide-content-${item.key}`}
+                  tabIndex={0}
+                  className={`platform-guide-tab ${item.className} ${isActive ? 'platform-guide-tab--active' : ''}`}
+                  onClick={(event) => {
+                    // Prevent native toggle; preserve original behaviour where
+                    // clicking selects the tab but does not automatically open the <details>.
+                    event.preventDefault();
+                    setSelectedTab(item.key);
+                  }}
+                >
+                  <span className="platform-guide-item-icon">{item.icon}</span>
+                  <span className="platform-guide-item-name">{t(`landing.guide.${item.key}.name`)}</span>
+                </summary>
+
+                <div
+                  id={`platform-guide-content-${item.key}`}
+                  role="tabpanel"
+                  aria-labelledby={`platform-guide-tab-${item.key}`}
+                  className="platform-guide-item-content"
+                >
+                  {item.available ? (
+                    <>
+                      <h3>{t('landing.guide.reads')}</h3>
+                      <ul>
+                        {(t(`landing.guide.${item.key}.reads`, { returnObjects: true }) as string[]).map((line, idx) => (
+                          <li key={`${item.key}-reads-${idx}`}>{line}</li>
+                        ))}
+                      </ul>
+
+                      <h3>{t('landing.guide.doesNotRead')}</h3>
+                      <ul>
+                        {(t(`landing.guide.${item.key}.doesNotRead`, { returnObjects: true }) as string[]).map((line, idx) => (
+                          <li key={`${item.key}-doesNotRead-${idx}`}>{line}</li>
+                        ))}
+                      </ul>
+
+                      <h3>{t('landing.guide.todo')}</h3>
+                      <ol>
+                        {(t(`landing.guide.${item.key}.todo`, { returnObjects: true }) as string[]).map((line, idx) => (
+                          <li key={`${item.key}-todo-${idx}`}>{line}</li>
+                        ))}
+                      </ol>
+                    </>
+                  ) : (
+                    <p className="note">{t('landing.guide.unavailable')}</p>
+                  )}
+                </div>
+              </details>
             );
           })}
-        </div>
-
-        <div className="platform-guide-tab-content-container">
-          {activeItem.available ? (
-            <div className="platform-guide-item-content">
-              <h3>{t('landing.guide.reads')}</h3>
-              <ul>
-                {(t(`landing.guide.${activeItem.key}.reads`, { returnObjects: true }) as string[]).map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-
-              <h3>{t('landing.guide.doesNotRead')}</h3>
-              <ul>
-                {(t(`landing.guide.${activeItem.key}.doesNotRead`, { returnObjects: true }) as string[]).map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-
-              <h3>{t('landing.guide.todo')}</h3>
-              <ol>
-                {(t(`landing.guide.${activeItem.key}.todo`, { returnObjects: true }) as string[]).map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ol>
-            </div>
-          ) : (
-            <div className="platform-guide-item-content">
-              <p className="note">{t('landing.guide.unavailable')}</p>
-            </div>
-          )}
         </div>
       </div>
     </section>

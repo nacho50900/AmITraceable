@@ -1,5 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { MdLanguage, MdArrowDropDown } from 'react-icons/md';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 // Solo dos idiomas soportados por ahora (ver src/i18n): español (por
@@ -14,57 +13,43 @@ const LANGUAGES = [
 
 const LanguageSwitcher: React.FC = () => {
   const { t, i18n } = useTranslation();
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [changing, setChanging] = useState(false);
 
   // i18next-browser-languagedetector puede resolver a variantes regionales
   // (p. ej. "en-US"); nos quedamos con el prefijo de dos letras para
   // marcar la opción correcta.
   const currentLang = i18n.language?.split('-')[0] === 'en' ? 'en' : 'es';
-  const currentLangLabel = t(LANGUAGES.find(l => l.code === currentLang)?.labelKey || 'languageSwitcher.spanish');
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  const handleChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const nextLang = event.target.value as 'es' | 'en';
+    try {
+      setChanging(true);
+      await i18n.changeLanguage(nextLang);
+    } catch (err) {
+      // Log error for diagnostics; consider showing a user-visible message if desired
+      // (avoid importing a UI toast here to keep the component minimal).
+      // eslint-disable-next-line no-console
+      console.error('Error changing language:', err);
+    } finally {
+      setChanging(false);
+    }
+  };
 
   return (
-    <div className="language-switcher" ref={dropdownRef}>
-      <button 
-        type="button" 
-        className="language-switcher-button" 
-        onClick={() => setIsOpen(!isOpen)}
+    <div className="language-switcher">
+      <label htmlFor="language-selector">{t('languageSwitcher.label')}</label>
+      <select
+        id="language-selector"
         aria-label={t('languageSwitcher.label')}
-        aria-expanded={isOpen}
+        value={currentLang}
+        onChange={handleChange}
       >
-        <MdLanguage aria-hidden="true" className="language-switcher-icon" />
-        <span className="language-switcher-current">{currentLangLabel}</span>
-        <MdArrowDropDown aria-hidden="true" className="language-switcher-chevron" />
-      </button>
-      
-      {isOpen && (
-        <ul className="language-switcher-menu" role="menu">
-          {LANGUAGES.map((lang) => (
-            <li key={lang.code} role="none">
-              <button
-                role="menuitem"
-                className={`language-switcher-menu-item ${currentLang === lang.code ? 'language-switcher-menu-item--active' : ''}`}
-                onClick={() => {
-                  i18n.changeLanguage(lang.code);
-                  setIsOpen(false);
-                }}
-              >
-                {t(lang.labelKey)}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+        {LANGUAGES.map((lang) => (
+          <option key={lang.code} value={lang.code}>
+            {t(lang.labelKey)}
+          </option>
+        ))}
+      </select>
     </div>
   );
 };
