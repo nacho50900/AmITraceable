@@ -43,6 +43,7 @@ const LanguageSwitcher: React.FC = () => {
         aria-label={t('languageSwitcher.label')}
         value={currentLang}
         onChange={handleChange}
+        disabled={changing}
       >
         {LANGUAGES.map((lang) => (
           <option key={lang.code} value={lang.code}>
