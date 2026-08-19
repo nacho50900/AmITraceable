@@ -70,6 +70,47 @@ services:
     networks:
       - monitor-net
 
+  dinov2-igpu-worker:
+    build:
+      context: ./backend/igpu_worker
+    container_name: dinov2-igpu-worker
+    # profiles: igual mecanismo que prometheus/grafana más abajo -- NUNCA
+    # arranca con un `docker compose up` a secas, solo con
+    # `docker compose --profile igpu up`. Motivo distinto al de
+    # monitoring: este servicio necesita torch-directml, que solo tiene
+    # sentido en una máquina con iGPU (Intel/AMD) ADEMÁS de la GPU NVIDIA
+    # dedicada (ver ENABLE_IGPU_OFFLOAD en backend/.env) -- en cualquier
+    # otra máquina ni siquiera debería construirse la imagen. Ver el
+    # docstring de backend/igpu_worker/app.py para el motivo completo por
+    # el que esto vive en un proceso/imagen aparte del backend.
+    profiles:
+      - igpu
+    ports:
+      - "8001:8001"
+    # Paso de la iGPU al contenedor vía DirectML sobre WSL2: /dev/dxg es
+    # el dispositivo de paravirtualización de GPU que expone WSL2 (TODAS
+    # las GPUs visibles desde Windows, dedicada Y integrada -- a
+    # diferencia del bloque `deploy.resources` del backend, que es
+    # específico de NVIDIA vía nvidia-container-toolkit y solo expone la
+    # dedicada). Sin este device y sin las librerías de usuario de
+    # /usr/lib/wsl, torch_directml.device_count() devuelve 0 dentro del
+    # contenedor aunque Windows sí vea la iGPU.
+    #
+    # NOTA (Vicen): esto no está verificado todavía en una máquina real
+    # con Docker Desktop -- si GET /devices devuelve una lista vacía una
+    # vez arrancado el contenedor, empieza por comprobar que /dev/dxg
+    # existe en el host WSL2 (`ls -la /dev/dxg` dentro de la distro WSL,
+    # no en PowerShell) y que "GPU support" está activo en Docker
+    # Desktop > Settings > Resources.
+    devices:
+      - /dev/dxg:/dev/dxg
+    volumes:
+      - /usr/lib/wsl:/usr/lib/wsl
+    environment:
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib
+    networks:
+      - monitor-net
+
   prometheus:
     image: prom/prometheus
     container_name: prometheus

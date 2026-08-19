@@ -209,24 +209,35 @@ class Settings(BaseSettings):
     # Offload de DINOv2 a una GPU "compartida" (integrada en el procesador,
     # vía DirectML) cuando la máquina tiene, ADEMÁS de la GPU dedicada que
     # ya usa Moondream2, una segunda GPU distinta -- ver docstring completo
-    # de `_select_dinov2_device()` en app/vision/geolocation.py para todas
-    # las condiciones que se comprueban antes de activarse de verdad
-    # (nunca revienta nada si no se cumplen: cae al comportamiento de
-    # siempre, DINOv2 en la misma GPU dedicada que Moondream2).
+    # de `_select_igpu_worker_device_index()` en app/vision/geolocation.py
+    # para todas las condiciones que se comprueban antes de activarse de
+    # verdad (nunca revienta nada si no se cumplen: cae al comportamiento
+    # de siempre, DINOv2 en la misma GPU dedicada que Moondream2).
+    #
+    # A diferencia de un primer intento (ver historial/ADR), esto NO
+    # importa `torch-directml` dentro de este proceso: `torch-directml`
+    # fija una versión de `torch` incompatible con el build CUDA (`cu121`)
+    # que este backend ya usa para Moondream2, e instalarlo aquí mismo
+    # reinstalaría `torch` y rompería ese CUDA en el proceso (esto pasó de
+    # verdad en producción). En vez de eso, DINOv2 se despacha por HTTP a
+    # `backend/igpu_worker/`, un proceso/imagen Docker COMPLETAMENTE
+    # aparte que sí tiene `torch-directml` instalado, sin que el backend
+    # llegue a tocar esa dependencia. Ver `igpu_worker_url` justo debajo.
     #
     # DESACTIVADO por defecto (a diferencia de otros flags de este
-    # fichero) -- a propósito, NO es un descuido. `torch-directml` (el
-    # paquete que hace falta para esto, ver requirements-igpu.txt) fija
-    # una versión concreta de `torch` como dependencia, incompatible con
-    # el rango + build CUDA (`cu121`) que ya usa este proyecto para
-    # Moondream2 (ver requirements-vision.txt) -- instalarlo sin comprobar
-    # antes en la máquina real podría reinstalar `torch` con otra
-    # versión/build y romper el CUDA de Moondream2 en el proceso, que es
-    # justo el problema de contención de GPU que esto intenta evitar.
-    # Actívalo (`ENABLE_IGPU_OFFLOAD=true` en `.env`) solo después de
-    # probar `pip install torch-directml` en un entorno aparte y
-    # confirmar que no toca la versión/build de `torch` ya instalada.
+    # fichero) -- a propósito, NO es un descuido: sin el servicio
+    # `dinov2-igpu-worker` arrancado (`docker compose --profile igpu up`,
+    # ver docker-compose.yml), activar esto no hace nada salvo un intento
+    # de conexión fallido por foto (silencioso, con fallback automático).
     enable_igpu_offload: bool = False
+
+    # URL del proceso worker aislado que ejecuta DINOv2 sobre DirectML
+    # (ver backend/igpu_worker/ y el comentario de enable_igpu_offload de
+    # arriba). El valor por defecto asume Docker Compose (nombre del
+    # servicio en docker-compose.yml, red monitor-net) -- cámbialo si
+    # arrancas el worker de otra forma (p. ej. fuera de Compose, en otro
+    # host). Solo se usa si enable_igpu_offload es true.
+    igpu_worker_url: str = "http://dinov2-igpu-worker:8001"
 
 
 settings = Settings()

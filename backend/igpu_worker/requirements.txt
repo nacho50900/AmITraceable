@@ -1,0 +1,27 @@
+# Requirements de un proceso COMPLETAMENTE APARTE del backend (imagen
+# Docker propia, venv propio, nunca el mismo site-packages) -- ver el
+# docstring de app.py para el porqué: torch-directml fija una versión
+# concreta de `torch` que es incompatible con el build CUDA (`cu121`) que
+# usa el backend para Moondream2. Antes se intentó instalar torch-directml
+# DENTRO del backend (ver historial/ADR) y la reinstalación de `torch` que
+# provocó dejó el entorno del backend corrupto a medias. Este fichero NUNCA
+# debe copiarse ni instalarse en la imagen del backend (backend/Dockerfile).
+#
+# El pin exacto de torch (2.4.1) es el que exige torch-directml en el
+# momento de escribir esto -- torch-directml apenas recibe actualizaciones,
+# así que es poco probable que cambie, pero si `docker compose build` falla
+# aquí por un conflicto de versión, vuelve a comprobar en un contenedor
+# desechable (NUNCA en este ni en el del backend):
+#   docker run --rm python:3.12-slim bash -c \
+#     "pip install -q torch-directml --extra-index-url https://download.pytorch.org/whl/cu121 && pip show torch"
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.4.1
+torch-directml
+transformers>=4.40,<5.0
+pillow>=10.0,<12.0
+numpy>=1.26,<3.0
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.32,<1.0
+# Necesario para que FastAPI acepte el UploadFile multipart del endpoint
+# /embed -- sin esto, FastAPI arranca pero devuelve 422 en cada petición.
+python-multipart>=0.0.9,<1.0

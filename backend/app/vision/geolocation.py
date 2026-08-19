@@ -29,11 +29,14 @@ campo) -- pero la estimación sigue siendo información real y se sigue
 mostrando en el mapa con su confianza real, no se oculta.
 """
 import asyncio
+import io
 import logging
 import time
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import httpx
 
 from app.config import settings
 from app.models.schemas import InferredAttribute
@@ -70,20 +73,33 @@ _model = None
 _processor = None
 _index = None
 _index_meta = None
-# Dispositivo torch donde corre DINOv2 en ESTE proceso, decidido una sola
-# vez (ver `_select_dinov2_device()`) -- normalmente "cuda" (comparte la
-# GPU dedicada con Moondream2, comportamiento de siempre) o "cpu", pero
-# puede ser un dispositivo DirectML (`torch_directml.device(N)`) si
-# `settings.enable_igpu_offload=True` y la máquina tiene una segunda GPU
-# distinta de la dedicada (ver docstring de `_select_dinov2_device`).
+# Dispositivo torch LOCAL donde corre DINOv2 en ESTE proceso, decidido una
+# sola vez (ver `_select_dinov2_device()`) -- "cuda" (comparte la GPU
+# dedicada con Moondream2) o "cpu". Se usa siempre que NO se despache la
+# foto al worker de iGPU (ver `_igpu_worker_device_index` justo debajo), y
+# también como fallback si el worker falla.
 _device = None
-# Si un forward pass en DirectML falla en tiempo de ejecución (operador no
-# soportado, ver README de torch-directml -- "actively adding more
-# operators", no todo está cubierto todavía), se recuerda aquí para no
-# volver a intentarlo en cada foto: cae a CPU de forma permanente para el
-# resto de la vida del proceso, sin reintentar contra la GPU dedicada
-# (evitaría el problema de contención que se acaba de arreglar).
-_dml_failed = False
+# Índice de dispositivo DirectML en el proceso worker aislado
+# (backend/igpu_worker/) al que despachar DINOv2, o None si hay que
+# quedarse con el comportamiento de siempre (DINOv2 local, en `_device`).
+# Decidido una sola vez en `_lazy_load()` -- ver
+# `_select_igpu_worker_device_index()` para todas las condiciones. El
+# modelo NO se ejecuta en este proceso vía DirectML (a diferencia de un
+# primer intento, ver ADR/historial): torch-directml exige una versión de
+# torch incompatible con el build CUDA que este backend ya usa para
+# Moondream2, así que el offload vive en un proceso/imagen Docker aparte
+# al que se llama por HTTP.
+_igpu_worker_device_index = None
+# Si una petición al worker de iGPU falla (caído, timeout, operador de
+# DINOv2 sin soporte en DirectML todavía...), se recuerda aquí para no
+# reintentar el worker en cada foto: cae a `_device` (local) de forma
+# permanente para el resto de la vida del proceso.
+_igpu_worker_failed = False
+# Timeout HTTP contra el worker de iGPU -- generoso en la parte de
+# lectura (30s) porque la PRIMERA petición incluye la carga en frío del
+# modelo dentro del worker (ver `_load_model` en igpu_worker/app.py);
+# las siguientes son mucho más rápidas.
+_IGPU_WORKER_TIMEOUT = httpx.Timeout(5.0, read=30.0)
 
 
 @dataclass
@@ -313,115 +329,133 @@ class GeolocationOutcome:
     general_descriptions: dict[str, str] = field(default_factory=dict)
 
 
-def _select_dinov2_device():
-    """Decide en qué dispositivo torch corre DINOv2 -- llamado UNA VEZ
-    desde `_lazy_load()` y cacheado en `_device` (module-level).
-
-    Comportamiento de siempre (sin cambios si `enable_igpu_offload` está
-    desactivado, que es el valor por defecto -- ver más abajo por qué):
-    "cuda" si `torch.cuda.is_available()`, si no "cpu". DINOv2 y
-    Moondream2 comparten la misma GPU dedicada.
-
-    Offload a iGPU (opt-in, `ENABLE_IGPU_OFFLOAD=true`): idea del propio
-    usuario del proyecto -- Moondream2 (scene_analysis.py) satura la GPU
-    dedicada durante el análisis de contenido; DINOv2 es una carga mucho
-    más ligera (un embedding, no generación autorregresiva de texto) y en
-    máquinas con una GPU dedicada + otra "compartida" (integrada en el
-    procesador -- Intel/AMD), esa segunda GPU normalmente está ociosa
-    durante el análisis. Moverlo ahí libera la dedicada por completo para
-    Moondream2, en vez de competir por ella.
-
-    OJO -- limitación importante, y por qué esto es opt-in en vez de
-    intentarlo siempre por defecto: `torch.cuda` SOLO ve tarjetas NVIDIA.
-    Una gráfica integrada Intel/AMD no aparece ahí en absoluto, así que no
-    hay forma de usarla vía CUDA. La única vía es un backend distinto,
-    DirectML (paquete opcional `torch-directml`, Windows/WSL2) -- pero
-    tiene una restricción de versión de `torch` bastante estricta (fija
-    una versión exacta como dependencia, incompatible con el rango
-    `torch>=2.2,<3.0` + build CUDA cu121 que ya usa este proyecto para
-    Moondream2, ver comentario en requirements-igpu.txt). Por eso NO se
-    instala como dependencia por defecto (ver ese fichero) -- instalarlo
-    sin comprobar antes en la máquina real podría reinstalar `torch` con
-    otra versión/build y romper el CUDA de Moondream2, justo el problema
-    de contención que se acaba de arreglar. Verificar con
-    `pip install torch-directml` en un entorno de prueba ANTES de activar
-    esto en un despliegue real.
-
-    Solo se activa si TODAS estas condiciones se cumplen (todas
-    comprobadas aquí, no hace falta configurar nada más allá del
-    interruptor):
-    - `settings.enable_igpu_offload` es True (opt-in explícito).
-    - Hay una GPU NVIDIA dedicada disponible (`torch.cuda.is_available()`)
-      -- si no la hay, no tiene sentido "liberarla": Moondream2 ya
-      correría en CPU o no correría en absoluto, y mover DINOv2 a una
-      iGPU en ese caso no libera nada.
-    - El paquete `torch_directml` está instalado e importable.
-    - Hay al menos un dispositivo DirectML cuyo nombre NO coincide con el
-      de la GPU CUDA ya detectada -- si todos los dispositivos DirectML
-      visibles son la MISMA tarjeta dedicada (algunos drivers exponen la
-      GPU NVIDIA también vía DirectML), usarla ahí no libera nada, sería
-      contención con otro nombre. En máquinas con una sola GPU (sin
-      "más de una GPU", como pide el usuario del proyecto) esta condición
-      nunca se cumple y se sigue el comportamiento de siempre.
-
-    Cualquier fallo en esta detección (import, driver, lo que sea) se
-    trata como "no hay iGPU utilizable": vuelve silenciosamente al
-    comportamiento de siempre, nunca revienta el arranque.
-    """
+def _select_dinov2_device() -> str:
+    """Dispositivo torch LOCAL donde corre DINOv2 en este proceso -- "cuda"
+    si hay GPU dedicada disponible, si no "cpu". Se usa tanto cuando NO se
+    despacha al worker de iGPU como de fallback si el worker falla (ver
+    `_igpu_worker_device_index` y `_select_igpu_worker_device_index`, que
+    es donde vive ahora toda la lógica de detección de iGPU -- este
+    proceso ya no importa `torch_directml` en absoluto)."""
     import torch
 
-    cuda_available = torch.cuda.is_available()
+    return "cuda" if torch.cuda.is_available() else "cpu"
 
-    if settings.enable_igpu_offload and cuda_available:
-        try:
-            import torch_directml
 
-            cuda_name = torch.cuda.get_device_name(0)
-            device_count = torch_directml.device_count()
-            for i in range(device_count):
-                dml_name = torch_directml.device_name(i)
-                if dml_name and dml_name != cuda_name:
-                    logger.info(
-                        "ENABLE_IGPU_OFFLOAD=true: DINOv2 se ejecutara en la GPU "
-                        "compartida '%s' (DirectML, dispositivo %d) -- la GPU "
-                        "dedicada '%s' queda libre para Moondream2.",
-                        dml_name,
-                        i,
-                        cuda_name,
-                    )
-                    return torch_directml.device(i)
-            logger.info(
-                "ENABLE_IGPU_OFFLOAD=true pero no se encontro ninguna GPU DirectML "
-                "distinta de la dedicada ('%s') -- probablemente solo hay una GPU "
-                "en esta maquina. DINOv2 seguira compartiendo la GPU dedicada con "
-                "Moondream2, comportamiento de siempre.",
-                cuda_name,
-            )
-        except ImportError:
-            logger.info(
-                "ENABLE_IGPU_OFFLOAD=true pero el paquete torch_directml no esta "
-                "instalado (ver requirements-igpu.txt) -- DINOv2 seguira "
-                "compartiendo la GPU dedicada con Moondream2, comportamiento de "
-                "siempre."
-            )
-        except Exception:
-            logger.exception(
-                "ENABLE_IGPU_OFFLOAD=true pero fallo la deteccion de GPU DirectML "
-                "-- DINOv2 seguira compartiendo la GPU dedicada con Moondream2, "
-                "comportamiento de siempre. Traceback arriba para depurar."
-            )
+def _select_igpu_worker_device_index(cuda_available: bool) -> int | None:
+    """Decide si DINOv2 debe despacharse al proceso worker aislado (ver
+    backend/igpu_worker/, y su docstring para el motivo de vivir en un
+    proceso/imagen Docker completamente aparte: `torch-directml` fija una
+    versión de `torch` incompatible con el build CUDA (`cu121`) que este
+    backend ya usa para Moondream2 -- instalarlo aquí mismo reinstalaría
+    `torch` y rompería ese CUDA, cosa que ya pasó de verdad en producción).
 
-    return "cuda" if cuda_available else "cpu"
+    Llamada UNA VEZ desde `_lazy_load()`, cacheada en
+    `_igpu_worker_device_index` (module-level). Devuelve el índice de
+    dispositivo DirectML a usar en el worker, o None si hay que quedarse
+    con el comportamiento de siempre (DINOv2 local, en `_device`, junto a
+    Moondream2).
+
+    Solo se activa si TODAS estas condiciones se cumplen:
+    - `settings.enable_igpu_offload` es True (opt-in explícito).
+    - Hay una GPU NVIDIA dedicada disponible (`cuda_available`) -- si no
+      la hay, no tiene sentido "liberarla": Moondream2 ya correría en CPU
+      o no correría en absoluto, y mover DINOv2 a una iGPU en ese caso no
+      libera nada.
+    - El worker de iGPU (`settings.igpu_worker_url`) responde y expone al
+      menos un dispositivo DirectML cuyo nombre NO coincide con el de la
+      GPU CUDA ya detectada -- si todos los dispositivos DirectML
+      visibles desde el worker son la MISMA tarjeta dedicada (algunos
+      drivers la exponen también vía DirectML), usarla ahí no libera
+      nada, sería contención con otro nombre. En máquinas con una sola
+      GPU esta condición nunca se cumple y se sigue el comportamiento de
+      siempre.
+
+    Cualquier fallo en esta detección (worker no arrancado, timeout, lo
+    que sea) se trata como "no hay iGPU utilizable": vuelve
+    silenciosamente al comportamiento de siempre, nunca revienta el
+    arranque.
+    """
+    if not (settings.enable_igpu_offload and cuda_available):
+        return None
+
+    import torch
+
+    cuda_name = torch.cuda.get_device_name(0)
+    try:
+        resp = httpx.get(
+            f"{settings.igpu_worker_url}/devices", timeout=_IGPU_WORKER_TIMEOUT
+        )
+        resp.raise_for_status()
+        for dev in resp.json().get("devices", []):
+            if dev.get("name") and dev["name"] != cuda_name:
+                logger.info(
+                    "ENABLE_IGPU_OFFLOAD=true: DINOv2 se despachara al worker "
+                    "de iGPU en '%s', dispositivo DirectML %d ('%s') -- la "
+                    "GPU dedicada '%s' queda libre para Moondream2.",
+                    settings.igpu_worker_url,
+                    dev["index"],
+                    dev["name"],
+                    cuda_name,
+                )
+                return dev["index"]
+        logger.info(
+            "ENABLE_IGPU_OFFLOAD=true pero el worker de iGPU no expone "
+            "ninguna GPU DirectML distinta de la dedicada ('%s') -- "
+            "probablemente solo hay una GPU en esta maquina. DINOv2 "
+            "seguira compartiendo la GPU dedicada con Moondream2, "
+            "comportamiento de siempre.",
+            cuda_name,
+        )
+    except httpx.HTTPError:
+        logger.warning(
+            "ENABLE_IGPU_OFFLOAD=true pero no se pudo contactar con el "
+            "worker de iGPU en %s -- ¿esta arrancado el servicio "
+            "dinov2-igpu-worker? (docker compose --profile igpu up). "
+            "DINOv2 seguira compartiendo la GPU dedicada con Moondream2, "
+            "comportamiento de siempre.",
+            settings.igpu_worker_url,
+        )
+    except Exception:
+        logger.exception(
+            "ENABLE_IGPU_OFFLOAD=true pero fallo la deteccion de GPU "
+            "DirectML en el worker -- DINOv2 seguira compartiendo la GPU "
+            "dedicada con Moondream2, comportamiento de siempre. "
+            "Traceback arriba para depurar."
+        )
+
+    return None
+
+
+def _embed_via_igpu_worker(image, device_index: int) -> np.ndarray | None:
+    """Pide el embedding DINOv2 (normalizado L2) de `image` al proceso
+    worker aislado (ver backend/igpu_worker/app.py) en vez de calcularlo
+    en este proceso. Devuelve None ante cualquier fallo (worker caido,
+    timeout, operador de DINOv2 sin soporte en DirectML todavia...) -- el
+    llamador (`estimate_location_from_image`) decide entonces si
+    reintenta en local."""
+    buf = io.BytesIO()
+    image.convert("RGB").save(buf, format="JPEG")
+    buf.seek(0)
+    try:
+        resp = httpx.post(
+            f"{settings.igpu_worker_url}/embed",
+            params={"device_index": device_index},
+            files={"file": ("image.jpg", buf, "image/jpeg")},
+            timeout=_IGPU_WORKER_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return np.array(resp.json()["embedding"], dtype="float32")
+    except Exception:
+        return None
 
 
 def _lazy_load():
-    global _model, _processor, _index, _index_meta, _device
+    global _model, _processor, _index, _index_meta, _device, _igpu_worker_device_index
     if _model is not None:
         return
 
     import faiss
     import pandas as pd
-    import torch
     from transformers import AutoImageProcessor, AutoModel
 
     index_path = _INDEX_DIR / "index.faiss"
@@ -433,6 +467,11 @@ def _lazy_load():
         )
 
     _device = _select_dinov2_device()
+    _igpu_worker_device_index = _select_igpu_worker_device_index(_device == "cuda")
+    # El modelo local se carga SIEMPRE, aunque se vaya a usar el worker de
+    # iGPU -- es el fallback si el worker falla (ver
+    # `estimate_location_from_image`), y así ese fallback es inmediato
+    # (sin latencia de carga en frío) en vez de solo en el primer fallo.
     _processor = AutoImageProcessor.from_pretrained(_MODEL_NAME)
     _model = AutoModel.from_pretrained(_MODEL_NAME).to(_device).eval()
     _index = faiss.read_index(str(index_path))
@@ -448,7 +487,7 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
     Devuelve None si el índice no está construido (módulo opcional) o si
     la imagen no se puede procesar.
     """
-    global _dml_failed, _device
+    global _igpu_worker_failed
 
     try:
         _lazy_load()
@@ -467,44 +506,37 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
     if gps is not None:
         return _estimate_from_exact_coordinates(*gps)
 
-    import torch
+    embedding = None
 
-    try:
-        with torch.no_grad():
-            inputs = _processor(images=image.convert("RGB"), return_tensors="pt").to(_device)
-            outputs = _model(**inputs)
-            embedding = outputs.last_hidden_state[:, 0, :].cpu().numpy()[0]
-            embedding = embedding / (np.linalg.norm(embedding) + 1e-8)
-    except Exception:
-        # Si el dispositivo es DirectML (offload a iGPU, ver
-        # _select_dinov2_device) y esto es la PRIMERA foto que falla,
-        # asume que es un operador de DINOv2 sin soporte en DirectML (ver
-        # su docstring: "actively adding more operators", no todo está
-        # cubierto) en vez de un problema de esta imagen en concreto --
-        # cae a CPU de forma PERMANENTE para el resto del proceso (nunca
-        # a la GPU dedicada: sería reintroducir la contención con
-        # Moondream2 que este offload existe para evitar) y reintenta
-        # esta misma foto una vez en CPU antes de rendirse.
-        is_dml_device = bool(_device) and not isinstance(_device, str)
-        if is_dml_device and not _dml_failed:
-            logger.exception(
-                "Fallo al ejecutar DINOv2 en la GPU compartida (DirectML) -- "
-                "probablemente un operador sin soporte. A partir de ahora DINOv2 "
-                "correra en CPU para el resto del proceso (nunca en la GPU "
-                "dedicada, para no competir con Moondream2). Traceback arriba "
-                "para depurar cual operador ha fallado."
+    # Si ENABLE_IGPU_OFFLOAD detectó un dispositivo DirectML libre (ver
+    # _select_igpu_worker_device_index en _lazy_load), intenta despachar
+    # esta foto al worker aislado ANTES de tocar el modelo local.
+    if _igpu_worker_device_index is not None and not _igpu_worker_failed:
+        embedding = _embed_via_igpu_worker(image, _igpu_worker_device_index)
+        if embedding is None:
+            # Primer fallo con el worker (caído, timeout, operador de
+            # DINOv2 sin soporte en DirectML todavía...): se asume que no
+            # es fiable y se cae al modelo local de forma PERMANENTE para
+            # el resto del proceso -- NO se reintenta el worker en cada
+            # foto siguiente (evitaría pagar el timeout una y otra vez).
+            logger.warning(
+                "Fallo al despachar DINOv2 al worker de iGPU (%s) -- a "
+                "partir de ahora esta foto y las siguientes se procesaran "
+                "localmente en la GPU dedicada junto a Moondream2.",
+                settings.igpu_worker_url,
             )
-            _dml_failed = True
-            _device = "cpu"
-            try:
-                with torch.no_grad():
-                    inputs = _processor(images=image.convert("RGB"), return_tensors="pt").to(_device)
-                    outputs = _model.to(_device)(**inputs)
-                    embedding = outputs.last_hidden_state[:, 0, :].cpu().numpy()[0]
-                    embedding = embedding / (np.linalg.norm(embedding) + 1e-8)
-            except Exception:
-                return None
-        else:
+            _igpu_worker_failed = True
+
+    if embedding is None:
+        import torch
+
+        try:
+            with torch.no_grad():
+                inputs = _processor(images=image.convert("RGB"), return_tensors="pt").to(_device)
+                outputs = _model(**inputs)
+                embedding = outputs.last_hidden_state[:, 0, :].cpu().numpy()[0]
+                embedding = embedding / (np.linalg.norm(embedding) + 1e-8)
+        except Exception:
             return None
 
     similarities, indices = _index.search(embedding.reshape(1, -1).astype("float32"), k)

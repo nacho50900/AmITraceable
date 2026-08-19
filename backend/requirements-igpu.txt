@@ -1,48 +1,14 @@
-# EXPERIMENTAL, opt-in -- NO se instala en el build por defecto (no está
-# referenciado desde el Dockerfile, a diferencia de requirements.txt y
-# requirements-vision.txt). Ver Settings.enable_igpu_offload en
-# app/config.py y el docstring de _select_dinov2_device() en
-# app/vision/geolocation.py para el porqué completo.
+# MOVIDO a backend/igpu_worker/requirements.txt.
 #
-# Objetivo: cuando la máquina tiene, además de la GPU dedicada que ya usa
-# Moondream2 (scene_analysis.py) vía CUDA, una segunda GPU "compartida"
-# (integrada en el procesador -- Intel/AMD), DINOv2 (más ligero) puede
-# correr ahí en vez de competir por la GPU dedicada. torch.cuda NO ve
-# GPUs integradas Intel/AMD en absoluto (son un fabricante distinto) --
-# la única vía es un backend diferente, DirectML (Windows/WSL2).
+# torch-directml ya NO se instala en el backend en absoluto (ver el
+# docstring de backend/igpu_worker/app.py para el motivo completo:
+# torch-directml exige una versión de torch incompatible con el build
+# CUDA/cu121 que este backend usa para Moondream2 -- instalarlo aquí
+# reinstalaba torch y rompía ese CUDA, esto pasó de verdad en
+# producción). El offload a iGPU vive ahora en un proceso/imagen Docker
+# completamente aparte (backend/igpu_worker/), al que este backend habla
+# por HTTP -- ver ENABLE_IGPU_OFFLOAD e IGPU_WORKER_URL en
+# app/config.py.
 #
-# ADVERTENCIA IMPORTANTE, LEER ANTES DE INSTALAR: torch-directml fija una
-# versión CONCRETA de `torch` como dependencia (a fecha de escribir esto:
-# torch==2.4.1 en Windows nativo, hasta 2.3.1 en la variante WSL2) --
-# incompatible con el rango `torch>=2.2,<3.0` + build CUDA cu121 que ya
-# fija requirements-vision.txt para Moondream2. Si simplemente instalas
-# esto DESPUÉS de requirements-vision.txt (o en el mismo `pip install`),
-# pip puede reinstalar `torch` con otra versión/build (posiblemente
-# SOLO-CPU, si no se especifica el índice CUDA también para esa versión
-# exacta) -- rompiendo el CUDA que Moondream2 necesita, justo el problema
-# de contención de GPU que esto existe para evitar.
-#
-# Antes de activar esto en un despliegue real:
-#   1. Prueba `pip install torch-directml` en un venv APARTE (no el
-#      entorno/imagen que ya tiene torch+cu121 instalado) y comprueba qué
-#      versión de torch instala (`pip show torch`).
-#   2. Si esa versión no coincide con la ya fijada en
-#      requirements-vision.txt, hace falta reconciliar ambas ANTES de
-#      instalar los dos paquetes en el mismo entorno -- puede que haga
-#      falta fijar requirements-vision.txt a la versión exacta que exige
-#      torch-directml, y volver a verificar que Moondream2 sigue cargando
-#      en GPU con esa versión (docker compose exec backend python
-#      /app/data/test_moondream.py).
-#   3. Solo entonces añadir esta línea al Dockerfile (mismo patrón que
-#      requirements-vision.txt con WITH_GEOLOCATION) y activar
-#      ENABLE_IGPU_OFFLOAD=true en .env.
-#
-# torch-directml funciona en Windows nativo y en WSL2 (Windows 11) -- ver
-# https://learn.microsoft.com/windows/ai/directml/pytorch-windows y
-# https://learn.microsoft.com/windows/ai/directml/pytorch-wsl. Si el
-# backend corre dentro de un contenedor Linux vía Docker Desktop/WSL2
-# (como en este proyecto), la GPU integrada también necesita pasarse al
-# contenedor -- comprobar si hace falta algo más allá de la reserva de
-# GPU NVIDIA ya presente en docker-compose.yml (p. ej. montar /dev/dxg)
-# antes de asumir que basta con instalar el paquete Python.
-torch-directml
+# Este fichero se deja vacío a propósito, solo como puntero para quien
+# busque por costumbre en la ruta antigua.
