@@ -118,6 +118,7 @@
       "estado_civil_ia_simbolica": "Inferred by AI from symbolic or indirect content (emojis, dates, recurring mentions...), not from an explicit self-declaration: lower reliability than the rest of the traits on this list.",
       "estado_civil_ia_simbolica_exact_combo": "Inferred by AI from symbolic or indirect content (emojis, dates, recurring mentions...), not from an explicit self-declaration: lower reliability than the rest of the traits on this list. Since sex is also known, the EXACT percentage for that specific combination is used (marital status conditioned on sex, real INE cross-table), not an approximation multiplying independent proportions.",
       "edad_repartida_uniformemente": "Estimated by evenly spreading the INE proportion across five-year brackets among the ages within each bracket (there's no year-by-year table available directly).",
+      "edad_estimada_por_tramo": "Age bracket estimated by AI from indirect clues in the text (graduation year, the school/college year they mention being in, generational references...), not from an explicit self-declaration: lower reliability. The INE's five-year population bracket is used instead of an exact year, since this is a less precise estimate than a self-declared age.",
       "location_no_population_data": "There's no reference population data for this municipality/province in the current table.",
       "location_note_base": "Assumes an age/sex distribution similar to the national average (approximation).",
       "location_note_imagen": "Assumes an age/sex distribution similar to the national average (approximation). Location estimated from an image, not from self-declared text: lower reliability than an explicit self-declaration.",
@@ -233,6 +234,7 @@
     "populationNarrowing": {
       "noData": "No explicit statements about you (age, sex, location, education...) were detected in your public text, so there's no population estimate to show here.",
       "reductionBadgeTitle": "Percentage of the population remaining after the previous trait in the chain that this trait, on its own, rules out.",
+      "confidenceBadgeTitle": "The AI's approximate confidence in this indirect estimate (not an exact self-declaration).",
       "risk": {
         "bajo": "Low",
         "medio": "Medium",
@@ -245,14 +247,16 @@
         "imagen": "Image",
         "ia": "AI (text)",
         "ia_nombre": "AI (name)",
-        "ia_simbolica": "AI (symbolic)"
+        "ia_simbolica": "AI (symbolic)",
+        "ia_estimada": "AI (estimated)"
       },
       "sourceTitle": {
         "texto": "Detected in text you wrote yourself",
         "imagen": "Estimated from an image (less reliable than a self-declaration in text)",
         "ia": "Detected by an AI model in text/bio that you wrote yourself",
         "ia_nombre": "Estimated from the cultural convention of your account's public name, not from something you wrote -- lower reliability",
-        "ia_simbolica": "Inferred by AI from symbolic or indirect content (emojis, dates, recurring mentions...), not from an explicit self-declaration -- lower reliability"
+        "ia_simbolica": "Inferred by AI from symbolic or indirect content (emojis, dates, recurring mentions...), not from an explicit self-declaration -- lower reliability",
+        "ia_estimada": "Estimated by AI from indirect clues in the text, not from an explicit self-declaration -- lower reliability"
       },
       "combinedSummaryPrefix": "In Spain there are",
       "combinedSummarySuffix": "people who share your traits (all the ones detected, combined at once: sex, age, location, education, occupation, marital status -- whichever could be estimated).",

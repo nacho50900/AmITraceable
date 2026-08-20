@@ -137,6 +137,16 @@ describe('PopulationNarrowingTable', () => {
     expect(screen.queryByText(/^-.*%$/)).not.toBeInTheDocument();
   });
 
+  test('confidence presente (tramo de edad estimado por IA): muestra el badge de confianza aproximada', () => {
+    renderTable([makeStep({ category: 'edad', source: 'ia_estimada', confidence: 0.6 })]);
+    expect(screen.getByText('~60%')).toBeInTheDocument();
+  });
+
+  test('confidence ausente: no muestra el badge de confianza', () => {
+    renderTable([makeStep()]);
+    expect(screen.queryByText(/^~\d+%$/)).not.toBeInTheDocument();
+  });
+
   describe('resumen combinado (el único pictograma grande de la sección)', () => {
     test('remainingPopulationAllTraits null: no se muestra ningún resumen combinado', () => {
       const { container } = renderTable([makeStep()], { remainingPopulationAllTraits: null });

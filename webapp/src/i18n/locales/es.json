@@ -118,6 +118,7 @@
       "estado_civil_ia_simbolica": "Inferido por IA a partir de contenido simbólico o indirecto (emojis, fechas, menciones recurrentes...), no de una autodeclaración explícita: fiabilidad menor que el resto de rasgos de esta lista.",
       "estado_civil_ia_simbolica_exact_combo": "Inferido por IA a partir de contenido simbólico o indirecto (emojis, fechas, menciones recurrentes...), no de una autodeclaración explícita: fiabilidad menor que el resto de rasgos de esta lista. Al conocerse también el sexo, se usa el porcentaje EXACTO de esa combinación concreta (estado civil condicionado a sexo, tabla real del INE), no una aproximación multiplicando proporciones independientes.",
       "edad_repartida_uniformemente": "Estimado repartiendo uniformemente la proporción de INE por tramos quinquenales entre las edades de cada tramo (no hay tabla año a año descargable directamente).",
+      "edad_estimada_por_tramo": "Tramo de edad estimado por IA a partir de pistas indirectas del texto (años de graduación, curso que menciona estar haciendo, referencias generacionales...), no de una autodeclaración explícita: fiabilidad menor. Se usa el tramo quinquenal de población del INE en vez de un año exacto, por ser una estimación menos precisa que una edad autodeclarada.",
       "location_no_population_data": "No hay dato de población de referencia para este municipio/provincia en la tabla actual.",
       "location_note_base": "Asume distribución de edad/sexo similar a la media nacional (aproximación).",
       "location_note_imagen": "Asume distribución de edad/sexo similar a la media nacional (aproximación). Ubicación estimada a partir de una imagen, no de texto autodeclarado: menor fiabilidad que una autodeclaración explícita.",
@@ -233,6 +234,7 @@
     "populationNarrowing": {
       "noData": "No se han detectado declaraciones explícitas sobre ti (edad, sexo, ubicación, estudios...) en tu texto público, así que no hay una estimación de población que mostrar aquí.",
       "reductionBadgeTitle": "Porcentaje de la población que quedaba tras el rasgo anterior de la cadena que este rasgo, por sí solo, deja fuera.",
+      "confidenceBadgeTitle": "Confianza aproximada de la IA en esta estimación indirecta (no es una autodeclaración exacta).",
       "risk": {
         "bajo": "Bajo",
         "medio": "Medio",
@@ -245,14 +247,16 @@
         "imagen": "Imagen",
         "ia": "IA (texto)",
         "ia_nombre": "IA (nombre)",
-        "ia_simbolica": "IA (simbólico)"
+        "ia_simbolica": "IA (simbólico)",
+        "ia_estimada": "IA (estimado)"
       },
       "sourceTitle": {
         "texto": "Detectado en texto que escribiste tú mismo/a",
         "imagen": "Estimado a partir de una imagen (menor fiabilidad que una autodeclaración de texto)",
         "ia": "Detectado por un modelo de IA en texto/biografía que escribiste tú mismo/a",
         "ia_nombre": "Estimado por convención cultural del nombre público de tu cuenta, no por algo que hayas escrito -- fiabilidad menor",
-        "ia_simbolica": "Inferido por IA a partir de contenido simbólico o indirecto (emojis, fechas, menciones recurrentes...), no de una autodeclaración explícita -- fiabilidad menor"
+        "ia_simbolica": "Inferido por IA a partir de contenido simbólico o indirecto (emojis, fechas, menciones recurrentes...), no de una autodeclaración explícita -- fiabilidad menor",
+        "ia_estimada": "Estimado por IA a partir de pistas indirectas del texto, no de una autodeclaración explícita -- fiabilidad menor"
       },
       "combinedSummaryPrefix": "En España hay",
       "combinedSummarySuffix": "personas que comparten tus rasgos (todos los detectados, combinados a la vez: sexo, edad, ubicación, estudios, ocupación, estado civil -- los que se hayan podido estimar).",

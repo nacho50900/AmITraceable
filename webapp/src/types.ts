@@ -37,7 +37,7 @@ export interface PopulationEstimate {
   remaining_population: number | null;
   risk_level: 'bajo' | 'medio' | 'alto' | 'critico' | 'no_estimable';
   evidence: string[];
-  source: 'texto' | 'imagen' | 'ia' | 'ia_nombre' | 'ia_simbolica';
+  source: 'texto' | 'imagen' | 'ia' | 'ia_nombre' | 'ia_simbolica' | 'ia_estimada';
   note: string | null;
   // Código estable (ver app/note_codes.py) para traducir `note` sin
   // parsear la frase en español; `note` se conserva para logs/descarga
@@ -60,6 +60,11 @@ export interface PopulationEstimate {
   // app/scoring/k_anonymity.py. null en pasos no estimables y en los
   // standalone (universidad/empresa).
   reduction_percent: number | null;
+  // Confianza (0-1) declarada por la IA para una estimación INDIRECTA,
+  // cuando aplique (de momento, solo el tramo de edad estimado -- ver
+  // app/scoring/k_anonymity.py::_step_edad). null para el resto de pasos,
+  // incluidas las autodeclaraciones exactas.
+  confidence?: number | null;
 }
 
 export interface ImageLocationPoint {

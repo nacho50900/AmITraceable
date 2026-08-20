@@ -37,11 +37,29 @@ def load_log(path: Path = _LOG_PATH) -> pd.DataFrame:
 
 def summarize(df: pd.DataFrame) -> pd.DataFrame:
     """Agrupa por la configuración usada (núcleos, concurrencia, si
-    Moondream2 estaba activo) y calcula el tiempo medio por foto y el
-    nº de análisis que aportan cada combinación -- para distinguir una
-    media fiable (muchas observaciones) de una anecdótica (una sola)."""
+    Moondream2 estaba activo, si el worker de iGPU se llegó a usar de
+    verdad -- ver igpu_offload_used en performance_log.py, no es lo mismo
+    que ENABLE_IGPU_OFFLOAD=true en la config: un análisis con el flag
+    activado pero el worker caído sale con igpu_offload_used=False, y por
+    tanto en el mismo grupo que los análisis sin offload) y calcula el
+    tiempo medio por foto y el nº de análisis que aportan cada
+    combinación -- para distinguir una media fiable (muchas
+    observaciones) de una anecdótica (una sola)."""
+    # Logs de antes de que existiera este campo (columna ausente) se
+    # tratan como "sin offload" -- es la interpretación correcta, ya que
+    # el worker de iGPU no existía todavía cuando se generaron.
+    if "igpu_offload_used" not in df.columns:
+        df["igpu_offload_used"] = False
+    df["igpu_offload_used"] = df["igpu_offload_used"].fillna(False)
+
     grouped = df.groupby(
-        ["cpu_count", "configured_concurrency", "threads_per_inference", "enable_scene_analysis"],
+        [
+            "cpu_count",
+            "configured_concurrency",
+            "threads_per_inference",
+            "enable_scene_analysis",
+            "igpu_offload_used",
+        ],
         as_index=False,
     ).agg(
         analisis=("total_photos", "count"),
@@ -68,8 +86,8 @@ def main() -> None:
     print(
         f"\nMás rápida hasta ahora: concurrencia={int(best.configured_concurrency)} "
         f"({int(best.threads_per_inference)} hilos/inferencia) en máquinas de "
-        f"{int(best.cpu_count)} núcleos -> {best.media_seg_por_foto:.2f}s/foto de media "
-        f"({int(best.analisis)} análisis)."
+        f"{int(best.cpu_count)} núcleos, offload iGPU={'sí' if best.igpu_offload_used else 'no'} "
+        f"-> {best.media_seg_por_foto:.2f}s/foto de media ({int(best.analisis)} análisis)."
     )
     if (summary["analisis"] < 3).any():
         print(

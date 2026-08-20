@@ -161,19 +161,36 @@ _STRUCTURED_QUERY = (
     # explícita más abajo, aparte de la general del final del prompt.
     "Analiza esta imagen y responde EXACTAMENTE en este formato de cuatro líneas, sin nada más, "
     "como en este ejemplo (sustituyendo los valores por los reales de ESTA imagen):\n"
-    # PERSONAS usa aquí el mismo valor "nulo"/negativo que los otros tres
-    # campos (ninguno/no/ninguno) -- antes decía "varias", el único valor
-    # "positivo" de los cuatro del ejemplo. Visto en producción: Moondream2
-    # marcaba "varias" de forma sistemática incluso en fotos con una sola
-    # persona, un fallo de instruction-following ya documentado en este
-    # mismo módulo para VQA pequeños (copian el ejemplo en vez de
-    # sustituirlo, ver la nota sobre _STRUCTURED_QUERY más abajo) -- que
-    # con "varias" como ejemplo sesga sistemáticamente hacia ese valor
-    # cuando el modelo "se confunde" y copia en vez de razonar sobre esta
-    # imagen en concreto. "ninguna" es coherente con el resto de ejemplos y
-    # no favorece a priori ninguno de los otros dos valores reales (una
-    # persona / varias).
-    "PERSONAS: ninguna\n"
+    # HISTORIAL DEL SESGO EN PERSONAS (ver test de regresión más abajo en
+    # este módulo -- test_scene_analysis.py::TestParsePersonas -- y el
+    # registro de trabajo): el ejemplo de este campo pasó por DOS
+    # intentos previos, ambos con el mismo fallo de fondo.
+    #
+    # 1) Originalmente decía "PERSONAS: varias" (el único valor
+    # "positivo" del bloque). En producción, Moondream2 lo marcaba de
+    # forma sistemática incluso con una sola persona -- el fallo de
+    # instruction-following ya documentado en este módulo para VQA
+    # pequeños: copian el ejemplo en vez de razonar sobre la imagen real.
+    #
+    # 2) Se cambió a "PERSONAS: ninguna", asumiendo que el problema era
+    # "varias" concretamente (el valor atípico entre los cuatro campos
+    # del ejemplo). Error de diagnóstico: el problema no era QUÉ valor
+    # se copiaba, sino que se copiaba CUALQUIERA que fuera un valor
+    # VÁLIDO -- así que el sesgo simplemente se trasladó de "varias" a
+    # "ninguna" (visto en producción: fotos con varias personas
+    # mostrando "Personas en la foto: ninguna" de forma sistemática).
+    #
+    # Solución adoptada: el ejemplo usa "dos", que NO pertenece al
+    # vocabulario válido de PERSONAS ('ninguna'/'una'/'varias', ver
+    # `_parse_personas`). Si el modelo lo copia igualmente por
+    # confusión, `_parse_personas` lo descarta (no es una de las tres
+    # opciones) y el campo simplemente no se muestra -- degradación
+    # segura (dato ausente) en vez de un dato incorrecto pero plausible
+    # como antes. Mantiene el resto de campos del ejemplo con su valor
+    # "negativo"/por defecto porque no hay evidencia de que sufran el
+    # mismo problema (ver más abajo, "uno" en AFICION es un fallo
+    # distinto, aún sin diagnosticar con datos reales).
+    "PERSONAS: dos\n"
     "AFICION: ninguno\n"
     "PAREJA: no\n"
     "TEXTO_VISIBLE: ninguno\n\n"
@@ -182,7 +199,8 @@ _STRUCTURED_QUERY = (
     "similar, p. ej. una pareja o un grupo).\n"
     "AFICION solo puede valer: una afición, actividad, deporte, instrumento musical o fandom "
     "concreto que sugiera la imagen, en pocas palabras, o la palabra 'ninguno' si no hay nada "
-    "específico.\n"
+    "específico. AFICION NUNCA es un número ni una cantidad de personas -- eso va en PERSONAS, "
+    "no aquí.\n"
     "PAREJA solo puede valer: 'si' si la imagen muestra a dos personas besándose, en un abrazo "
     "claramente romántico, o cogidas de la mano en un contexto de pareja, o 'no' en cualquier "
     "otro caso.\n"
@@ -763,10 +781,10 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
     de la propia explicación del prompt (visto en producción); reconstruir
     desde valores parseados descarta esa cola sin depender de acertar el
     `max_tokens` exacto cada vez; (b) solo interesa mostrar señales
-    POSITIVAS/informativas -- los valores negativos por defecto (afición
-    ninguna, sin pareja, sin texto visible) no aportan nada y solo
-    acumulan líneas vacías si se muestran siempre. None si no hubo NADA
-    informativo que mostrar.
+    POSITIVAS/informativas -- los valores negativos por defecto (personas
+    ninguna, afición ninguna, sin pareja, sin texto visible) no aportan
+    nada y solo acumulan líneas vacías si se muestran siempre. None si no
+    hubo NADA informativo que mostrar.
 
     `descripcion_general` es directamente la respuesta de `_CAPTION_QUERY`
     (`caption`, ya limpia) -- pensada para mostrarse tal cual como pie de
@@ -899,6 +917,26 @@ def _parse_descripcion(answer: str) -> str | None:
     return valor
 
 
+# Palabras que NUNCA son una afición real por sí solas -- si AFICION
+# devuelve exactamente una de estas, es casi con toda seguridad un fallo
+# de generación (p. ej. eco/confusión con el vocabulario de PERSONAS,
+# como el ejemplo "PERSONAS: dos" de más arriba, o con el propio conteo
+# de personas de la imagen) y no una afición genuina. Visto en producción
+# (Comandante, agosto 2026): "Posible afición o interés: uno" en fotos
+# donde no había ninguna pista de afición real -- se descarta por
+# precaución en vez de mostrarlo como si fuera una señal fiable. Lista
+# deliberadamente corta y literal (números en palabra hasta diez más sus
+# formas más comunes) en vez de un intento de detectar "cualquier
+# número" con regex, que podría descartar de más (p. ej. una afición
+# real como "coleccionar cromos del Mundial 2010" contiene un número
+# pero SÍ es una afición legítima).
+_AFICION_INVALID_VALUES = frozenset({
+    "cero", "uno", "una", "dos", "tres", "cuatro", "cinco", "seis",
+    "siete", "ocho", "nueve", "diez",
+    "ninguna", "varias", "persona", "personas",
+})
+
+
 def _parse_personas(answer: str) -> str | None:
     match = _PERSONAS_RE.search(answer)
     if match is None:
@@ -917,12 +955,18 @@ def _parse_aficion_raw(answer: str) -> str | None:
     un InferredAttribute atribuido a la cuenta analizada) y
     `_build_clean_summary` (que solo quiere mostrar "qué vio la IA" en el
     frontend, sin atribuírselo a nadie como rasgo personal -- ahí la
-    cautela de atribución no aplica)."""
+    cautela de atribución no aplica).
+
+    Descarta también valores que son claramente un fallo de generación
+    cruzada con PERSONAS en vez de una afición real -- ver
+    `_AFICION_INVALID_VALUES`."""
     match = _AFICION_RE.search(answer)
     if match is None:
         return None
     valor = match.group(1).strip().rstrip(".")
     if not valor or valor.lower() in ("ninguno", "ninguna", "none", "n/a"):
+        return None
+    if valor.lower() in _AFICION_INVALID_VALUES:
         return None
     return valor
 
@@ -1025,20 +1069,31 @@ def _build_clean_summary(
     "Indicio de contexto de pareja: sí", "Posible afición: guitarra") --
     los valores negativos por defecto (afición ninguna, sin pareja, sin
     texto visible) no aportan nada al usuario y solo acumulan líneas
-    vacías si se muestran siempre. PERSONAS es la excepción: se muestra
-    siempre que se pudo parsear (incluido 'ninguna'), porque da contexto
-    básico en una sola línea -- no es una "señal negativa" en el mismo
-    sentido que las otras tres.
+    vacías si se muestran siempre. PERSONAS sigue el mismo criterio:
+    'una'/'varias' sí se muestran (dan contexto básico sobre la foto),
+    pero 'ninguna' se trata como el resto de valores negativos y se
+    oculta. Antes 'ninguna' era la única excepción que sí se mostraba
+    siempre -- se quitó esa excepción (Comandante, agosto 2026) tras el
+    sesgo documentado en `_STRUCTURED_QUERY` (Moondream2 copiando el
+    valor de ejemplo del prompt en vez de contar la imagen real, visto
+    primero con "varias" y después con "ninguna"): aunque el ejemplo ya
+    no usa un valor válido como placeholder (ver comentario en
+    `_STRUCTURED_QUERY`), tratar 'ninguna' igual que el resto de valores
+    negativos por defecto es más consistente con el resto del proyecto
+    ("ante la duda, no mostrar") y limita el impacto visible si ese sesgo
+    volviera a aparecer -- un 'ninguna' incorrecto oculto no confunde al
+    usuario, uno mostrado sí.
 
     La descripción general (frase libre, `descripcion_general` en
     `analyze_image_content`) NO se repite aquí -- el frontend ya la
     muestra aparte, destacada, justo encima de este bloque.
 
-    None si no hay NADA que mostrar (PERSONAS no se pudo parsear Y las
-    otras tres son negativas) -- caso raro pero posible si el modelo se
-    desvió del formato por completo."""
+    None si no hay NADA que mostrar (PERSONAS es 'ninguna' o no se pudo
+    parsear, Y las otras tres son negativas) -- caso frecuente ahora que
+    'ninguna' ya no se muestra por defecto, no solo un caso raro de
+    formato inesperado."""
     lines = []
-    if personas is not None:
+    if personas in ("una", "varias"):
         lines.append(f"Personas en la foto: {personas}")
     if aficion_raw:
         lines.append(f"Posible afición o interés: {aficion_raw}")

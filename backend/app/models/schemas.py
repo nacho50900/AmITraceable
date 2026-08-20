@@ -133,6 +133,12 @@ class PopulationEstimate(BaseModel):
     # de España) -- ver scoring/k_anonymity.py. None en pasos no estimables
     # y en los standalone (universidad/empresa).
     reduction_percent: float | None = None
+    # Confianza (0-1) declarada por la IA para una estimación INDIRECTA,
+    # cuando aplique (de momento, solo el tramo de edad estimado -- ver
+    # app/scoring/k_anonymity.py::_step_edad). None para el resto de pasos,
+    # incluidas las autodeclaraciones exactas (esas no llevan confianza:
+    # o se detectan literalmente, o no se detectan).
+    confidence: float | None = None
 
 
 class ImageLocationPoint(BaseModel):

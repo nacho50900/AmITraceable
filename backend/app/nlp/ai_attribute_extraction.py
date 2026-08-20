@@ -93,6 +93,7 @@ from app.data.ine_reference import (
     OCCUPATION_DISTRIBUTION,
     PROVINCE_POPULATION,
     STUDIES_DISTRIBUTION,
+    age_bin,
     resolve_autonomous_community,
 )
 from app.models.schemas import InferredAttribute, SocialPost
@@ -116,12 +117,26 @@ _HOUSEHOLD_VALUES = ("unipersonal", "pareja_sin_hijos", "pareja_con_hijos", "mon
 # prompt ya pide un máximo de 5 -- por si el modelo no lo respeta al pie de
 # la letra, no se toma "gratis" lo que devuelva de más.
 _MAX_SOFT_INFERENCES = 5
+# Confianza mínima (0-1) para aceptar la estimación INDIRECTA de tramo de
+# edad ("edad_estimada", ver _set_edad_rango). Por debajo de este umbral no
+# se añade nada -- ni tramo ni edad -- en vez de mostrar un dato de baja
+# fiabilidad como si fuera sólido. Deliberadamente más alto que el rango
+# 0.3-0.7 que se acepta sin filtrar para `inferencias_blandas` genéricas,
+# porque esto SÍ participa en el cálculo de k-anonimato (afecta al número
+# de personas que se muestra en el informe), no solo en la lista
+# informativa de atributos inferidos.
+_AGE_RANGE_MIN_CONFIDENCE = 0.5
 # Todos los campos que puede rellenar este módulo, en el mismo orden que
 # `DemographicFindings`, usado por `merge_findings`.
 _ALL_FIELDS = (
     "sexo", "edad", "provincia", "municipio", "comunidad_autonoma",
     "estudios", "ocupacion", "universidad", "empresa",
     "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
+    # Estimación INDIRECTA de tramo de edad (ver docstring del campo en
+    # DemographicFindings) -- solo la rellena la IA, nunca la regex, pero
+    # reutiliza el mismo mecanismo de merge (copiar si regex_findings.edad
+    # sigue en None) para no duplicar lógica.
+    "edad_rango",
     # A diferencia de los anteriores (autodeclaraciones explícitas que la
     # regex TAMBIÉN podría detectar), estos SOLO los rellena la IA -- pero
     # reutilizan el mismo mecanismo de merge (copiar si regex_findings lo
@@ -141,7 +156,9 @@ _SYSTEM_PROMPT = (
     "nunca inferencias o suposiciones tuyas, EXCEPTO en los campos marcados como "
     "'simbólico/indirecto' más abajo. Responde EXCLUSIVAMENTE con un JSON con esta "
     "forma exacta, sin texto adicional ni backticks:\n"
-    '{"sexo": "hombre"|"mujer"|null, "edad": <entero>|null, "provincia": <string>|null, '
+    '{"sexo": "hombre"|"mujer"|null, "edad": <entero>|null, '
+    '"edad_estimada": {"edad_aproximada": <entero>|null, "confianza": <0-1>}|null, '
+    '"provincia": <string>|null, '
     '"municipio": <string>|null, "comunidad_autonoma": <string>|null, "estudios": <string>|null, '
     '"ocupacion": <string>|null, "universidad": <string>|null, "empresa": <string>|null, '
     '"nacionalidad": "espanola"|"extranjera"|null, '
@@ -214,6 +231,20 @@ _SYSTEM_PROMPT = (
     "Devuelve el nombre de la religión en minúscula ('judaismo', 'islam', 'catolicismo', "
     "'cristianismo', 'budismo', 'hinduismo', 'ateismo', 'agnosticismo'...). "
     "Usa null si no hay ninguna señal clara.\n"
+    "'edad_estimada' es DISTINTO de 'edad': úsalo SOLO cuando 'edad' se haya quedado en null "
+    "porque la persona NO ha declarado su edad literalmente, pero el texto SÍ da alguna pista "
+    "INDIRECTA de la que se pueda deducir razonablemente en qué edad podría estar -- por "
+    "ejemplo, menciona un año de graduación o de inicio de estudios/trabajo, en qué curso "
+    "está, referencias a hitos vitales (jubilación próxima, hijos adultos, empezar la "
+    "universidad este año), o jerga/referencias claramente generacionales. Devuelve tu MEJOR "
+    "ESTIMACIÓN numérica en 'edad_aproximada' (no hace falta acertar el año exacto, basta con "
+    "una edad plausible dentro de ese rango) y en 'confianza' un número entre 0 y 1 que refleje "
+    "honestamente cuánto peso tiene la pista -- sé conservador: usa valores por debajo de 0.6 "
+    "salvo que la pista sea casi tan clara como una declaración explícita (p. ej. dice el año "
+    "exacto en que nació, o un cálculo de años sin ambigüedad). Si no hay ninguna pista "
+    "razonable, usa null en 'edad_aproximada' (o directamente null en todo el objeto) antes que "
+    "adivinar. NUNCA reutilices esto para razonar sobre la edad de otra persona mencionada en el "
+    "texto, solo sobre la propia persona.\\n"
     "'inferencias_blandas' es DISTINTO de todo lo anterior: aquí SÍ debes razonar, como lo "
     "haría una persona observadora, sobre contenido SIMBÓLICO O INDIRECTO -- combinaciones "
     "de emojis, fechas sueltas, estilo de escritura, jerga -- que sugieran algo sobre la vida "
@@ -523,6 +554,47 @@ def _set_edad(findings: DemographicFindings, parsed: dict, evidence_map: dict) -
     _set_evidence(findings, "edad", evidence_map)
 
 
+def _set_edad_rango(findings: DemographicFindings, parsed: dict) -> None:
+    """Procesa el campo 'edad_estimada' del modelo (ver _SYSTEM_PROMPT):
+    estimación INDIRECTA de tramo de edad, distinta de una autodeclaración
+    explícita. Solo se acepta si (1) no hay ya una edad EXACTA (más
+    precisa, ver docstring de `edad_rango` en DemographicFindings) y
+    (2) la confianza declarada alcanza `_AGE_RANGE_MIN_CONFIDENCE` -- por
+    debajo de ese umbral se descarta por completo, no se añade nada, ni
+    edad ni tramo (mismo principio de "ante la duda, no se adivina" que el
+    resto del módulo)."""
+    if findings.edad is not None:
+        return  # ya hay edad exacta, siempre más precisa: no se sustituye por un tramo
+
+    raw = parsed.get("edad_estimada")
+    if not isinstance(raw, dict):
+        return
+
+    confidence = _parse_soft_inference_confidence(raw.get("confianza"))
+    if confidence < _AGE_RANGE_MIN_CONFIDENCE:
+        return
+
+    edad_aproximada = raw.get("edad_aproximada")
+    if not isinstance(edad_aproximada, int) or isinstance(edad_aproximada, bool):
+        return
+    if not (12 <= edad_aproximada <= 100):
+        return
+
+    findings.edad_rango = age_bin(edad_aproximada)
+    findings.confidence["edad_rango"] = confidence
+    findings.evidence.setdefault("edad_rango", [])
+    # No se usa `evidence_map`/`_set_evidence` aquí porque este campo va
+    # en un objeto JSON aparte ("edad_estimada"), sin entrada propia en el
+    # mapa 'evidence' genérico del prompt -- la evidencia real de este
+    # tipo de estimación son las pistas dispersas por varios posts, no un
+    # único permalink localizable, así que se deja vacía a propósito.
+    # NUNCA "ia" a secas: es una estimación indirecta por tramo, no una
+    # autodeclaración -- misma distinción de fiabilidad que
+    # `estado_civil` ("ia_simbolica"); k_anonymity.py usa esto para la
+    # nota de menor fiabilidad en el informe.
+    findings.source["edad_rango"] = "ia_estimada"
+
+
 def _set_free_text_fields(findings: DemographicFindings, parsed: dict, evidence_map: dict) -> None:
     for field in _FREE_TEXT_FIELDS:
         value = parsed.get(field)
@@ -567,6 +639,7 @@ def _to_findings(parsed: dict) -> DemographicFindings:
 
     _set_sexo(findings, parsed, evidence_map)
     _set_edad(findings, parsed, evidence_map)
+    _set_edad_rango(findings, parsed)
     _set_normalized(findings, parsed, "estudios", STUDIES_DISTRIBUTION, evidence_map)
     _set_normalized(findings, parsed, "ocupacion", OCCUPATION_DISTRIBUTION, evidence_map)
     _set_location(findings, parsed, evidence_map)
@@ -604,4 +677,6 @@ def merge_findings(regex_findings: DemographicFindings, ai_findings: Demographic
             # estimación por nombre público) -- nunca se aplana a "ia" a
             # secas, o se perdería la distinción de fiabilidad.
             regex_findings.source[field] = ai_findings.source.get(field, "ia")
+            if field in ai_findings.confidence:
+                regex_findings.confidence[field] = ai_findings.confidence[field]
     return regex_findings

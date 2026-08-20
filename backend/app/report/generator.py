@@ -481,6 +481,7 @@ async def generate_report(
                 location_level=step.location_level,
                 proportion=step.proportion,
                 reduction_percent=step.reduction_percent,
+                confidence=step.confidence,
             )
             for step in narrowing_steps
         ]

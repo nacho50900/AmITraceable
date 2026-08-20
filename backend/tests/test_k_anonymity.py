@@ -108,6 +108,40 @@ class TestEstimatePopulationNarrowing:
 
         assert pop_with_edad < pop_sexo_only
 
+    def test_edad_rango_step_uses_5y_ine_bracket_when_no_exact_age(self):
+        findings = DemographicFindings(
+            edad_rango="25-29",
+            source={"edad_rango": "ia_estimada"},
+            confidence={"edad_rango": 0.6},
+        )
+
+        steps = estimate_population_narrowing(findings)
+        edad_step = next(s for s in steps if s.category == "edad")
+
+        assert edad_step.value_raw == "25-29"
+        assert edad_step.source == "ia_estimada"
+        assert edad_step.confidence == 0.6
+        assert edad_step.remaining_population is not None
+        assert edad_step.note_code == "edad_estimada_por_tramo"
+
+    def test_edad_exacta_wins_over_edad_rango_when_both_present(self):
+        """Nunca deberían convivir edad exacta y tramo a la vez (ver
+        ai_attribute_extraction.py), pero si por algún motivo llegaran
+        ambas, la edad exacta debe ganar -- es la más precisa."""
+        findings = DemographicFindings(
+            edad=24,
+            edad_rango="25-29",
+            source={"edad": "texto", "edad_rango": "ia_estimada"},
+            confidence={"edad_rango": 0.6},
+        )
+
+        steps = estimate_population_narrowing(findings)
+        edad_step = next(s for s in steps if s.category == "edad")
+
+        assert edad_step.value_raw == "24"
+        assert edad_step.confidence is None
+        assert edad_step.note_code == "edad_repartida_uniformemente"
+
     def test_full_cascade_narrows_monotonically_reddit_style_example(self):
         """Reproduce el ejemplo de la conversación: mujer, 24 años, vive en
         León, estudia Medicina -> la población restante debe decrecer en

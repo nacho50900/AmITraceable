@@ -165,6 +165,94 @@ class TestSuccessfulExtraction:
 
         assert findings.edad is None
 
+
+class TestEdadEstimadaPorTramo:
+    """Estimación INDIRECTA de tramo de edad ('edad_estimada' en el prompt),
+    distinta de una autodeclaración explícita -- ver
+    ai_attribute_extraction.py::_set_edad_rango."""
+
+    @pytest.mark.asyncio
+    async def test_confianza_suficiente_se_convierte_en_tramo_ine(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(edad_estimada={"edad_aproximada": 27, "confianza": 0.6}),
+            )
+        )
+
+        findings = await extract_demographics_with_ai(
+            [_post("me gradue en 2019 y llevo un par de años currando")], username="x"
+        )
+
+        assert findings.edad is None
+        assert findings.edad_rango == "25-29"
+        assert findings.source["edad_rango"] == "ia_estimada"
+        assert findings.confidence["edad_rango"] == 0.6
+
+    @pytest.mark.asyncio
+    async def test_confianza_baja_no_anade_nada(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(edad_estimada={"edad_aproximada": 27, "confianza": 0.3}),
+            )
+        )
+
+        findings = await extract_demographics_with_ai([_post("texto ambiguo cualquiera")], username="x")
+
+        assert findings.edad is None
+        assert findings.edad_rango is None
+        assert "edad_rango" not in findings.confidence
+
+    @pytest.mark.asyncio
+    async def test_edad_exacta_declarada_gana_sobre_el_tramo(self, monkeypatch, respx_mock):
+        """Si el modelo devuelve AMBOS campos (edad exacta Y una estimación
+        indirecta), la edad exacta es más precisa y se queda sola -- nunca
+        conviven `edad` y `edad_rango` a la vez."""
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(
+                    edad=24,
+                    edad_estimada={"edad_aproximada": 40, "confianza": 0.9},
+                    evidence={"edad": "https://x/1"},
+                ),
+            )
+        )
+
+        findings = await extract_demographics_with_ai([_post("tengo 24 años", permalink="https://x/1")], username="x")
+
+        assert findings.edad == 24
+        assert findings.edad_rango is None
+
+    @pytest.mark.asyncio
+    async def test_edad_aproximada_fuera_de_rango_se_descarta(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(edad_estimada={"edad_aproximada": 500, "confianza": 0.9}),
+            )
+        )
+
+        findings = await extract_demographics_with_ai([_post("texto cualquiera")], username="x")
+
+        assert findings.edad_rango is None
+
+    @pytest.mark.asyncio
+    async def test_edad_estimada_null_no_anade_nada(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(edad_estimada=None))
+        )
+
+        findings = await extract_demographics_with_ai([_post("texto cualquiera")], username="x")
+
+        assert findings.edad_rango is None
+
     @pytest.mark.asyncio
     async def test_free_text_fields_universidad_empresa(self, monkeypatch, respx_mock):
         monkeypatch.setattr(settings, "mistral_api_key", "fake-key")

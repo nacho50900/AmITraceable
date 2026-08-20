@@ -43,6 +43,20 @@ def _strip_accents(text: str) -> str:
 class DemographicFindings:
     sexo: str | None = None
     edad: int | None = None
+    # Tramo quinquenal de edad (p. ej. "25-29", "85+" -- claves de
+    # AGE_DISTRIBUTION_5Y en ine_reference.py). A diferencia de `edad`
+    # (autodeclaración EXPLÍCITA, por regex o IA leyendo una frase literal
+    # tipo "tengo 24 años"), este campo lo rellena ÚNICAMENTE
+    # ai_attribute_extraction.py mediante razonamiento INDIRECTO/simbólico
+    # sobre pistas sueltas (año de graduación, curso que menciona estar
+    # haciendo, jerga generacional...) -- mismo principio que
+    # `estado_civil`, con su propia confianza mínima antes de aceptarse
+    # (ver `_set_edad_rango`): si la señal es débil, se queda en None en
+    # vez de adivinar. Solo se calcula si `edad` sigue siendo None (una
+    # edad exacta autodeclarada es siempre más precisa y la sustituye por
+    # completo, nunca conviven las dos). NUNCA lo rellena este módulo
+    # (regex): aquí solo se detectan autodeclaraciones literales.
+    edad_rango: str | None = None
     provincia: str | None = None
     municipio: str | None = None
     # Se rellena en dos casos: (1) autodeclaración explícita de una
@@ -149,6 +163,12 @@ class DemographicFindings:
     # llamada a la IA solo para esto. No participa en `merge_findings` (no
     # es un campo INE): report/generator.py lo lee directamente.
     soft_inferences: list[InferredAttribute] = field(default_factory=list)
+    # Confianza (0-1) de estimaciones que no son autodeclaraciones exactas
+    # y necesitan comunicar su propia fiabilidad al informe -- de momento
+    # solo la usa `edad_rango` (ver arriba). Dict genérico por campo (no
+    # un float suelto) para poder ampliarse a otros campos probabilísticos
+    # en el futuro sin cambiar la forma de la clase otra vez.
+    confidence: dict[str, float] = field(default_factory=dict)
 
 
 _AGE_RE = re.compile(r"\b(?:tengo|con)\s+(\d{1,2})\s+años\b|\b(\d{1,2})\s+años\b", re.I)

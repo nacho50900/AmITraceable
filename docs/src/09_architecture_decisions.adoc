@@ -1179,3 +1179,105 @@ recupera aquí con el número que le corresponde en la secuencia actual
 lección para evitar que se repita: re-clonar el repo antes de tocar
 ficheros que otra sesión pueda haber tocado en paralelo, en vez de
 asumir que la copia local sigue siendo la última.
+
+=== ADR-27: Estimación indirecta de tramo de edad, con umbral de confianza propio y sin sustituir nunca una edad exacta
+
+*Contexto*: hasta ahora, `edad` solo se rellenaba con una
+autodeclaración EXPLÍCITA ("tengo 24 años"), detectada por regex o por
+la IA leyendo una frase literal. Si el texto no contenía una frase así,
+el escalón de edad de `estimate_population_narrowing` simplemente no
+aparecía en el informe, aunque hubiera pistas indirectas razonables
+(año de graduación, curso que la persona menciona estar haciendo,
+jerga o referencias generacionales) de las que un lector humano sí
+podría deducir una franja de edad plausible.
+
+*Alternativas consideradas*: (1) reutilizar sin más el mecanismo de
+`inferencias_blandas`/`InferredAttribute` ya existente -- descartado
+porque esas inferencias son deliberadamente ajenas al estimador de
+k-anonimato (no narrowean población, ver docstring de
+`soft_inferences` en `DemographicFindings`), y aquí el objetivo
+explícito era justo lo contrario: que la estimación SÍ afecte al
+número de población restante que ve el usuario. (2) Pedir a la IA una
+edad EXACTA también para el caso indirecto (mismo campo `edad` que ya
+existe) -- descartado: mezclaría en un único campo autodeclaraciones
+literales (alta fiabilidad) con conjeturas basadas en pistas sueltas
+(fiabilidad mucho menor), sin forma de que el informe distinguiera
+ambos casos ni de aplicar un umbral de confianza distinto a cada uno.
+(3) Devolver directamente un tramo de INE como string libre desde el
+prompt (p. ej. que el modelo escriba `"25-29"`) -- descartado frente a
+pedir una edad numérica aproximada y convertirla con la función
+`age_bin()` ya existente: es más robusto (el modelo puede alucinar un
+formato de tramo distinto al de `AGE_DISTRIBUTION_5Y`, p. ej. "25 a 29"
+o "26-30") y evita introducir una segunda fuente de verdad para los
+límites de los tramos.
+
+*Decisión*: nuevo campo `DemographicFindings.edad_rango` (tramo
+quinquenal, mismas claves que `AGE_DISTRIBUTION_5Y`), rellenado
+ÚNICAMENTE por `ai_attribute_extraction.py::_set_edad_rango`, nunca por
+regex. El prompt de Mistral incorpora un campo aparte,
+`"edad_estimada": {"edad_aproximada": <entero>|null, "confianza": <0-1>}`,
+con instrucciones explícitas de razonar de forma INDIRECTA/simbólica
+(mismo estilo que `estado_civil`, ver ADR previo sobre inferencias
+blandas) y de ser conservador con la confianza. Reglas de aceptación,
+en este orden:
+
+1. Si ya existe una edad EXACTA (`findings.edad`, autodeclarada por
+   regex o por IA) para esa misma persona, `edad_estimada` se ignora
+   por completo -- la edad exacta es siempre más precisa y nunca
+   conviven ambos campos a la vez.
+2. Si `confianza < 0.5`, se descarta también -- no se añade ni edad ni
+   tramo. El umbral es deliberadamente más alto que el rango 0.3-0.7
+   que se acepta sin filtrar para `inferencias_blandas` genéricas,
+   precisamente porque esto SÍ participa en el cálculo de
+   k-anonimato (a diferencia de las inferencias blandas).
+3. Si supera el umbral, `edad_aproximada` se convierte al tramo INE
+   correspondiente con `age_bin()` y se guarda con
+   `source["edad_rango"] = "ia_estimada"` (nunca `"ia"` a secas) y su
+   confianza en el nuevo campo genérico `DemographicFindings.confidence`
+   (dict por campo, pensado para poder reutilizarse en el futuro con
+   otros atributos probabilísticos sin volver a cambiar la forma de la
+   clase).
+
+`scoring/k_anonymity.py::_step_edad` prioriza `edad` sobre `edad_rango`
+(mismo orden que la regla 1 de arriba) y, cuando usa el tramo, aplica
+la proporción de `AGE_DISTRIBUTION_5Y` (no la derivada año a año de
+`AGE_DISTRIBUTION_1Y`, que no tendría sentido sin conocer la edad
+exacta dentro del tramo). La confianza se expone como campo propio
+(`PopulationNarrowingStep.confidence` / `PopulationEstimate.confidence`)
+en vez de interpolarse dentro de `note` -- ver ADR-26: todas las
+`note` de `k_anonymity.py` son deliberadamente texto fijo por
+categoría/fuente para que el frontend las traduzca por `note_code` sin
+parsear frases, e interpolar un número variable ahí habría roto ese
+contrato.
+
+*Justificación*: separar `edad_rango` de `edad` en vez de mezclarlos
+mantiene la misma garantía de trazabilidad que ya tiene el resto del
+proyecto -- el informe siempre puede distinguir "esto lo dijiste tú
+literalmente" de "esto lo ha deducido una IA de pistas sueltas", igual
+que ya ocurre con `sexo`/`sexo_por_nombre` (ADR-13) y con
+`estado_civil` (inferencia simbólica). Usar el tramo quinquenal ya
+publicado por el INE en vez de fingir precisión año a año para un dato
+que en realidad es una conjetura es, además, más honesto de cara al
+usuario: la incertidumbre de la estimación queda reflejada en la
+propia granularidad del dato mostrado, no solo en una nota al pie.
+
+*Consecuencias*: (+) el informe puede mostrar un indicio de edad
+incluso cuando el usuario no lo ha declarado explícitamente, sin
+necesidad de adivinar un año concreto ni de aceptar estimaciones poco
+fundamentadas (el umbral de confianza filtra las conjeturas débiles
+antes de que lleguen al cálculo de k-anonimato); (+) coherente con el
+patrón ya establecido de "código de fuente + nota" para señalar menor
+fiabilidad (`ia_estimada`, icono 🤖 reutilizado en el frontend); (+)
+cero cambios de comportamiento cuando ya existe una edad exacta o
+cuando no hay `MISTRAL_API_KEY` configurada (degradación con gracia,
+mismo principio que el resto de `ai_attribute_extraction.py`); (-) el
+umbral de confianza de 0.5 es una elección heurística, no calibrada
+contra casos reales etiquetados a mano -- queda como trabajo futuro
+si se observa en producción que el modelo es sistemáticamente
+demasiado (o poco) conservador con este campo concreto; (-) al ser un
+tramo de 5 años en vez de una edad puntual, reduce algo la población
+respecto a una edad exacta, pero mucho menos que un año concreto --
+efecto esperado y deseado, no un error: es justo la contrapartida de
+tener menos certeza sobre el dato de partida.
+
+

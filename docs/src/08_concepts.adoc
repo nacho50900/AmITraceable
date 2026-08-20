@@ -180,6 +180,26 @@ La población de cada comunidad autónoma se deriva sumando la de sus
 provincias, no como una segunda cifra hardcodeada que pudiera
 desincronizarse.
 
+La edad tiene, por el mismo motivo, dos niveles de granularidad. Cuando
+el usuario ha declarado su edad EXACTA (por regex o por IA leyendo una
+frase literal), se usa `AGE_DISTRIBUTION_1Y` (proporción año a año,
+derivada repartiendo uniformemente los tramos quinquenales del INE
+entre las edades que los componen). Cuando no hay una declaración
+explícita pero sí pistas indirectas suficientemente claras (año de
+graduación, curso que menciona estar haciendo, referencias
+generacionales...), `ai_attribute_extraction.py` puede estimar un
+TRAMO quinquenal (mismas claves que `AGE_DISTRIBUTION_5Y`, p. ej.
+"25-29") en vez de un año concreto -- fingir precisión año a año sobre
+una conjetura sería menos honesto que reflejar la incertidumbre en la
+propia granularidad del dato. Esta estimación por tramo solo se acepta
+si su confianza declarada supera un umbral mínimo (0.5, más exigente
+que el aceptado sin filtrar para inferencias blandas genéricas,
+precisamente porque esto SÍ afecta al número de población del
+informe) y nunca sustituye a una edad exacta ya conocida; se marca con
+`source = "ia_estimada"` para que el informe distinga claramente
+"lo dijiste tú" de "lo ha deducido una IA de pistas sueltas" -- ver
+ADR-27.
+
 Cada paso de la cascada expone también la proporción resultante sobre el
 total de España (`remaining_population / TOTAL_POPULATION_ES`), ya
 calculada en el backend, precisamente para que el frontend no tenga que

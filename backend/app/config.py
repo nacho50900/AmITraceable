@@ -237,6 +237,17 @@ class Settings(BaseSettings):
     # servicio en docker-compose.yml, red monitor-net) -- cámbialo si
     # arrancas el worker de otra forma (p. ej. fuera de Compose, en otro
     # host). Solo se usa si enable_igpu_offload es true.
+    #
+    # SonarCloud (hotspot de seguridad, "Using HTTP protocol is
+    # insecure"): a propósito no se usa HTTPS aquí. El tráfico contra
+    # este worker nunca sale de la red interna de Docker Compose
+    # (backend y dinov2-igpu-worker comparten `monitor-net`, ver
+    # docker-compose.yml -- ese servicio ni siquiera publica su puerto
+    # al host), así que no hay tramo de red expuesto que TLS estuviera
+    # protegiendo; añadirlo aquí solo sumaría gestión de certificados
+    # para un servicio interno y opt-in sin reducir ningún riesgo real.
+    # Revisar y marcar como "Safe" en SonarCloud con este mismo
+    # razonamiento en vez de dejarlo pendiente.
     igpu_worker_url: str = "http://dinov2-igpu-worker:8001"
 
 

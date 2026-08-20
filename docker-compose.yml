@@ -85,8 +85,26 @@ services:
     # el que esto vive en un proceso/imagen aparte del backend.
     profiles:
       - igpu
-    ports:
-      - "8001:8001"
+    # Sin bloque `ports:` a propósito -- ver más abajo.
+    #
+    # SonarCloud marca `igpu_worker_url = "http://..."` en
+    # app/config.py como hotspot de seguridad ("usa HTTPS en vez de
+    # HTTP"). No se ha añadido TLS aquí porque el tráfico backend <->
+    # worker NUNCA sale de la red interna de Docker Compose
+    # (`monitor-net`, ambos servicios la comparten, ver `networks:` de
+    # `backend` más arriba) -- ni pasa por el host ni por ninguna red
+    # externa, así que TLS no protegería contra ninguna amenaza real
+    # aquí y sí añadiría gestión de certificados a un servicio interno
+    # y opt-in.
+    #
+    # Lo que SÍ se ha corregido es la superficie de exposición real: sin
+    # `ports:`, el puerto 8001 NO se publica en el host (a diferencia de
+    # backend/webapp) -- nada fuera de `monitor-net` puede alcanzarlo,
+    # ni siquiera desde la propia máquina Windows. Si necesitas
+    # depurarlo a mano (`curl http://localhost:8001/devices` desde
+    # Windows/WSL2), publica el puerto solo temporalmente:
+    #   docker compose --profile igpu run --rm -p 8001:8001 dinov2-igpu-worker
+    # en vez de dejarlo publicado de forma permanente en este fichero.
     # Paso de la iGPU al contenedor vía DirectML sobre WSL2: /dev/dxg es
     # el dispositivo de paravirtualización de GPU que expone WSL2 (TODAS
     # las GPUs visibles desde Windows, dedicada Y integrada -- a

@@ -69,6 +69,7 @@ def log_photo_analysis_run(
     actual_concurrency: int,
     threads_per_inference: int,
     enable_scene_analysis: bool,
+    igpu_offload_used: bool,
     total_wall_seconds: float,
     per_photo_seconds: list[float],
 ) -> None:
@@ -93,6 +94,15 @@ def log_photo_analysis_run(
         "actual_concurrency": actual_concurrency,
         "threads_per_inference": threads_per_inference,
         "enable_scene_analysis": enable_scene_analysis,
+        # Estado REAL en el momento de este análisis, no si
+        # ENABLE_IGPU_OFFLOAD estaba a true en la config: si el worker
+        # falló o nunca respondió, esto sale False aunque el flag esté
+        # activado -- ver `_igpu_worker_device_index`/`_igpu_worker_failed`
+        # en app/vision/geolocation.py. Sin esto, una comparación de
+        # rendimiento "con offload vs sin offload" no sería de fiar (un
+        # fallback silencioso al modelo local contaminaría el grupo "con
+        # offload" con tiempos que en realidad son de ejecución local).
+        "igpu_offload_used": igpu_offload_used,
         "total_wall_seconds": round(total_wall_seconds, 3),
         "avg_seconds_per_photo": round(avg, 3) if avg is not None else None,
         "per_photo_seconds": per_photo_seconds,

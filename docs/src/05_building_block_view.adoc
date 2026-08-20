@@ -299,6 +299,22 @@ simbólico dan nada, `report/generator.py` todavía puede rellenar el
 mismo campo a partir de una señal de pareja detectada en fotos (ver
 `vision/scene_analysis.py`), con `source = "imagen"` en ese caso.
 
+Con el mismo tipo de razonamiento indirecto, este módulo también puede
+rellenar `edad_rango` (tramo quinquenal de edad, p. ej. "25-29") cuando
+`demographic_extraction.py` NO encontró una edad exacta autodeclarada
+-- pistas como un año de graduación, el curso que la persona menciona
+estar haciendo o referencias generacionales. El modelo devuelve su
+mejor estimación numérica y una confianza (0-1); `_set_edad_rango`
+descarta la estimación por completo si la confianza no supera 0.5 (ver
+`ai_attribute_extraction.py::_AGE_RANGE_MIN_CONFIDENCE`) -- ante la
+duda, no se adivina, ni siquiera por tramo -- y, si se acepta, convierte
+la edad aproximada al tramo del INE con `ine_reference.age_bin()` y
+guarda la confianza en `DemographicFindings.confidence["edad_rango"]`.
+Se marca igual que `estado_civil` con una procedencia distinta
+(`source["edad_rango"] = "ia_estimada"`, nunca `"ia"` a secas) y nunca
+sustituye una edad exacta ya conocida, sea de regex o de la propia IA
+(ver ADR-27).
+
 Interfaces::
 `extract_demographics_with_ai(posts, username, full_name, bio)`,
 `merge_findings(regex_findings, ai_findings)`.

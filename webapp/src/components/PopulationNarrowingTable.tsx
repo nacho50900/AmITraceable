@@ -100,6 +100,14 @@ const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({
                       -{step.reduction_percent}%
                     </span>
                   )}
+                  {step.confidence !== null && step.confidence !== undefined && (
+                    <span
+                      className="confidence-badge"
+                      title={t('components.populationNarrowing.confidenceBadgeTitle')}
+                    >
+                      ~{Math.round(step.confidence * 100)}%
+                    </span>
+                  )}
                   <span
                     className="risk-pill"
                     style={{ background: RISK_COLORS[step.risk_level], color: '#fff' }}
@@ -154,6 +162,7 @@ const SOURCE_ICONS: Record<string, string> = {
   ia: '🤖',
   ia_nombre: '🤖',
   ia_simbolica: '🤖',
+  ia_estimada: '🤖',
 };
 
 export default PopulationNarrowingTable;

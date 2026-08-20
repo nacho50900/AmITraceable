@@ -64,7 +64,9 @@ ifndef::imagesdir[:imagesdir: ../images]
   características (edad, sexo, ubicación...) es compartida por al menos
   *k* individuos. En este proyecto se usa como marco conceptual para
   estimar cuánta gente en España comparte lo que el usuario ha declarado
-  explícitamente sobre sí mismo (`scoring/k_anonymity.py`) — cuanto más
+  explícitamente sobre sí mismo, o -- solo para la edad, y con un umbral
+  de confianza propio -- lo que se ha podido estimar por tramo a partir
+  de pistas indirectas del texto (`scoring/k_anonymity.py`) — cuanto más
   bajo el número resultante, más fácil sería, en teoría, identificar a
   esa persona a partir de esas características.
 

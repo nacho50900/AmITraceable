@@ -34,6 +34,7 @@ from dataclasses import dataclass
 
 from app.data.ine_reference import (
     AGE_DISTRIBUTION_1Y,
+    AGE_DISTRIBUTION_5Y,
     AUTONOMOUS_COMMUNITY_DISPLAY_NAMES,
     CCAA_POPULATION,
     HOUSEHOLD_TYPE_DISTRIBUTION,
@@ -99,6 +100,14 @@ class PopulationNarrowingStep:
     # los standalone (universidad/empresa), donde no hay una proporción
     # nacional de referencia con la que calcularlo.
     reduction_percent: float | None = None
+    # Confianza (0-1) declarada por la IA para una estimación INDIRECTA,
+    # cuando aplique -- de momento solo lo usa el tramo de edad estimado
+    # (`edad_rango`, ver ai_attribute_extraction.py::_set_edad_rango). Se
+    # expone como campo propio, no interpolado dentro de `note` (que se
+    # mantiene siempre como texto fijo por categoría/fuente, ver
+    # note_codes.py), para no romper el contrato de traducción por
+    # note_code del frontend. None para el resto de pasos.
+    confidence: float | None = None
 
 
 # Categorías que participan en la cadena de estrechamiento (mismo criterio
@@ -157,6 +166,7 @@ def _apply_proportion(
     note: str | None = None,
     note_code: str | None = None,
     value_raw: str | None = None,
+    confidence: float | None = None,
 ) -> tuple[float, PopulationNarrowingStep | None]:
     """Multiplica `remaining` por una proporción marginal del INE (asumiendo
     independencia respecto a los atributos ya aplicados) y construye el
@@ -172,6 +182,7 @@ def _apply_proportion(
             note="No hay dato de referencia del INE para este valor concreto en la tabla actual.",
             note_code=note_codes.NO_INE_DATA_FOR_VALUE,
             value_raw=value_raw,
+            confidence=confidence,
         )
 
     new_remaining = remaining * proportion
@@ -191,6 +202,7 @@ def _apply_proportion(
         # así que la reducción respecto al escalón anterior es 1 menos ese
         # factor, sin falta de recalcular nada.
         reduction_percent=round((1 - proportion) * 100, 1),
+        confidence=confidence,
     )
 
 
@@ -276,23 +288,49 @@ def _step_relacion(findings: DemographicFindings, remaining: float) -> tuple[flo
 
 
 def _step_edad(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
-    if findings.edad is None:
-        return remaining, None
-    return _apply_proportion(
-        remaining,
-        AGE_DISTRIBUTION_1Y.get(findings.edad),
-        f"Edad: {findings.edad} años",
-        "edad",
-        findings.evidence.get("edad", []),
-        source=findings.source.get("edad", "texto"),
-        note="Estimado repartiendo uniformemente la proporción de INE por tramos "
-             "quinquenales entre las edades de cada tramo (no hay tabla año a año "
-             "descargable directamente); ver ine_reference.py.",
-        note_code=note_codes.EDAD_REPARTIDA_UNIFORMEMENTE,
-        # Un número no necesita traducción; se manda como string para que
-        # el frontend lo interpole igual que el resto de `value_raw`.
-        value_raw=str(findings.edad),
-    )
+    if findings.edad is not None:
+        return _apply_proportion(
+            remaining,
+            AGE_DISTRIBUTION_1Y.get(findings.edad),
+            f"Edad: {findings.edad} años",
+            "edad",
+            findings.evidence.get("edad", []),
+            source=findings.source.get("edad", "texto"),
+            note="Estimado repartiendo uniformemente la proporción de INE por tramos "
+                 "quinquenales entre las edades de cada tramo (no hay tabla año a año "
+                 "descargable directamente); ver ine_reference.py.",
+            note_code=note_codes.EDAD_REPARTIDA_UNIFORMEMENTE,
+            # Un número no necesita traducción; se manda como string para que
+            # el frontend lo interpole igual que el resto de `value_raw`.
+            value_raw=str(findings.edad),
+        )
+
+    if findings.edad_rango is not None:
+        # No hay edad EXACTA autodeclarada, pero sí una estimación
+        # INDIRECTA por tramo quinquenal (ver
+        # ai_attribute_extraction.py::_set_edad_rango) que ya superó su
+        # propio umbral de confianza mínima antes de llegar aquí -- se usa
+        # la proporción de INE del tramo completo (AGE_DISTRIBUTION_5Y),
+        # no la derivada año a año, porque no se conoce la edad exacta
+        # dentro del tramo.
+        return _apply_proportion(
+            remaining,
+            AGE_DISTRIBUTION_5Y.get(findings.edad_rango),
+            f"Edad aproximada: {findings.edad_rango} años",
+            "edad",
+            findings.evidence.get("edad_rango", []),
+            source=findings.source.get("edad_rango", "ia_estimada"),
+            note="Tramo de edad estimado por IA a partir de pistas indirectas del texto "
+                 "(años de graduación, curso que menciona estar haciendo, referencias "
+                 "generacionales...), no de una autodeclaración explícita: fiabilidad menor. "
+                 "Se usa el tramo quinquenal de población del INE en vez de un año exacto, "
+                 "por ser una estimación menos precisa que una edad autodeclarada.",
+            note_code=note_codes.EDAD_ESTIMADA_POR_TRAMO,
+            value_raw=findings.edad_rango,
+            confidence=findings.confidence.get("edad_rango"),
+        )
+
+    return remaining, None
 
 
 def _location_no_estimable_step(

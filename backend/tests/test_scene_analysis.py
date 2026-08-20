@@ -511,17 +511,27 @@ class TestParsePersonas:
     def test_missing_line_returns_none(self):
         assert scene_analysis._parse_personas("AFICION: ninguno") is None
 
-    def test_prompt_example_for_personas_is_not_the_biased_varias_value(self):
-        """Regresión: el ejemplo de PERSONAS en `_STRUCTURED_QUERY` era
-        "varias" -- el único valor "positivo" entre los cuatro campos del
-        ejemplo (los otros tres son ninguno/no/ninguno) -- y en producción
-        Moondream2 marcaba "varias" de forma sistemática incluso en fotos
-        con una sola persona, un fallo de instruction-following ya
-        documentado en este módulo (VQA pequeños que copian el ejemplo en
-        vez de sustituirlo). Debe ser "ninguna", coherente con el resto."""
+    def test_prompt_example_for_personas_is_never_a_valid_category(self):
+        """Regresión (segunda vuelta): el ejemplo de PERSONAS en
+        `_STRUCTURED_QUERY` pasó primero por "varias" (Moondream2 lo
+        copiaba de forma sistemática incluso con una sola persona) y
+        luego por "ninguna" -- que sufrió EXACTAMENTE el mismo problema,
+        solo que trasladado a otro valor (reportado por Comandante en
+        producción: fotos con varias personas mostrando "ninguna"). El
+        fallo real nunca fue "qué palabra concreta usar de ejemplo", sino
+        que cualquier valor VÁLIDO puesto ahí se copia igual. Por eso el
+        ejemplo ya no debe ser ninguna de las tres categorías reales
+        (`ninguna`/`una`/`varias`): si el modelo lo copia por confusión,
+        `_parse_personas` debe descartarlo (dato ausente) en vez de
+        mostrar una categoría incorrecta pero creíble."""
         example_section = scene_analysis._STRUCTURED_QUERY.split("\n\n")[0]
-        assert "PERSONAS: ninguna" in example_section
-        assert "PERSONAS: varias" not in example_section
+        personas_line = next(line for line in example_section.splitlines() if line.startswith("PERSONAS:"))
+        example_value = personas_line.split(":", 1)[1].strip()
+        assert example_value not in ("ninguna", "una", "varias")
+        # Y si por algún motivo se copiara igualmente, el parseo debe
+        # descartarlo -- no vale con que el ejemplo "no sea una de las
+        # tres", también hace falta que el propio parser lo rechace.
+        assert scene_analysis._parse_personas(personas_line) is None
 
 
 class TestParseTextoVisible:
@@ -554,6 +564,29 @@ class TestParseAficionRaw:
     @pytest.mark.parametrize("negative_value", ["ninguno", "Ninguna", "none", "N/A", ""])
     def test_ninguno_variants_return_none(self, negative_value):
         assert scene_analysis._parse_aficion_raw(f"AFICION: {negative_value}") is None
+
+    @pytest.mark.parametrize(
+        "cross_field_value",
+        ["uno", "Uno", "UNO", "una", "dos", "tres", "personas", "cero"],
+    )
+    def test_number_words_are_discarded_as_probable_cross_field_bleed(self, cross_field_value):
+        """Regresión: reportado en producción (Comandante, agosto 2026)
+        "Posible afición o interés: uno" en fotos sin ninguna afición
+        real visible -- un número en palabra no es una afición, y todo
+        apunta a un fallo de generación cruzada con el vocabulario de
+        PERSONAS en vez de una señal real. Se descarta por precaución en
+        vez de mostrarse como si fuera fiable."""
+        assert scene_analysis._parse_aficion_raw(f"AFICION: {cross_field_value}") is None
+
+    def test_hobby_containing_a_number_is_still_accepted(self):
+        """La guarda de arriba descarta el valor EXACTO 'uno'/'dos'/etc,
+        no cualquier afición que simplemente CONTENGA un número -- una
+        afición real como coleccionar cromos de un año concreto sigue
+        siendo válida."""
+        assert (
+            scene_analysis._parse_aficion_raw("AFICION: cromos del Mundial 2010")
+            == "cromos del Mundial 2010"
+        )
 
 
 class TestBuildCleanSummary:
@@ -588,7 +621,26 @@ class TestBuildCleanSummary:
         summary = scene_analysis._build_clean_summary(
             personas="ninguna", aficion_raw=None, indicio_pareja=False, texto_visible="Bar Manolo"
         )
-        assert summary == "Personas en la foto: ninguna\nTexto visible: Bar Manolo"
+        # "ninguna" ya no se muestra (ver docstring de _build_clean_summary,
+        # tratado igual que el resto de valores negativos por defecto).
+        assert summary == "Texto visible: Bar Manolo"
+
+    def test_personas_ninguna_is_hidden_like_other_negative_defaults(self):
+        """Regresión (Comandante, agosto 2026): 'ninguna' ya no se
+        considera una excepción -- se oculta igual que 'afición: ninguno'
+        o 'pareja: no', para minimizar el impacto visible si el sesgo de
+        `_STRUCTURED_QUERY` documentado en scene_analysis.py (Moondream2
+        copiando el valor de ejemplo del prompt) volviera a aparecer."""
+        assert scene_analysis._build_clean_summary(
+            personas="ninguna", aficion_raw=None, indicio_pareja=False, texto_visible=None
+        ) is None
+
+    @pytest.mark.parametrize("value", ["una", "varias"])
+    def test_personas_una_o_varias_se_siguen_mostrando(self, value):
+        summary = scene_analysis._build_clean_summary(
+            personas=value, aficion_raw=None, indicio_pareja=False, texto_visible=None
+        )
+        assert summary == f"Personas en la foto: {value}"
 
     def test_all_four_positive_at_once(self):
         summary = scene_analysis._build_clean_summary(
