@@ -66,7 +66,7 @@ const LanguageSwitcher: React.FC = () => {
       <button
         type="button"
         id="language-selector"
-        className={`language-switcher-button ${open ? 'language-switcher-button--open' : ''}`}
+        className="language-switcher-button"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={t('languageSwitcher.label')}
