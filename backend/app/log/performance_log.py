@@ -51,14 +51,41 @@ _warned_unwritable = False
 @dataclass
 class PhotoAnalysisTiming:
     """Acumulador de tiempos durante UN análisis (una llamada a
-    `estimate_locations_for_posts`). `record()` se llama una vez por foto
-    procesada (con o sin resultado válido -- lo que importa aquí es cuánto
-    tardó el intento, no si tuvo éxito)."""
+    `estimate_locations_for_posts`). Los tres `record*()` se llaman una
+    vez por foto procesada (con o sin resultado válido -- lo que importa
+    aquí es cuánto tardó el intento, no si tuvo éxito).
+
+    `per_photo_seconds` es el tiempo TOTAL de la foto (desde que arrancan
+    los dos modelos hasta que los dos han terminado para ESA foto, ver
+    `_process_photo` en app/vision/geolocation.py) -- se mantiene tal
+    cual por compatibilidad con logs antiguos y porque sigue siendo la
+    cifra relevante para "cuánto tardó esta foto en tener resultado
+    completo".
+
+    `dinov2_seconds`/`scene_seconds` son NUEVOS (ver ADR-29): tiempo de
+    CADA modelo por separado, medido dentro de su propio semáforo. Desde
+    ADR-29, ambos modelos corren en pipeline entre fotos distintas (el
+    semáforo de uno se libera sin esperar al otro), así que la SUMA de
+    `dinov2_seconds[i] + scene_seconds[i]` para una foto puede ser MAYOR
+    que `per_photo_seconds[i]` si esa foto se solapó bien con sus
+    vecinas -- eso es señal de que el pipeline está funcionando, no un
+    error de medición. Sirven para diagnosticar, foto a foto, cuál de
+    los dos modelos domina el tiempo y si el offload a iGPU (ADR-28)
+    está ayudando o no en la práctica, cosa que `per_photo_seconds` por
+    sí solo no permitía distinguir."""
 
     per_photo_seconds: list[float] = field(default_factory=list)
+    dinov2_seconds: list[float] = field(default_factory=list)
+    scene_seconds: list[float] = field(default_factory=list)
 
     def record(self, seconds: float) -> None:
         self.per_photo_seconds.append(round(seconds, 3))
+
+    def record_dinov2(self, seconds: float) -> None:
+        self.dinov2_seconds.append(round(seconds, 3))
+
+    def record_scene(self, seconds: float) -> None:
+        self.scene_seconds.append(round(seconds, 3))
 
 
 def log_photo_analysis_run(
@@ -72,6 +99,8 @@ def log_photo_analysis_run(
     igpu_offload_used: bool,
     total_wall_seconds: float,
     per_photo_seconds: list[float],
+    per_photo_dinov2_seconds: list[float],
+    per_photo_scene_seconds: list[float],
 ) -> None:
     """Añade una línea al log de rendimiento. Nunca lanza excepción hacia
     el llamador: un fallo al escribir el log no debe tumbar ni degradar el
@@ -85,6 +114,16 @@ def log_photo_analysis_run(
         return  # nada que registrar -- no hubo fotos que analizar
 
     avg = sum(per_photo_seconds) / len(per_photo_seconds) if per_photo_seconds else None
+    avg_dinov2 = (
+        sum(per_photo_dinov2_seconds) / len(per_photo_dinov2_seconds)
+        if per_photo_dinov2_seconds
+        else None
+    )
+    avg_scene = (
+        sum(per_photo_scene_seconds) / len(per_photo_scene_seconds)
+        if per_photo_scene_seconds
+        else None
+    )
 
     entry = {
         "timestamp": time.time(),
@@ -105,7 +144,16 @@ def log_photo_analysis_run(
         "igpu_offload_used": igpu_offload_used,
         "total_wall_seconds": round(total_wall_seconds, 3),
         "avg_seconds_per_photo": round(avg, 3) if avg is not None else None,
+        # Desglose por modelo (ver ADR-29) -- desde el pipeline entre
+        # fotos, la suma de estas dos medias puede ser MAYOR que
+        # avg_seconds_per_photo si hay buen solapamiento entre fotos
+        # vecinas; eso es la señal de que el pipeline funciona, no un
+        # error de los datos.
+        "avg_dinov2_seconds_per_photo": round(avg_dinov2, 3) if avg_dinov2 is not None else None,
+        "avg_scene_seconds_per_photo": round(avg_scene, 3) if avg_scene is not None else None,
         "per_photo_seconds": per_photo_seconds,
+        "per_photo_dinov2_seconds": per_photo_dinov2_seconds,
+        "per_photo_scene_seconds": per_photo_scene_seconds,
     }
 
     try:

@@ -939,6 +939,145 @@ class TestEstimateLocationsForPosts:
         assert elapsed < _SLEEP * 1.5
 
     @pytest.mark.asyncio
+    async def test_dinov2_of_next_photo_does_not_wait_for_moondream2_of_previous_photo(self, monkeypatch, respx_mock):
+        """Regresión de ADR-29: antes, UN solo semáforo envolvía DINOv2 +
+        Moondream2 JUNTOS por foto -- el hueco de una foto no se liberaba
+        hasta que las DOS terminaban, así que aunque DINOv2 acabase
+        enseguida, la foto siguiente no podía ni empezar a analizarse
+        hasta que Moondream2 (mucho más lento) terminase la actual. Con
+        DOS semáforos independientes (uno por modelo), el DINOv2 de la
+        foto 2 debe poder arrancar en cuanto se libera el semáforo de
+        DINOv2 de la foto 1 -- sin esperar a que su Moondream2 (todavía
+        en marcha, con su propio semáforo aparte) termine.
+
+        `photo_analysis_concurrency=1` a propósito (no 2, ver el test de
+        arriba): con concurrencia 2 ambas fotos podrían arrancar sus dos
+        modelos de golpe incluso con el semáforo ÚNICO antiguo, sin que
+        eso demuestre nada sobre el desacoplo -- con 1, el semáforo único
+        antiguo forzaba secuencialidad estricta entre fotos, así que es
+        el caso que de verdad distingue el comportamiento viejo del
+        nuevo."""
+        import asyncio
+        import time
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        monkeypatch.setattr(geolocation.settings, "photo_analysis_concurrency", 1)
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [
+            Post(type="image", media_urls=["https://cdn.fake/p1.jpg"], permalink="https://ig/p1"),
+            Post(type="image", media_urls=["https://cdn.fake/p2.jpg"], permalink="https://ig/p2"),
+        ]
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/p1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+        respx_mock.get("https://cdn.fake/p2.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        events = []
+        _DINOV2_SLEEP = 0.05  # rápido, como DINOv2 en la práctica (~1-2s reales, ver ADR-25)
+        _SCENE_SLEEP = 0.3  # mucho más lento, como Moondream2 (~15-25s reales)
+
+        def _fake_dinov2(image, k=15):
+            # Corre en un hilo real (asyncio.to_thread), time.sleep no
+            # bloquea el event loop -- por eso _fake_scene sí puede
+            # avanzar mientras tanto.
+            events.append(("dinov2_start", time.monotonic()))
+            time.sleep(_DINOV2_SLEEP)
+            events.append(("dinov2_end", time.monotonic()))
+            return None
+
+        async def _fake_scene(image):
+            events.append(("scene_start", time.monotonic()))
+            await asyncio.sleep(_SCENE_SLEEP)
+            events.append(("scene_end", time.monotonic()))
+            return [], False, None, None
+
+        monkeypatch.setattr(geolocation, "estimate_location_from_image", _fake_dinov2)
+        monkeypatch.setattr(geolocation, "_maybe_analyze_content", _fake_scene)
+
+        await geolocation.estimate_locations_for_posts(posts)
+
+        dinov2_starts = sorted(t for name, t in events if name == "dinov2_start")
+        scene_ends = sorted(t for name, t in events if name == "scene_end")
+        assert len(dinov2_starts) == 2
+        assert len(scene_ends) == 2
+
+        # La prueba real: el DINOv2 de la SEGUNDA foto arranca antes de
+        # que el Moondream2 (más lento) de la PRIMERA termine. Con el
+        # semáforo único antiguo esto era imposible -- la segunda foto no
+        # podía empezar hasta que las dos tareas de la primera liberasen
+        # el hueco compartido.
+        assert dinov2_starts[1] < scene_ends[0], (
+            "el DINOv2 de la segunda foto debería arrancar antes de que "
+            "termine el Moondream2 de la primera -- si esto falla, ha "
+            "vuelto la lógica de semáforo único (ver ADR-29)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_process_photo_records_per_stage_timing(self, monkeypatch, respx_mock):
+        """ADR-29 añadió timing por etapa (dinov2_seconds/scene_seconds)
+        a PhotoAnalysisTiming, además del total ya existente
+        (per_photo_seconds) -- comprueba que _process_photo() rellena
+        los tres con valores del orden esperado, no solo que no
+        revienta."""
+        import asyncio
+        import time
+        import httpx
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/p.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        _DINOV2_SLEEP = 0.02
+        _SCENE_SLEEP = 0.05
+
+        def _fake_dinov2(image, k=15):
+            time.sleep(_DINOV2_SLEEP)
+            return None
+
+        async def _fake_scene(image):
+            await asyncio.sleep(_SCENE_SLEEP)
+            return [], False, None, None
+
+        monkeypatch.setattr(geolocation, "estimate_location_from_image", _fake_dinov2)
+        monkeypatch.setattr(geolocation, "_maybe_analyze_content", _fake_scene)
+
+        timing = geolocation.PhotoAnalysisTiming()
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await geolocation._process_photo(
+                client,
+                asyncio.Semaphore(1),
+                asyncio.Semaphore(1),
+                asyncio.Semaphore(1),
+                "https://cdn.fake/p.jpg",
+                timing,
+            )
+
+        assert len(timing.dinov2_seconds) == 1
+        assert len(timing.scene_seconds) == 1
+        assert len(timing.per_photo_seconds) == 1
+        # Cada medición individual ronda el sleep correspondiente (con
+        # margen generoso para no ser inestable en CI).
+        assert _DINOV2_SLEEP * 0.5 <= timing.dinov2_seconds[0] < _DINOV2_SLEEP * 5
+        assert _SCENE_SLEEP * 0.5 <= timing.scene_seconds[0] < _SCENE_SLEEP * 5
+        # El total (gather de las dos DENTRO de la misma foto, sigue
+        # siendo concurrente ahí -- ver docstring de _process_photo) debe
+        # rondar el máximo de los dos, NO la suma -- si fuera la suma,
+        # significaría que ya no corren en paralelo dentro de la misma
+        # foto, una regresión distinta del pipeline ENTRE fotos que ya
+        # cubre el test de arriba.
+        assert timing.per_photo_seconds[0] < timing.dinov2_seconds[0] + timing.scene_seconds[0]
+
+    @pytest.mark.asyncio
     async def test_skips_image_that_fails_to_download_without_aborting(self, monkeypatch, respx_mock):
         import httpx
 

@@ -669,7 +669,7 @@ async def _maybe_analyze_content(image):
         return [], False, None, None
 
 
-async def _process_photo(client, download_semaphore, analysis_semaphore, media_url, timing):
+async def _process_photo(client, download_semaphore, dinov2_semaphore, scene_semaphore, media_url, timing):
     """Descarga UNA foto y, si se pudo, la analiza con los dos modelos.
     Devuelve (image_or_None, estimate_or_None, scene_inferences,
     indicio_pareja, description_or_None, description_general_or_None).
@@ -678,28 +678,53 @@ async def _process_photo(client, download_semaphore, analysis_semaphore, media_u
     distintas etapas (descargando / en cola para analizar / analizando) a
     la vez.
 
-    `timing` (PhotoAnalysisTiming, ver app/log/performance_log.py) recibe UNA
-    medición por foto -- solo el tramo de análisis con los modelos de
-    visión (no la descarga, que es I/O de red y depende de factores ajenos
-    a la CPU/concurrencia que queremos medir aquí)."""
+    `timing` (PhotoAnalysisTiming, ver app/log/performance_log.py) recibe
+    TRES mediciones por foto -- el total combinado (`record`, no la
+    descarga, que es I/O de red y depende de factores ajenos a la
+    CPU/concurrencia que queremos medir aquí) y, por separado, el tiempo
+    de cada modelo (`record_dinov2`/`record_scene`), útil para
+    diagnosticar cuál domina y si el offload a iGPU (ADR-28) ayuda de
+    verdad -- ver ADR-29.
+
+    `dinov2_semaphore` y `scene_semaphore` son DOS semáforos
+    INDEPENDIENTES (antes uno solo, `analysis_semaphore`, envolvía las dos
+    llamadas juntas -- ver ADR-29): con uno compartido, el slot de una
+    foto no se liberaba hasta que DINOv2 *y* Moondream2 habían terminado
+    los dos para ESA foto, así que aunque DINOv2 acabase en 1-2s, la foto
+    siguiente no podía ni empezar a analizarse hasta que Moondream2
+    (mucho más lento, generación autoregresiva) terminase la actual. Con
+    semáforos separados, en cuanto el DINOv2 de la foto N libera su
+    semáforo, el DINOv2 de la foto N+1 (su tarea ya está en marcha,
+    esperando el semáforo) puede arrancar YA, aunque el Moondream2 de la
+    foto N siga ocupado con el suyo -- pipeline real entre fotos, no solo
+    paralelismo dentro de una misma foto. El `asyncio.gather` de aquí
+    abajo sigue esperando a que las DOS terminen para ESTA foto en
+    concreto antes de devolver su resultado (necesario: el resultado
+    combinado de la foto se vuelca junto, ver `_collect_photo_result`),
+    pero eso ya no bloquea a las fotos siguientes."""
     image = await _download_image(client, download_semaphore, media_url)
     if image is None:
         return None, None, [], False, None, None
 
-    # `analysis_semaphore` (ver Settings.photo_analysis_concurrency) acota
-    # cuántas fotos ocupan a la vez los modelos de visión -- DINOv2 es
-    # rápido pero Moondream2 es lento (generación autoregresiva), así que
-    # sin este límite de concurrencia el núcleo que usaría DINOv2 para la
-    # siguiente foto se quedaría ocioso mientras Moondream2 termina la
-    # actual. Se deja como configurable porque el punto óptimo depende de
-    # cuántos núcleos tenga la máquina que lo ejecute.
-    async with analysis_semaphore:
-        start = time.monotonic()
-        estimate, (scene_inferences, indicio_pareja, description, description_general) = await asyncio.gather(
-            asyncio.to_thread(estimate_location_from_image, image),
-            _maybe_analyze_content(image),
-        )
-        timing.record(time.monotonic() - start)
+    async def _run_dinov2():
+        async with dinov2_semaphore:
+            dinov2_start = time.monotonic()
+            result = await asyncio.to_thread(estimate_location_from_image, image)
+            timing.record_dinov2(time.monotonic() - dinov2_start)
+            return result
+
+    async def _run_scene():
+        async with scene_semaphore:
+            scene_start = time.monotonic()
+            result = await _maybe_analyze_content(image)
+            timing.record_scene(time.monotonic() - scene_start)
+            return result
+
+    start = time.monotonic()
+    estimate, (scene_inferences, indicio_pareja, description, description_general) = await asyncio.gather(
+        _run_dinov2(), _run_scene()
+    )
+    timing.record(time.monotonic() - start)
     # `image` sale de scope tras este bloque y se descarta (nunca se escribe a disco)
     return image, estimate, scene_inferences, indicio_pareja, description, description_general
 
@@ -840,11 +865,14 @@ async def estimate_locations_for_posts(
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         # Se lanza YA el pipeline completo (descarga + análisis) de TODAS
-        # las fotos como tareas independientes, acotadas por dos límites
+        # las fotos como tareas independientes, acotadas por TRES límites
         # de concurrencia distintos: uno para las descargas (por no
-        # golpear de golpe el CDN de Instagram) y otro para cuántas fotos
-        # ocupan a la vez los modelos de visión (ver
-        # Settings.photo_analysis_concurrency). Se sigue consumiendo el
+        # golpear de golpe el CDN de Instagram) y DOS para los modelos de
+        # visión -- uno por DINOv2, otro por Moondream2, independientes
+        # entre sí (ver ADR-29 y el docstring de `_process_photo`: antes
+        # era uno solo compartido, y una foto no liberaba su hueco hasta
+        # que los dos modelos terminaban, bloqueando a la siguiente foto
+        # aunque DINOv2 ya llevara rato libre). Se sigue consumiendo el
         # resultado de cada tarea EN EL ORDEN ORIGINAL de las fotos (no en
         # el orden en que terminan) para que `results` y los eventos de
         # progreso salgan deterministas -- pero como las tareas ya están
@@ -861,12 +889,23 @@ async def estimate_locations_for_posts(
         # el arranque asumiendo como máximo `settings.photo_analysis_concurrency`
         # fotos a la vez (ver app/main.py), y aquí nunca se supera ese tope.
         actual_concurrency = max(1, min(settings.photo_analysis_concurrency, total))
-        analysis_semaphore = asyncio.Semaphore(actual_concurrency)
+        # Mismo valor de concurrencia que antes (`Settings.photo_analysis_concurrency`,
+        # sin tocar su heurística/calibración existente), pero en DOS
+        # semáforos independientes en vez de uno compartido -- ver ADR-29
+        # y el docstring de `_process_photo` para el motivo: así el
+        # análisis de una foto ya no bloquea a la siguiente esperando al
+        # modelo más lento (Moondream2). El techo de inferencias
+        # simultáneas no cambia (como mucho `actual_concurrency` DINOv2 +
+        # `actual_concurrency` Moondream2 a la vez, igual que antes con
+        # el semáforo único, ver ADR-29) -- `threads_per_inference`
+        # sigue siendo válido sin tocarlo.
+        dinov2_semaphore = asyncio.Semaphore(actual_concurrency)
+        scene_semaphore = asyncio.Semaphore(actual_concurrency)
         timing = PhotoAnalysisTiming()
         run_start = time.monotonic()
         photo_tasks = [
             asyncio.create_task(
-                _process_photo(client, download_semaphore, analysis_semaphore, media_url, timing)
+                _process_photo(client, download_semaphore, dinov2_semaphore, scene_semaphore, media_url, timing)
             )
             for _permalink, media_url, _index, _post_total in photo_units
         ]
@@ -939,6 +978,8 @@ async def estimate_locations_for_posts(
         igpu_offload_used=_igpu_worker_device_index is not None and not _igpu_worker_failed,
         total_wall_seconds=time.monotonic() - run_start,
         per_photo_seconds=timing.per_photo_seconds,
+        per_photo_dinov2_seconds=timing.dinov2_seconds,
+        per_photo_scene_seconds=timing.scene_seconds,
     )
 
     return GeolocationOutcome(
