@@ -7,8 +7,11 @@ from app.data.ine_reference import (
     MARITAL_STATUS_BY_SEX,
     MARITAL_STATUS_DISTRIBUTION,
     NATIONALITY_DISTRIBUTION,
+    RELIGION_DISTRIBUTION,
+    SEXUAL_ORIENTATION_DISTRIBUTION,
     SITUACION_LABORAL_DISTRIBUTION,
     TOTAL_POPULATION_ES,
+    ZODIAC_DISTRIBUTION,
 )
 from app.scoring.k_anonymity import (
     PopulationNarrowingStep,
@@ -597,3 +600,121 @@ class TestLenguaMaternaStep:
         steps = estimate_population_narrowing(findings)
         assert final_remaining_population(steps) == steps[-1].remaining_population
 
+
+class TestOrientacionSexualStep:
+    def test_produces_a_step_that_narrows_population(self):
+        findings = DemographicFindings(orientacion_sexual="bisexual", source={"orientacion_sexual": "texto"})
+        steps = estimate_population_narrowing(findings)
+
+        assert len(steps) == 1
+        assert steps[0].category == "orientacion_sexual"
+        assert steps[0].attribute_label == "Orientación sexual: Bisexual"
+        assert steps[0].remaining_population == round(
+            TOTAL_POPULATION_ES * SEXUAL_ORIENTATION_DISTRIBUTION["bisexual"]
+        )
+        assert steps[0].note_code == "orientacion_sexual_categoria_especial"
+
+    def test_all_seven_categories_produce_a_step(self):
+        for value in SEXUAL_ORIENTATION_DISTRIBUTION:
+            steps = estimate_population_narrowing(DemographicFindings(orientacion_sexual=value))
+            assert len(steps) == 1
+            assert steps[0].remaining_population is not None
+
+    def test_none_produces_no_step(self):
+        assert estimate_population_narrowing(DemographicFindings(orientacion_sexual=None)) == []
+
+    def test_counts_towards_final_remaining_population(self):
+        findings = DemographicFindings(orientacion_sexual="gay")
+        steps = estimate_population_narrowing(findings)
+        assert final_remaining_population(steps) == steps[-1].remaining_population
+
+    def test_distribution_sums_to_one(self):
+        assert sum(SEXUAL_ORIENTATION_DISTRIBUTION.values()) == pytest.approx(1.0)
+
+
+class TestReligionStep:
+    def test_produces_a_step_that_narrows_population(self):
+        findings = DemographicFindings(religion="ateismo", source={"religion": "texto"})
+        steps = estimate_population_narrowing(findings)
+
+        assert len(steps) == 1
+        assert steps[0].category == "religion"
+        assert steps[0].attribute_label == "Religión: Ateismo"
+        assert steps[0].remaining_population == round(TOTAL_POPULATION_ES * RELIGION_DISTRIBUTION["ateismo"])
+        assert steps[0].note_code == "religion_categoria_especial"
+
+    def test_all_eight_categories_produce_a_step(self):
+        for value in RELIGION_DISTRIBUTION:
+            steps = estimate_population_narrowing(DemographicFindings(religion=value))
+            assert len(steps) == 1
+            assert steps[0].remaining_population is not None
+
+    def test_none_produces_no_step(self):
+        assert estimate_population_narrowing(DemographicFindings(religion=None)) == []
+
+    def test_counts_towards_final_remaining_population(self):
+        findings = DemographicFindings(religion="islam")
+        steps = estimate_population_narrowing(findings)
+        assert final_remaining_population(steps) == steps[-1].remaining_population
+
+
+class TestSignoZodiacalStep:
+    def test_produces_a_step_that_narrows_population(self):
+        findings = DemographicFindings(
+            signo_zodiacal="aries (21 mar - 19 abr)", source={"signo_zodiacal": "texto"}
+        )
+        steps = estimate_population_narrowing(findings)
+
+        assert len(steps) == 1
+        assert steps[0].category == "signo_zodiacal"
+        assert steps[0].remaining_population == round(TOTAL_POPULATION_ES * ZODIAC_DISTRIBUTION["aries"])
+        assert steps[0].note_code == "signo_zodiacal_note"
+
+    def test_base_sign_is_extracted_from_the_stored_range_string(self):
+        """`findings.signo_zodiacal` se guarda como 'signo (rango)' -- el
+        paso debe usar solo el nombre del signo para buscar en
+        ZODIAC_DISTRIBUTION, no la cadena completa con el rango."""
+        findings = DemographicFindings(signo_zodiacal="escorpio (23 oct - 21 nov)")
+        steps = estimate_population_narrowing(findings)
+        assert steps[0].remaining_population == round(TOTAL_POPULATION_ES * ZODIAC_DISTRIBUTION["escorpio"])
+
+    def test_all_twelve_signs_produce_a_step(self):
+        for sign in ZODIAC_DISTRIBUTION:
+            findings = DemographicFindings(signo_zodiacal=f"{sign} (rango cualquiera)")
+            steps = estimate_population_narrowing(findings)
+            assert len(steps) == 1
+            assert steps[0].remaining_population is not None
+
+    def test_none_produces_no_step(self):
+        assert estimate_population_narrowing(DemographicFindings(signo_zodiacal=None)) == []
+
+    def test_counts_towards_final_remaining_population(self):
+        findings = DemographicFindings(signo_zodiacal="leo (23 jul - 22 ago)")
+        steps = estimate_population_narrowing(findings)
+        assert final_remaining_population(steps) == steps[-1].remaining_population
+
+    def test_distribution_sums_to_one(self):
+        assert sum(ZODIAC_DISTRIBUTION.values()) == pytest.approx(1.0)
+
+
+class TestSpecialCategoryFieldsCombined:
+    """Regresión: orientacion_sexual, religion y signo_zodiacal se
+    detectaban en demographic_extraction.py/ai_attribute_extraction.py
+    pero nunca llegaban a k_anonymity.py -- se perdían sin afectar al
+    número final ni aparecer en el informe (Comandante, agosto 2026)."""
+
+    def test_all_three_together_chain_correctly(self):
+        findings = DemographicFindings(
+            sexo="mujer",
+            orientacion_sexual="bisexual",
+            religion="ateismo",
+            signo_zodiacal="aries (21 mar - 19 abr)",
+        )
+        steps = estimate_population_narrowing(findings)
+        categories = {s.category for s in steps}
+        assert {"sexo", "orientacion_sexual", "religion", "signo_zodiacal"} <= categories
+
+        # El último escalón debe ser el más estrecho (cada paso multiplica
+        # sobre el anterior).
+        assert final_remaining_population(steps) == steps[-1].remaining_population
+        assert steps[-1].remaining_population < steps[0].remaining_population

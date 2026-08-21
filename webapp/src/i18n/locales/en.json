@@ -127,7 +127,10 @@
       "lengua_no_estimable": "This can only be narrowed down if the region of residence is also known (this language is nearly residual outside its co-official territory, so a national proportion wouldn't add anything useful).",
       "lengua_within_ccaa": "Proportion calculated ONLY within the already-known region (not nationwide).",
       "universidad_no_estimable": "Would require the number of students/graduates of that specific university and degree (future work): data not included in this version.",
-      "empresa_no_estimable": "Would require the number of employees of that specific company (future work): data not included in this version."
+      "empresa_no_estimable": "Would require the number of employees of that specific company (future work): data not included in this version.",
+      "orientacion_sexual_categoria_especial": "Special category of data (GDPR Art. 9): only calculated because the person explicitly self-declared it in public, never by indirect inference. The proportion used is a contextual estimate for Spain (CIS/observatories), not an official INE census figure.",
+      "religion_categoria_especial": "Special category of data (GDPR Art. 9): only calculated because the person explicitly self-declared it or indicated it with an unambiguous symbol/emoji in public, never by indirect inference. The proportion used is a contextual estimate for Spain (CIS and community sources), not an official INE census figure -- Spain does not collect religious affiliation in its census.",
+      "signo_zodiacal_note": "The distribution is uniform (~8.33% per sign, one twelfth of the year) because birth dates are spread almost uniformly across the year -- it isn't a made-up figure: it directly reveals a real ~30-day birth window, even though the astrological belief itself has no scientific basis."
     },
     "attribute": {
       "sexo": "Sex: {{value}}",
@@ -143,7 +146,10 @@
       "empresa": "Company: {{value}}",
       "ubicacion_municipio": "Lives in municipality: {{value}}",
       "ubicacion_provincia": "Lives in province: {{value}}",
-      "ubicacion_comunidad_autonoma": "Lives in region: {{value}}"
+      "ubicacion_comunidad_autonoma": "Lives in region: {{value}}",
+      "orientacion_sexual": "Sexual orientation: {{value}}",
+      "religion": "Religion: {{value}}",
+      "signo_zodiacal": "Zodiac sign: {{value}}"
     },
     "attributeValue": {
       "sexo": {
@@ -207,6 +213,39 @@
         "administracion publica": "Public Administration",
         "construccion": "Construction",
         "transporte": "Transportation"
+      },
+      "orientacion_sexual": {
+        "heterosexual": "Heterosexual",
+        "gay": "Gay",
+        "lesbiana": "Lesbian",
+        "bisexual": "Bisexual",
+        "pansexual": "Pansexual",
+        "asexual": "Asexual",
+        "homosexual": "Homosexual"
+      },
+      "religion": {
+        "judaismo": "Judaism",
+        "islam": "Islam",
+        "catolicismo": "Catholicism",
+        "cristianismo": "Christianity",
+        "budismo": "Buddhism",
+        "hinduismo": "Hinduism",
+        "ateismo": "Atheism",
+        "agnosticismo": "Agnosticism"
+      },
+      "signo_zodiacal": {
+        "aries (21 mar - 19 abr)": "Aries (Mar 21 - Apr 19)",
+        "tauro (20 abr - 20 may)": "Taurus (Apr 20 - May 20)",
+        "geminis (21 may - 20 jun)": "Gemini (May 21 - Jun 20)",
+        "cancer (21 jun - 22 jul)": "Cancer (Jun 21 - Jul 22)",
+        "leo (23 jul - 22 ago)": "Leo (Jul 23 - Aug 22)",
+        "virgo (23 ago - 22 sep)": "Virgo (Aug 23 - Sep 22)",
+        "libra (23 sep - 22 oct)": "Libra (Sep 23 - Oct 22)",
+        "escorpio (23 oct - 21 nov)": "Scorpio (Oct 23 - Nov 21)",
+        "sagitario (22 nov - 21 dic)": "Sagittarius (Nov 22 - Dec 21)",
+        "capricornio (22 dic - 19 ene)": "Capricorn (Dec 22 - Jan 19)",
+        "acuario (20 ene - 18 feb)": "Aquarius (Jan 20 - Feb 18)",
+        "piscis (19 feb - 20 mar)": "Pisces (Feb 19 - Mar 20)"
       }
     }
   },

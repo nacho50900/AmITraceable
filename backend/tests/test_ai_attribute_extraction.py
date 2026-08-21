@@ -177,7 +177,7 @@ class TestEdadEstimadaPorTramo:
         respx_mock.post(MISTRAL_URL).mock(
             return_value=httpx.Response(
                 200,
-                json=_mock_content(edad_estimada={"edad_aproximada": 27, "confianza": 0.6}),
+                json=_mock_content(edad_estimada={"edad_aproximada": 27, "confianza": 0.8}),
             )
         )
 
@@ -188,7 +188,28 @@ class TestEdadEstimadaPorTramo:
         assert findings.edad is None
         assert findings.edad_rango == "25-29"
         assert findings.source["edad_rango"] == "ia_estimada"
-        assert findings.confidence["edad_rango"] == 0.6
+        assert findings.confidence["edad_rango"] == 0.8
+
+    @pytest.mark.asyncio
+    async def test_confianza_moderada_ya_no_es_suficiente(self, monkeypatch, respx_mock):
+        """Regresión (Comandante, agosto 2026): con el umbral antiguo (0.5)
+        se colaban estimaciones claramente erróneas con confianza
+        "moderada" (p. ej. 30 años estimados para alguien de 21 real). El
+        umbral subió de 0.5 a 0.7 -- 0.6 (dentro del techo "conservador"
+        que el propio prompt le pide al modelo para pistas no del todo
+        claras) ya no debe ser suficiente."""
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(edad_estimada={"edad_aproximada": 27, "confianza": 0.6}),
+            )
+        )
+
+        findings = await extract_demographics_with_ai([_post("alguna pista ambigua")], username="x")
+
+        assert findings.edad_rango is None
+        assert "edad_rango" not in findings.confidence
 
     @pytest.mark.asyncio
     async def test_confianza_baja_no_anade_nada(self, monkeypatch, respx_mock):
@@ -722,3 +743,78 @@ class TestGroupBFieldsFromAI:
         assert findings.tipo_hogar is None
         assert findings.lengua_materna is None
 
+
+class TestOrientacionSexualReligionSignoZodiacal:
+    """Regresión: estos tres campos se guardaban tal cual devolviera el
+    modelo, sin validar contra ningún vocabulario cerrado -- un valor
+    inventado o mal formado se colaba en DemographicFindings y luego
+    k_anonymity.py simplemente no encontraba proporción (silencioso, sin
+    avisar de que el dato era basura). Ahora se validan igual que
+    nacionalidad/situacion_laboral/etc (ver _SEXUAL_ORIENTATION_VALUES /
+    _RELIGION_VALUES / _set_signo_zodiacal)."""
+
+    @pytest.mark.asyncio
+    async def test_valid_orientacion_sexual_is_kept(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(orientacion_sexual="bisexual"))
+        )
+        findings = await extract_demographics_with_ai([_post("soy bisexual")], username="x")
+        assert findings.orientacion_sexual == "bisexual"
+
+    @pytest.mark.asyncio
+    async def test_invalid_orientacion_sexual_is_discarded(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(orientacion_sexual="queer"))
+        )
+        findings = await extract_demographics_with_ai([_post("texto cualquiera")], username="x")
+        assert findings.orientacion_sexual is None
+
+    @pytest.mark.asyncio
+    async def test_valid_religion_is_kept(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(religion="budismo"))
+        )
+        findings = await extract_demographics_with_ai([_post("soy budista")], username="x")
+        assert findings.religion == "budismo"
+
+    @pytest.mark.asyncio
+    async def test_invalid_religion_is_discarded(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(religion="pastafarismo"))
+        )
+        findings = await extract_demographics_with_ai([_post("texto cualquiera")], username="x")
+        assert findings.religion is None
+
+    @pytest.mark.asyncio
+    async def test_signo_zodiacal_is_normalized_to_canonical_format(self, monkeypatch, respx_mock):
+        """El modelo puede devolver el rango con capitalización o espacios
+        distintos al ejemplo del prompt; debe normalizarse siempre al
+        mismo formato canónico que usa la detección por regex/emoji."""
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(signo_zodiacal="Escorpio (23 oct - 21 nov)"))
+        )
+        findings = await extract_demographics_with_ai([_post("soy escorpio")], username="x")
+        assert findings.signo_zodiacal == "escorpio (23 oct - 21 nov)"
+
+    @pytest.mark.asyncio
+    async def test_signo_zodiacal_with_only_the_sign_name_is_normalized(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(signo_zodiacal="Aries"))
+        )
+        findings = await extract_demographics_with_ai([_post("soy aries")], username="x")
+        assert findings.signo_zodiacal == "aries (21 mar - 19 abr)"
+
+    @pytest.mark.asyncio
+    async def test_invalid_signo_zodiacal_is_discarded(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(signo_zodiacal="ofiuco"))
+        )
+        findings = await extract_demographics_with_ai([_post("texto cualquiera")], username="x")
+        assert findings.signo_zodiacal is None

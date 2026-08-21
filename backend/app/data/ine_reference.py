@@ -174,26 +174,35 @@ RELIGION_DISTRIBUTION = {
 }
 
 # Signo zodiacal: distribución contextual uniforme en España por fecha de
-# nacimiento, no oficial.
+# nacimiento, no oficial. 1/12 exacto (no 0,0833 redondeado -- 12 × 0,0833
+# = 0,9996, no 1,0: detectado por un test de regresión que comprueba que
+# la distribución suma 1, ver test_k_anonymity.py::TestSignoZodiacalStep).
 ZODIAC_DISTRIBUTION = {
-    "aries": 0.0833,
-    "tauro": 0.0833,
-    "geminis": 0.0833,
-    "cancer": 0.0833,
-    "leo": 0.0833,
-    "virgo": 0.0833,
-    "libra": 0.0833,
-    "escorpio": 0.0833,
-    "sagitario": 0.0833,
-    "capricornio": 0.0833,
-    "acuario": 0.0833,
-    "piscis": 0.0833,
+    "aries": 1 / 12,
+    "tauro": 1 / 12,
+    "geminis": 1 / 12,
+    "cancer": 1 / 12,
+    "leo": 1 / 12,
+    "virgo": 1 / 12,
+    "libra": 1 / 12,
+    "escorpio": 1 / 12,
+    "sagitario": 1 / 12,
+    "capricornio": 1 / 12,
+    "acuario": 1 / 12,
+    "piscis": 1 / 12,
 }
 
 # Orientación sexual: referencia contextual para España, no oficial. La
 # mayoría es heterosexual y una minoría LGBTIQ+ se mueve alrededor del 4-8%.
+# "heterosexual" es la categoría residual: se ajustó de 0,94 a 0,914 para
+# que el conjunto sume exactamente 1 (con 0,94 sumaba 1,026 -- "homosexual"
+# se añadió como término de autodeclaración distinto de "gay"/"lesbiana"
+# sin volver a cuadrar el resto de la tabla; detectado por un test de
+# regresión, ver test_k_anonymity.py::TestOrientacionSexualStep). Se ajusta
+# la categoría mayoritaria/residual en vez de las minoritarias porque estas
+# últimas son las que llevan más trabajo de estimación detrás.
 SEXUAL_ORIENTATION_DISTRIBUTION = {
-    "heterosexual": 0.94,
+    "heterosexual": 0.914,
     "gay": 0.022,
     "lesbiana": 0.015,
     "bisexual": 0.017,

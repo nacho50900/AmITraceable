@@ -127,7 +127,10 @@
       "lengua_no_estimable": "Solo se puede acotar si también se conoce la comunidad autónoma de residencia (esta lengua es casi residual fuera de su territorio cooficial, así que una proporción nacional no aportaría nada útil).",
       "lengua_within_ccaa": "Proporción calculada SOLO dentro de la comunidad autónoma ya conocida (no a nivel nacional).",
       "universidad_no_estimable": "Requeriría el nº de alumnos/egresados de esa universidad y titulación concretos (trabajo futuro): dato no incluido en esta versión.",
-      "empresa_no_estimable": "Requeriría el nº de empleados de esa empresa concreta (trabajo futuro): dato no incluido en esta versión."
+      "empresa_no_estimable": "Requeriría el nº de empleados de esa empresa concreta (trabajo futuro): dato no incluido en esta versión.",
+      "orientacion_sexual_categoria_especial": "Categoría especial de datos (art. 9 RGPD): se calcula únicamente porque la propia persona lo autodeclaró de forma explícita en público, nunca por inferencia indirecta. La proporción usada es una estimación contextual para España (CIS/observatorios), no un censo oficial del INE.",
+      "religion_categoria_especial": "Categoría especial de datos (art. 9 RGPD): se calcula únicamente porque la propia persona lo autodeclaró o lo indicó con un símbolo/emoji explícito en público, nunca por inferencia indirecta. La proporción usada es una estimación contextual para España (CIS y fuentes comunitarias), no un censo oficial del INE -- España no recoge la afiliación religiosa en el censo.",
+      "signo_zodiacal_note": "La distribución es uniforme (~8,33% cada signo, un doceavo del año) porque las fechas de nacimiento se reparten de forma prácticamente uniforme a lo largo del año -- no es un dato inventado: revela directamente un rango real de ~30 días de nacimiento, aunque la creencia astrológica en sí no tenga base científica."
     },
     "attribute": {
       "sexo": "Sexo: {{value}}",
@@ -143,7 +146,10 @@
       "empresa": "Empresa: {{value}}",
       "ubicacion_municipio": "Vive en municipio: {{value}}",
       "ubicacion_provincia": "Vive en provincia: {{value}}",
-      "ubicacion_comunidad_autonoma": "Vive en comunidad autónoma: {{value}}"
+      "ubicacion_comunidad_autonoma": "Vive en comunidad autónoma: {{value}}",
+      "orientacion_sexual": "Orientación sexual: {{value}}",
+      "religion": "Religión: {{value}}",
+      "signo_zodiacal": "Signo zodiacal: {{value}}"
     },
     "attributeValue": {
       "sexo": {
@@ -207,6 +213,39 @@
         "administracion publica": "Administración Pública",
         "construccion": "Construcción",
         "transporte": "Transporte"
+      },
+      "orientacion_sexual": {
+        "heterosexual": "Heterosexual",
+        "gay": "Gay",
+        "lesbiana": "Lesbiana",
+        "bisexual": "Bisexual",
+        "pansexual": "Pansexual",
+        "asexual": "Asexual",
+        "homosexual": "Homosexual"
+      },
+      "religion": {
+        "judaismo": "Judaísmo",
+        "islam": "Islam",
+        "catolicismo": "Catolicismo",
+        "cristianismo": "Cristianismo",
+        "budismo": "Budismo",
+        "hinduismo": "Hinduismo",
+        "ateismo": "Ateísmo",
+        "agnosticismo": "Agnosticismo"
+      },
+      "signo_zodiacal": {
+        "aries (21 mar - 19 abr)": "Aries (21 mar - 19 abr)",
+        "tauro (20 abr - 20 may)": "Tauro (20 abr - 20 may)",
+        "geminis (21 may - 20 jun)": "Géminis (21 may - 20 jun)",
+        "cancer (21 jun - 22 jul)": "Cáncer (21 jun - 22 jul)",
+        "leo (23 jul - 22 ago)": "Leo (23 jul - 22 ago)",
+        "virgo (23 ago - 22 sep)": "Virgo (23 ago - 22 sep)",
+        "libra (23 sep - 22 oct)": "Libra (23 sep - 22 oct)",
+        "escorpio (23 oct - 21 nov)": "Escorpio (23 oct - 21 nov)",
+        "sagitario (22 nov - 21 dic)": "Sagitario (22 nov - 21 dic)",
+        "capricornio (22 dic - 19 ene)": "Capricornio (22 dic - 19 ene)",
+        "acuario (20 ene - 18 feb)": "Acuario (20 ene - 18 feb)",
+        "piscis (19 feb - 20 mar)": "Piscis (19 feb - 20 mar)"
       }
     }
   },

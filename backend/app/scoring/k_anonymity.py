@@ -46,10 +46,13 @@ from app.data.ine_reference import (
     OCCUPATION_DISTRIBUTION,
     PROVINCE_POPULATION,
     PROVINCE_TO_CCAA,
+    RELIGION_DISTRIBUTION,
     SEX_DISTRIBUTION,
+    SEXUAL_ORIENTATION_DISTRIBUTION,
     SITUACION_LABORAL_DISTRIBUTION,
     STUDIES_DISTRIBUTION,
     TOTAL_POPULATION_ES,
+    ZODIAC_DISTRIBUTION,
 )
 from app.nlp.demographic_extraction import DemographicFindings
 from app import note_codes
@@ -116,6 +119,15 @@ class PopulationNarrowingStep:
 _CHAINED_CATEGORIES = {
     "sexo", "edad", "ubicacion", "estudios", "ocupacion", "estado_civil",
     "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
+    # Categorías especiales del art. 9 RGPD (orientacion_sexual, religion)
+    # y signo_zodiacal -- SÍ participan en la cadena que afina el número
+    # final, igual que el resto: si la persona lo autodeclaró en público,
+    # es información real que reduce el conjunto de posibles individuos.
+    # Ver _step_orientacion_sexual/_step_religion/_step_signo_zodiacal
+    # para el razonamiento completo de por qué se procesan pese a ser
+    # datos sensibles (spoiler: la herramienta existe para mostrarle a la
+    # persona su propia exposición, no para perfilar a terceros).
+    "orientacion_sexual", "religion", "signo_zodiacal",
 }
 
 
@@ -590,6 +602,114 @@ def _step_lengua(findings: DemographicFindings, remaining: float) -> tuple[float
     )
 
 
+_ORIENTACION_SEXUAL_LABELS = {
+    "heterosexual": "Heterosexual",
+    "gay": "Gay",
+    "lesbiana": "Lesbiana",
+    "bisexual": "Bisexual",
+    "pansexual": "Pansexual",
+    "asexual": "Asexual",
+    "homosexual": "Homosexual",
+}
+
+
+def _step_orientacion_sexual(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
+    """Orientación sexual autodeclarada de forma EXPLÍCITA (nunca inferida
+    de forma indirecta -- ver el requisito de autodeclaración literal en
+    `demographic_extraction.py::_try_detect_orientacion_sexual` y en el
+    campo homónimo del prompt de IA en `ai_attribute_extraction.py`).
+
+    Es una categoría especial del art. 9 RGPD. Se procesa de todos modos
+    porque el propósito de esta herramienta es precisamente mostrarle a
+    la persona qué tan expuesto queda un dato que ELLA MISMA publicó en
+    abierto -- no perfilar a terceros ni inferir nada que no haya dicho
+    explícitamente. Se marca en la nota para que quede claro en el
+    informe que se trata de una categoría especial, no un dato más.
+
+    `SEXUAL_ORIENTATION_DISTRIBUTION` (ver ine_reference.py) es una
+    estimación contextual para España basada en CIS/observatorios, NO un
+    censo oficial del INE -- España no pregunta esto en el censo."""
+    if not findings.orientacion_sexual:
+        return remaining, None
+    label = _ORIENTACION_SEXUAL_LABELS.get(
+        findings.orientacion_sexual, findings.orientacion_sexual.title()
+    )
+    return _apply_proportion(
+        remaining,
+        SEXUAL_ORIENTATION_DISTRIBUTION.get(findings.orientacion_sexual),
+        f"Orientación sexual: {label}",
+        "orientacion_sexual",
+        findings.evidence.get("orientacion_sexual", []),
+        source=findings.source.get("orientacion_sexual", "texto"),
+        note="Categoría especial de datos (art. 9 RGPD): se calcula únicamente "
+             "porque la propia persona lo autodeclaró de forma explícita en "
+             "público, nunca por inferencia indirecta. La proporción usada es "
+             "una estimación contextual para España (CIS/observatorios), no un "
+             "censo oficial del INE.",
+        note_code=note_codes.ORIENTACION_SEXUAL_CATEGORIA_ESPECIAL,
+        value_raw=findings.orientacion_sexual,
+    )
+
+
+def _step_religion(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
+    """Religión autodeclarada explícitamente en texto o mediante un
+    símbolo/emoji inequívoco -- ver `_try_detect_religion` y el campo
+    homónimo del prompt de IA. Misma categoría especial del art. 9 RGPD
+    que `orientacion_sexual`, mismo razonamiento para procesarla (ver
+    docstring de `_step_orientacion_sexual`)."""
+    if not findings.religion:
+        return remaining, None
+    return _apply_proportion(
+        remaining,
+        RELIGION_DISTRIBUTION.get(findings.religion),
+        f"Religión: {findings.religion.title()}",
+        "religion",
+        findings.evidence.get("religion", []),
+        source=findings.source.get("religion", "texto"),
+        note="Categoría especial de datos (art. 9 RGPD): se calcula únicamente "
+             "porque la propia persona lo autodeclaró o lo indicó con un "
+             "símbolo/emoji explícito en público, nunca por inferencia "
+             "indirecta. La proporción usada es una estimación contextual para "
+             "España (CIS y fuentes comunitarias), no un censo oficial del "
+             "INE -- España no recoge la afiliación religiosa en el censo.",
+        note_code=note_codes.RELIGION_CATEGORIA_ESPECIAL,
+        value_raw=findings.religion,
+    )
+
+
+def _step_signo_zodiacal(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
+    """El signo zodiacal, más allá de la creencia astrológica en sí (sin
+    base científica), revela de facto un rango real de ~30 días de fecha
+    de nacimiento -- por eso SÍ afina la población igual que cualquier
+    otro rasgo, no es un dato "de broma". No es categoría especial RGPD
+    (a diferencia de orientación sexual/religión): la fecha de nacimiento
+    aproximada no está en el art. 9.
+
+    `findings.signo_zodiacal` se guarda como 'signo (rango de fechas)'
+    (ver `_try_detect_signo_zodiacal`); aquí solo hace falta el nombre
+    del signo (antes del primer paréntesis) para buscarlo en
+    `ZODIAC_DISTRIBUTION`, que usa claves sin el rango."""
+    if not findings.signo_zodiacal:
+        return remaining, None
+    signo = findings.signo_zodiacal.split(" (")[0]
+    return _apply_proportion(
+        remaining,
+        ZODIAC_DISTRIBUTION.get(signo),
+        f"Signo zodiacal: {findings.signo_zodiacal.title()}",
+        "signo_zodiacal",
+        findings.evidence.get("signo_zodiacal", []),
+        source=findings.source.get("signo_zodiacal", "texto"),
+        note="La distribución es uniforme (~8,33% cada signo, un doceavo del "
+             "año) porque las fechas de nacimiento se reparten de forma "
+             "prácticamente uniforme a lo largo del año -- no es un dato "
+             "inventado: revela directamente un rango real de ~30 días de "
+             "nacimiento, aunque la creencia astrológica en sí no tenga base "
+             "científica.",
+        note_code=note_codes.SIGNO_ZODIACAL_NOTE,
+        value_raw=findings.signo_zodiacal,
+    )
+
+
 def _step_universidad(findings: DemographicFindings) -> PopulationNarrowingStep | None:
     """Universidad y empresa concretas no son "proporciones nacionales": son
     recuentos absolutos (nº de alumnos/empleados), y no tenemos esa tabla en
@@ -638,6 +758,14 @@ _CHAINED_STEPS = (
     # después, aunque no dependa del PROPIO remaining de location, solo de
     # los campos ya presentes en `findings`.
     _step_lengua,
+    # Autodeclaraciones explícitas (o símbolo/emoji inequívoco), igual de
+    # sólidas que sexo/nacionalidad/etc en cuanto a fiabilidad de la
+    # señal -- van aquí, antes de _step_relacion (la señal MENOS fiable
+    # de la cadena), aunque el orden no cambie el resultado final (la
+    # multiplicación de proporciones es conmutativa, ver docstring del
+    # módulo): es solo para que el orden de aparición en el informe siga
+    # yendo de más a menos fiable.
+    _step_orientacion_sexual, _step_religion, _step_signo_zodiacal,
     # Al final: es la señal menos fiable de la cadena (inferencia simbólica
     # por IA, no autodeclaración -- ver docstring de
     # DemographicFindings.estado_civil), así que refina lo que ya se haya

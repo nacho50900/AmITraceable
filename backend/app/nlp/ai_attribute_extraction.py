@@ -92,12 +92,14 @@ from app.data.ine_reference import (
     MUNICIPALITY_POPULATION,
     OCCUPATION_DISTRIBUTION,
     PROVINCE_POPULATION,
+    RELIGION_DISTRIBUTION,
+    SEXUAL_ORIENTATION_DISTRIBUTION,
     STUDIES_DISTRIBUTION,
     age_bin,
     resolve_autonomous_community,
 )
 from app.models.schemas import InferredAttribute, SocialPost
-from app.nlp.demographic_extraction import DemographicFindings, _strip_accents
+from app.nlp.demographic_extraction import DemographicFindings, _strip_accents, _ZODIAC_TEXT_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +115,12 @@ _NATIONALITY_VALUES = ("espanola", "extranjera")
 _EMPLOYMENT_VALUES = ("activo", "parado", "jubilado", "estudiante", "otro_inactivo")
 _LANGUAGE_VALUES = ("catalan", "euskera", "gallego", "valenciano")
 _HOUSEHOLD_VALUES = ("unipersonal", "pareja_sin_hijos", "pareja_con_hijos", "monoparental")
+# Igual que las cuatro de arriba: valores exactos, no texto libre a
+# normalizar por subcadena -- se validan con `_set_exact_enum` contra las
+# claves REALES de las tablas de distribución de ine_reference.py, en vez
+# de mantener una lista duplicada a mano que podría desincronizarse.
+_SEXUAL_ORIENTATION_VALUES = tuple(SEXUAL_ORIENTATION_DISTRIBUTION.keys())
+_RELIGION_VALUES = tuple(RELIGION_DISTRIBUTION.keys())
 # Tope defensivo de inferencias blandas aceptadas por respuesta, aunque el
 # prompt ya pide un máximo de 5 -- por si el modelo no lo respeta al pie de
 # la letra, no se toma "gratis" lo que devuelva de más.
@@ -125,7 +133,19 @@ _MAX_SOFT_INFERENCES = 5
 # porque esto SÍ participa en el cálculo de k-anonimato (afecta al número
 # de personas que se muestra en el informe), no solo en la lista
 # informativa de atributos inferidos.
-_AGE_RANGE_MIN_CONFIDENCE = 0.5
+#
+# Subido de 0.5 a 0.7 (Comandante, agosto 2026) tras detectar en
+# producción estimaciones claramente erróneas colándose con confianza
+# "moderada" (p. ej. 30 años estimados para alguien de 21) -- el propio
+# prompt (ver más abajo) ya le pide al modelo mantenerse POR DEBAJO de
+# 0.6 salvo que la pista sea casi tan clara como una declaración
+# explícita; con el umbral en 0.5, cualquier valor en la franja 0.5-0.59
+# pasaba igualmente, pese a que esa franja son -por diseño del propio
+# prompt- conjeturas que el modelo NO considera fiables. Subir el umbral
+# a 0.7 (por encima del techo "conservador" de 0.6 del prompt) deja pasar
+# únicamente las estimaciones que el propio modelo trata como
+# prácticamente tan sólidas como una autodeclaración explícita.
+_AGE_RANGE_MIN_CONFIDENCE = 0.7
 # Todos los campos que puede rellenar este módulo, en el mismo orden que
 # `DemographicFindings`, usado por `merge_findings`.
 _ALL_FIELDS = (
@@ -239,9 +259,13 @@ _SYSTEM_PROMPT = (
     "universidad este año), o jerga/referencias claramente generacionales. Devuelve tu MEJOR "
     "ESTIMACIÓN numérica en 'edad_aproximada' (no hace falta acertar el año exacto, basta con "
     "una edad plausible dentro de ese rango) y en 'confianza' un número entre 0 y 1 que refleje "
-    "honestamente cuánto peso tiene la pista -- sé conservador: usa valores por debajo de 0.6 "
-    "salvo que la pista sea casi tan clara como una declaración explícita (p. ej. dice el año "
-    "exacto en que nació, o un cálculo de años sin ambigüedad). Si no hay ninguna pista "
+    "honestamente cuánto peso tiene la pista -- sé MUY conservador: un tramo de edad "
+    "equivocado es peor que no mostrar nada, así que usa valores por debajo de 0.6 casi "
+    "siempre, y reserva 0.7 o más SOLO para cuando la pista deje la edad prácticamente tan "
+    "clara como una declaración explícita (p. ej. dice el año exacto en que nació, o un "
+    "cálculo de años sin ninguna ambigüedad posible -- no una simple corazonada sobre el "
+    "estilo de escritura o el tono). Si tienes cualquier duda razonable, usa un valor por "
+    "debajo de 0.7 a propósito para que la estimación se descarte. Si no hay ninguna pista "
     "razonable, usa null en 'edad_aproximada' (o directamente null en todo el objeto) antes que "
     "adivinar. NUNCA reutilices esto para razonar sobre la edad de otra persona mencionada en el "
     "texto, solo sobre la propia persona.\\n"
@@ -399,6 +423,30 @@ def _set_normalized(
     if matched:
         setattr(findings, field, matched)
         _set_evidence(findings, field, evidence_map)
+
+
+def _set_signo_zodiacal(findings: DemographicFindings, parsed: dict, evidence_map: dict) -> None:
+    """Como `_set_exact_enum`, pero para 'signo_zodiacal': el modelo no
+    devuelve un valor exacto de un enum cerrado, sino texto libre tipo
+    'aries (21 mar - 19 abr)' (el prompt le da ese formato como ejemplo).
+    Aquí se valida que el NOMBRE del signo (antes del primer paréntesis,
+    sin acentos/mayúsculas) sea uno de los 12 reales y se normaliza al
+    formato canónico de `_ZODIAC_TEXT_MAP` -- el mismo que produce la
+    detección por regex/emoji -- para que ambas rutas de detección
+    terminen SIEMPRE en uno de los 12 valores exactos que espera
+    `_step_signo_zodiacal` (k_anonymity.py) y las traducciones del
+    frontend (`attributeValue.signo_zodiacal` en i18n), en vez de dejar
+    pasar el rango de fechas que el modelo haya escrito con su propio
+    formato (que podría no coincidir con ninguna traducción)."""
+    raw = parsed.get("signo_zodiacal")
+    if not isinstance(raw, str) or not raw.strip():
+        return
+    signo = _strip_accents(raw.strip().lower().split(" (")[0].split("(")[0].strip())
+    canonical = _ZODIAC_TEXT_MAP.get(signo)
+    if canonical is None:
+        return
+    findings.signo_zodiacal = canonical
+    _set_evidence(findings, "signo_zodiacal", evidence_map)
 
 
 def _set_exact_enum(
@@ -648,14 +696,22 @@ def _to_findings(parsed: dict) -> DemographicFindings:
     _set_exact_enum(findings, parsed, "situacion_laboral", _EMPLOYMENT_VALUES, evidence_map)
     _set_exact_enum(findings, parsed, "tipo_hogar", _HOUSEHOLD_VALUES, evidence_map)
     _set_exact_enum(findings, parsed, "lengua_materna", _LANGUAGE_VALUES, evidence_map)
+    # orientacion_sexual/religion: valores exactos, validados contra las
+    # claves reales de sus tablas de distribución (ver comentario junto a
+    # _SEXUAL_ORIENTATION_VALUES/_RELIGION_VALUES más arriba) -- antes se
+    # aceptaba CUALQUIER string que devolviera el modelo sin comprobar
+    # nada, así que un valor inventado se guardaba igual y luego
+    # _step_orientacion_sexual/_step_religion en k_anonymity.py
+    # simplemente no encontraban proporción (se comportaba como "no
+    # estimable" en vez de fallar, pero sin avisar de que el dato era
+    # basura). signo_zodiacal usa su propio validador porque no es un
+    # enum exacto, sino texto con un rango de fechas -- ver
+    # _set_signo_zodiacal.
+    _set_exact_enum(findings, parsed, "orientacion_sexual", _SEXUAL_ORIENTATION_VALUES, evidence_map)
+    _set_exact_enum(findings, parsed, "religion", _RELIGION_VALUES, evidence_map)
+    _set_signo_zodiacal(findings, parsed, evidence_map)
     _set_travel_permalinks(findings, parsed)
     _set_estado_civil(findings, parsed, evidence_map)
-    # Nuevos campos: orientacion_sexual, signo_zodiacal, religion
-    for field in ("orientacion_sexual", "signo_zodiacal", "religion"):
-        value = parsed.get(field)
-        if isinstance(value, str) and value.strip():
-            setattr(findings, field, value.strip().lower())
-            _set_evidence(findings, field, evidence_map)
 
     findings.soft_inferences = _parse_soft_inferences(parsed)
 
