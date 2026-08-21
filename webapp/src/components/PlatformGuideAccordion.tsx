@@ -78,33 +78,58 @@ const PlatformGuideAccordion: React.FC<Props> = ({ activePlatform }) => {
           aria-labelledby={`platform-guide-tab-${activeItem.key}`}
           className="platform-guide-tab-content-container"
         >
-          <div className="platform-guide-item-content">
-            {activeItem.available ? (
-              <>
-                <h3>{t('landing.guide.reads')}</h3>
-                <ul>
-                  {(t(`landing.guide.${activeItem.key}.reads`, { returnObjects: true }) as string[]).map((line, idx) => (
-                    <li key={`${activeItem.key}-reads-${idx}`}>{line}</li>
-                  ))}
-                </ul>
+          {/* Las tres plataformas se renderizan a la vez, apiladas en la
+              misma celda de grid (ver .platform-guide-panel-stack): solo la
+              activa es visible, pero el contenedor mide lo que ocupa la más
+              alta de las tres. Así, cambiar de pestaña nunca hace crecer o
+              encoger el bloque ni empuja el resto de la página -- sin
+              necesidad de fijar una altura a mano (que se desincronizaría en
+              cuanto cambiase el texto o el idioma). */}
+          <div className="platform-guide-panel-stack">
+            {GUIDE_ITEMS.map((item) => {
+              const isActive = item.key === selectedTab;
+              return (
+                <div
+                  key={item.key}
+                  className="platform-guide-item-content"
+                  aria-hidden={!isActive}
+                  style={{ visibility: isActive ? 'visible' : 'hidden' }}
+                >
+                  {item.available ? (
+                    <>
+                      <h3>{t('landing.guide.reads')}</h3>
+                      <ul>
+                        {(t(`landing.guide.${item.key}.reads`, { returnObjects: true }) as string[]).map(
+                          (line, idx) => (
+                            <li key={`${item.key}-reads-${idx}`}>{line}</li>
+                          ),
+                        )}
+                      </ul>
 
-                <h3>{t('landing.guide.doesNotRead')}</h3>
-                <ul>
-                  {(t(`landing.guide.${activeItem.key}.doesNotRead`, { returnObjects: true }) as string[]).map((line, idx) => (
-                    <li key={`${activeItem.key}-doesNotRead-${idx}`}>{line}</li>
-                  ))}
-                </ul>
+                      <h3>{t('landing.guide.doesNotRead')}</h3>
+                      <ul>
+                        {(t(`landing.guide.${item.key}.doesNotRead`, { returnObjects: true }) as string[]).map(
+                          (line, idx) => (
+                            <li key={`${item.key}-doesNotRead-${idx}`}>{line}</li>
+                          ),
+                        )}
+                      </ul>
 
-                <h3>{t('landing.guide.todo')}</h3>
-                <ol>
-                  {(t(`landing.guide.${activeItem.key}.todo`, { returnObjects: true }) as string[]).map((line, idx) => (
-                    <li key={`${activeItem.key}-todo-${idx}`}>{line}</li>
-                  ))}
-                </ol>
-              </>
-            ) : (
-              <p className="note">{t('landing.guide.unavailable')}</p>
-            )}
+                      <h3>{t('landing.guide.todo')}</h3>
+                      <ol>
+                        {(t(`landing.guide.${item.key}.todo`, { returnObjects: true }) as string[]).map(
+                          (line, idx) => (
+                            <li key={`${item.key}-todo-${idx}`}>{line}</li>
+                          ),
+                        )}
+                      </ol>
+                    </>
+                  ) : (
+                    <p className="note">{t('landing.guide.unavailable')}</p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, test } from 'vitest';
 import i18n from '../i18n';
@@ -29,15 +29,21 @@ describe('PlatformGuideAccordion', () => {
 
   test('Reddit y X muestran el aviso de "no disponible todavía", no listas de lectura', async () => {
     const user = userEvent.setup();
-    render(<PlatformGuideAccordion />);
+    const { container } = render(<PlatformGuideAccordion />);
+
+    // Las tres variantes de contenido viven a la vez en el DOM, apiladas en
+    // el mismo grid para que el panel reserve la altura de la más alta (ver
+    // .platform-guide-panel-stack); solo la activa tiene aria-hidden="false".
+    const getActivePanel = () =>
+      container.querySelector('.platform-guide-item-content[aria-hidden="false"]') as HTMLElement;
 
     await user.click(screen.getByRole('tab', { name: 'Reddit' }));
-    expect(screen.getByText(/instrucciones no disponibles todavía/i)).toBeInTheDocument();
-    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+    expect(within(getActivePanel()).getByText(/instrucciones no disponibles todavía/i)).toBeInTheDocument();
+    expect(within(getActivePanel()).queryByRole('list')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('tab', { name: 'X' }));
-    expect(screen.getByText(/instrucciones no disponibles todavía/i)).toBeInTheDocument();
-    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+    expect(within(getActivePanel()).getByText(/instrucciones no disponibles todavía/i)).toBeInTheDocument();
+    expect(within(getActivePanel()).queryByRole('list')).not.toBeInTheDocument();
   });
 
   test('Instagram muestra las tres listas: qué lee, qué no lee, y qué debe hacer el usuario', async () => {
@@ -80,6 +86,24 @@ describe('PlatformGuideAccordion', () => {
 
     expect(redditTab).toHaveClass('platform-guide-tab');
     expect(redditTab).not.toHaveClass('platform-guide-tab--active');
+  });
+
+  test('el contenido de las tres plataformas convive en el DOM (apilado) para que el panel no cambie de tamaño al cambiar de pestaña', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<PlatformGuideAccordion />);
+
+    // Con Reddit activa por defecto, el contenido de Instagram (mucho más
+    // largo: tres listas) ya está en el DOM, solo que oculto -- así el
+    // contenedor mide siempre lo que ocupa la variante más alta.
+    expect(screen.getByText('La aplicación SÍ lee:')).toBeInTheDocument();
+
+    const stack = container.querySelector('.platform-guide-panel-stack');
+    expect(stack?.children).toHaveLength(3);
+
+    await user.click(screen.getByRole('tab', { name: 'Instagram' }));
+    // Sigue habiendo exactamente 3 variantes apiladas, ahora con Instagram
+    // visible y Reddit/X ocultas -- no se desmonta/remonta nada.
+    expect(stack?.children).toHaveLength(3);
   });
 
   test('cambiar el idioma a inglés traduce títulos y contenido de Instagram', async () => {

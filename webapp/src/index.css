@@ -177,7 +177,7 @@ body {
   padding: 10px 16px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-top: 4.5px solid transparent;
+  border-top: 4.5px solid var(--border);
   border-bottom: 3px solid var(--bg);
   border-radius: 8px 8px 0 0;
   cursor: pointer;
@@ -199,29 +199,29 @@ body {
   border-bottom-color: transparent;
 }
 
-/* Curvas cóncavas donde la pestaña activa se une al panel: un anillo de
-   1px (color --border) trazado con radial-gradient centrado en la esquina
-   de contacto. Transparente por dentro y por fuera -- solo pinta la línea
-   curva, sin relleno sólido que tape el hueco de detrás (antes se veían
-   cuadrados porque el relleno y la sombra usaban el mismo color plano). */
+/* Curvas de fusión donde la pestaña activa se une al panel, al estilo de
+   una pestaña de navegador (Chrome/Edge): rellenas de --bg-card (como el
+   propio panel/pestaña) hasta el radio, con un filo de 1px --border
+   marcando el borde curvo, y transparente a partir de ahí (deja ver el
+   hueco oscuro del fondo de la página, igual que el resto del borde). */
 .platform-guide-tab--active::before,
 .platform-guide-tab--active::after {
   content: '';
   position: absolute;
   bottom: 0;
-  width: 4px;
-  height: 4px;
+  width: 10px;
+  height: 10px;
   pointer-events: none;
 }
 
 .platform-guide-tab--active::before {
-  left: -4px;
-  background: radial-gradient(circle 4px at 0% 0%, transparent 3px, var(--border) 3px 4px, transparent 4px);
+  left: -10px;
+  background: radial-gradient(circle 10px at 0% 0%, var(--bg-card) 0 9px, var(--border) 9px 10px, transparent 10px);
 }
 
 .platform-guide-tab--active::after {
-  right: -4px;
-  background: radial-gradient(circle 4px at 100% 0%, transparent 3px, var(--border) 3px 4px, transparent 4px);
+  right: -10px;
+  background: radial-gradient(circle 10px at 100% 0%, var(--bg-card) 0 9px, var(--border) 9px 10px, transparent 10px);
 }
 
 .platform-guide-tab.platform-guide-item--reddit.platform-guide-tab--active {
@@ -260,8 +260,12 @@ body {
   padding: 20px;
 }
 
-.platform-guide-item-content {
-  /* removed top padding and border as they are handled by container */
+.platform-guide-panel-stack {
+  display: grid;
+}
+
+.platform-guide-panel-stack > .platform-guide-item-content {
+  grid-area: 1 / 1;
 }
 
 .platform-guide-item-content h3 {
