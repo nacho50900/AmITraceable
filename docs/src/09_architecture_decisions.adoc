@@ -1280,4 +1280,107 @@ respecto a una edad exacta, pero mucho menos que un año concreto --
 efecto esperado y deseado, no un error: es justo la contrapartida de
 tener menos certeza sobre el dato de partida.
 
+=== ADR-28: Offload de DINOv2 a una iGPU vía un proceso worker aislado (no en el propio backend)
+
+*Contexto*: ADR-25 fija la concurrencia de fotos a 1 cuando hay CUDA
+disponible, precisamente porque DINOv2 y Moondream2 comparten la MISMA
+GPU dedicada (GTX 1650, 4GB VRAM en la máquina de desarrollo) -- toda
+foto paga la suma de ambos tiempos, no el máximo. En máquinas con,
+además de la GPU dedicada, una segunda GPU integrada en el procesador
+(iGPU Intel/AMD), surge la posibilidad de mover el modelo más ligero
+(DINOv2, ~1-2s por foto) a esa segunda tarjeta vía DirectML y dejar la
+dedicada solo para Moondream2 (~15-25s), evitando la contención sin
+tocar el análisis de VRAM/streams ya descartado en ADR-25.
+
+Un primer intento instaló `torch-directml` directamente dentro del
+entorno del backend. `torch-directml` fija una versión concreta de
+`torch` (2.4.1 en el momento de escribir esto) como dependencia --
+incompatible con el rango + build CUDA (`cu121`) que el backend ya usa
+para Moondream2 (ver requirements-vision.txt). Al instalarlo, `pip`
+intentó reinstalar `torch` con esa otra versión/build y la
+desinstalación del `torch` anterior falló a medias con un
+`OSError: [Errno 5] Input/output error`, dejando el entorno del
+backend corrupto y obligando a reconstruir la imagen desde cero.
+
+*Alternativas consideradas*:
+
+1. *Reconciliar versiones*: fijar `requirements-vision.txt` a
+`torch==2.4.1` (la versión que exige `torch-directml`) y re-validar
+que Moondream2 sigue funcionando con ella. Descartada: la maquinaria
+de dtype casting (`_upcast_bfloat16_tensors()`, ver ADR-16/ADR-22) y
+`device_map={"": "cuda"}` en dict (necesario para la GTX 1650, sm_75)
+está validada contra la versión de `torch` actual, mucho más reciente
+-- bajar de versión no es solo cambiar un pin, exige repetir esa
+validación entera, con riesgo de romper algo que ya funciona para
+ganar algo que hoy es opcional. Además `torch-directml` apenas recibe
+actualizaciones, así que reconciliar ataría el backend entero a una
+versión de `torch` vieja de forma indefinida.
+2. *Proceso worker aislado* (elegida, ver más abajo).
+
+*Decisión*: DINOv2 sobre DirectML corre en `backend/igpu_worker/`, un
+proceso Python COMPLETAMENTE aparte -- imagen Docker propia, `venv`
+propio, nunca comparte `site-packages` con el backend. Expone dos
+endpoints HTTP (FastAPI, ya dependencia del backend, así que
+`httpx` para el cliente no añade nada nuevo):
+
+* `GET /devices`: lista los dispositivos DirectML visibles desde el
+  worker. El backend (que conoce el nombre de su propia GPU dedicada
+  vía `torch.cuda.get_device_name`) es quien decide, comparando
+  nombres, si alguno está de verdad libre -- si el único dispositivo
+  DirectML visible resulta ser la misma GPU dedicada expuesta con otro
+  nombre (pasa con algunos drivers), usarlo no libera nada y se
+  descarta.
+* `POST /embed`: calcula el embedding DINOv2 (normalizado L2) de una
+  imagen en el dispositivo indicado.
+
+El backend decide una sola vez, en `_lazy_load()`
+(`_select_igpu_worker_device_index()` en `app/vision/geolocation.py`),
+si despachar al worker; `estimate_location_from_image()` intenta el
+worker primero y cae al modelo local (mismo comportamiento de siempre,
+compartiendo la GPU dedicada) ante cualquier fallo -- worker no
+arrancado, timeout, o un operador de DINOv2 sin soporte todavía en
+DirectML (cobertura incompleta, ver README de `torch-directml`). El
+primer fallo se recuerda (`_igpu_worker_failed`) para no reintentar el
+worker en cada foto siguiente, mismo patrón que el fallback CPU
+original de DirectML antes de este ADR.
+
+Arrancar el worker es opt-in en dos niveles independientes: el flag
+`ENABLE_IGPU_OFFLOAD` (`Settings`, desactivado por defecto) y el
+servicio `dinov2-igpu-worker` en `docker-compose.yml`, tras
+`profiles: [igpu]` (`docker compose --profile igpu up`) -- nunca
+arranca con un `docker compose up` a secas, ni siquiera construye su
+imagen, para no imponer la dependencia de `torch-directml` en máquinas
+sin iGPU. Tampoco publica su puerto al host (`ports:` ausente a
+propósito): solo es alcanzable desde `backend` por la red interna
+`monitor-net`, lo que además responde al hotspot de seguridad de
+SonarCloud sobre `igpu_worker_url = "http://..."` (sin HTTPS) --
+justificado ahí mismo, en el propio comentario de
+`Settings.igpu_worker_url`: no hay tramo de red expuesto que TLS
+estuviera protegiendo.
+
+El log de rendimiento (`performance_log.py`) registra
+`igpu_offload_used` como estado REAL de cada análisis concreto (no si
+el flag estaba activado), para que una comparación de rendimiento
+offload/sin-offload no quede contaminada por análisis donde el flag
+estaba a `true` pero el worker cayó en fallback silencioso.
+
+*Consecuencias*: (+) el backend nunca vuelve a tocar `torch-directml`
+ni su pin de versión -- el problema original (reinstalación de `torch`
+corrompiendo el entorno) queda estructuralmente descartado, no solo
+evitado con más cuidado; (+) opt-in en dos niveles independientes
+(flag + perfil de Compose) y con degradación en silencio ante
+cualquier fallo -- una máquina sin iGPU, o con el worker parado, se
+comporta exactamente igual que antes de este ADR; (+) separa con
+claridad, en el propio log de rendimiento, si una mejora observada
+viene de verdad del offload o es ruido de otra variable (ver aviso de
+ADR-25 sobre no confundir concurrencia con paralelismo real -- el
+mismo cuidado aplica aquí); (-) añade un proceso más que gestionar
+(arranque, salud, reconstrucción de imagen) y un salto de red (HTTP,
+aunque interno) donde antes había una llamada de función directa --
+coste de latencia pequeño pero no nulo por foto, asumido a cambio de
+liberar la GPU dedicada para Moondream2; (-) el paso de la iGPU al
+contenedor vía `/dev/dxg` + `/usr/lib/wsl` (Docker Desktop sobre
+WSL2) no está verificado todavía en una máquina real con esa
+configuración -- pendiente de confirmar antes de dar la funcionalidad
+por completa, no solo por diseñada.
 

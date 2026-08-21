@@ -15,9 +15,13 @@ ifndef::imagesdir[:imagesdir: ../images]
 | Desarrollo día a día; permite hot-reload en ambos lados.
 
 | Local con Docker
-| `docker-compose up --build` desde la raíz del repo
-| Prueba del sistema completo tal como se desplegaría, incluida
-  monitorización.
+| `docker compose up --build` desde la raíz del repo -- arranca solo
+  `backend` + `webapp` (servicios sin perfil). `prometheus`/`grafana`
+  (perfil `monitoring`) y `dinov2-igpu-worker` (perfil `igpu`, ver
+  ADR-28) son opt-in: `docker compose --profile monitoring --profile
+  igpu up --build` para tenerlo todo a la vez.
+| Prueba del sistema tal como se desplegaría; monitorización y offload
+  de iGPU se añaden explícitamente solo cuando hacen falta.
 
 | Integración continua (CI)
 | GitHub Actions, runners `ubuntu-latest`
@@ -34,23 +38,23 @@ ifndef::imagesdir[:imagesdir: ../images]
 
 [source]
 ----
-+------------------------------------------------------------------------+
-|                         Docker host                                     |
-|                                                                           |
-|  red "monitor-net" (bridge)                                             |
-|                                                                           |
-|  +-----------+   +-----------+   +--------------+   +-------------+      |
-|  |  webapp   |-->|  backend  |   |  prometheus  |   |   grafana   |      |
-|  | (nginx,   |   | (uvicorn) |   |              |   |             |      |
-|  |  proxy)   |   | :3000     |   | :9090        |   | :9091->3000 |      |
-|  | :80       |   +-----------+   +--------------+   +-------------+      |
-|  +-----------+         |                |                  |            |
-|        |                |                |                  |            |
-|        |          [ volúmenes: ./backend/data (índice FAISS),            |
-|        |            ./backend/data/hf_cache (caché de modelo) ]          |
-+--------|----------------|----------------|------------------|-----------+
-         |                |                |                  |
-    localhost:8080   localhost:3000   localhost:9090     localhost:9091
++------------------------------------------------------------------------------------------+
+|                                  Docker host                                              |
+|                                                                                             |
+|  red "monitor-net" (bridge)                                                               |
+|                                                                                             |
+|  +-----------+   +-----------+   +--------------+   +-------------+   +-----------------+  |
+|  |  webapp   |-->|  backend  |-->| dinov2-igpu- |   |  prometheus  |   |    grafana      |  |
+|  | (nginx,   |   | (uvicorn) |   |    worker    |   |  [opt-in:    |   |  [opt-in:       |  |
+|  |  proxy)   |   | :3000     |   | (DirectML)   |   |  monitoring] |   |  monitoring]    |  |
+|  | :80       |   +-----------+   | [opt-in:igpu]|   | :9090        |   | :9091->3000     |  |
+|  +-----------+         |         +--------------+   +--------------+   +-----------------+  |
+|        |                |                                  |                  |             |
+|        |          [ volúmenes: ./backend/data (índice FAISS),                               |
+|        |            ./backend/data/hf_cache (caché de modelo) ]                              |
++--------|----------------|---------------------------------------------------------------+
+         |                |
+    localhost:8080   localhost:3000
 ----
 
 Motivación::
@@ -91,12 +95,24 @@ Mapeo de bloques a infraestructura::
   (`./backend/data/hf_cache`, para no volver a descargar el modelo en
   cada reinicio).
 
+| `dinov2-igpu-worker`
+| Proceso worker aislado que ejecuta DINOv2 sobre DirectML (iGPU
+  Intel/AMD vía WSL2), en una imagen/venv completamente aparte del
+  backend -- ver ADR-28 para el motivo (conflicto de versión de `torch`
+  entre `torch-directml` y el build CUDA que usa Moondream2). Opt-in vía
+  `profiles: [igpu]`; sin `ports:` publicado al host, solo alcanzable
+  desde `backend` por la red interna `monitor-net`. Requiere pasar
+  `/dev/dxg` y las librerías de `/usr/lib/wsl` al contenedor (Docker
+  Desktop + WSL2).
+
 | `prometheus`
 | Recolección de métricas expuestas en `backend:3000/metrics`
-  (`prometheus-fastapi-instrumentator`).
+  (`prometheus-fastapi-instrumentator`). Opt-in vía `profiles:
+  [monitoring]`.
 
 | `grafana`
-| Dashboards sobre las métricas anteriores.
+| Dashboards sobre las métricas anteriores. Opt-in vía `profiles:
+  [monitoring]`.
 |===
 
 === Infraestructura nivel 2: runner de CI (GitHub Actions)

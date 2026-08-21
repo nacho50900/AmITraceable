@@ -203,12 +203,27 @@ navegador.
 ### With Docker
 
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
+
+Arranca solo `backend` + `webapp` (servicios sin perfil):
 
 - Web application: http://localhost:8080
 - Backend API: http://localhost:3000 (docs interactivos en `/docs`)
+
+`prometheus`/`grafana` (perfil `monitoring`) y `dinov2-igpu-worker`
+(perfil `igpu`, ver más abajo) son **opt-in**, no arrancan con el
+comando de arriba a secas:
+
+```bash
+docker compose --profile monitoring up --build   # + Grafana/Prometheus
+docker compose --profile igpu up --build         # + worker de iGPU
+# combinables:
+docker compose --profile monitoring --profile igpu up --build
+```
+
 - Grafana: http://localhost:9091 · Prometheus: http://localhost:9090
+  (solo con `--profile monitoring`)
 
 Antes de levantarlo, crea `backend/.env` a partir de `backend/.env.example`
 (ver [variables de entorno](#variables-de-entorno) más abajo).
@@ -230,6 +245,52 @@ El modelo de geolocalización se precarga en el arranque del contenedor
 (no en el primer análisis); Moondream2 se carga de forma perezosa en la
 primera foto que lo necesita. La caché de ambos se persiste en
 `backend/data/hf_cache/` para no volver a descargarlos en cada reinicio.
+
+**Offload de DINOv2 a una iGPU (opcional, `--profile igpu`):** en
+máquinas con GPU dedicada + iGPU (Intel/AMD, vía DirectML sobre WSL2),
+`dinov2-igpu-worker` descarga su propio `torch==2.4.1+cu121` +
+`torch-directml` -- deliberadamente en una imagen/`venv` completamente
+aparte del backend, nunca instalado ahí (ver ADR-28 en
+`docs/src/09_architecture_decisions.adoc` para el porqué: mezclarlo con
+el `torch`/`cu121` que ya usa el backend para Moondream2 corrompe ese
+entorno). Actívalo con `ENABLE_IGPU_OFFLOAD=true` en `backend/.env` **y**
+el perfil `igpu` al arrancar -- ninguno de los dos por separado hace
+nada.
+
+Construir `backend` + `webapp` + `dinov2-igpu-worker` los tres a la vez
+(cada uno con su propia descarga de `torch`) puede saturar los recursos
+de Docker Desktop/WSL2 y el build del worker termina con un
+`rpc error: code = Unavailable desc = error reading from server: EOF`
+justo al final (paso `exporting layers`) aunque los otros dos hayan
+terminado bien. Si te pasa:
+
+```bash
+docker images | findstr amitraceable    # confirma si backend/webapp sí terminaron
+docker compose build dinov2-igpu-worker # reintenta solo el que falló
+```
+
+Si vuelve a fallar igual, es contención de recursos, no mala suerte
+puntual -- en orden de probabilidad:
+
+1. `wsl --shutdown` y reabrir Docker Desktop (el demonio de BuildKit a
+   veces queda colgado tras un fallo así).
+2. Subir el límite de RAM de WSL2 si lo tienes ajustado bajo -- en
+   `%UserProfile%\.wslconfig`:
+   ```ini
+   [wsl2]
+   memory=8GB
+   ```
+   y `wsl --shutdown` para aplicarlo.
+3. Construir uno a uno en vez de en paralelo:
+   ```bash
+   docker compose build backend
+   docker compose build webapp
+   docker compose --profile igpu build dinov2-igpu-worker
+   ```
+4. Comprobar espacio en disco (`docker system df`) -- los dos `torch+cu121`
+   (backend y worker, cada uno de varios cientos de MB/GB en wheels) más
+   las capas intermedias de build acumulan bastante; `docker builder
+   prune` libera caché de builds antiguos sin tocar las imágenes en uso.
 
 ### Without Docker
 
