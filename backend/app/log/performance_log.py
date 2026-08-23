@@ -113,6 +113,27 @@ def log_photo_analysis_run(
     if total_photos == 0:
         return  # nada que registrar -- no hubo fotos que analizar
 
+    # `throughput_seconds_per_photo` (total_wall_seconds / total_photos) es
+    # DISTINTO de `avg_seconds_per_photo` (media de `per_photo_seconds`,
+    # que mide LATENCIA por foto: desde que arranca su intento hasta que
+    # termina). Con concurrencia baja y una etapa mucho más lenta que la
+    # otra (p. ej. Moondream2 en CPU frente a DINOv2 en iGPU tras
+    # ADR-28), la LATENCIA de las fotos que quedan detrás en la cola del
+    # semáforo crece de forma aproximadamente lineal con su posición (la
+    # foto N espera a que terminen las N-1 anteriores en esa etapa), así
+    # que la MEDIA de latencias puede acabar siendo varias veces mayor
+    # que el tiempo real que cuesta añadir una foto más al análisis --
+    # confirmado en producción (ver mensaje de Nacho del 21/8: análisis
+    # de ~21 fotos con offload iGPU registrando ~242-302s/foto de
+    # "media" cuando el propio proceso completo tardó ~10 min en total,
+    # es decir, ~28s/foto reales, igual que `avg_scene_seconds_per_photo`
+    # porque Moondream2 es el cuello de botella). El throughput SÍ es
+    # comparable entre configuraciones para decidir cuál usar; la
+    # latencia media es útil solo para estimar cuánto va a tardar en
+    # aparecer el resultado de UNA foto concreta (progreso de UI), no
+    # para comparar rendimiento global.
+    throughput = total_wall_seconds / total_photos
+
     avg = sum(per_photo_seconds) / len(per_photo_seconds) if per_photo_seconds else None
     avg_dinov2 = (
         sum(per_photo_dinov2_seconds) / len(per_photo_dinov2_seconds)
@@ -143,6 +164,13 @@ def log_photo_analysis_run(
         # offload" con tiempos que en realidad son de ejecución local).
         "igpu_offload_used": igpu_offload_used,
         "total_wall_seconds": round(total_wall_seconds, 3),
+        # Métrica principal para COMPARAR configuraciones -- ver el
+        # comentario de arriba sobre por qué no vale usar
+        # `avg_seconds_per_photo` para esto.
+        "throughput_seconds_per_photo": round(throughput, 3),
+        # Se mantiene por compatibilidad y porque sigue siendo útil para
+        # otra cosa (estimar la latencia típica de UNA foto, no el
+        # rendimiento agregado del análisis) -- ver comentario arriba.
         "avg_seconds_per_photo": round(avg, 3) if avg is not None else None,
         # Desglose por modelo (ver ADR-29) -- desde el pipeline entre
         # fotos, la suma de estas dos medias puede ser MAYOR que
