@@ -144,6 +144,44 @@ _LANGUAGE_INSTRUCTIONS = {
 SUPPORTED_LANGUAGES = frozenset({"es", *_LANGUAGE_INSTRUCTIONS.keys()})
 
 
+async def _call_mistral_chat(payload: dict) -> dict:
+    """Llamada HTTP de bajo nivel al endpoint de chat de Mistral, usada
+    por `analyze_report_with_ai()` -- centraliza el manejo de errores
+    (sin API key, cuota agotada, key inválida, fallo de red...) para que
+    no viva repetido si en el futuro se añade otra función que también
+    necesite hablar con Mistral. (Hasta ADR-31 también la usaba
+    `translate_texts()`, eliminada -- ver la nota más abajo, junto a
+    donde vivía esa función.) Lanza `AiAnalysisUnavailable` ante
+    cualquier fallo; el llamador solo se
+    preocupa de construir el payload y parsear
+    `data["choices"][0]["message"]["content"]`."""
+    if not settings.mistral_api_key:
+        raise AiAnalysisUnavailable(
+            "El análisis con IA no está configurado en este servidor (falta MISTRAL_API_KEY)."
+        )
+    headers = {"Authorization": f"Bearer {settings.mistral_api_key}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.post(MISTRAL_API_URL, json=payload, headers=headers)
+    except httpx.RequestError as exc:
+        raise AiAnalysisUnavailable(f"No se pudo contactar con el servicio de IA: {exc}") from exc
+
+    if response.status_code == 429:
+        # Cuota del tier gratuito agotada (peticiones/minuto o tope mensual).
+        # NO se reintenta -- eso podría seguir gastando cuota o, en un plan
+        # de pago, generar coste no deseado.
+        raise AiAnalysisUnavailable(
+            "Se ha alcanzado el límite del plan gratuito de IA por ahora. Inténtalo de nuevo más tarde."
+        )
+    if response.status_code == 401:
+        raise AiAnalysisUnavailable("La clave de API de Mistral no es válida.")
+    if response.status_code >= 400:
+        raise AiAnalysisUnavailable(f"El servicio de IA devolvió un error ({response.status_code}).")
+
+    return response.json()
+
+
 async def analyze_report_with_ai(report: ExposureReport, lang: str = "es") -> dict:
     if not settings.mistral_api_key:
         raise AiAnalysisUnavailable(
@@ -174,27 +212,8 @@ async def analyze_report_with_ai(report: ExposureReport, lang: str = "es") -> di
         "response_format": {"type": "json_object"},
         "max_tokens": 600,
     }
-    headers = {"Authorization": f"Bearer {settings.mistral_api_key}"}
 
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.post(MISTRAL_API_URL, json=payload, headers=headers)
-    except httpx.RequestError as exc:
-        raise AiAnalysisUnavailable(f"No se pudo contactar con el servicio de IA: {exc}") from exc
-
-    if response.status_code == 429:
-        # Cuota del tier gratuito agotada (peticiones/minuto o tope mensual).
-        # NO se reintenta -- eso podría seguir gastando cuota o, en un plan
-        # de pago, generar coste no deseado.
-        raise AiAnalysisUnavailable(
-            "Se ha alcanzado el límite del plan gratuito de IA por ahora. Inténtalo de nuevo más tarde."
-        )
-    if response.status_code == 401:
-        raise AiAnalysisUnavailable("La clave de API de Mistral no es válida.")
-    if response.status_code >= 400:
-        raise AiAnalysisUnavailable(f"El servicio de IA devolvió un error ({response.status_code}).")
-
-    data = response.json()
+    data = await _call_mistral_chat(payload)
     try:
         content = data["choices"][0]["message"]["content"]
         parsed = json.loads(content)
@@ -212,3 +231,14 @@ async def analyze_report_with_ai(report: ExposureReport, lang: str = "es") -> di
     )
 
     return {"verdict": verdict, "conclusions": conclusions}
+
+
+# NOTA: la traducción de descripciones de fotos (aficion/caption de
+# Moondream2) usaba antes Mistral desde aquí (translate_texts()) -- ver
+# ADR-30. Se sustituyó por traducción LOCAL con modelos MarianMT vía
+# CTranslate2 (ver ADR-31 y app/nlp/translation.py::translate_texts_local()),
+# muchísimo más ligera en RAM/CPU para este caso concreto (frases cortas)
+# y sin depender de red ni cuota. Este módulo (ai_analysis.py) sigue
+# existiendo solo para el veredicto/conclusiones del informe
+# (analyze_report_with_ai, arriba), donde SÍ hace falta un LLM de
+# propósito general.

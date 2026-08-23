@@ -83,3 +83,29 @@ timm>=1.0,<2.0
 einops>=0.7,<1.0
 pyvips-binary>=8.14
 pyvips>=2.2,<3.0
+
+# Traducción LOCAL de descripciones de fotos al idioma de la UI (ver
+# app/nlp/translation.py, ADR-31) -- MarianMT (Helsinki-NLP/opus-mt-*)
+# convertido a formato CTranslate2, en vez de traducir con Mistral (ver
+# ADR-30, ya descartado): mucho más ligero en RAM/CPU para este caso
+# (frases cortas), sin red ni cuota. Comprobado sin conflictos con
+# torch/transformers ya fijados arriba (`pip check` limpio).
+#
+# ctranslate2: el motor de inferencia en sí -- benchmark oficial de
+# OpenNMT para un modelo de este tamaño: ~516MB de RAM en CPU con
+# cuantización int8, frente a ~2.3GB si se cargara el mismo modelo con
+# transformers+torch directos (por eso NO se reutiliza el `transformers`
+# ya instalado arriba para esto).
+# sentencepiece: tokenización de los modelos ya convertidos (llevan sus
+# propios ficheros source.spm/target.spm) -- mucho más ligera que tirar
+# de `transformers` para esto, que es justo lo que se quiere evitar.
+#
+# NO hace falta para EJECUTAR la traducción con los modelos ya
+# convertidos, solo para la CONVERSIÓN inicial (ver
+# scripts/convert_translation_models.py, que si acaso se ejecuta una vez,
+# fuera de la imagen Docker, con torch/transformers ya presentes en este
+# mismo entorno):
+#   pip install huggingface_hub  # normalmente ya viene como dependencia
+#                                 # transitiva de transformers, arriba
+ctranslate2>=4.0,<5.0
+sentencepiece>=0.2,<1.0

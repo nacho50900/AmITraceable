@@ -22,11 +22,12 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.ai_analysis import AiAnalysisUnavailable, analyze_report_with_ai
+from app.nlp.translation import translate_texts_local
 from app.log.analysis_run_log import log_analysis_run
 from app.analysis_timing import run_with_timer, timed_stage
 from app.config import settings
 from app.instagram_client import InstagramClient
-from app.models.schemas import ExposureReport, SocialProfile
+from app.models.schemas import ExposureReport, SocialProfile, TranslateDescriptionsRequest
 from app.nlp.attribute_inference import infer_attributes
 from app.nlp.fingerprint import build_fingerprint
 from app.progress import ProgressCallback, emit_progress
@@ -227,6 +228,43 @@ async def ai_summary(report: Annotated[ExposureReport, Body(...)], lang: str = "
         raise HTTPException(status_code=503, detail=str(exc))
 
     return result
+
+
+@router.post("/analyze/translate-descriptions")
+async def translate_descriptions(request: Annotated[TranslateDescriptionsRequest, Body(...)], lang: str = "es"):
+    """
+    Endpoint AISLADO, registrado con el mismo cuidado de orden que
+    `POST /analyze/ai-summary` justo arriba (ver el comentario en
+    `ai_summary()`): recibe una lista de textos cortos ya generados por
+    Moondream2 (afición o caption de fotos, ver
+    app/vision/scene_analysis.py y ADR-30) y devuelve su traducción a
+    `lang`.
+
+    A diferencia de `ai_summary` (que sí usa Mistral, un servicio
+    externo con cuota y posibles caídas), la traducción es LOCAL (ver
+    ADR-31 y app/nlp/translation.py -- modelos MarianMT/CTranslate2, sin
+    red ni API key) y NUNCA lanza: si los modelos no están convertidos
+    en disco, o falla cualquier cosa durante la traducción, se devuelven
+    los textos ORIGINALES sin cambios -- por eso este endpoint no
+    necesita un camino de error 503 como sí tiene ai-summary, siempre
+    responde 200 con algo útil.
+
+    `lang` (query param, "es" por defecto): un valor no soportado, o
+    "es" (nada que traducir hacia el idioma nativo del proyecto),
+    devuelve los textos SIN CAMBIOS, no es un error.
+
+    IMPORTANTE: igual que ai-summary, esta ruta está registrada ANTES que
+    `POST /analyze/{platform}` a propósito -- mismo motivo de orden de
+    resolución de rutas de FastAPI, ver el comentario en `ai_summary()`
+    de arriba.
+    """
+    # Traducción local con CTranslate2 es CPU-bound (no I/O), así que se
+    # despacha a un hilo aparte para no bloquear el event loop de FastAPI
+    # mientras corre -- mismo patrón que ya usa todo el pipeline de
+    # visión (ver asyncio.to_thread en app/vision/geolocation.py).
+    translations = await asyncio.to_thread(translate_texts_local, request.texts, lang)
+
+    return {"translations": translations}
 
 
 @router.post(

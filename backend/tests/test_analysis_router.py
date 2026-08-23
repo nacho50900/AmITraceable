@@ -233,6 +233,67 @@ class TestAiSummaryEndpoint:
         resp = client.post("/api/analyze/ai-summary", json={"not": "a valid report"})
         assert resp.status_code == 422
 
+
+class TestTranslateDescriptionsEndpoint:
+    """ADR-30/ADR-31. Mismo patrón que TestAiSummaryEndpoint de arriba --
+    estos tests, además de comprobar el endpoint en sí, verifican de
+    forma implícita el orden de registro de rutas: si
+    `/analyze/{platform}` resolviera primero, "translate-descriptions"
+    haría match como nombre de plataforma (404, no 200/422).
+
+    `translate_texts_local` (ver app/nlp/translation.py, ADR-31) es
+    SÍNCRONA -- el endpoint la despacha con `asyncio.to_thread`, así que
+    aquí se mockea con una función normal, no `async def`."""
+
+    def test_success_returns_translations_in_order(self, monkeypatch):
+        def _fake_translate(texts, lang="es"):
+            return [t.upper() for t in texts]
+
+        monkeypatch.setattr(analysis_router, "translate_texts_local", _fake_translate)
+
+        resp = client.post("/api/analyze/translate-descriptions", json={"texts": ["guitarra", "baloncesto"]})
+
+        assert resp.status_code == 200
+        assert resp.json() == {"translations": ["GUITARRA", "BALONCESTO"]}
+
+    def test_malformed_body_returns_422(self):
+        resp = client.post("/api/analyze/translate-descriptions", json={"not": "the expected shape"})
+        assert resp.status_code == 422
+
+    def test_lang_query_param_is_forwarded(self, monkeypatch):
+        received = {}
+
+        def _fake_translate(texts, lang="es"):
+            received["lang"] = lang
+            return texts
+
+        monkeypatch.setattr(analysis_router, "translate_texts_local", _fake_translate)
+
+        client.post("/api/analyze/translate-descriptions?lang=en", json={"texts": ["x"]})
+
+        assert received["lang"] == "en"
+
+    def test_empty_texts_list_is_valid(self, monkeypatch):
+        def _fake_translate(texts, lang="es"):
+            return []
+
+        monkeypatch.setattr(analysis_router, "translate_texts_local", _fake_translate)
+
+        resp = client.post("/api/analyze/translate-descriptions", json={"texts": []})
+
+        assert resp.status_code == 200
+        assert resp.json() == {"translations": []}
+
+    def test_no_es_translation_call_never_raises_even_if_models_missing(self):
+        """Sin mockear nada: translate_texts_local() de verdad, sin
+        modelos convertidos en disco (no aplica en este entorno de
+        test) -- debe degradarse a devolver los textos originales, sin
+        reventar el endpoint ni devolver un error."""
+        resp = client.post("/api/analyze/translate-descriptions?lang=en", json={"texts": ["guitarra"]})
+
+        assert resp.status_code == 200
+        assert resp.json() == {"translations": ["guitarra"]}
+
     def test_lang_query_param_is_forwarded_to_analyze_report_with_ai(self, monkeypatch):
         received = {}
 

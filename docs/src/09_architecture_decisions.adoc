@@ -1384,3 +1384,309 @@ WSL2) no está verificado todavía en una máquina real con esa
 configuración -- pendiente de confirmar antes de dar la funcionalidad
 por completa, no solo por diseñada.
 
+=== ADR-29: Semáforos independientes por modelo, no uno compartido por foto (pipeline real entre fotos)
+
+*Contexto*: tras ADR-28 (offload de DINOv2 a un worker de iGPU), surgió
+la pregunta de si DINOv2 y Moondream2 corrían de verdad en pipeline
+entre fotos DISTINTAS -- es decir, si DINOv2 podía avanzar a la foto
+N+1 en cuanto terminaba la N, sin esperar a que Moondream2 (mucho más
+lento, generación autoregresiva) terminase esa misma foto N. La
+respuesta, revisando `_process_photo()`, era que no: `analysis_semaphore`
+(un único semáforo, tamaño `Settings.photo_analysis_concurrency`)
+envolvía la llamada conjunta `asyncio.gather(estimate_location_from_image,
+_maybe_analyze_content)` -- el hueco de una foto no se liberaba hasta
+que las DOS terminaban para esa foto, así que aunque DINOv2 acabase en
+1-2s, la foto siguiente no podía ni empezar a analizarse hasta que
+Moondream2 (15-25s) terminase la actual. El offload de ADR-28 solo
+podía ayudar al solapamiento DENTRO de una misma foto (el techo de 1-2s
+ya calculado en ADR-25) -- nunca a que DINOv2 se adelantase a la foto
+siguiente, con o sin worker de iGPU de por medio: esa puerta estaba
+cerrada por este diseño, no por el dispositivo donde corriera DINOv2.
+
+*Decisión*: sustituir el semáforo único por DOS semáforos
+independientes, `dinov2_semaphore` y `scene_semaphore`, ambos del mismo
+tamaño que antes (`actual_concurrency`, sin tocar la heurística/
+calibración de `Settings.photo_analysis_concurrency` ni la cuenta de
+`threads_per_inference` de `app/main.py` -- el techo de inferencias
+simultáneas no cambia: como mucho `actual_concurrency` DINOv2 +
+`actual_concurrency` Moondream2 a la vez, igual que antes, solo que
+ahora pueden pertenecer a fotos DISTINTAS en vez de forzosamente a la
+misma). Dentro de `_process_photo()`, cada modelo entra en su propio
+semáforo por separado, y las dos llamadas se siguen esperando juntas
+con `asyncio.gather` para ESA foto en concreto (necesario: el resultado
+combinado se vuelca junto, ver `_collect_photo_result`) -- pero eso ya
+no bloquea a las fotos siguientes, porque el semáforo de DINOv2 se
+libera en cuanto DINOv2 termina, sin esperar al de Moondream2.
+
+El arreglo de la condición de carrera de PIL (ADR-24, `image.load()`
+forzado en `_download_image` antes de repartir la imagen entre los dos
+modelos) sigue siendo válido sin tocarlo: ambos hilos seguían leyendo
+únicamente píxeles ya decodificados, este cambio no introduce ninguna
+lectura perezosa nueva ni cambia CUÁNDO se decodifica la imagen, solo
+CUÁNDO puede empezar el análisis de la foto siguiente.
+
+*Verificación*: test dedicado
+(`test_dinov2_of_next_photo_does_not_wait_for_moondream2_of_previous_photo`)
+con dos modelos simulados de duración muy distinta (DINOv2 50ms,
+Moondream2 300ms) y `photo_analysis_concurrency=1` a propósito (con
+concurrencia ≥2 el semáforo único antiguo también habría dejado
+arrancar ambas fotos de golpe, sin distinguir el comportamiento viejo
+del nuevo) -- comprueba con marcas de tiempo reales que el DINOv2 de la
+segunda foto arranca antes de que termine el Moondream2 de la primera.
+Confirmado además revirtiendo temporalmente el cambio de producción
+mientras se mantenía el test nuevo: el test FALLA contra el diseño
+antiguo (best 384.9323s > 384.9320s, la segunda foto no llegaba a
+arrancar antes de que la primera terminase del todo) y pasa contra el
+nuevo -- no es una aserción que pase por casualidad con cualquier
+implementación.
+
+*Consecuencias*: (+) pipeline real entre fotos distintas, no solo
+dentro de la misma foto -- el offload de ADR-28 (o cualquier mejora
+futura de velocidad de DINOv2) ahora sí puede traducirse en throughput
+total, en vez de quedarse acotado al techo de 1-2s por foto de ADR-25;
+(+) cambio quirúrgico (una función y su punto de creación de
+semáforos), sin tocar la calibración de concurrencia existente ni el
+cálculo de hilos por inferencia; (+) test de regresión que falla de
+verdad contra el diseño anterior, no solo pasa con el nuevo -- da
+confianza de que mide lo que dice medir; (-) el log de rendimiento
+(`per_photo_seconds`, ver `app/log/performance_log.py`) sigue
+reportando solo el tiempo TOTAL por foto (DINOv2 + Moondream2 juntos
+para esa foto concreta), no cuánto de ese tiempo estuvo genuinamente
+solapado con fotos vecinas gracias a este cambio -- diagnosticar CUÁNTO
+ayuda el pipeline en la práctica (frente a "si ayuda en absoluto", que
+sí queda demostrado aquí) requeriría desglose de tiempos por etapa,
+pendiente como posible trabajo futuro si hace falta cuantificarlo para
+la memoria; (-) no se ha subido la concurrencia de `dinov2_semaphore`
+por encima de la de `scene_semaphore` pese a que, con DINOv2
+despachado al worker de iGPU (ADR-28), ya no comparte dispositivo con
+Moondream2 y en teoría podría soportar más fotos en vuelo a la vez --
+decisión deliberadamente conservadora dado que los primeros datos reales
+con offload activo (ver registro de trabajo) apuntan a que la iGPU de
+prueba podría ser más lenta que la GPU dedicada para este modelo, así
+que subir la concurrencia ahí sin confirmarlo antes arriesgaría
+degradar el caso ya incierto en vez de mejorarlo.
+
+=== ADR-30: Traducción de las descripciones visuales de Moondream2 al idioma de la UI
+
+*Contexto*: el análisis de contenido visual (`app/vision/scene_analysis.py`,
+Moondream2) genera dos textos por foto, cada uno en un idioma FIJO y
+distinto, por motivos ya documentados en el propio módulo: el caption
+libre (`descripcion_general`) siempre en inglés (Moondream2 apenas
+tiene datos de entrenamiento en español; forzarlo producía frases con
+gramática rota, palabras inventadas), y el bloque estructurado
+(`personas`/`aficion`/`pareja`/`texto_visible`, vocabulario cerrado más
+un campo semi-libre) siempre en español, ya calibrado con varios
+arreglos de sesgo documentados en el propio módulo. Hasta este ADR,
+ambos se mostraban tal cual al frontend sin tener en cuenta el idioma
+de la UI (ver ADR-26) -- un usuario con la interfaz en inglés veía el
+bloque estructurado en español igualmente, y viceversa con el caption.
+
+Ya se había descartado una vez traducir el caption con Mistral (nota en
+`scene_analysis.py`, junto a `_CAPTION_QUERY`): "reintroduciría el
+mismo límite de 2 peticiones/minuto del tier gratuito que motivó pasar
+a un modelo local en primer lugar... salvo que se batchee a UNA llamada
+por informe en vez de por foto -- no implementado aquí". Este ADR
+implementa justo esa solución, pendiente desde entonces.
+
+*Alternativas consideradas*:
+
+1. *Volver a generar directamente en el idioma pedido* (mismo patrón
+que ADR-26 usa para el veredicto de Mistral: pedirle al modelo que
+responda ya en el idioma de destino, en vez de traducir después).
+Descartada para Moondream2: a diferencia de Mistral (un LLM grande y
+capaz), Moondream2 es un modelo de visión de solo 1.8B parámetros, con
+calibración ya frágil y documentada (varios ADR de este mismo fichero
+tratan sesgos concretos de este modelo) -- generar en otro idioma
+arriesgaría reabrir esos mismos problemas sin poder validarlo aquí
+(este entorno no tiene GPU para probar inferencia real del modelo).
+2. *Traducir en el backend con Mistral, en UNA llamada por informe* (la
+elegida, ver más abajo).
+
+*Decisión*: los prompts a Moondream2 NO se tocan -- siguen generando
+exactamente en el mismo idioma fijo de siempre, sin ningún riesgo para
+su calibración. La traducción ocurre DESPUÉS, como una capa aparte:
+
+- `personas` (cerrado: "una"/"varias", nunca "ninguna" -- mismo filtro
+que ya aplicaba `_build_clean_summary`) e `indicio_pareja` (booleano):
+se exponen como CÓDIGOS ESTABLES (`VisualDescriptionCodes`, dataclass
+en `scene_analysis.py` y modelo Pydantic homónimo en `schemas.py`,
+convertidos el uno al otro en `report/generator.py` porque
+`scene_analysis.py` ya importa de `schemas.py` y un import circular no
+es una opción) -- mismo patrón "código estable + traducción en
+frontend" que ADR-26 ya estableció para vocabulario cerrado, coste
+cero, sin llamada al backend.
+- `texto_visible` NUNCA se traduce -- es texto literal leído de la foto
+(un cartel, una matrícula), traducirlo falsearía la evidencia. Se
+muestra tal cual venga, en cualquier idioma de UI.
+- `aficion` (semi-libre) y el caption (`descripcion_general`, libre):
+se traducen de verdad, bajo demanda, con una función nueva,
+`ai_analysis.translate_texts()`, que reutiliza el mismo proveedor
+(Mistral) que ya usa el veredicto -- se extrajo un helper HTTP
+compartido (`_call_mistral_chat`) para no duplicar el manejo de
+errores (sin API key, cuota agotada, key inválida) entre ambas
+funciones. Traduce TODA la lista de textos del informe en una sola
+llamada (no una por foto), exactamente lo que la nota de
+`scene_analysis.py` dejaba pendiente. Si Mistral no devuelve el mismo
+número de elementos que se pidieron, se descarta el LOTE ENTERO (no
+hay forma fiable de saber qué traducción es de qué foto) -- un
+elemento individual raro dentro de un lote correcto sí se sustituye
+por el texto original en vez de tirar todo lo demás.
+
+Como el caption siempre nace en inglés y la afición siempre nace en
+español, **nunca hace falta traducir los dos a la vez**: según el
+idioma de la UI, como mucho uno de los dos necesita una traducción
+real. Esto simplifica bastante el diseño frente a "traducir todo
+siempre" -- con solo dos idiomas soportados (`es`/`en`, ver ADR-26), la
+dirección de traducción queda determinada sin ambigüedad por el idioma
+de UI actual.
+
+Endpoint nuevo, `POST /analyze/translate-descriptions`, mismo patrón
+exacto que `/analyze/ai-summary` (ADR-26): registrado ANTES de
+`/analyze/{platform}` por el mismo motivo de resolución de rutas de
+FastAPI, devuelve 503 (no 500) si la traducción no está disponible, y
+un `lang` no soportado o igual a "es" es un no-op (sin llamar a
+Mistral), no un error.
+
+En el frontend (`LocationMap.tsx`), un `useEffect` que depende de
+`points` Y de `i18n.language` decide, según la dirección que toque,
+qué lista de textos mandar a `/analyze/translate-descriptions` --
+cacheado en estado de React por la duración de la sesión (no hay
+persistencia entre pestañas ni entre análisis, coherente con el diseño
+RGPD del proyecto: nada se guarda en disco). Si la traducción falla,
+se degrada EN SILENCIO al texto original sin traducir (sin estado de
+error visible) -- a diferencia de `AiSummaryCard` (donde sin la
+llamada no hay nada útil que mostrar), aquí SIEMPRE hay un texto de
+respaldo con contenido real, así que un error de red no debería
+alarmar al usuario ni bloquear la lectura del resto del informe.
+
+*Consecuencias*: (+) Moondream2 no se toca -- cero riesgo para su
+calibración ya frágil y documentada en otros ADR; (+) una sola llamada
+a Mistral por informe (no por foto), mismo cuidado de cuota que ya
+rige el resto del proyecto con el tier gratuito; (+) vocabulario
+cerrado (personas/pareja) traducido gratis en frontend, sin tocar el
+backend para eso; (+) texto_visible nunca se traduce, preservando la
+evidencia literal de la foto; (+) degradación en silencio ante fallo
+de traducción, coherente con el resto de fallbacks ya documentados en
+este fichero (DirectML, worker de iGPU, etc.); (-) el desglose de
+`personas`/`aficion`/`indicio_pareja`/`texto_visible` en códigos
+estructurados duplica, en esencia, la información que ya llevaba
+`visual_description` (el texto en español, sin tocar, que sigue
+siendo lo que ve Mistral como contexto del informe y lo que se
+mostraba antes) -- se mantiene aposta sin unificar los dos caminos,
+para no arriesgar romper el contexto que recibe Mistral en el
+veredicto por un cambio pensado solo para el frontend; (-) la
+traducción de `aficion`/caption solo se dispara al cargar el informe o
+cambiar de idioma, no hay forma de forzar un reintento manual desde la
+UI si la llamada falla la primera vez -- aceptable dado que sigue
+habiendo texto de respaldo útil, pero queda como posible mejora futura
+si se observa que hace falta en la práctica.
+
+=== ADR-31: Traducción local con CTranslate2 en vez de Mistral (sustituye ADR-30)
+
+*Contexto*: ADR-30 implementó la traducción de descripciones de fotos
+(afición/caption de Moondream2) con Mistral, reutilizando el mismo
+proveedor que ya generaba el veredicto del informe. Revisando la
+decisión con más calma: un LLM de propósito general para traducir
+frases cortas es un uso desproporcionado -- reintroduce justo la
+dependencia de red/cuota que el propio proyecto ya había evitado una
+vez para Moondream2 (ver la nota junto a `_CAPTION_QUERY` en
+`scene_analysis.py`, que explícitamente descartó traducir el caption
+con Mistral por el límite de peticiones/minuto del tier gratuito). Con
+la máquina de desarrollo además muy justa de RAM libre, tenía sentido
+revisar si había una alternativa más ligera en vez de dar la
+implementación de ADR-30 por definitiva.
+
+*Alternativas consideradas* (comparadas por relación calidad/RAM/CPU,
+que era el criterio que de verdad importaba aquí):
+
+1. *Mantener Mistral* (ADR-30). Descartada por lo de arriba, y porque
+un modelo de traducción dedicado consigue calidad equivalente para
+frases cortas con una fracción de los recursos (cifra de referencia de
+un comparativo externo: un LLM pequeño de ~2B parámetros necesita del
+orden de 1,5GB de RAM y varios segundos por frase en CPU, frente a
+20-35MB para un modelo de traducción dedicado por par de idioma).
+2. *API de traducción en la nube* (Google Translate y similares).
+Descartada: aunque mejora la calidad y no consume RAM local, reintroduce
+red + clave de API + cuota (esta vez con coste económico real, no solo
+un límite gratuito) y, más importante para este proyecto en concreto,
+manda texto derivado sobre la persona analizada (aficiones, contenido de
+sus fotos) a un tercero más -- va a contracorriente del diseño de
+minimización de datos que ya rige el resto de la herramienta (ADR-17,
+consentimiento OAuth, cero persistencia en disco).
+3. *Argos Translate* (paquete `pip install argostranslate`, envuelve
+CTranslate2 + modelos OPUS-MT ya cuantizados). Evaluada en detalle:
+mismo motor de inferencia que la opción elegida, pero con dependencias
+adicionales (Stanza para segmentación de frases, OpenNMT-py, extras de
+interfaz gráfica) que no hacen falta aquí -- las descripciones de
+Moondream2 ya son frases sueltas, no hace falta segmentación automática
+de texto largo. Descartada por peso extra innecesario dado el límite de
+RAM real de la máquina de desarrollo, a favor de ir directos al motor.
+4. *CTranslate2 directo, con los modelos MarianMT (Helsinki-NLP/opus-mt-{es-en,en-es})
+convertidos a mano* (la elegida, ver más abajo).
+
+*Decisión*: `app/nlp/translation.py` traduce localmente con CTranslate2
+(el motor de inferencia, no `transformers`+`torch`) sobre los
+checkpoints MarianMT oficiales de Helsinki-NLP, convertidos una sola
+vez con `scripts/convert_translation_models.py` (necesita
+`transformers`+`torch`, ya presentes si el backend se construyó con
+`WITH_GEOLOCATION=true`) y cuantizados a int8. En tiempo de EJECUCIÓN
+solo hacen falta `ctranslate2`+`sentencepiece` -- ligeras, sin
+`transformers`/`torch` de por medio para esto -- porque los modelos ya
+convertidos llevan sus propios ficheros SentencePiece
+(`source.spm`/`target.spm`), suficientes para tokenizar/detokenizar sin
+la maquinaria completa de un tokenizador de HuggingFace.
+
+Cifra de referencia (benchmark oficial de OpenNMT/CTranslate2, mismo
+tamaño de modelo que OPUS-MT): ~2,3GB de RAM en CPU con
+`transformers`+`torch` frente a **~516MB con CTranslate2 en int8** --
+la razón de fondo por la que no se reutilizó el `transformers` ya
+instalado para Moondream2/DINOv2 también para esto, pese a que hubiera
+sido la opción de menos dependencias nuevas.
+
+`app/analysis_router.py::translate_descriptions()` (el endpoint HTTP,
+`POST /analyze/translate-descriptions`) NO cambia su contrato desde
+fuera -- mismo `lang` como query param, mismo cuerpo `{"texts": [...]}`,
+misma respuesta `{"translations": [...]}` -- así que el frontend
+(`LocationMap.tsx`) no necesitó ningún cambio al hacer este ADR. Sí
+cambia por dentro: como la traducción local nunca depende de red ni
+cuota, `translate_texts_local()` (a diferencia de la `translate_texts()`
+de ADR-30, ahora eliminada) NUNCA lanza -- cualquier fallo (modelos no
+convertidos, librerías no instaladas, error de inferencia) degrada a
+devolver los textos originales sin traducir, así que el endpoint ya no
+necesita un camino de error 503: siempre responde 200 con algo útil.
+Al ser CPU-bound (no I/O), se sigue despachando con `asyncio.to_thread`
+para no bloquear el event loop, mismo patrón que el resto del pipeline
+de visión.
+
+Se eliminó por completo `ai_analysis.translate_texts()` (y sus tests) en
+vez de dejarla como alternativa sin usar -- el motivo de la decisión
+queda documentado aquí, no hace falta mantener dos implementaciones
+funcionando en paralelo. `ai_analysis.py` conserva únicamente
+`analyze_report_with_ai()` (el veredicto/conclusiones del informe),
+donde sí hace falta un LLM de propósito general -- ahí la traducción
+directa (pedirle a Mistral que responda ya en el idioma pedido, ver
+`_LANGUAGE_INSTRUCTIONS`) sigue siendo la decisión correcta, sin
+cambios respecto a ADR-26.
+
+*Consecuencias*: (+) traducción sin red, sin clave de API, sin cuota,
+determinista -- el mismo texto siempre traduce igual; (+) ~4,5x menos
+RAM que la alternativa más liviana con `transformers`+`torch`
+(~516MB frente a ~2,3GB), crítico dado lo justa que va la máquina de
+desarrollo de RAM libre; (+) `ctranslate2`/`sentencepiece` no
+introducen ningún conflicto de dependencias con `torch`/`transformers`
+ya fijados para Moondream2/DINOv2 (comprobado con `pip check`); (+) el
+endpoint HTTP no cambió de contrato -- cero cambios en el frontend; (-)
+calidad de traducción probablemente algo por debajo de Mistral para
+jerga informal o aficiones muy específicas (un LLM grande generaliza
+mejor fuera del vocabulario de entrenamiento que un modelo de
+traducción dedicado) -- aceptable dado el volumen de texto real (una
+frase corta por foto, no párrafos); (-) requiere un paso de
+preparación manual (`scripts/convert_translation_models.py`) antes de
+que la traducción funcione de verdad -- sin ejecutarlo, el
+comportamiento es idéntico a antes de ADR-30 (textos sin traducir, sin
+romper nada, solo sin la funcionalidad); (-) solo cubre es↔en por
+diseño (dos modelos direccionales convertidos a mano) -- añadir un
+tercer idioma exige convertir dos modelos más por cada nuevo idioma
+(ida y vuelta con cada uno de los ya existentes) y tocar la lógica de
+`translate_texts_local()` que hoy infiere el origen a partir de que
+solo hay dos idiomas posibles (ver su docstring).

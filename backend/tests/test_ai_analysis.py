@@ -271,3 +271,4 @@ class TestAnalyzeReportWithAiLanguage:
 
         sent_payload = json.loads(route.calls[0].request.content)
         assert sent_payload["messages"][0]["content"] == ai_analysis._SYSTEM_PROMPT
+

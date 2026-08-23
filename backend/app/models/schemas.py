@@ -141,6 +141,28 @@ class PopulationEstimate(BaseModel):
     confidence: float | None = None
 
 
+class VisualDescriptionCodes(BaseModel):
+    """Representación serializable (JSON) de
+    `app.vision.scene_analysis.VisualDescriptionCodes` -- mismos campos,
+    pero como modelo Pydantic para poder formar parte de
+    `ImageLocationPoint` sin crear un import circular (scene_analysis.py
+    ya importa de ESTE módulo para `InferredAttribute`). `report/generator.py`
+    hace la conversión trivial de un objeto al otro al construir
+    `ImageLocationPoint`.
+
+    Ver ADR-30 y el docstring del original en scene_analysis.py: pensado
+    para que el frontend traduzca sin depender del texto ya redactado en
+    español de `visual_description` -- `personas` (cerrado: "una"/
+    "varias") vía i18n propio del frontend, `aficion` (semi-libre) vía
+    `/analyze/translate-descriptions` solo si la UI no está en español, y
+    `texto_visible` NUNCA se traduce (es texto literal leído de la foto)."""
+
+    personas: str | None = None
+    aficion: str | None = None
+    texto_visible: str | None = None
+    indicio_pareja: bool = False
+
+
 class ImageLocationPoint(BaseModel):
     permalink: str  # enlace a la foto que generó esta estimación (o la URL directa de la foto de perfil, ver is_profile_picture)
     province: str
@@ -193,6 +215,13 @@ class ImageLocationPoint(BaseModel):
     # explícita del prompt (ver scene_analysis.py), no un filtro aparte.
     # None en los mismos casos que `visual_description`.
     visual_description_general: str | None = None
+    # Mismas señales que `visual_description`, pero SIN formatear a texto
+    # en español -- ver VisualDescriptionCodes arriba y ADR-30.
+    # `visual_description` (arriba) se mantiene intacto y sin tocar: sigue
+    # siendo lo que ve Mistral en app/ai_analysis.py y lo que se muestra
+    # en la vista de detalle en español. Este campo es ADITIVO, pensado
+    # solo para que el frontend pueda traducir sin depender de ese texto.
+    visual_description_codes: VisualDescriptionCodes | None = None
 
 
 class ExposureReport(BaseModel):
@@ -238,3 +267,14 @@ class ExposureReport(BaseModel):
     # expone), para identificar visualmente de quién es el informe en el
     # título del dashboard. Solo la URL -- ver nota en SocialProfile.
     avatar_url: str | None = None
+
+
+class TranslateDescriptionsRequest(BaseModel):
+    """Cuerpo de `POST /analyze/translate-descriptions` (ver
+    app/analysis_router.py y app.nlp.translation.translate_texts_local(),
+    ADR-30/ADR-31) --
+    lista de textos cortos ya generados por Moondream2 (caption en
+    inglés, o valores de AFICION en español, nunca los dos a la vez) a
+    traducir al idioma pedido por query param `lang`."""
+
+    texts: list[str]
