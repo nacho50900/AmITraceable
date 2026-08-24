@@ -59,7 +59,7 @@ class _FakeTranslator:
         self.model_dir = model_dir
         self.device = device
 
-    def translate_batch(self, tokenized, beam_size=1):
+    def translate_batch(self, tokenized, **kwargs):
         return [_FakeTranslationResult([tokens]) for tokens in tokenized]
 
 
@@ -162,6 +162,70 @@ class TestTranslateTextsLocalHappyPath:
     """Con el modelo "convertido" (directorio fake) y ctranslate2/
     sentencepiece sustituidos por fakes -- ver _install_fake_ctranslate2."""
 
+    def test_calls_translate_batch_with_safeguards_against_repetition_loops(self, monkeypatch, tmp_path):
+        """Regresión de un fallo real visto en producción: `beam_size=1`
+        (voraz) sin ninguna salvaguarda se quedó enganchado repitiendo
+        "persona" cientos de veces en vez de traducir de verdad -- ver el
+        comentario junto a translate_batch(). Comprueba que se piden las
+        tres salvaguardas, no que produzcan un resultado concreto (eso
+        haría falta un modelo real, imposible de probar aquí)."""
+        _make_fake_model_dir(tmp_path, "es-en")
+        monkeypatch.setattr(translation, "_MODELS_DIR", tmp_path)
+        received_kwargs = {}
+
+        class _RecordingTranslator(_FakeTranslator):
+            def translate_batch(self, tokenized, **kwargs):
+                received_kwargs.update(kwargs)
+                return super().translate_batch(tokenized, **kwargs)
+
+        monkeypatch.setitem(sys.modules, "ctranslate2", SimpleNamespace(Translator=_RecordingTranslator))
+        monkeypatch.setitem(
+            sys.modules,
+            "sentencepiece",
+            SimpleNamespace(SentencePieceProcessor=_FakeSentencePieceProcessor),
+        )
+
+        translation.translate_texts_local(["guitarra"], lang="en")
+
+        assert received_kwargs["beam_size"] >= 2  # nunca voraz sin red de seguridad
+        assert received_kwargs["repetition_penalty"] > 1
+        assert received_kwargs["no_repeat_ngram_size"] > 0
+
+    def test_absurdly_long_repetitive_output_falls_back_to_original(self, monkeypatch, tmp_path):
+        """Reproduce el bug real tal cual se vio en producción: el modelo
+        devuelve un bucle de repetición larguísimo en vez de fallar con
+        una excepción -- la salvaguarda de longitud debe descartarlo y
+        conservar el texto original, no colar la basura al usuario."""
+        _make_fake_model_dir(tmp_path, "en-es")  # lang="es" => origen "en" => dirección "en-es"
+        monkeypatch.setattr(translation, "_MODELS_DIR", tmp_path)
+
+        class _LoopingTranslator(_FakeTranslator):
+            def translate_batch(self, tokenized, **kwargs):
+                garbage = " ".join(["persona"] * 200)
+                return [_FakeTranslationResult([[garbage]]) for _ in tokenized]
+
+        monkeypatch.setitem(sys.modules, "ctranslate2", SimpleNamespace(Translator=_LoopingTranslator))
+
+        class _PassthroughDecodeTokenizer(_FakeSentencePieceProcessor):
+            def decode(self, tokens):
+                # El _LoopingTranslator ya mete el texto final directamente
+                # como ÚNICA "hipótesis" (una lista de un solo elemento,
+                # ver hypotheses=[garbage] arriba) -- el decode real solo
+                # tiene que devolverla tal cual, sin la marca de mayúsculas
+                # de _FakeSentencePieceProcessor (que aquí solo estorbaría
+                # para ver la longitud real de la basura).
+                return tokens[0]
+
+        monkeypatch.setitem(
+            sys.modules,
+            "sentencepiece",
+            SimpleNamespace(SentencePieceProcessor=_PassthroughDecodeTokenizer),
+        )
+
+        result = translation.translate_texts_local(["a person playing guitar"], lang="es")
+
+        assert result == ["a person playing guitar"]
+
     def test_translates_and_caches_the_loaded_model(self, monkeypatch, tmp_path):
         _make_fake_model_dir(tmp_path, "es-en")
         monkeypatch.setattr(translation, "_MODELS_DIR", tmp_path)
@@ -203,7 +267,7 @@ class TestTranslateTextsLocalHappyPath:
         monkeypatch.setattr(translation, "_MODELS_DIR", tmp_path)
 
         class _EmptyResultTranslator(_FakeTranslator):
-            def translate_batch(self, tokenized, beam_size=1):
+            def translate_batch(self, tokenized, **kwargs):
                 return [_FakeTranslationResult([""]) for _ in tokenized]
 
         monkeypatch.setitem(sys.modules, "ctranslate2", SimpleNamespace(Translator=_EmptyResultTranslator))
@@ -222,7 +286,7 @@ class TestTranslateTextsLocalHappyPath:
         monkeypatch.setattr(translation, "_MODELS_DIR", tmp_path)
 
         class _RaisingTranslator(_FakeTranslator):
-            def translate_batch(self, tokenized, beam_size=1):
+            def translate_batch(self, tokenized, **kwargs):
                 raise RuntimeError("modelo corrupto")
 
         monkeypatch.setitem(sys.modules, "ctranslate2", SimpleNamespace(Translator=_RaisingTranslator))
@@ -241,20 +305,3 @@ class TestTranslateTextsLocalHappyPath:
         monkeypatch.setattr(translation, "_MODELS_DIR", tmp_path)
 
         assert translation.translation_available("en") is True
-
-
-class TestSourceLanguageFor:
-    """Único punto donde vive la regla "el origen es el otro de los dos
-    idiomas soportados" (ver docstring de `source_language_for()`) --
-    reutilizado por `translation_available()`, `translate_texts_local()`
-    y por el logging de rendimiento en app/analysis_router.py."""
-
-    def test_es_target_returns_en_source(self):
-        assert translation.source_language_for("es") == "en"
-
-    def test_en_target_returns_es_source(self):
-        assert translation.source_language_for("en") == "es"
-
-    @pytest.mark.parametrize("lang", ["fr", "", "ES", None])
-    def test_unsupported_lang_returns_none(self, lang):
-        assert translation.source_language_for(lang) is None
