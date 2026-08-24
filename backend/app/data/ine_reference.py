@@ -355,6 +355,22 @@ def _build_age_distribution_1y() -> dict[int, float]:
 AGE_DISTRIBUTION_1Y = _build_age_distribution_1y()
 
 
+def age_range_proportion(min_age: int, max_age: int) -> float:
+    """Suma la proporción de AGE_DISTRIBUTION_1Y entre min_age y max_age
+    (ambos incluidos). A diferencia de `age_bin` (que encaja una edad en
+    uno de los tramos FIJOS de AGE_DISTRIBUTION_5Y), esto admite un rango
+    de ANCHO ARBITRARIO -- pensado para estimaciones de edad por IA donde
+    el propio rango se ensancha o estrecha según la confianza real de la
+    pista (ver `ai_attribute_extraction.py::_set_edad_rango`), en vez de
+    forzarlo a encajar en un tramo quinquenal prefijado. Si `min_age`
+    o `max_age` caen fuera de 0-100 (rango de AGE_DISTRIBUTION_1Y), esas
+    edades fuera de rango simplemente no suman nada (`.get(edad, 0.0)`),
+    no lanzan error -- un rango que se salga un poco por los extremos
+    (p. ej. 95-110) sigue siendo válido, solo pierde algo de precisión en
+    la cola que no existe en la tabla."""
+    return sum(AGE_DISTRIBUTION_1Y.get(age, 0.0) for age in range(min_age, max_age + 1))
+
+
 # Claves canónicas de las comunidades autónomas cuyo nombre se repite
 # muchas veces a lo largo de este fichero (como clave de provincia -- cuando
 # coincide -- de comunidad, de nombre legible y de múltiples alias). Se

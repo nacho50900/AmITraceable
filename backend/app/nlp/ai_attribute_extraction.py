@@ -95,7 +95,6 @@ from app.data.ine_reference import (
     RELIGION_DISTRIBUTION,
     SEXUAL_ORIENTATION_DISTRIBUTION,
     STUDIES_DISTRIBUTION,
-    age_bin,
     resolve_autonomous_community,
 )
 from app.models.schemas import InferredAttribute, SocialPost
@@ -125,26 +124,35 @@ _RELIGION_VALUES = tuple(RELIGION_DISTRIBUTION.keys())
 # prompt ya pide un máximo de 5 -- por si el modelo no lo respeta al pie de
 # la letra, no se toma "gratis" lo que devuelva de más.
 _MAX_SOFT_INFERENCES = 5
-# Confianza mínima (0-1) para aceptar la estimación INDIRECTA de tramo de
-# edad ("edad_estimada", ver _set_edad_rango). Por debajo de este umbral no
-# se añade nada -- ni tramo ni edad -- en vez de mostrar un dato de baja
-# fiabilidad como si fuera sólido. Deliberadamente más alto que el rango
-# 0.3-0.7 que se acepta sin filtrar para `inferencias_blandas` genéricas,
-# porque esto SÍ participa en el cálculo de k-anonimato (afecta al número
-# de personas que se muestra en el informe), no solo en la lista
-# informativa de atributos inferidos.
+# Confianza mínima (0-1) para aceptar el RANGO de edad estimado
+# INDIRECTAMENTE ("edad_estimada", ver _set_edad_rango). Por debajo de
+# este umbral no se añade nada -- ni edad ni rango -- en vez de mostrar
+# un dato de baja fiabilidad como si fuera sólido. Deliberadamente más
+# alto que el rango 0.3-0.7 que se acepta sin filtrar para
+# `inferencias_blandas` genéricas, porque esto SÍ participa en el
+# cálculo de k-anonimato (afecta al número de personas que se muestra en
+# el informe), no solo en la lista informativa de atributos inferidos.
 #
-# Subido de 0.5 a 0.7 (Comandante, agosto 2026) tras detectar en
-# producción estimaciones claramente erróneas colándose con confianza
-# "moderada" (p. ej. 30 años estimados para alguien de 21) -- el propio
-# prompt (ver más abajo) ya le pide al modelo mantenerse POR DEBAJO de
-# 0.6 salvo que la pista sea casi tan clara como una declaración
-# explícita; con el umbral en 0.5, cualquier valor en la franja 0.5-0.59
-# pasaba igualmente, pese a que esa franja son -por diseño del propio
-# prompt- conjeturas que el modelo NO considera fiables. Subir el umbral
-# a 0.7 (por encima del techo "conservador" de 0.6 del prompt) deja pasar
-# únicamente las estimaciones que el propio modelo trata como
-# prácticamente tan sólidas como una autodeclaración explícita.
+# Historial (Comandante, agosto 2026): primero se subió de 0.5 a 0.7
+# tras detectar en producción estimaciones erróneas coladas con
+# confianza "moderada" sobre un valor PUNTUAL (p. ej. 30 años estimados
+# para alguien de 21). Pero subir solo el umbral tiene un límite: obliga
+# a elegir entre descartar la estimación del todo o aceptar un único
+# valor que el modelo no puede justificar con precisión. La solución de
+# fondo fue rediseñar 'edad_estimada' para pedir un RANGO en vez de un
+# valor puntual (ver el prompt más abajo y `_set_edad_rango`): ahora,
+# ante una pista débil, el modelo debe ENSANCHAR el rango hasta tener
+# una confianza alta genuina, en vez de arriesgarse con un año concreto.
+# Esto traslada la responsabilidad de expresar la incertidumbre del
+# umbral (una decisión binaria de aceptar/descartar) al propio ancho del
+# rango (una escala continua) -- un rango de 20 años con confianza alta
+# es preferible a uno estrecho con confianza baja, y matemáticamente no
+# hace daño: `age_range_proportion` en ine_reference.py simplemente
+# devuelve una proporción de población más alta (narrowea menos) cuanto
+# más ancho es el rango, así que un rango deliberadamente amplio nunca
+# produce una falsa precisión, solo aporta menos información. El umbral
+# de 0.7 se mantiene como red de seguridad adicional, ya no como
+# mecanismo principal para absorber la incertidumbre.
 _AGE_RANGE_MIN_CONFIDENCE = 0.7
 # Todos los campos que puede rellenar este módulo, en el mismo orden que
 # `DemographicFindings`, usado por `merge_findings`.
@@ -152,11 +160,11 @@ _ALL_FIELDS = (
     "sexo", "edad", "provincia", "municipio", "comunidad_autonoma",
     "estudios", "ocupacion", "universidad", "empresa",
     "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
-    # Estimación INDIRECTA de tramo de edad (ver docstring del campo en
-    # DemographicFindings) -- solo la rellena la IA, nunca la regex, pero
+    # Rango de edad estimado INDIRECTAMENTE (ver docstring del campo en
+    # DemographicFindings) -- solo lo rellena la IA, nunca la regex, pero
     # reutiliza el mismo mecanismo de merge (copiar si regex_findings.edad
     # sigue en None) para no duplicar lógica.
-    "edad_rango",
+    "edad_rango_min", "edad_rango_max",
     # A diferencia de los anteriores (autodeclaraciones explícitas que la
     # regex TAMBIÉN podría detectar), estos SOLO los rellena la IA -- pero
     # reutilizan el mismo mecanismo de merge (copiar si regex_findings lo
@@ -177,7 +185,7 @@ _SYSTEM_PROMPT = (
     "'simbólico/indirecto' más abajo. Responde EXCLUSIVAMENTE con un JSON con esta "
     "forma exacta, sin texto adicional ni backticks:\n"
     '{"sexo": "hombre"|"mujer"|null, "edad": <entero>|null, '
-    '"edad_estimada": {"edad_aproximada": <entero>|null, "confianza": <0-1>}|null, '
+    '"edad_estimada": {"edad_min": <entero>|null, "edad_max": <entero>|null, "confianza": <0-1>}|null, '
     '"provincia": <string>|null, '
     '"municipio": <string>|null, "comunidad_autonoma": <string>|null, "estudios": <string>|null, '
     '"ocupacion": <string>|null, "universidad": <string>|null, "empresa": <string>|null, '
@@ -253,22 +261,26 @@ _SYSTEM_PROMPT = (
     "Usa null si no hay ninguna señal clara.\n"
     "'edad_estimada' es DISTINTO de 'edad': úsalo SOLO cuando 'edad' se haya quedado en null "
     "porque la persona NO ha declarado su edad literalmente, pero el texto SÍ da alguna pista "
-    "INDIRECTA de la que se pueda deducir razonablemente en qué edad podría estar -- por "
+    "INDIRECTA de la que se pueda deducir razonablemente un RANGO de edad plausible -- por "
     "ejemplo, menciona un año de graduación o de inicio de estudios/trabajo, en qué curso "
     "está, referencias a hitos vitales (jubilación próxima, hijos adultos, empezar la "
-    "universidad este año), o jerga/referencias claramente generacionales. Devuelve tu MEJOR "
-    "ESTIMACIÓN numérica en 'edad_aproximada' (no hace falta acertar el año exacto, basta con "
-    "una edad plausible dentro de ese rango) y en 'confianza' un número entre 0 y 1 que refleje "
-    "honestamente cuánto peso tiene la pista -- sé MUY conservador: un tramo de edad "
-    "equivocado es peor que no mostrar nada, así que usa valores por debajo de 0.6 casi "
-    "siempre, y reserva 0.7 o más SOLO para cuando la pista deje la edad prácticamente tan "
-    "clara como una declaración explícita (p. ej. dice el año exacto en que nació, o un "
-    "cálculo de años sin ninguna ambigüedad posible -- no una simple corazonada sobre el "
-    "estilo de escritura o el tono). Si tienes cualquier duda razonable, usa un valor por "
-    "debajo de 0.7 a propósito para que la estimación se descarte. Si no hay ninguna pista "
-    "razonable, usa null en 'edad_aproximada' (o directamente null en todo el objeto) antes que "
-    "adivinar. NUNCA reutilices esto para razonar sobre la edad de otra persona mencionada en el "
-    "texto, solo sobre la propia persona.\\n"
+    "universidad este año), o jerga/referencias claramente generacionales. En vez de acertar "
+    "un año exacto, da un RANGO ('edad_min', 'edad_max', ambos incluidos): SI LA PISTA ES "
+    "DÉBIL O AMBIGUA, ENSANCHA EL RANGO en vez de arriesgarte con un valor puntual que no "
+    "puedas justificar -- no hay ninguna penalización por dar un rango amplio (p. ej. 20 años "
+    "de ancho: 'edad_min': 20, 'edad_max': 40), y es MUCHO PREFERIBLE un rango amplio con "
+    "confianza alta a uno estrecho con confianza baja o, peor, a un año concreto que resulte "
+    "estar equivocado. Usa un rango estrecho SOLO cuando la pista sea casi tan clara como una "
+    "declaración explícita (p. ej. dice el año exacto en que nació, o un cálculo de años sin "
+    "ninguna ambigüedad posible). En 'confianza' pon un número entre 0 y 1 que refleje "
+    "honestamente cuánta seguridad tienes de que la edad REAL esté DENTRO del rango que has "
+    "dado -- como el rango ya absorbe la incertidumbre de la pista, reserva 0.7 o más para "
+    "cuando estés genuinamente convencido/a de que la edad real cae ahí dentro (ensanchando el "
+    "rango todo lo que haga falta para llegar a esa confianza), no para acertar un valor "
+    "concreto. Si no hay ninguna pista razonable, usa null en 'edad_min'/'edad_max' (o "
+    "directamente null en todo el objeto) antes que inventar un rango sin fundamento. NUNCA "
+    "reutilices esto para razonar sobre la edad de otra persona mencionada en el texto, solo "
+    "sobre la propia persona.\\n"
     "'inferencias_blandas' es DISTINTO de todo lo anterior: aquí SÍ debes razonar, como lo "
     "haría una persona observadora, sobre contenido SIMBÓLICO O INDIRECTO -- combinaciones "
     "de emojis, fechas sueltas, estilo de escritura, jerga -- que sugieran algo sobre la vida "
@@ -604,15 +616,25 @@ def _set_edad(findings: DemographicFindings, parsed: dict, evidence_map: dict) -
 
 def _set_edad_rango(findings: DemographicFindings, parsed: dict) -> None:
     """Procesa el campo 'edad_estimada' del modelo (ver _SYSTEM_PROMPT):
-    estimación INDIRECTA de tramo de edad, distinta de una autodeclaración
-    explícita. Solo se acepta si (1) no hay ya una edad EXACTA (más
-    precisa, ver docstring de `edad_rango` en DemographicFindings) y
-    (2) la confianza declarada alcanza `_AGE_RANGE_MIN_CONFIDENCE` -- por
-    debajo de ese umbral se descarta por completo, no se añade nada, ni
-    edad ni tramo (mismo principio de "ante la duda, no se adivina" que el
-    resto del módulo)."""
+    RANGO de edad estimado por razonamiento INDIRECTO, distinto de una
+    autodeclaración explícita. Solo se acepta si (1) no hay ya una edad
+    EXACTA (más precisa, ver docstring de `edad_rango_min`/`edad_rango_max`
+    en DemographicFindings) y (2) la confianza declarada alcanza
+    `_AGE_RANGE_MIN_CONFIDENCE`.
+
+    A diferencia de la primera versión (que pedía una única edad puntual
+    y la encajaba en un tramo quinquenal fijo), aquí el ANCHO del rango
+    lo decide el propio modelo: el prompt le pide EXPLÍCITAMENTE
+    ensanchar el rango, no la confianza, cuando la pista sea débil -- así
+    una estimación con poca certeza sigue pudiendo aportar algo (un rango
+    amplio con confianza alta) en vez de descartarse sin más o, peor,
+    colarse con una confianza moderada sobre un valor puntual que puede
+    estar muy equivocado (caso real detectado en producción, ver el
+    comentario en DemographicFindings). El umbral de confianza sigue
+    existiendo como red de seguridad adicional, no como mecanismo
+    principal para absorber la incertidumbre."""
     if findings.edad is not None:
-        return  # ya hay edad exacta, siempre más precisa: no se sustituye por un tramo
+        return  # ya hay edad exacta, siempre más precisa: no se sustituye por un rango
 
     raw = parsed.get("edad_estimada")
     if not isinstance(raw, dict):
@@ -622,25 +644,37 @@ def _set_edad_rango(findings: DemographicFindings, parsed: dict) -> None:
     if confidence < _AGE_RANGE_MIN_CONFIDENCE:
         return
 
-    edad_aproximada = raw.get("edad_aproximada")
-    if not isinstance(edad_aproximada, int) or isinstance(edad_aproximada, bool):
+    edad_min = raw.get("edad_min")
+    edad_max = raw.get("edad_max")
+    if not isinstance(edad_min, int) or isinstance(edad_min, bool):
         return
-    if not (12 <= edad_aproximada <= 100):
+    if not isinstance(edad_max, int) or isinstance(edad_max, bool):
+        return
+    if not (12 <= edad_min <= edad_max <= 100):
         return
 
-    findings.edad_rango = age_bin(edad_aproximada)
-    findings.confidence["edad_rango"] = confidence
-    findings.evidence.setdefault("edad_rango", [])
+    findings.edad_rango_min = edad_min
+    findings.edad_rango_max = edad_max
+    # Mismo valor duplicado bajo las dos claves para que el traspaso
+    # genérico por nombre de campo en `merge_findings` (que copia
+    # `ai_findings.confidence[field]` para cada `field` de `_ALL_FIELDS`)
+    # funcione sin caso especial -- ver comentario en
+    # DemographicFindings.confidence.
+    findings.confidence["edad_rango_min"] = confidence
+    findings.confidence["edad_rango_max"] = confidence
+    findings.evidence.setdefault("edad_rango_min", [])
+    findings.evidence.setdefault("edad_rango_max", [])
     # No se usa `evidence_map`/`_set_evidence` aquí porque este campo va
     # en un objeto JSON aparte ("edad_estimada"), sin entrada propia en el
     # mapa 'evidence' genérico del prompt -- la evidencia real de este
     # tipo de estimación son las pistas dispersas por varios posts, no un
     # único permalink localizable, así que se deja vacía a propósito.
-    # NUNCA "ia" a secas: es una estimación indirecta por tramo, no una
+    # NUNCA "ia" a secas: es una estimación indirecta por rango, no una
     # autodeclaración -- misma distinción de fiabilidad que
     # `estado_civil` ("ia_simbolica"); k_anonymity.py usa esto para la
     # nota de menor fiabilidad en el informe.
-    findings.source["edad_rango"] = "ia_estimada"
+    findings.source["edad_rango_min"] = "ia_estimada"
+    findings.source["edad_rango_max"] = "ia_estimada"
 
 
 def _set_free_text_fields(findings: DemographicFindings, parsed: dict, evidence_map: dict) -> None:

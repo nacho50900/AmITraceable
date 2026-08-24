@@ -187,16 +187,32 @@ derivada repartiendo uniformemente los tramos quinquenales del INE
 entre las edades que los componen). Cuando no hay una declaración
 explícita pero sí pistas indirectas suficientemente claras (año de
 graduación, curso que menciona estar haciendo, referencias
-generacionales...), `ai_attribute_extraction.py` puede estimar un
-TRAMO quinquenal (mismas claves que `AGE_DISTRIBUTION_5Y`, p. ej.
-"25-29") en vez de un año concreto -- fingir precisión año a año sobre
-una conjetura sería menos honesto que reflejar la incertidumbre en la
-propia granularidad del dato. Esta estimación por tramo solo se acepta
-si su confianza declarada supera un umbral mínimo (0.5, más exigente
-que el aceptado sin filtrar para inferencias blandas genéricas,
-precisamente porque esto SÍ afecta al número de población del
-informe) y nunca sustituye a una edad exacta ya conocida; se marca con
-`source = "ia_estimada"` para que el informe distinga claramente
+generacionales...), `ai_attribute_extraction.py` puede estimar un RANGO
+de edad (`edad_rango_min`/`edad_rango_max`, ANCHO LIBRE, no un tramo
+quinquenal fijo del INE) -- fingir precisión año a año sobre una
+conjetura sería menos honesto que reflejar la incertidumbre en la
+propia granularidad del dato. La proporción de un rango de ancho
+arbitrario se calcula sumando `AGE_DISTRIBUTION_1Y` año a año
+(`ine_reference.age_range_proportion`), no encajándolo en un tramo
+prefijado.
+
+El diseño delibera de forma explícita cómo absorber la incertidumbre de
+la pista: en vez de exigir que el modelo acierte un valor puntual y
+descartar la estimación si su confianza no supera un umbral (mecanismo
+original, agosto 2026 -- ver ADR-27), el prompt le pide directamente
+ENSANCHAR el rango cuando la pista sea débil, hasta tener una confianza
+alta genuina de que la edad real cae dentro. No hay penalización por un
+rango amplio: `age_range_proportion` simplemente devuelve una
+proporción de población más alta (narrowea menos) cuanto más ancho es
+el rango, así que ensancharlo nunca produce una falsa precisión, solo
+aporta menos información -- el mecanismo es matemáticamente
+autolimitante frente a un rango deliberadamente inútil (p. ej. 12-100),
+sin necesidad de una regla aparte que lo prohíba. La estimación solo se
+acepta si su confianza declarada supera un umbral mínimo (0.7, más
+exigente que el aceptado sin filtrar para inferencias blandas
+genéricas, precisamente porque esto SÍ afecta al número de población
+del informe) y nunca sustituye a una edad exacta ya conocida; se marca
+con `source = "ia_estimada"` para que el informe distinga claramente
 "lo dijiste tú" de "lo ha deducido una IA de pistas sueltas" -- ver
 ADR-27.
 

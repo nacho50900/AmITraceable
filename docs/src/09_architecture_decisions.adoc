@@ -1280,6 +1280,63 @@ respecto a una edad exacta, pero mucho menos que un año concreto --
 efecto esperado y deseado, no un error: es justo la contrapartida de
 tener menos certeza sobre el dato de partida.
 
+*Actualización (agosto 2026)*: el riesgo que este ADR ya anticipaba
+como "trabajo futuro" en la consecuencia negativa de arriba se
+confirmó en producción -- el umbral de 0.5 dejaba pasar estimaciones
+claramente erróneas con confianza "moderada" (caso real: 30 años
+estimados para una persona de 21). El umbral (`_AGE_RANGE_MIN_CONFIDENCE`)
+sube de 0.5 a 0.7, por encima del techo de 0.6 que el propio prompt ya
+le pedía al modelo para pistas no del todo claras (ver el texto exacto
+del prompt en `_SYSTEM_PROMPT`, sección `'edad_estimada'`) -- con esto,
+solo las estimaciones que el propio modelo trata como prácticamente
+tan sólidas como una autodeclaración explícita llegan a mostrarse. El
+prompt también se reforzó para insistir explícitamente en que "un
+tramo de edad equivocado es peor que no mostrar nada". Sigue siendo una
+elección heurística, no calibrada con datos etiquetados a mano; si
+recurre el problema con el nuevo umbral, el siguiente paso sería
+registrar la confianza real devuelta por el modelo en los casos
+erróneos para calibrar con datos en vez de conjeturas.
+
+*Segunda actualización (agosto 2026, mismo día)*: subir solo el umbral
+tiene un límite estructural -- obliga a elegir entre descartar la
+estimación del todo o aceptar un único valor puntual que el modelo no
+siempre puede justificar con precisión, por alto que sea el umbral de
+confianza exigido. Comandante propuso la solución de fondo: en vez de
+pedir una edad puntual y decidir con un umbral binario si se acepta o
+se descarta, pedirle directamente al modelo un RANGO de ancho LIBRE, y
+dejar que sea el propio ancho del rango -- no el umbral de confianza --
+quien absorba la incertidumbre de la pista. Cambios:
+
+- `DemographicFindings.edad_rango` (string, tramo quinquenal fijo del
+  INE tipo "25-29") se sustituye por `edad_rango_min`/`edad_rango_max`
+  (dos enteros, ancho arbitrario).
+- El prompt pide `{"edad_min", "edad_max", "confianza"}` en vez de
+  `{"edad_aproximada", "confianza"}`, instruyendo explícitamente:
+  *"si la pista es débil, ENSANCHA el rango, no arriesgues con un valor
+  puntual"* -- no hay ninguna penalización por dar un rango amplio
+  (p. ej. 20 años de ancho).
+- Nueva función `ine_reference.age_range_proportion(min_age, max_age)`,
+  que suma `AGE_DISTRIBUTION_1Y` año a año sobre el rango exacto dado,
+  en vez de encajarlo por la fuerza en uno de los tramos quinquenales
+  fijos de `AGE_DISTRIBUTION_5Y` (`age_bin()` deja de usarse para esto).
+- El umbral de confianza (0.7) se mantiene, pero pasa a ser una red de
+  seguridad adicional, no el mecanismo principal para absorber la
+  incertidumbre -- esa responsabilidad recae ahora en el ancho del
+  rango, una escala continua, en vez de en una decisión binaria de
+  aceptar/descartar.
+
+*Por qué es matemáticamente seguro dejar el ancho libre*: un rango más
+amplio nunca puede producir una falsa precisión, solo aporta menos
+información -- `age_range_proportion` devuelve una proporción de
+población estrictamente mayor (narrowea menos) cuanto más ancho es el
+rango dado, así que el mecanismo es autolimitante frente a un rango
+inútilmente amplio (p. ej. 12-100 años) sin necesidad de una regla
+aparte que lo prohíba. Verificado con casos reales: un rango de 1 año
+(21-21) deja ~442.000 personas; uno de 7 años (18-24) deja ~3,1M; uno
+de 21 años (15-35) deja ~10,7M; el caso degenerado (12-100) deja
+~44,3M -- prácticamente toda la población adulta, es decir, información
+casi nula, pero nunca un dato erróneo con apariencia de precisión.
+
 === ADR-28: Offload de DINOv2 a una iGPU vía un proceso worker aislado (no en el propio backend)
 
 *Contexto*: ADR-25 fija la concurrencia de fotos a 1 cuando hay CUDA

@@ -43,20 +43,38 @@ def _strip_accents(text: str) -> str:
 class DemographicFindings:
     sexo: str | None = None
     edad: int | None = None
-    # Tramo quinquenal de edad (p. ej. "25-29", "85+" -- claves de
-    # AGE_DISTRIBUTION_5Y en ine_reference.py). A diferencia de `edad`
-    # (autodeclaración EXPLÍCITA, por regex o IA leyendo una frase literal
-    # tipo "tengo 24 años"), este campo lo rellena ÚNICAMENTE
-    # ai_attribute_extraction.py mediante razonamiento INDIRECTO/simbólico
-    # sobre pistas sueltas (año de graduación, curso que menciona estar
-    # haciendo, jerga generacional...) -- mismo principio que
-    # `estado_civil`, con su propia confianza mínima antes de aceptarse
-    # (ver `_set_edad_rango`): si la señal es débil, se queda en None en
-    # vez de adivinar. Solo se calcula si `edad` sigue siendo None (una
-    # edad exacta autodeclarada es siempre más precisa y la sustituye por
-    # completo, nunca conviven las dos). NUNCA lo rellena este módulo
-    # (regex): aquí solo se detectan autodeclaraciones literales.
-    edad_rango: str | None = None
+    # Rango de edad estimado (p. ej. min=20, max=35). A diferencia de
+    # `edad` (autodeclaración EXPLÍCITA, por regex o IA leyendo una frase
+    # literal tipo "tengo 24 años"), estos dos campos los rellena
+    # ÚNICAMENTE ai_attribute_extraction.py mediante razonamiento
+    # INDIRECTO/simbólico sobre pistas sueltas (año de graduación, curso
+    # que menciona estar haciendo, jerga generacional...) -- mismo
+    # principio que `estado_civil`.
+    #
+    # A diferencia de la primera versión de este mecanismo (que encajaba
+    # la estimación en uno de los tramos FIJOS de AGE_DISTRIBUTION_5Y),
+    # el ANCHO del rango es libre y lo decide el propio modelo: si la
+    # pista es débil, debe ENSANCHAR el rango hasta tener una confianza
+    # alta genuina de que la edad real cae dentro -- un rango de 20 años
+    # con confianza alta es preferible a uno estrecho con confianza baja
+    # (ver el prompt exacto en `ai_attribute_extraction.py::_SYSTEM_PROMPT`,
+    # sección 'edad_estimada', y `_set_edad_rango`). Cambio motivado por un
+    # caso real en producción (Comandante, agosto 2026): con un tramo
+    # quinquenal fijo y un umbral de confianza demasiado permisivo, se
+    # coló una estimación de 30 años para una persona de 21 -- dejar que
+    # el propio rango absorba la incertidumbre, en vez de forzar un umbral
+    # arbitrario sobre un valor puntual, es más honesto y más difícil de
+    # acertar mal: `AGE_DISTRIBUTION_1Y`/`age_range_proportion` en
+    # ine_reference.py calculan la proporción de población de CUALQUIER
+    # rango, no solo de los tramos quinquenales predefinidos.
+    #
+    # Solo se calculan si `edad` sigue siendo None (una edad exacta
+    # autodeclarada es siempre más precisa y la sustituye por completo,
+    # nunca conviven `edad` y `edad_rango_min`/`edad_rango_max`). NUNCA
+    # los rellena este módulo (regex): aquí solo se detectan
+    # autodeclaraciones literales.
+    edad_rango_min: int | None = None
+    edad_rango_max: int | None = None
     provincia: str | None = None
     municipio: str | None = None
     # Se rellena en dos casos: (1) autodeclaración explícita de una
@@ -165,9 +183,13 @@ class DemographicFindings:
     soft_inferences: list[InferredAttribute] = field(default_factory=list)
     # Confianza (0-1) de estimaciones que no son autodeclaraciones exactas
     # y necesitan comunicar su propia fiabilidad al informe -- de momento
-    # solo la usa `edad_rango` (ver arriba). Dict genérico por campo (no
-    # un float suelto) para poder ampliarse a otros campos probabilísticos
-    # en el futuro sin cambiar la forma de la clase otra vez.
+    # solo la usan `edad_rango_min`/`edad_rango_max` (mismo valor de
+    # confianza duplicado bajo ambas claves, ver `merge_findings` en
+    # ai_attribute_extraction.py, para que el mecanismo genérico de
+    # traspaso por nombre de campo funcione sin caso especial). Dict
+    # genérico por campo (no un float suelto) para poder ampliarse a
+    # otros campos probabilísticos en el futuro sin cambiar la forma de
+    # la clase otra vez.
     confidence: dict[str, float] = field(default_factory=dict)
 
 

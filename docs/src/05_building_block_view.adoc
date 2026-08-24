@@ -300,20 +300,32 @@ mismo campo a partir de una señal de pareja detectada en fotos (ver
 `vision/scene_analysis.py`), con `source = "imagen"` en ese caso.
 
 Con el mismo tipo de razonamiento indirecto, este módulo también puede
-rellenar `edad_rango` (tramo quinquenal de edad, p. ej. "25-29") cuando
+rellenar `edad_rango_min`/`edad_rango_max` (un RANGO de edad, de ANCHO
+LIBRE -- no un tramo quinquenal fijo del INE) cuando
 `demographic_extraction.py` NO encontró una edad exacta autodeclarada
 -- pistas como un año de graduación, el curso que la persona menciona
-estar haciendo o referencias generacionales. El modelo devuelve su
-mejor estimación numérica y una confianza (0-1); `_set_edad_rango`
-descarta la estimación por completo si la confianza no supera 0.5 (ver
+estar haciendo o referencias generacionales. El prompt le pide
+explícitamente al modelo ENSANCHAR el rango cuando la pista sea débil,
+en vez de arriesgarse a un valor puntual que no pueda justificar: un
+rango de 20 años con confianza alta es preferible a uno estrecho con
+confianza baja. `_set_edad_rango` descarta la estimación por completo
+si la confianza declarada no supera 0.7 (ver
 `ai_attribute_extraction.py::_AGE_RANGE_MIN_CONFIDENCE`) -- ante la
-duda, no se adivina, ni siquiera por tramo -- y, si se acepta, convierte
-la edad aproximada al tramo del INE con `ine_reference.age_bin()` y
-guarda la confianza en `DemographicFindings.confidence["edad_rango"]`.
-Se marca igual que `estado_civil` con una procedencia distinta
-(`source["edad_rango"] = "ia_estimada"`, nunca `"ia"` a secas) y nunca
-sustituye una edad exacta ya conocida, sea de regex o de la propia IA
-(ver ADR-27).
+duda, no se adivina, ni siquiera por rango amplio -- y, si se acepta,
+guarda `edad_rango_min`/`edad_rango_max` tal cual y la confianza en
+`DemographicFindings.confidence["edad_rango_min"]` (duplicada también
+bajo `"edad_rango_max"` para que el mecanismo genérico de merge por
+nombre de campo la traspase sin caso especial). La proporción de
+población de ese rango se calcula sumando `AGE_DISTRIBUTION_1Y` año a
+año (`ine_reference.age_range_proportion`), no encajándolo en un tramo
+prefijado -- así, ensanchar el rango nunca produce una falsa precisión,
+solo reduce menos la población (ver ADR-27, actualización de agosto de
+2026: el mecanismo original pedía una edad puntual con un umbral de
+confianza como única defensa, y se coló una estimación de 30 años para
+alguien de 21 real). Se marca igual que `estado_civil` con una
+procedencia distinta (`source["edad_rango_min"] = "ia_estimada"`, nunca
+`"ia"` a secas) y nunca sustituye una edad exacta ya conocida, sea de
+regex o de la propia IA (ver ADR-27).
 
 Interfaces::
 `extract_demographics_with_ai(posts, username, full_name, bio)`,

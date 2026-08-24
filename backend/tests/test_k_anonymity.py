@@ -111,31 +111,45 @@ class TestEstimatePopulationNarrowing:
 
         assert pop_with_edad < pop_sexo_only
 
-    def test_edad_rango_step_uses_5y_ine_bracket_when_no_exact_age(self):
+    def test_edad_rango_step_uses_age_range_proportion_when_no_exact_age(self):
         findings = DemographicFindings(
-            edad_rango="25-29",
-            source={"edad_rango": "ia_estimada"},
-            confidence={"edad_rango": 0.6},
+            edad_rango_min=25,
+            edad_rango_max=30,
+            source={"edad_rango_min": "ia_estimada"},
+            confidence={"edad_rango_min": 0.75},
         )
 
         steps = estimate_population_narrowing(findings)
         edad_step = next(s for s in steps if s.category == "edad")
 
-        assert edad_step.value_raw == "25-29"
+        assert edad_step.value_raw == "25-30"
         assert edad_step.source == "ia_estimada"
-        assert edad_step.confidence == 0.6
+        assert edad_step.confidence == 0.75
         assert edad_step.remaining_population is not None
         assert edad_step.note_code == "edad_estimada_por_tramo"
 
+    def test_wider_edad_rango_narrows_population_less(self):
+        """El punto central del rediseño: un rango más ancho debe narrowear
+        MENOS (más población restante), nunca más -- ensanchar el rango
+        nunca debe producir una falsa precisión."""
+        narrow = DemographicFindings(edad_rango_min=25, edad_rango_max=27)
+        wide = DemographicFindings(edad_rango_min=15, edad_rango_max=45)
+
+        pop_narrow = estimate_population_narrowing(narrow)[-1].remaining_population
+        pop_wide = estimate_population_narrowing(wide)[-1].remaining_population
+
+        assert pop_wide > pop_narrow
+
     def test_edad_exacta_wins_over_edad_rango_when_both_present(self):
-        """Nunca deberían convivir edad exacta y tramo a la vez (ver
+        """Nunca deberían convivir edad exacta y rango a la vez (ver
         ai_attribute_extraction.py), pero si por algún motivo llegaran
         ambas, la edad exacta debe ganar -- es la más precisa."""
         findings = DemographicFindings(
             edad=24,
-            edad_rango="25-29",
-            source={"edad": "texto", "edad_rango": "ia_estimada"},
-            confidence={"edad_rango": 0.6},
+            edad_rango_min=25,
+            edad_rango_max=30,
+            source={"edad": "texto", "edad_rango_min": "ia_estimada"},
+            confidence={"edad_rango_min": 0.75},
         )
 
         steps = estimate_population_narrowing(findings)

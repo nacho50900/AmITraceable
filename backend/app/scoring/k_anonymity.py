@@ -34,7 +34,6 @@ from dataclasses import dataclass
 
 from app.data.ine_reference import (
     AGE_DISTRIBUTION_1Y,
-    AGE_DISTRIBUTION_5Y,
     AUTONOMOUS_COMMUNITY_DISPLAY_NAMES,
     CCAA_POPULATION,
     HOUSEHOLD_TYPE_DISTRIBUTION,
@@ -53,6 +52,7 @@ from app.data.ine_reference import (
     STUDIES_DISTRIBUTION,
     TOTAL_POPULATION_ES,
     ZODIAC_DISTRIBUTION,
+    age_range_proportion,
 )
 from app.nlp.demographic_extraction import DemographicFindings
 from app import note_codes
@@ -104,8 +104,9 @@ class PopulationNarrowingStep:
     # nacional de referencia con la que calcularlo.
     reduction_percent: float | None = None
     # Confianza (0-1) declarada por la IA para una estimación INDIRECTA,
-    # cuando aplique -- de momento solo lo usa el tramo de edad estimado
-    # (`edad_rango`, ver ai_attribute_extraction.py::_set_edad_rango). Se
+    # cuando aplique -- de momento solo lo usa el rango de edad estimado
+    # (`edad_rango_min`/`edad_rango_max`, ver
+    # ai_attribute_extraction.py::_set_edad_rango). Se
     # expone como campo propio, no interpolado dentro de `note` (que se
     # mantiene siempre como texto fijo por categoría/fuente, ver
     # note_codes.py), para no romper el contrato de traducción por
@@ -317,29 +318,33 @@ def _step_edad(findings: DemographicFindings, remaining: float) -> tuple[float, 
             value_raw=str(findings.edad),
         )
 
-    if findings.edad_rango is not None:
-        # No hay edad EXACTA autodeclarada, pero sí una estimación
-        # INDIRECTA por tramo quinquenal (ver
-        # ai_attribute_extraction.py::_set_edad_rango) que ya superó su
-        # propio umbral de confianza mínima antes de llegar aquí -- se usa
-        # la proporción de INE del tramo completo (AGE_DISTRIBUTION_5Y),
-        # no la derivada año a año, porque no se conoce la edad exacta
-        # dentro del tramo.
+    if findings.edad_rango_min is not None and findings.edad_rango_max is not None:
+        # No hay edad EXACTA autodeclarada, pero sí un RANGO estimado
+        # INDIRECTAMENTE (ver ai_attribute_extraction.py::_set_edad_rango)
+        # que ya superó su propio umbral de confianza mínima antes de
+        # llegar aquí. A diferencia de la primera versión (que encajaba la
+        # estimación en un tramo quinquenal FIJO de AGE_DISTRIBUTION_5Y),
+        # el rango aquí es de ancho LIBRE -- lo eligió el propio modelo
+        # según cuánta certeza tenía -- así que se usa
+        # `age_range_proportion` (suma AGE_DISTRIBUTION_1Y año a año sobre
+        # el rango exacto dado), no un tramo prefijado.
+        label = f"Edad aproximada: {findings.edad_rango_min}-{findings.edad_rango_max} años"
         return _apply_proportion(
             remaining,
-            AGE_DISTRIBUTION_5Y.get(findings.edad_rango),
-            f"Edad aproximada: {findings.edad_rango} años",
+            age_range_proportion(findings.edad_rango_min, findings.edad_rango_max),
+            label,
             "edad",
-            findings.evidence.get("edad_rango", []),
-            source=findings.source.get("edad_rango", "ia_estimada"),
-            note="Tramo de edad estimado por IA a partir de pistas indirectas del texto "
+            findings.evidence.get("edad_rango_min", []),
+            source=findings.source.get("edad_rango_min", "ia_estimada"),
+            note="Rango de edad estimado por IA a partir de pistas indirectas del texto "
                  "(años de graduación, curso que menciona estar haciendo, referencias "
                  "generacionales...), no de una autodeclaración explícita: fiabilidad menor. "
-                 "Se usa el tramo quinquenal de población del INE en vez de un año exacto, "
-                 "por ser una estimación menos precisa que una edad autodeclarada.",
+                 "El ancho del rango lo decide la propia IA según cuánta certeza tenía -- un "
+                 "rango más amplio reduce menos la población, pero es más honesto que fingir "
+                 "precisión sobre una pista débil.",
             note_code=note_codes.EDAD_ESTIMADA_POR_TRAMO,
-            value_raw=findings.edad_rango,
-            confidence=findings.confidence.get("edad_rango"),
+            value_raw=f"{findings.edad_rango_min}-{findings.edad_rango_max}",
+            confidence=findings.confidence.get("edad_rango_min"),
         )
 
     return remaining, None
