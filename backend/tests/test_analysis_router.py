@@ -294,6 +294,61 @@ class TestTranslateDescriptionsEndpoint:
         assert resp.status_code == 200
         assert resp.json() == {"translations": ["guitarra"]}
 
+    def test_logs_translation_performance_with_correct_direction(self, monkeypatch):
+        """ver app/log/translation_log.py -- lang="en" pedido implica
+        origen "es" (único idioma soportado que no es "en"), calculado
+        con `source_language_for()` (ver TestSourceLanguageFor en
+        test_translation.py)."""
+        monkeypatch.setattr(analysis_router, "translate_texts_local", lambda texts, lang="es": texts)
+        logged = {}
+
+        def _fake_log(**kwargs):
+            logged.update(kwargs)
+
+        monkeypatch.setattr(analysis_router, "log_translation_run", _fake_log)
+
+        client.post("/api/analyze/translate-descriptions?lang=en", json={"texts": ["guitarra", "baloncesto"]})
+
+        assert logged["num_texts"] == 2
+        assert logged["source_lang"] == "es"
+        assert logged["target_lang"] == "en"
+        assert logged["total_seconds"] >= 0
+
+    def test_does_not_log_when_lang_unsupported(self, monkeypatch):
+        monkeypatch.setattr(analysis_router, "translate_texts_local", lambda texts, lang="es": texts)
+        called = []
+        monkeypatch.setattr(analysis_router, "log_translation_run", lambda **kwargs: called.append(kwargs))
+
+        resp = client.post("/api/analyze/translate-descriptions?lang=fr", json={"texts": ["guitarra"]})
+
+        assert resp.status_code == 200
+        assert called == []
+
+    def test_does_not_log_when_texts_empty(self, monkeypatch):
+        monkeypatch.setattr(analysis_router, "translate_texts_local", lambda texts, lang="es": texts)
+        called = []
+        monkeypatch.setattr(analysis_router, "log_translation_run", lambda **kwargs: called.append(kwargs))
+
+        client.post("/api/analyze/translate-descriptions?lang=en", json={"texts": []})
+
+        assert called == []
+
+    def test_translate_endpoint_still_works_if_logging_raises(self, monkeypatch):
+        """El logging de rendimiento es best-effort -- ver docstring de
+        log_translation_run(). Un fallo ahí nunca debe tumbar la
+        respuesta de traducción real."""
+        monkeypatch.setattr(analysis_router, "translate_texts_local", lambda texts, lang="es": [t.upper() for t in texts])
+
+        def _raising_log(**kwargs):
+            raise RuntimeError("disco lleno")
+
+        monkeypatch.setattr(analysis_router, "log_translation_run", _raising_log)
+
+        resp = client.post("/api/analyze/translate-descriptions?lang=en", json={"texts": ["guitarra"]})
+
+        assert resp.status_code == 200
+        assert resp.json() == {"translations": ["GUITARRA"]}
+
     def test_lang_query_param_is_forwarded_to_analyze_report_with_ai(self, monkeypatch):
         received = {}
 

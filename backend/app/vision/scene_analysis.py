@@ -89,6 +89,16 @@ _MODEL_NAME = "vikhyatk/moondream2"
 _MODEL_REVISION = "2025-06-21"  # fijado explícitamente, ver docstring del modelo en HuggingFace
 
 _model = None
+# Dispositivo REAL en el que quedó cargado Moondream2 tras `_lazy_load()`
+# ("cuda:0" o "cpu", ver el `_actual_device = next(_model.parameters()).device`
+# dentro de `_lazy_load()`) -- expuesto vía `get_device()` para que el
+# logging de rendimiento (app/log/performance_log.py) pueda saber de
+# verdad dónde corrió, en vez de asumir "GPU si CUDA está disponible" sin
+# más: `torch.cuda.is_available()` puede dar False por motivos que no
+# lanzan ninguna excepción (ver comentario dentro de `_lazy_load()`), así
+# que se guarda el valor observado en la carga, no se volvería a acertar
+# solo con ese booleano.
+_actual_device: str | None = None
 
 _CAPTION_QUERY = (
     # NOTA (ver registro de trabajo): la primera versión de este campo
@@ -294,6 +304,18 @@ _PAREJA_RE = re.compile(r"PAREJA:[ \t]*(\S+)", re.IGNORECASE)
 _TEXTO_VISIBLE_RE = re.compile(r"TEXTO_VISIBLE:[ \t]*(.+)", re.IGNORECASE)
 
 
+def get_device() -> str | None:
+    """Dispositivo REAL ("cuda" o "cpu") en el que quedó cargado
+    Moondream2 en este proceso, o `None` si `_lazy_load()` no se ha
+    llamado todavía (modelo no cargado -- p. ej. `enable_scene_analysis`
+    desactivado, o análisis sin ninguna foto procesada aún). Pensado para
+    el logging de rendimiento (ver app/log/performance_log.py), que
+    necesita saber de verdad dónde corrió cada modelo, no asumirlo -- ver
+    el comentario de `_actual_device` más arriba sobre por qué
+    `torch.cuda.is_available()` por sí solo no basta."""
+    return _actual_device
+
+
 def _scene_analysis_available() -> bool:
     """Comprobación barata (sin cargar el modelo) de si este módulo puede
     funcionar: dependencias opcionales instaladas. No hay ningún índice ni
@@ -489,7 +511,7 @@ def _lazy_load():
     proceso) mientras la geolocalización (DINOv2, mucho más ligera) sí usa
     la GPU -- DINOv2 ya selecciona GPU automáticamente si está disponible,
     con independencia de esto (ver geolocation.py)."""
-    global _model
+    global _model, _actual_device
     if _model is not None:
         return
 
@@ -564,11 +586,17 @@ def _lazy_load():
         # "la GPU no está siendo usada" y "la GPU sí se usa pero esta foto
         # en concreto ha tardado más de la cuenta" -- este log sí lo
         # distingue.
-        _actual_device = next(_model.parameters()).device
+        _loaded_device = next(_model.parameters()).device
+        # Guardado a nivel de módulo como "cuda"/"cpu" (sin el índice de
+        # tarjeta, p. ej. "cuda:0" -> "cuda") -- ver `get_device()` más
+        # abajo, es lo que consulta el logging de rendimiento para saber
+        # de verdad dónde corrió Moondream2 en este proceso, sin tener
+        # que volver a preguntarle a `torch.cuda.is_available()`.
+        _actual_device = "cuda" if str(_loaded_device).startswith("cuda") else "cpu"
         _actual_dtype = next(_model.parameters()).dtype
         logger.info(
             "Moondream2 cargado: device=%s dtype=%s (torch.cuda.is_available()=%s)",
-            _actual_device,
+            _loaded_device,
             _actual_dtype,
             torch.cuda.is_available(),
         )

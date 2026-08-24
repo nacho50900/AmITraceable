@@ -15,6 +15,7 @@ ninguna otra plataforma.
 """
 import asyncio
 import json
+import os
 import time
 from typing import Annotated, Callable
 
@@ -22,8 +23,9 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.ai_analysis import AiAnalysisUnavailable, analyze_report_with_ai
-from app.nlp.translation import translate_texts_local
+from app.nlp.translation import source_language_for, translate_texts_local, translation_available
 from app.log.analysis_run_log import log_analysis_run
+from app.log.translation_log import log_translation_run
 from app.analysis_timing import run_with_timer, timed_stage
 from app.config import settings
 from app.instagram_client import InstagramClient
@@ -262,7 +264,29 @@ async def translate_descriptions(request: Annotated[TranslateDescriptionsRequest
     # despacha a un hilo aparte para no bloquear el event loop de FastAPI
     # mientras corre -- mismo patrón que ya usa todo el pipeline de
     # visión (ver asyncio.to_thread en app/vision/geolocation.py).
+    start = time.monotonic()
     translations = await asyncio.to_thread(translate_texts_local, request.texts, lang)
+    elapsed = time.monotonic() - start
+
+    # `lang` no soportado no se registra -- es un no-op sin coste real de
+    # traducción (ver translate_texts_local()), no aporta nada al log de
+    # rendimiento. Nunca debe romper la respuesta: log_translation_run()
+    # ya no lanza por sí sola (ver su docstring), pero se envuelve
+    # igualmente por si acaso, con el mismo criterio best-effort que el
+    # resto del logging de este proyecto.
+    source_lang = source_language_for(lang)
+    if source_lang is not None and request.texts:
+        try:
+            log_translation_run(
+                num_texts=len(request.texts),
+                source_lang=source_lang,
+                target_lang=lang,
+                cpu_count=os.cpu_count() or 4,
+                total_seconds=elapsed,
+                translation_available=translation_available(lang),
+            )
+        except Exception:
+            pass
 
     return {"translations": translations}
 

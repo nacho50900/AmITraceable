@@ -41,7 +41,7 @@ import httpx
 from app.config import settings
 from app.models.schemas import InferredAttribute
 from app.log.performance_log import PhotoAnalysisTiming, log_photo_analysis_run
-from app.vision.scene_analysis import analyze_image_content
+from app.vision.scene_analysis import analyze_image_content, get_device as get_moondream_device
 
 import numpy as np
 
@@ -339,6 +339,20 @@ def _select_dinov2_device() -> str:
     import torch
 
     return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def get_local_device() -> str | None:
+    """Dispositivo LOCAL ("cuda" o "cpu") donde correría DINOv2 en este
+    proceso si NO se despachara al worker de iGPU -- `None` si
+    `_lazy_load()` no se ha llamado todavía. IMPORTANTE: esto NO indica
+    dónde corrió DINOv2 para una foto en concreto -- para eso hace falta
+    combinarlo con `igpu_offload_used` (ver `log_photo_analysis_run()` en
+    app/log/performance_log.py): si es True, la foto fue al worker de
+    iGPU (DirectML) y `get_local_device()` no aplica; si es False, corrió
+    en el valor que devuelve esta función -- que en la práctica, con la
+    GPU dedicada disponible, es "cuda" COMPARTIDA con Moondream2 (ver
+    `_select_igpu_worker_device_index()`), no CPU."""
+    return _device
 
 
 def _select_igpu_worker_device_index(cuda_available: bool) -> int | None:
@@ -976,6 +990,18 @@ async def estimate_locations_for_posts(
         # log de rendimiento debe reflejar eso, no la config nominal (ver
         # el comentario de este mismo campo en log/performance_log.py).
         igpu_offload_used=_igpu_worker_device_index is not None and not _igpu_worker_failed,
+        # Dispositivo LOCAL de DINOv2 ("cuda"/"cpu") -- solo se usa
+        # cuando igpu_offload_used es False, ver docstring de
+        # `get_local_device()`. Con GPU dedicada disponible y offload
+        # desactivado, DINOv2 comparte esa misma GPU con Moondream2 (no
+        # corre en CPU) -- ver `_select_igpu_worker_device_index()`.
+        dinov2_local_device=get_local_device(),
+        # Dispositivo REAL en el que quedó cargado Moondream2 en este
+        # proceso -- ver scene_analysis.get_device() (importado aquí como
+        # get_moondream_device). Casi siempre "cuda" (misma GPU dedicada
+        # que DINOv2 si no hay offload) salvo que no haya CUDA disponible
+        # en absoluto, ver su docstring.
+        moondream_device=get_moondream_device(),
         total_wall_seconds=time.monotonic() - run_start,
         per_photo_seconds=timing.per_photo_seconds,
         per_photo_dinov2_seconds=timing.dinov2_seconds,

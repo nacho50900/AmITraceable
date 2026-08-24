@@ -31,6 +31,12 @@ observación, nunca debe ser motivo de que un análisis falle.
 Puede desactivarse por completo con ENABLE_PERFORMANCE_LOGGING=false (ver
 Settings.enable_performance_logging en config.py) -- activado por
 defecto, ya que no guarda nada personal.
+
+Este módulo solo cubre el TRAMO de análisis de fotos (DINOv2 +
+Moondream2). La traducción local de descripciones (ver
+app/nlp/translation.py, ADR-30/ADR-31) es una operación aparte y bajo
+demanda -- no ligada a un análisis concreto -- y se registra en su propio
+log, ver app/log/translation_log.py.
 """
 import json
 import logging
@@ -97,6 +103,8 @@ def log_photo_analysis_run(
     threads_per_inference: int,
     enable_scene_analysis: bool,
     igpu_offload_used: bool,
+    dinov2_local_device: str | None,
+    moondream_device: str | None,
     total_wall_seconds: float,
     per_photo_seconds: list[float],
     per_photo_dinov2_seconds: list[float],
@@ -104,7 +112,23 @@ def log_photo_analysis_run(
 ) -> None:
     """Añade una línea al log de rendimiento. Nunca lanza excepción hacia
     el llamador: un fallo al escribir el log no debe tumbar ni degradar el
-    análisis real."""
+    análisis real.
+
+    `dinov2_local_device`/`moondream_device`: dispositivo REAL donde
+    corrió cada modelo en este proceso (ver
+    `app.vision.geolocation.get_local_device()` y
+    `app.vision.scene_analysis.get_device()`) -- IMPORTANTE, y motivo por
+    el que existen estos dos parámetros en vez de asumir nada a partir de
+    `igpu_offload_used`: sin offload activo, DINOv2 NO corre en CPU, sino
+    en la MISMA GPU dedicada que Moondream2 (ver
+    `_select_igpu_worker_device_index()` en geolocation.py -- el offload
+    a iGPU existe justamente para dejar de compartirla). Un primer intento
+    de esta función asumía "GPU si hay offload a iGPU, si no CPU" para
+    los dos modelos, lo cual describía correctamente la traducción (ver
+    app/log/translation_log.py, esa sí es CPU siempre) pero NO el
+    análisis de fotos -- corregido tras confirmarlo directamente contra
+    el código de selección de dispositivo (no era una suposición
+    razonable, era un error de hecho)."""
     global _warned_unwritable
 
     if not settings.enable_performance_logging:
@@ -117,22 +141,70 @@ def log_photo_analysis_run(
     # DISTINTO de `avg_seconds_per_photo` (media de `per_photo_seconds`,
     # que mide LATENCIA por foto: desde que arranca su intento hasta que
     # termina). Con concurrencia baja y una etapa mucho más lenta que la
-    # otra (p. ej. Moondream2 en CPU frente a DINOv2 en iGPU tras
-    # ADR-28), la LATENCIA de las fotos que quedan detrás en la cola del
-    # semáforo crece de forma aproximadamente lineal con su posición (la
-    # foto N espera a que terminen las N-1 anteriores en esa etapa), así
+    # otra, la LATENCIA de las fotos que quedan detrás en la cola del
+    # semáforo crece de forma aproximadamente lineal con su posición, así
     # que la MEDIA de latencias puede acabar siendo varias veces mayor
-    # que el tiempo real que cuesta añadir una foto más al análisis --
-    # confirmado en producción (ver mensaje de Nacho del 21/8: análisis
-    # de ~21 fotos con offload iGPU registrando ~242-302s/foto de
-    # "media" cuando el propio proceso completo tardó ~10 min en total,
-    # es decir, ~28s/foto reales, igual que `avg_scene_seconds_per_photo`
-    # porque Moondream2 es el cuello de botella). El throughput SÍ es
-    # comparable entre configuraciones para decidir cuál usar; la
-    # latencia media es útil solo para estimar cuánto va a tardar en
-    # aparecer el resultado de UNA foto concreta (progreso de UI), no
-    # para comparar rendimiento global.
+    # que el tiempo real que cuesta añadir una foto más al análisis
+    # (confirmado en producción -- ver ADR de rendimiento / conversación
+    # del 21/8). El throughput SÍ es comparable entre configuraciones;
+    # la latencia media es útil solo para estimar cuánto tarda en
+    # aparecer el resultado de UNA foto concreta (progreso de UI).
     throughput = total_wall_seconds / total_photos
+
+    # Tiempo de cómputo por DISPOSITIVO durante ESTE análisis de fotos (no
+    # incluye traducción -- ver app/log/translation_log.py, es una
+    # operación separada y bajo demanda, no atada a este análisis). TRES
+    # categorías, no dos -- ver el docstring de arriba sobre por qué:
+    #
+    # - `cuda_gpu_seconds`: GPU DEDICADA (CUDA). Moondream2 corre ahí
+    #   salvo que no haya CUDA en absoluto (`moondream_device == "cpu"`).
+    #   DINOv2 corre ahí TAMBIÉN, compartiéndola, cuando NO hay offload a
+    #   iGPU y sí hay CUDA (`dinov2_local_device == "cuda"`) -- este es
+    #   el caso más común en la práctica (ver `_select_igpu_worker_
+    #   device_index()`), y es justo la contención que ADR-28 intenta
+    #   aliviar.
+    # - `igpu_seconds`: iGPU vía DirectML (worker aparte, ver
+    #   `_igpu_worker_device_index` en geolocation.py). Solo DINOv2, solo
+    #   si `igpu_offload_used` es True.
+    # - `cpu_seconds`: cualquiera de los dos modelos SIN ninguna GPU
+    #   disponible (`dinov2_local_device`/`moondream_device == "cpu"`) --
+    #   en la práctica solo ocurre en máquinas sin CUDA en absoluto (ver
+    #   memoria: en el equipo de desarrollo, con GTX 1650, esto no
+    #   debería pasar salvo error de detección).
+    #
+    # Con el pipeline entre fotos (ADR-29) estos tiempos pueden solaparse
+    # entre sí, así que ningún par de estas tres cifras tiene por qué
+    # sumar `total_wall_seconds` -- son SEGUNDOS DE CÓMPUTO consumidos,
+    # no un cronómetro de pared exclusivo; el `_pct` es "cuántos segundos
+    # de trabajo hubo en ese dispositivo por cada segundo de reloj", que
+    # puede superar el 100% con buen solapamiento (señal de que el
+    # pipeline aprovecha bien la concurrencia entre modelos).
+    dinov2_total = sum(per_photo_dinov2_seconds)
+    scene_total = sum(per_photo_scene_seconds)
+
+    cuda_gpu_seconds = 0.0
+    igpu_seconds = 0.0
+    cpu_seconds = 0.0
+
+    if igpu_offload_used:
+        igpu_seconds += dinov2_total
+    elif dinov2_local_device == "cuda":
+        cuda_gpu_seconds += dinov2_total
+    elif dinov2_local_device == "cpu":
+        cpu_seconds += dinov2_total
+    # dinov2_local_device is None (modelo nunca cargado, p. ej. 0 fotos
+    # con geolocalización intentada): dinov2_total ya es 0.0, no aporta.
+
+    if moondream_device == "cuda":
+        cuda_gpu_seconds += scene_total
+    elif moondream_device == "cpu":
+        cpu_seconds += scene_total
+    # moondream_device is None (enable_scene_analysis=False o modelo
+    # nunca cargado): scene_total ya es 0.0, no aporta.
+
+    cuda_gpu_usage_pct = (cuda_gpu_seconds / total_wall_seconds * 100) if total_wall_seconds else 0.0
+    igpu_usage_pct = (igpu_seconds / total_wall_seconds * 100) if total_wall_seconds else 0.0
+    cpu_usage_pct = (cpu_seconds / total_wall_seconds * 100) if total_wall_seconds else 0.0
 
     avg = sum(per_photo_seconds) / len(per_photo_seconds) if per_photo_seconds else None
     avg_dinov2 = (
@@ -163,11 +235,24 @@ def log_photo_analysis_run(
         # fallback silencioso al modelo local contaminaría el grupo "con
         # offload" con tiempos que en realidad son de ejecución local).
         "igpu_offload_used": igpu_offload_used,
+        # Dispositivo real por modelo -- ver docstring de la función.
+        "dinov2_local_device": dinov2_local_device,
+        "moondream_device": moondream_device,
         "total_wall_seconds": round(total_wall_seconds, 3),
         # Métrica principal para COMPARAR configuraciones -- ver el
         # comentario de arriba sobre por qué no vale usar
         # `avg_seconds_per_photo` para esto.
         "throughput_seconds_per_photo": round(throughput, 3),
+        # Segundos de cómputo por dispositivo y su fracción respecto al
+        # tiempo de reloj total -- ver comentario de arriba. Solo cubre
+        # el análisis de fotos (DINOv2 + Moondream2); la traducción se
+        # registra aparte en app/log/translation_log.py (siempre CPU).
+        "cuda_gpu_seconds": round(cuda_gpu_seconds, 3),
+        "igpu_seconds": round(igpu_seconds, 3),
+        "cpu_seconds": round(cpu_seconds, 3),
+        "cuda_gpu_usage_pct": round(cuda_gpu_usage_pct, 1),
+        "igpu_usage_pct": round(igpu_usage_pct, 1),
+        "cpu_usage_pct": round(cpu_usage_pct, 1),
         # Se mantiene por compatibilidad y porque sigue siendo útil para
         # otra cosa (estimar la latencia típica de UNA foto, no el
         # rendimiento agregado del análisis) -- ver comentario arriba.

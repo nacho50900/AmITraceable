@@ -58,6 +58,19 @@ _source_tokenizers: dict = {}
 _target_tokenizers: dict = {}
 
 
+def source_language_for(lang: str) -> str | None:
+    """Idioma de ORIGEN para una traducción HACIA `lang`, dado que solo
+    hay dos idiomas soportados en todo el proyecto (ver docstring del
+    módulo) -- `None` si `lang` no es "es" ni "en". Único punto donde
+    vive esta regla; `translation_available()`, `translate_texts_local()`
+    y el logging de rendimiento (ver app/log/translation_log.py y
+    `POST /analyze/translate-descriptions` en app/analysis_router.py) la
+    reutilizan en vez de repetir el ternario cada uno por su cuenta."""
+    if lang not in ("es", "en"):
+        return None
+    return "en" if lang == "es" else "es"
+
+
 def _direction_available(direction: str) -> bool:
     """True si el modelo convertido de esta dirección (p. ej. "es-en")
     está presente en disco -- ver scripts/convert_translation_models.py.
@@ -77,9 +90,9 @@ def translation_available(lang: str) -> bool:
     se limitará a devolver los textos sin cambios. Pensado para que quien
     llama pueda decidir si merece la pena intentarlo, sin pagar el coste
     de cargar el modelo solo para descubrir que no está."""
-    if lang not in ("es", "en"):
+    source_lang = source_language_for(lang)
+    if source_lang is None:
         return False
-    source_lang = "en" if lang == "es" else "es"
     return _direction_available(f"{source_lang}-{lang}")
 
 
@@ -137,13 +150,9 @@ def translate_texts_local(texts: list[str], lang: str) -> list[str]:
 
     `lang` no soportado, vacío, o `texts` vacía: no-op, sin tocar disco ni
     cargar nada."""
-    if lang not in ("es", "en") or not texts:
+    source_lang = source_language_for(lang)
+    if source_lang is None or not texts:
         return list(texts)
-
-    # Con solo dos idiomas soportados en todo el proyecto, el origen es
-    # el otro -- ver el docstring del módulo sobre por qué esto no
-    # escala a un tercer idioma sin cambios.
-    source_lang = "en" if lang == "es" else "es"
     direction = f"{source_lang}-{lang}"
 
     if not _lazy_load(direction):

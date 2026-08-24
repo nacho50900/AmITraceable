@@ -241,3 +241,20 @@ class TestTranslateTextsLocalHappyPath:
         monkeypatch.setattr(translation, "_MODELS_DIR", tmp_path)
 
         assert translation.translation_available("en") is True
+
+
+class TestSourceLanguageFor:
+    """Único punto donde vive la regla "el origen es el otro de los dos
+    idiomas soportados" (ver docstring de `source_language_for()`) --
+    reutilizado por `translation_available()`, `translate_texts_local()`
+    y por el logging de rendimiento en app/analysis_router.py."""
+
+    def test_es_target_returns_en_source(self):
+        assert translation.source_language_for("es") == "en"
+
+    def test_en_target_returns_es_source(self):
+        assert translation.source_language_for("en") == "es"
+
+    @pytest.mark.parametrize("lang", ["fr", "", "ES", None])
+    def test_unsupported_lang_returns_none(self, lang):
+        assert translation.source_language_for(lang) is None
