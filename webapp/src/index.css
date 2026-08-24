@@ -177,7 +177,7 @@ body {
   padding: 10px 16px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-top: 4.5px solid var(--border);
+  border-top: 1px solid var(--border);
   border-bottom: 3px solid var(--bg);
   border-radius: 8px 8px 0 0;
   cursor: pointer;
@@ -196,6 +196,7 @@ body {
 .platform-guide-tab--active {
   color: var(--text);
   background: var(--bg-card);
+  border-top-width: 4.5px;
   border-bottom-color: transparent;
 }
 
@@ -224,6 +225,30 @@ body {
   background: radial-gradient(circle 10px at 100% 0%, var(--bg-card) 0 9px, var(--border) 9px 10px, transparent 10px);
 }
 
+/* Tapa el último tramo (10px) del borde lateral recto de la pestaña activa,
+   justo donde arranca la curva de fusión: sin esto, el borde recto sigue
+   viéndose en paralelo a la curva en vez de "convertirse" en ella. */
+.platform-guide-tab-border-mask {
+  position: absolute;
+  bottom: 0;
+  width: 2px;
+  height: 10px;
+  background: transparent;
+  pointer-events: none;
+}
+
+.platform-guide-tab-border-mask--left {
+  left: 0;
+}
+
+.platform-guide-tab-border-mask--right {
+  right: 0;
+}
+
+.platform-guide-tab--active .platform-guide-tab-border-mask {
+  background: var(--bg-card);
+}
+
 .platform-guide-tab.platform-guide-item--reddit.platform-guide-tab--active {
   border-top-color: #ff4500;
 }
@@ -233,6 +258,11 @@ body {
 .platform-guide-tab.platform-guide-item--reddit.platform-guide-tab--active::before {
   content: none;
 }
+
+.platform-guide-tab.platform-guide-item--reddit.platform-guide-tab--active .platform-guide-tab-border-mask--left {
+  display: none;
+}
+
 
 .platform-guide-tab.platform-guide-item--instagram.platform-guide-tab--active {
   border-top-color: #dc2743;
