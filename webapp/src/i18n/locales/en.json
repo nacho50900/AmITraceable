@@ -130,7 +130,8 @@
       "empresa_no_estimable": "Would require the number of employees of that specific company (future work): data not included in this version.",
       "orientacion_sexual_categoria_especial": "Special category of data (GDPR Art. 9): only calculated because the person explicitly self-declared it in public, never by indirect inference. The proportion used is a contextual estimate for Spain (CIS/observatories), not an official INE census figure.",
       "religion_categoria_especial": "Special category of data (GDPR Art. 9): only calculated because the person explicitly self-declared it or indicated it with an unambiguous symbol/emoji in public, never by indirect inference. The proportion used is a contextual estimate for Spain (CIS and community sources), not an official INE census figure -- Spain does not collect religious affiliation in its census.",
-      "signo_zodiacal_note": "The distribution is uniform (~8.33% per sign, one twelfth of the year) because birth dates are spread almost uniformly across the year -- it isn't a made-up figure: it directly reveals a real ~30-day birth window, even though the astrological belief itself has no scientific basis."
+      "signo_zodiacal_note": "The distribution is uniform (~8.33% per sign, one twelfth of the year) because birth dates are spread almost uniformly across the year -- it isn't a made-up figure: it directly reveals a real ~30-day birth window, even though the astrological belief itself has no scientific basis.",
+      "practica_deportiva_no_particion": "Marginal proportion from the Spanish Sports Habits Survey (Encuesta de Hábitos Deportivos en España) -- not a partition: the survey allows multiple answers, a person can practice several sports at once, so this data point alone doesn't mean it's the ONLY sport they practice."
     },
     "attribute": {
       "sexo": "Sex: {{value}}",
@@ -149,7 +150,8 @@
       "ubicacion_comunidad_autonoma": "Lives in region: {{value}}",
       "orientacion_sexual": "Sexual orientation: {{value}}",
       "religion": "Religion: {{value}}",
-      "signo_zodiacal": "Zodiac sign: {{value}}"
+      "signo_zodiacal": "Zodiac sign: {{value}}",
+      "practica_deportiva": "Sport practiced: {{value}}"
     },
     "attributeValue": {
       "sexo": {
@@ -246,6 +248,17 @@
         "capricornio (22 dic - 19 ene)": "Capricorn (Dec 22 - Jan 19)",
         "acuario (20 ene - 18 feb)": "Aquarius (Jan 20 - Feb 18)",
         "piscis (19 feb - 20 mar)": "Pisces (Feb 19 - Mar 20)"
+      },
+      "practica_deportiva": {
+        "senderismo": "Hiking / mountaineering",
+        "ciclismo": "Cycling",
+        "natacion": "Swimming",
+        "running": "Running / athletics",
+        "musculacion": "Weight training / gym",
+        "padel": "Padel",
+        "futbol": "Football",
+        "baloncesto": "Basketball",
+        "tenis": "Tennis"
       }
     }
   },

@@ -94,6 +94,7 @@ from app.data.ine_reference import (
     PROVINCE_POPULATION,
     RELIGION_DISTRIBUTION,
     SEXUAL_ORIENTATION_DISTRIBUTION,
+    SPORT_PRACTICE_DISTRIBUTION,
     STUDIES_DISTRIBUTION,
     resolve_autonomous_community,
 )
@@ -120,6 +121,7 @@ _HOUSEHOLD_VALUES = ("unipersonal", "pareja_sin_hijos", "pareja_con_hijos", "mon
 # de mantener una lista duplicada a mano que podría desincronizarse.
 _SEXUAL_ORIENTATION_VALUES = tuple(SEXUAL_ORIENTATION_DISTRIBUTION.keys())
 _RELIGION_VALUES = tuple(RELIGION_DISTRIBUTION.keys())
+_SPORT_PRACTICE_VALUES = tuple(SPORT_PRACTICE_DISTRIBUTION.keys())
 # Tope defensivo de inferencias blandas aceptadas por respuesta, aunque el
 # prompt ya pide un máximo de 5 -- por si el modelo no lo respeta al pie de
 # la letra, no se toma "gratis" lo que devuelva de más.
@@ -160,6 +162,7 @@ _ALL_FIELDS = (
     "sexo", "edad", "provincia", "municipio", "comunidad_autonoma",
     "estudios", "ocupacion", "universidad", "empresa",
     "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
+    "practica_deportiva",
     # Rango de edad estimado INDIRECTAMENTE (ver docstring del campo en
     # DemographicFindings) -- solo lo rellena la IA, nunca la regex, pero
     # reutiliza el mismo mecanismo de merge (copiar si regex_findings.edad
@@ -193,6 +196,7 @@ _SYSTEM_PROMPT = (
     '"situacion_laboral": "activo"|"parado"|"jubilado"|"estudiante"|"otro_inactivo"|null, '
     '"tipo_hogar": "unipersonal"|"pareja_sin_hijos"|"pareja_con_hijos"|"monoparental"|null, '
     '"lengua_materna": "catalan"|"euskera"|"gallego"|"valenciano"|null, '
+    '"practica_deportiva": "senderismo"|"ciclismo"|"natacion"|"running"|"musculacion"|"padel"|"futbol"|"baloncesto"|"tenis"|null, '
     '"sexo_por_nombre": "hombre"|"mujer"|null, '
     '"fotos_de_viaje": [<identificador_de_publicacion>, ...], '
     '"estado_civil": "soltero"|"con_pareja"|"casado"|"divorciado"|"viudo"|null, '
@@ -227,7 +231,22 @@ _SYSTEM_PROMPT = (
     "hijos, sin pareja). 'lengua_materna' es SOLO una de las 4 lenguas cooficiales listadas "
     "(catalán, euskera, gallego, valenciano) si la persona dice explícitamente que es su "
     "lengua materna o habitual -- no infieras esto del lugar donde vive ni del idioma en que "
-    "está escrito el texto. 'fotos_de_viaje' es una lista aparte, "
+    "está escrito el texto. "
+    "'practica_deportiva' detecta si la persona declara EXPLÍCITAMENTE que practica un "
+    "deporte con regularidad -- verbos de práctica como 'juego al...', 'hago...', 'salgo a "
+    "correr', 'voy al gimnasio', 'practico...', 'soy runner/nadador/futbolista'. NO uses "
+    "este campo si el texto solo MENCIONA el deporte sin indicar que la persona lo practica "
+    "-- p. ej. 'vi el partido de fútbol', 'me encanta el fútbol' (como afición de "
+    "espectador), un resultado deportivo, o una noticia sobre un equipo NO cuentan; solo "
+    "cuenta una autodeclaración de PRÁCTICA real. Los únicos valores válidos son "
+    "'musculacion' (gimnasio, pesas, musculación, halterofilia, crossfit), 'senderismo' "
+    "(senderismo, montañismo, rutas de montaña), 'running' (running, atletismo, correr con "
+    "regularidad), 'natacion' (natación, nadar), 'futbol' (fútbol 11 o 7, jugador/futbolista), "
+    "'ciclismo' (ciclismo, ir en bici con regularidad, ciclista), 'padel' (pádel), 'tenis' "
+    "(tenis) y 'baloncesto' (baloncesto, jugador/jugadora de baloncesto) -- si "
+    "practica otro deporte no listado aquí, usa null (no inventes una categoría nueva ni "
+    "fuerces la más parecida). Usa null si no hay ninguna autodeclaración de práctica. "
+    "'fotos_de_viaje' es una lista aparte, "
     "sin relación con las autodeclaraciones anteriores: incluye ahí el identificador de "
     "CUALQUIER publicación cuyo texto indique que la persona está de viaje, de vacaciones, "
     "de paso, o visitando temporalmente un sitio que NO es necesariamente donde vive (p. ej. "
@@ -744,6 +763,13 @@ def _to_findings(parsed: dict) -> DemographicFindings:
     _set_exact_enum(findings, parsed, "orientacion_sexual", _SEXUAL_ORIENTATION_VALUES, evidence_map)
     _set_exact_enum(findings, parsed, "religion", _RELIGION_VALUES, evidence_map)
     _set_signo_zodiacal(findings, parsed, evidence_map)
+    # practica_deportiva: enum exacto igual que nacionalidad/situacion_laboral
+    # -- requiere que el prompt distinga PRÁCTICA (autodeclaración de hacer
+    # el deporte con regularidad) de una simple MENCIÓN/afición como
+    # espectador (ver instrucción explícita en _SYSTEM_PROMPT), mismo
+    # motivo por el que _SPORT_PRACTICE_RE en demographic_extraction.py usa
+    # frases-ancla de práctica en vez de una simple mención por subcadena.
+    _set_exact_enum(findings, parsed, "practica_deportiva", _SPORT_PRACTICE_VALUES, evidence_map)
     _set_travel_permalinks(findings, parsed)
     _set_estado_civil(findings, parsed, evidence_map)
 

@@ -834,6 +834,49 @@ class TestGroupBFieldsFromAI:
         assert findings.lengua_materna is None
 
 
+class TestPracticaDeportivaFromAI:
+    """Mismo patrón que TestGroupBFieldsFromAI (enum exacto validado con
+    _set_exact_enum), pero probado aparte porque tiene una restricción
+    semántica adicional en el prompt (práctica real, no mención de
+    espectador) que merece su propia clase."""
+
+    @pytest.mark.asyncio
+    async def test_valid_value_is_parsed(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(practica_deportiva="senderismo"))
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.practica_deportiva == "senderismo"
+        assert findings.source["practica_deportiva"] == "ia"
+
+    @pytest.mark.asyncio
+    async def test_value_outside_enum_is_discarded(self, monkeypatch, respx_mock):
+        """Regresión del mismo tipo que orientacion_sexual/religion: si el
+        modelo inventa una categoría (p. ej. porque el deporte real no
+        está en la lista cerrada), se descarta en vez de guardarse tal
+        cual -- ver _SPORT_PRACTICE_VALUES."""
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(200, json=_mock_content(practica_deportiva="balonmano"))
+        )
+
+        findings = await extract_demographics_with_ai([_post("juego a balonmano")], username="x")
+
+        assert findings.practica_deportiva is None
+
+    @pytest.mark.asyncio
+    async def test_missing_field_stays_none(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content()))
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.practica_deportiva is None
+
+
 class TestOrientacionSexualReligionSignoZodiacal:
     """Regresión: estos tres campos se guardaban tal cual devolviera el
     modelo, sin validar contra ningún vocabulario cerrado -- un valor

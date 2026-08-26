@@ -338,3 +338,80 @@ class TestSymbolicAttributes:
         assert findings.signo_zodiacal == "cancer (21 jun - 22 jul)"
         assert findings.orientacion_sexual == "heterosexual"
 
+
+class TestSportPractice:
+    """Práctica deportiva: requiere un verbo de PRÁCTICA explícita, no una
+    simple mención del deporte -- ver _SPORT_PRACTICE_RE en
+    demographic_extraction.py. Cada caso positivo tiene un caso "gemelo"
+    de mera mención que debe quedarse en None, para dejar constancia
+    explícita de que se comprobó el falso positivo, no solo el caso feliz."""
+
+    def test_detects_futbol_practice(self):
+        findings = extract_demographics([_post("Juego al futbol todos los sabados con mis amigos")])
+        assert findings.practica_deportiva == "futbol"
+
+    def test_futbol_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Vi el partido de futbol ayer, menudo partidazo")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_running_practice(self):
+        findings = extract_demographics([_post("Salgo a correr cada semana antes de currar")])
+        assert findings.practica_deportiva == "running"
+
+    def test_running_generic_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Me gustaria correr una maraton algun dia")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_natacion_practice(self):
+        findings = extract_demographics([_post("Practico natacion desde que era niño")])
+        assert findings.practica_deportiva == "natacion"
+
+    def test_detects_senderismo_practice(self):
+        findings = extract_demographics([_post("Este finde hago senderismo por la sierra")])
+        assert findings.practica_deportiva == "senderismo"
+
+    def test_detects_musculacion_practice(self):
+        findings = extract_demographics([_post("Voy al gimnasio cuatro veces por semana")])
+        assert findings.practica_deportiva == "musculacion"
+
+    def test_detects_ciclismo_practice(self):
+        findings = extract_demographics([_post("Salgo en bici todos los fines de semana")])
+        assert findings.practica_deportiva == "ciclismo"
+
+    def test_ciclismo_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Vi el tour de francia por la tele")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_padel_practice(self):
+        findings = extract_demographics([_post("Juego al padel todos los martes con mi cuñado")])
+        assert findings.practica_deportiva == "padel"
+
+    def test_padel_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Me gusta ver padel en la tele los fines de semana")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_tenis_practice(self):
+        findings = extract_demographics([_post("Juego al tenis con mi hermano cada semana")])
+        assert findings.practica_deportiva == "tenis"
+
+    def test_tenis_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Vi la final de tenis ayer, que partidazo")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_baloncesto_practice(self):
+        findings = extract_demographics([_post("Juego al baloncesto en el equipo del barrio")])
+        assert findings.practica_deportiva == "baloncesto"
+
+    def test_baloncesto_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Vi el partido de baloncesto anoche")])
+        assert findings.practica_deportiva is None
+
+    def test_no_match_leaves_none(self):
+        findings = extract_demographics([_post("Hoy fui al parque con mi perro")])
+        assert findings.practica_deportiva is None
+
+    def test_first_match_wins_and_source_is_texto(self):
+        findings = extract_demographics([_post("Juego al futbol y tambien voy al gimnasio")])
+        assert findings.practica_deportiva == "futbol"
+        assert findings.source["practica_deportiva"] == "texto"
+        assert findings.evidence["practica_deportiva"] == ["https://x/1"]

@@ -10,6 +10,7 @@ from app.data.ine_reference import (
     RELIGION_DISTRIBUTION,
     SEXUAL_ORIENTATION_DISTRIBUTION,
     SITUACION_LABORAL_DISTRIBUTION,
+    SPORT_PRACTICE_DISTRIBUTION,
     TOTAL_POPULATION_ES,
     ZODIAC_DISTRIBUTION,
 )
@@ -732,3 +733,60 @@ class TestSpecialCategoryFieldsCombined:
         # sobre el anterior).
         assert final_remaining_population(steps) == steps[-1].remaining_population
         assert steps[-1].remaining_population < steps[0].remaining_population
+
+
+class TestPracticaDeportivaStep:
+    def test_produces_a_step_that_narrows_population(self):
+        findings = DemographicFindings(practica_deportiva="futbol", source={"practica_deportiva": "texto"})
+        steps = estimate_population_narrowing(findings)
+
+        assert len(steps) == 1
+        assert steps[0].category == "practica_deportiva"
+        assert steps[0].attribute_label == "Práctica deportiva: Fútbol"
+        assert steps[0].remaining_population == round(
+            TOTAL_POPULATION_ES * SPORT_PRACTICE_DISTRIBUTION["futbol"]
+        )
+        assert steps[0].note_code == "practica_deportiva_no_particion"
+
+    def test_all_categories_produce_a_step(self):
+        for value in SPORT_PRACTICE_DISTRIBUTION:
+            steps = estimate_population_narrowing(DemographicFindings(practica_deportiva=value))
+            assert len(steps) == 1
+            assert steps[0].remaining_population is not None
+
+    def test_ciclismo_padel_tenis_baloncesto_have_distinct_labels(self):
+        """Las 4 modalidades añadidas en la ampliación de la tabla (fuente
+        2022, ver ine_reference.py) también deben tener su propio label
+        legible, no caer en el fallback genérico .title()."""
+        expected = {
+            "ciclismo": "Ciclismo",
+            "padel": "Pádel",
+            "tenis": "Tenis",
+            "baloncesto": "Baloncesto",
+        }
+        for value, label in expected.items():
+            steps = estimate_population_narrowing(DemographicFindings(practica_deportiva=value))
+            assert steps[0].attribute_label == f"Práctica deportiva: {label}"
+
+    def test_none_produces_no_step(self):
+        assert estimate_population_narrowing(DemographicFindings(practica_deportiva=None)) == []
+
+    def test_counts_towards_final_remaining_population(self):
+        findings = DemographicFindings(sexo="hombre", practica_deportiva="musculacion")
+        steps = estimate_population_narrowing(findings)
+        assert final_remaining_population(steps) == steps[-1].remaining_population
+        assert steps[-1].remaining_population < steps[0].remaining_population
+
+    def test_distribution_is_deliberately_not_a_partition(self):
+        """Regresión conceptual: a diferencia de ZODIAC_DISTRIBUTION o
+        SEXUAL_ORIENTATION_DISTRIBUTION (que SÍ deben sumar 1, ver sus
+        propios tests), SPORT_PRACTICE_DISTRIBUTION es de una encuesta de
+        respuesta múltiple -- que la suma actual (~0,98 con las 9
+        modalidades cubiertas) esté cerca de 1 es COINCIDENCIA, no una
+        señal de que en realidad sea una partición: si mañana se añade
+        una décima modalidad y la suma superase 1, seguiría siendo
+        correcto (cada persona puede sumar en varias a la vez). Este test
+        documenta la intención (no debe forzarse a sumar exactamente 1),
+        no impone un valor concreto de la suma."""
+        total = sum(SPORT_PRACTICE_DISTRIBUTION.values())
+        assert total < 1.0

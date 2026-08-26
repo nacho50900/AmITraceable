@@ -68,6 +68,17 @@ _LAST_VERIFIED: dict[str, date | None] = {
     # saltaría permanentemente sin que haya nada nuevo que revisar. Se
     # comprueba con un umbral mucho más largo (ver STALE_THRESHOLDS).
     "LANGUAGE_BY_CCAA": date(2021, 1, 1),
+    # Encuesta de Hábitos Deportivos en España (Ministerio de Cultura y
+    # Deporte + Consejo Superior de Deportes, con colaboración del INE en
+    # el diseño muestral) -- periodicidad quinquenal. Edición usada: 2022
+    # (trabajo de campo may.-sep.2022, publicada dic.2022), la más
+    # reciente con desglose completo verificado por modalidad (incluye
+    # ciclismo/pádel/tenis/baloncesto, que la edición 2020 no traía en
+    # las fuentes consultadas). Hay indicios de una edición 2024/25 ya
+    # publicada (csd.gob.es la menciona actualizada a enero de 2026), pero
+    # no se ha verificado su desglose por modalidad al escribir esto --
+    # revisar csd.gob.es/es/estadisticas-deportivas al actualizar.
+    "SPORT_PRACTICE_DISTRIBUTION": date(2022, 5, 1),
 }
 
 # Umbral de antigüedad (días) a partir del cual `stale_tables()` avisa,
@@ -93,6 +104,10 @@ _STALE_THRESHOLDS: dict[str, timedelta] = {
     "MARITAL_STATUS_BY_SEX": _STALE_THRESHOLD_MULTIYEAR,
     "HOUSEHOLD_TYPE_DISTRIBUTION": _STALE_THRESHOLD_MULTIYEAR,
     "LANGUAGE_BY_CCAA": _STALE_THRESHOLD_MULTIYEAR,
+    # Quinquenal por diseño (ver comentario en _LAST_VERIFIED) -- un
+    # umbral anual saltaría constantemente sin que haya nada nuevo que
+    # revisar, igual que ECEPOV/Censo.
+    "SPORT_PRACTICE_DISTRIBUTION": _STALE_THRESHOLD_MULTIYEAR,
 }
 
 
@@ -750,6 +765,46 @@ OCCUPATION_DISTRIBUTION = {
     "administracion publica": 0.065,
     "construccion": 0.060,
     "transporte": 0.030,
+}
+
+# Práctica deportiva declarada, por modalidad. Fuente: Encuesta de Hábitos
+# Deportivos en España 2022 (Ministerio de Cultura y Deporte / Consejo
+# Superior de Deportes, con el INE colaborando en el diseño muestral) --
+# estadística oficial de periodicidad quinquenal. Resultados detallados:
+# https://www.csd.gob.es/sites/default/files/media/files/2022-12/Encuesta%20de%20H%C3%A1bitos%20Deportivos%20en%20Espa%C3%B1a%202022%20Resultados%20detallados.pdf
+# -- cifras por modalidad verificadas cruzando dos fuentes secundarias
+# independientes que citan directamente esa publicación oficial
+# (esciclismo.com/actualidad/-/73789.html y valgo.es), ambas coincidiendo
+# en los mismos porcentajes.
+#
+# IMPORTANTE -- esta tabla NO es una partición (a diferencia de
+# OCCUPATION_DISTRIBUTION o STUDIES_DISTRIBUTION, donde cada persona
+# tiene un único valor): la encuesta es de respuesta múltiple, una misma
+# persona puede practicar varias modalidades a la vez (la propia
+# publicación documenta correlaciones entre modalidades, p. ej. quien
+# hace ciclismo también hace senderismo con más frecuencia que la
+# población general), así que los porcentajes de abajo son proporciones
+# MARGINALES ("de toda la población, qué fracción practica ESTA
+# modalidad en concreto"), no probabilidades mutuamente excluyentes -- no
+# tiene sentido comprobar que sumen 1, y no deberían forzarse a sumarlo.
+#
+# Cálculo: (% de quienes practicaron ALGÚN deporte en el último año que
+# practican esta modalidad) × 0.573 (% de la población de 15+ años que
+# practicó algún deporte en el último año, cifra 2022). Se eligió la
+# edición 2022 en vez de la 2020 usada en un primer borrador de esta
+# tabla porque 2022 sí tiene cifras verificadas de TODAS estas
+# modalidades desde una única edición consistente (misma base
+# poblacional para las 9), evitando mezclar años distintos.
+SPORT_PRACTICE_DISTRIBUTION = {
+    "senderismo": round(0.308 * 0.573, 3),   # "senderismo y montañismo"
+    "ciclismo": round(0.284 * 0.573, 3),
+    "natacion": round(0.272 * 0.573, 3),
+    "running": round(0.190 * 0.573, 3),      # "carrera a pie"
+    "musculacion": round(0.170 * 0.573, 3),  # "musculación y halterofilia"
+    "padel": round(0.158 * 0.573, 3),
+    "futbol": round(0.145 * 0.573, 3),       # "fútbol 11 y 7"
+    "baloncesto": round(0.097 * 0.573, 3),
+    "tenis": round(0.080 * 0.573, 3),
 }
 
 # Reparto por nacionalidad (española vs. extranjera), INE -- Censo Anual de

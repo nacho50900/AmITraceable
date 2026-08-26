@@ -49,6 +49,7 @@ from app.data.ine_reference import (
     SEX_DISTRIBUTION,
     SEXUAL_ORIENTATION_DISTRIBUTION,
     SITUACION_LABORAL_DISTRIBUTION,
+    SPORT_PRACTICE_DISTRIBUTION,
     STUDIES_DISTRIBUTION,
     TOTAL_POPULATION_ES,
     ZODIAC_DISTRIBUTION,
@@ -129,6 +130,11 @@ _CHAINED_CATEGORIES = {
     # datos sensibles (spoiler: la herramienta existe para mostrarle a la
     # persona su propia exposición, no para perfilar a terceros).
     "orientacion_sexual", "religion", "signo_zodiacal",
+    # NO es partición (ver docstring de _step_practica_deportiva y el
+    # comentario de SPORT_PRACTICE_DISTRIBUTION en ine_reference.py), pero
+    # eso no impide que narrowee -- una proporción marginal sigue siendo
+    # una proporción de población válida para multiplicar en la cadena.
+    "practica_deportiva",
 }
 
 
@@ -471,6 +477,48 @@ def _step_ocupacion(findings: DemographicFindings, remaining: float) -> tuple[fl
     )
 
 
+_SPORT_LABELS = {
+    "musculacion": "Musculación / gimnasio",
+    "senderismo": "Senderismo / montañismo",
+    "running": "Running / atletismo",
+    "natacion": "Natación",
+    "futbol": "Fútbol",
+    "ciclismo": "Ciclismo",
+    "padel": "Pádel",
+    "tenis": "Tenis",
+    "baloncesto": "Baloncesto",
+}
+
+
+def _step_practica_deportiva(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
+    """A diferencia del resto de pasos, SPORT_PRACTICE_DISTRIBUTION (ver
+    ine_reference.py) NO es una partición -- son proporciones MARGINALES
+    de una encuesta de respuesta múltiple, no probabilidades mutuamente
+    excluyentes (una persona puede practicar varios deportes a la vez).
+    `_apply_proportion` no exige que la tabla sume 1 (nunca lo ha exigido,
+    ver OCCUPATION_DISTRIBUTION, que tampoco suma 1 -- ahí es porque solo
+    cubre un subconjunto de ocupaciones, aquí es porque el propio dato de
+    origen no es una partición), así que no hace falta ningún ajuste
+    especial aquí: el cálculo es idéntico al resto de pasos."""
+    if not findings.practica_deportiva:
+        return remaining, None
+    label = _SPORT_LABELS.get(findings.practica_deportiva, findings.practica_deportiva.title())
+    return _apply_proportion(
+        remaining,
+        SPORT_PRACTICE_DISTRIBUTION.get(findings.practica_deportiva),
+        f"Práctica deportiva: {label}",
+        "practica_deportiva",
+        findings.evidence.get("practica_deportiva", []),
+        source=findings.source.get("practica_deportiva", "texto"),
+        note="Proporción marginal de la Encuesta de Hábitos Deportivos en España (no es "
+             "una partición: la encuesta es de respuesta múltiple, una persona puede "
+             "practicar varios deportes a la vez, así que este dato por sí solo no implica "
+             "que sea el ÚNICO deporte que practica).",
+        note_code=note_codes.PRACTICA_DEPORTIVA_NO_PARTICION,
+        value_raw=findings.practica_deportiva,
+    )
+
+
 _NATIONALITY_LABELS = {
     "espanola": "Nacionalidad: española",
     "extranjera": "Nacionalidad: extranjera",
@@ -771,6 +819,11 @@ _CHAINED_STEPS = (
     # módulo): es solo para que el orden de aparición en el informe siga
     # yendo de más a menos fiable.
     _step_orientacion_sexual, _step_religion, _step_signo_zodiacal,
+    # Autodeclaración explícita igual de sólida que las anteriores (misma
+    # exigencia de verbo de PRÁCTICA, no simple mención -- ver
+    # demographic_extraction.py::_SPORT_PRACTICE_RE); va aquí por el mismo
+    # motivo que el bloque de arriba, no porque dependa de nada previo.
+    _step_practica_deportiva,
     # Al final: es la señal menos fiable de la cadena (inferencia simbólica
     # por IA, no autodeclaración -- ver docstring de
     # DemographicFindings.estado_civil), así que refina lo que ya se haya

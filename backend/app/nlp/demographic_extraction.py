@@ -24,6 +24,7 @@ from app.data.ine_reference import (
     MUNICIPALITY_POPULATION,
     OCCUPATION_DISTRIBUTION,
     PROVINCE_POPULATION,
+    SPORT_PRACTICE_DISTRIBUTION,
     STUDIES_DISTRIBUTION,
     resolve_autonomous_community_in_text,
 )
@@ -101,6 +102,21 @@ class DemographicFindings:
     ocupacion: str | None = None
     universidad: str | None = None
     empresa: str | None = None
+    # Práctica deportiva autodeclarada (p. ej. "musculacion", "running",
+    # ver claves de SPORT_PRACTICE_DISTRIBUTION en ine_reference.py). A
+    # diferencia de la `aficion` que ya existe (per-foto, texto libre, la
+    # detecta Moondream2 en imágenes, nunca narrowea población -- ver
+    # `VisualDescriptionCodes`), este es un campo NUEVO, a nivel de cuenta,
+    # detectado en TEXTO (regex aquí + IA en ai_attribute_extraction.py),
+    # deliberadamente independiente y sin tocar el mecanismo de `aficion`
+    # existente: son cosas distintas (una foto puede sugerir una afición
+    # puntual sin que la cuenta entera declare practicar deporte de forma
+    # regular, y viceversa). Requiere una autodeclaración de PRÁCTICA
+    # (verbos como "juego al...", "hago...", "voy a...") -- una simple
+    # mención del deporte (p. ej. "vi el partido de fútbol") NO cuenta,
+    # para evitar falsos positivos con comentarios de espectador, mucho
+    # más frecuentes que autodeclaraciones reales de práctica.
+    practica_deportiva: str | None = None
     # Nacionalidad autodeclarada: "espanola" | "extranjera" | None. A
     # diferencia de origen étnico/racial (ver ADR-17), la nacionalidad
     # LEGAL no es dato de categoría especial del art. 9 RGPD -- ver
@@ -349,6 +365,7 @@ def extract_demographics(posts: list[SocialPost]) -> DemographicFindings:
         _try_detect_location(text, post.permalink, findings)
         _try_detect_estudios(text, post.permalink, findings)
         _try_detect_ocupacion(text, post.permalink, findings)
+        _try_detect_practica_deportiva(text, post.permalink, findings)
         _try_detect_universidad(text, post.permalink, findings)
         _try_detect_empresa(text, post.permalink, findings)
         _try_detect_nacionalidad(text, post.permalink, findings)
@@ -372,6 +389,7 @@ def _mark_all_detected_as_texto(findings: DemographicFindings) -> None:
         "estudios", "ocupacion", "universidad", "empresa",
         "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
         "orientacion_sexual", "signo_zodiacal", "religion",
+        "practica_deportiva",
     ):
         if getattr(findings, attr_name) is not None:
             findings.source[attr_name] = "texto"
@@ -429,6 +447,55 @@ def _try_detect_ocupacion(text: str, permalink: str, findings: DemographicFindin
     if matched:
         findings.ocupacion = matched
         findings.evidence.setdefault("ocupacion", []).append(permalink)
+
+
+# Práctica deportiva: a diferencia de OCCUPATION_DISTRIBUTION (donde basta
+# con que la palabra aparezca en el texto, ver _try_detect_ocupacion de
+# arriba), aquí NO basta con que se mencione el deporte -- "vi el partido
+# de futbol" es una mención de espectador, mucho más frecuente en redes
+# sociales que una autodeclaración real de práctica, y un simple
+# substring match la marcaría como falso positivo. Por eso cada modalidad
+# tiene sus propias frases-ancla de PRÁCTICA (verbos como "juego al...",
+# "hago...", "salgo a...", "voy a...") en vez de comparar contra las
+# claves de SPORT_PRACTICE_DISTRIBUTION por subcadena. Un grupo con
+# nombre por modalidad (en vez de una tabla de mapeo aparte) para que
+# `match.lastgroup` sea directamente la clave de la modalidad detectada.
+_SPORT_PRACTICE_RE = re.compile(
+    r"\b(?:"
+    r"(?P<futbol>juego (?:al |a )?futbol\b|soy futbolista\b|practico futbol\b|entreno (?:al |a )?futbol\b)|"
+    r"(?P<running>hago running\b|soy runner\b|salgo a correr\b|"
+    r"corro (?:todas las semanas|cada semana|a diario|con regularidad)\b|"
+    r"practico running\b|practico atletismo\b)|"
+    r"(?P<natacion>hago natacion\b|voy a nadar\b|nado en la piscina\b|"
+    r"practico natacion\b|soy nadador\b|soy nadadora\b)|"
+    r"(?P<senderismo>hago senderismo\b|voy de senderismo\b|practico montanismo\b|"
+    r"practico senderismo\b|salgo a hacer rutas\b|hago rutas de montana\b)|"
+    r"(?P<musculacion>voy al gimnasio\b|hago musculacion\b|levanto pesas\b|"
+    r"hago pesas\b|entreno en el gimnasio\b|hago crossfit\b)|"
+    r"(?P<ciclismo>hago ciclismo\b|salgo en bici\b|salgo con la bici\b|"
+    r"monto en bici (?:todas las semanas|cada semana|con regularidad)\b|"
+    r"practico ciclismo\b|soy ciclista\b)|"
+    r"(?P<padel>juego (?:al |a )?padel\b|practico padel\b)|"
+    r"(?P<tenis>juego (?:al |a )?tenis\b|practico tenis\b)|"
+    r"(?P<baloncesto>juego (?:al |a )?baloncesto\b|practico baloncesto\b|"
+    r"soy jugador de baloncesto\b|soy jugadora de baloncesto\b)"
+    r")",
+    re.I,
+)
+
+
+def _try_detect_practica_deportiva(text: str, permalink: str, findings: DemographicFindings) -> None:
+    if findings.practica_deportiva is not None:
+        return
+
+    lowered = _strip_accents(text.lower())
+    match = _SPORT_PRACTICE_RE.search(lowered)
+    if not match:
+        return
+
+    findings.practica_deportiva = match.lastgroup
+    findings.evidence.setdefault("practica_deportiva", []).append(permalink)
+
 
 
 def _try_detect_universidad(text: str, permalink: str, findings: DemographicFindings) -> None:
