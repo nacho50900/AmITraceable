@@ -1280,63 +1280,6 @@ respecto a una edad exacta, pero mucho menos que un año concreto --
 efecto esperado y deseado, no un error: es justo la contrapartida de
 tener menos certeza sobre el dato de partida.
 
-*Actualización (agosto 2026)*: el riesgo que este ADR ya anticipaba
-como "trabajo futuro" en la consecuencia negativa de arriba se
-confirmó en producción -- el umbral de 0.5 dejaba pasar estimaciones
-claramente erróneas con confianza "moderada" (caso real: 30 años
-estimados para una persona de 21). El umbral (`_AGE_RANGE_MIN_CONFIDENCE`)
-sube de 0.5 a 0.7, por encima del techo de 0.6 que el propio prompt ya
-le pedía al modelo para pistas no del todo claras (ver el texto exacto
-del prompt en `_SYSTEM_PROMPT`, sección `'edad_estimada'`) -- con esto,
-solo las estimaciones que el propio modelo trata como prácticamente
-tan sólidas como una autodeclaración explícita llegan a mostrarse. El
-prompt también se reforzó para insistir explícitamente en que "un
-tramo de edad equivocado es peor que no mostrar nada". Sigue siendo una
-elección heurística, no calibrada con datos etiquetados a mano; si
-recurre el problema con el nuevo umbral, el siguiente paso sería
-registrar la confianza real devuelta por el modelo en los casos
-erróneos para calibrar con datos en vez de conjeturas.
-
-*Segunda actualización (agosto 2026, mismo día)*: subir solo el umbral
-tiene un límite estructural -- obliga a elegir entre descartar la
-estimación del todo o aceptar un único valor puntual que el modelo no
-siempre puede justificar con precisión, por alto que sea el umbral de
-confianza exigido. Comandante propuso la solución de fondo: en vez de
-pedir una edad puntual y decidir con un umbral binario si se acepta o
-se descarta, pedirle directamente al modelo un RANGO de ancho LIBRE, y
-dejar que sea el propio ancho del rango -- no el umbral de confianza --
-quien absorba la incertidumbre de la pista. Cambios:
-
-- `DemographicFindings.edad_rango` (string, tramo quinquenal fijo del
-  INE tipo "25-29") se sustituye por `edad_rango_min`/`edad_rango_max`
-  (dos enteros, ancho arbitrario).
-- El prompt pide `{"edad_min", "edad_max", "confianza"}` en vez de
-  `{"edad_aproximada", "confianza"}`, instruyendo explícitamente:
-  *"si la pista es débil, ENSANCHA el rango, no arriesgues con un valor
-  puntual"* -- no hay ninguna penalización por dar un rango amplio
-  (p. ej. 20 años de ancho).
-- Nueva función `ine_reference.age_range_proportion(min_age, max_age)`,
-  que suma `AGE_DISTRIBUTION_1Y` año a año sobre el rango exacto dado,
-  en vez de encajarlo por la fuerza en uno de los tramos quinquenales
-  fijos de `AGE_DISTRIBUTION_5Y` (`age_bin()` deja de usarse para esto).
-- El umbral de confianza (0.7) se mantiene, pero pasa a ser una red de
-  seguridad adicional, no el mecanismo principal para absorber la
-  incertidumbre -- esa responsabilidad recae ahora en el ancho del
-  rango, una escala continua, en vez de en una decisión binaria de
-  aceptar/descartar.
-
-*Por qué es matemáticamente seguro dejar el ancho libre*: un rango más
-amplio nunca puede producir una falsa precisión, solo aporta menos
-información -- `age_range_proportion` devuelve una proporción de
-población estrictamente mayor (narrowea menos) cuanto más ancho es el
-rango dado, así que el mecanismo es autolimitante frente a un rango
-inútilmente amplio (p. ej. 12-100 años) sin necesidad de una regla
-aparte que lo prohíba. Verificado con casos reales: un rango de 1 año
-(21-21) deja ~442.000 personas; uno de 7 años (18-24) deja ~3,1M; uno
-de 21 años (15-35) deja ~10,7M; el caso degenerado (12-100) deja
-~44,3M -- prácticamente toda la población adulta, es decir, información
-casi nula, pero nunca un dato erróneo con apariencia de precisión.
-
 === ADR-28: Offload de DINOv2 a una iGPU vía un proceso worker aislado (no en el propio backend)
 
 *Contexto*: ADR-25 fija la concurrencia de fotos a 1 cuando hay CUDA
@@ -1747,3 +1690,162 @@ tercer idioma exige convertir dos modelos más por cada nuevo idioma
 (ida y vuelta con cada uno de los ya existentes) y tocar la lógica de
 `translate_texts_local()` que hoy infiere el origen a partir de que
 solo hay dos idiomas posibles (ver su docstring).
+
+=== ADR-32: Bucle de repetición sin fin con beam_size=1 en la traducción local (corrige parte de ADR-31)
+
+*Contexto*: la primera versión de `translate_texts_local()` (ADR-31)
+usaba `beam_size=1` (decodificación voraz, sin búsqueda en haz) a
+propósito, con el razonamiento de que estas son frases cortas y
+descriptivas donde la calidad extra de la búsqueda en haz no se
+notaría, priorizando velocidad en CPU. Probado contra el modelo real
+(no los fakes de los tests, que no pueden reproducir este
+comportamiento), ese razonamiento resultó estar equivocado de una
+forma importante: para el par de fotos/frase de prueba
+`"a person playing guitar"`, la traducción no dio un resultado peor,
+dio un **bucle de repetición sin fin** -- cientos de repeticiones de
+"persona" y "que juega a la" hasta el tope de longitud por defecto
+(256 tokens), sin lanzar ninguna excepción. No era una pérdida de
+calidad marginal, era un fallo de corrección real, silencioso, que la
+degradación best-effort del módulo (pensada para fallos con
+excepción, no para "traducciones" sintácticamente válidas pero sin
+sentido) no llegaba a detectar.
+
+*Decisión*: `translate_batch()` se llama ahora con tres salvaguardas a
+la vez, no solo subiendo el tamaño del haz:
+
+- `beam_size=2` -- el valor por defecto de la propia librería
+CTranslate2 (no un valor elegido a mano), sigue siendo barato en CPU
+para un modelo de este tamaño.
+- `repetition_penalty=1.3` y `no_repeat_ngram_size=3` -- penalizan y
+bloquean la repetición directamente, como red de seguridad adicional
+por si el haz igual se engancha (la búsqueda en haz reduce mucho este
+problema pero no lo elimina del todo por sí sola).
+- `max_decoding_length` acotado en proporción al texto de entrada (el
+triple de su longitud tokenizada, con un suelo de 30) en vez de dejar
+el máximo por defecto de la librería (256) -- limita el desastre
+aunque las dos salvaguardas anteriores fallasen.
+
+Como cuarta red de seguridad, ya en el post-procesado de
+`translate_texts_local()`: si una traducción sale más de 4 veces más
+larga que el texto original (más un margen fijo de 20 caracteres para
+frases muy cortas), se descarta y se conserva el texto ORIGINAL sin
+traducir para esa posición -- mismo criterio defensivo que ya existía
+para traducciones vacías (ver ADR-31), extendido a "sospechosamente
+larga". Para las frases cortas que traduce este módulo (una afición,
+un caption de una foto), una traducción 4x más larga que la entrada es
+casi con certeza basura, no una traducción más detallada de verdad.
+
+Se añadió un test de regresión
+(`test_absurdly_long_repetitive_output_falls_back_to_original`) que
+reproduce el bucle exacto visto en producción con un traductor falso
+que siempre devuelve texto repetido, y se confirmó manualmente
+revirtiendo la salvaguarda de longitud mientras se mantenía el test:
+sin ella, el test FALLA reproduciendo la misma basura ("persona
+persona persona...") que se vio en el log real; con ella, pasa. Se
+añadió también un segundo test
+(`test_calls_translate_batch_with_safeguards_against_repetition_loops`)
+que comprueba que las tres salvaguardas de `translate_batch()` se
+piden siempre, no solo que produzcan un resultado concreto (verificar
+el resultado exacto de una traducción real necesitaría el modelo
+real, que no está disponible en el entorno de tests).
+
+*Consecuencias*: (+) el fallo queda cubierto por un test que lo
+reproduce de verdad, no solo por la corrección puntual -- una
+regresión futura (p. ej., alguien simplifica `translate_batch()` sin
+darse cuenta de por qué tiene esos parámetros) se detectaría de
+inmediato; (+) cuatro capas de defensa en vez de una, cada una
+independiente -- razonable dado que un fallo silencioso (sin
+excepción) es peor que uno ruidoso para un módulo pensado para
+degradar solo ante errores; (-) el coste en CPU sube ligeramente
+respecto a `beam_size=1` (búsqueda en haz de tamaño 2 en vez de
+decodificación voraz), aceptado sin más medición formal porque sigue
+siendo un modelo pequeño y la alternativa (voraz) demostró ser
+directamente incorrecta, no solo más lenta de calidad equivalente;
+(-) el umbral "4x la longitud original" de la salvaguarda de longitud
+es una elección heurística, no calibrada contra un corpus de
+traducciones reales -- si en el futuro aparecen frases donde una
+traducción correcta es legítimamente mucho más larga que el original
+(p. ej. un modismo que requiere una perífrasis larga), esa traducción
+válida se descartaría igual que la basura; no se ha observado ese
+caso en la práctica todavía.
+
+=== ADR-33: Progreso por foto emitido dentro de cada etapa, no en el bucle de acumulación de resultados
+
+*Contexto*: dos bugs reales observados en la pantalla de carga, ambos
+con la misma causa de fondo. `estimate_locations_for_posts()` lanza
+todas las tareas de foto de golpe (`asyncio.create_task`, una por
+foto) pero las CONSUME -- y hasta este ADR, también emitía el
+progreso -- en un bucle que recorre `photo_units` en su ORDEN
+ORIGINAL, esperando cada `photo_tasks[i-1]` uno detrás de otro:
+
+1. *Las dos pistas de progreso ("Geolocalizando fotos..." y
+"Analizando fotos...") subían siempre juntas*, aunque por dentro las
+dos etapas (DINOv2 y Moondream2) ya corrieran genuinamente
+desacopladas desde ADR-29 (semáforos independientes, pipeline real
+entre fotos). El motivo: ambas líneas de `emit_progress()` vivían
+juntas en el mismo punto del bucle exterior, así que se disparaban
+siempre a la vez para la foto `i`, sin importar que DINOv2 llevara
+rato libre mientras Moondream2 seguía trabajando en esa misma foto.
+2. *El progreso avanzaba a trompicones* (a veces de 1 en 1, a veces de
+4 en 4) en vez de una vez por foto terminada. Motivo: si la foto `i-1`
+tardaba más que las siguientes, `await photo_tasks[i-1]` bloqueaba el
+bucle aunque las tareas `i`, `i+1`, `i+2`... ya hubieran terminado de
+verdad -- en cuanto `i-1` por fin se resolvía, el bucle disparaba de
+golpe el progreso acumulado de todas las que ya estaban listas y
+esperando su turno.
+
+*Decisión*: la emisión de progreso se mueve DE DENTRO del bucle
+exterior A DENTRO de `_process_photo()`, concretamente a los cierres
+`_run_dinov2()`/`_run_scene()` -- cada uno emite su propio evento de
+progreso justo cuando SU etapa termina para SU foto, con un contador
+independiente por pista (`progress_state = {"dinov2": 0, "scene": 0}`,
+compartido por todas las tareas de foto de ese análisis, incrementado
+sin bloqueo explícito: entre leer y escribir el contador no hay ningún
+`await` de por medio, así que el modelo cooperativo de asyncio de un
+solo hilo garantiza que ninguna otra tarea puede intercalarse a
+mitad). El bucle exterior conserva su recorrido en orden original --
+sigue haciendo falta para que `results`/`visual_inferences` salgan
+deterministas -- pero ya no le corresponde emitir progreso, solo
+delegar el volcado a `_collect_photo_result()`.
+
+Caso especial: si la descarga de una foto falla, ninguna de las dos
+etapas llega a ejecutarse -- sin este ajuste, esa foto nunca
+incrementaría ningún contador y la barra se quedaría clavada por
+debajo del 100% en cuanto fallase una sola descarga (el total ya la
+cuenta). Se resuelve incrementando y emitiendo ambas pistas de golpe
+en el propio camino de fallo de la descarga, ya que ahí no hay trabajo
+real que justifique separarlo en el tiempo.
+
+*Verificación*: test dedicado
+(`test_progress_tracks_advance_independently_not_in_lockstep`) con el
+mismo montaje que el test de pipelining de ADR-29 (DINOv2 rápido,
+Moondream2 mucho más lento, concurrencia 1) pero mirando los EVENTOS
+DE PROGRESO en vez de los tiempos internos: comprueba que la pista
+rápida (geolocalización) termina del todo antes de que la lenta
+(análisis de contenido) emita siquiera su primer evento. Confirmado
+revirtiendo temporalmente el cambio de producción mientras se
+mantenía el test: falla contra el diseño antiguo con las marcas de
+tiempo reales invertidas (la pista lenta emitía su primer evento antes
+de que la rápida terminase), y pasa contra el nuevo. El test que
+comprobaba el orden de progreso con el diseño antiguo
+(`test_returns_every_processed_photo_unfiltered_by_confidence`) se
+actualizó para comprobar la propiedad que de verdad importa --cada
+pista avanza de forma monótona 1, 2, ..., total, sin asumir ningún
+orden de intercalado concreto entre las dos-- en vez de una secuencia
+exacta de eventos que ya no tiene sentido garantizar (y que sería
+justo el bug si se volviera a cumplir).
+
+*Consecuencias*: (+) las dos pistas de la pantalla de carga ahora
+reflejan de verdad lo que pasa por dentro desde ADR-29, en vez de
+ocultarlo tras una cadencia de reporte artificial; (+) el progreso
+avanza uno por foto terminada, sin trompicones, independientemente de
+qué foto en concreto esté tardando más en un momento dado; (+) cambio
+contenido a `_process_photo()` y al bucle exterior, sin tocar
+`_collect_photo_result()` ni la construcción de `results`/
+`visual_inferences`, que siguen siendo deterministas en orden
+original; (-) el orden relativo en que se intercalan los eventos de
+las DOS pistas entre sí ya no es predecible ni se prueba como tal --a
+propósito, ver el test actualizado-- lo cual es correcto (refleja la
+concurrencia real) pero significa que cualquier futuro consumidor del
+stream de progreso no puede asumir nada sobre ese orden, solo sobre la
+monotonía dentro de cada pista por separado.

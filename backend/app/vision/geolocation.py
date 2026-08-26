@@ -41,7 +41,8 @@ import httpx
 from app.config import settings
 from app.models.schemas import InferredAttribute
 from app.log.performance_log import PhotoAnalysisTiming, log_photo_analysis_run
-from app.vision.scene_analysis import analyze_image_content, get_device as get_moondream_device
+from app.progress import emit_progress
+from app.vision.scene_analysis import VisualDescriptionCodes, analyze_image_content
 
 import numpy as np
 
@@ -327,6 +328,15 @@ class GeolocationOutcome:
     # ético/legal del resto del módulo (nunca menciona raza/etnia/aspecto
     # físico, ver prompt en scene_analysis.py).
     general_descriptions: dict[str, str] = field(default_factory=dict)
+    # Mismas señales que `visual_descriptions`, pero SIN formatear a texto
+    # en español -- ver VisualDescriptionCodes en scene_analysis.py y
+    # ADR-30. Pensado para que el frontend traduzca `personas` (código
+    # cerrado) sin llamar al backend, y solo pida traducción real de
+    # `aficion` cuando la UI esté en un idioma distinto del español.
+    # `visual_descriptions` (arriba) se mantiene intacto y sin tocar --
+    # sigue siendo lo que ve Mistral en ai_analysis.py y lo que se
+    # muestra en la vista de detalle en español.
+    visual_description_codes: dict[str, VisualDescriptionCodes] = field(default_factory=dict)
 
 
 def _select_dinov2_device() -> str:
@@ -339,20 +349,6 @@ def _select_dinov2_device() -> str:
     import torch
 
     return "cuda" if torch.cuda.is_available() else "cpu"
-
-
-def get_local_device() -> str | None:
-    """Dispositivo LOCAL ("cuda" o "cpu") donde correría DINOv2 en este
-    proceso si NO se despachara al worker de iGPU -- `None` si
-    `_lazy_load()` no se ha llamado todavía. IMPORTANTE: esto NO indica
-    dónde corrió DINOv2 para una foto en concreto -- para eso hace falta
-    combinarlo con `igpu_offload_used` (ver `log_photo_analysis_run()` en
-    app/log/performance_log.py): si es True, la foto fue al worker de
-    iGPU (DirectML) y `get_local_device()` no aplica; si es False, corrió
-    en el valor que devuelve esta función -- que en la práctica, con la
-    GPU dedicada disponible, es "cuda" COMPARTIDA con Moondream2 (ver
-    `_select_igpu_worker_device_index()`), no CPU."""
-    return _device
 
 
 def _select_igpu_worker_device_index(cuda_available: bool) -> int | None:
@@ -665,7 +661,7 @@ async def _maybe_analyze_content(image):
        pipeline -- incluida la geolocalización de esa misma foto -- sigue
        sin más demora."""
     if not settings.enable_scene_analysis:
-        return [], False, None, None
+        return [], False, None, None, None
     timeout_seconds = settings.scene_analysis_timeout_seconds
     try:
         return await asyncio.wait_for(
@@ -680,13 +676,25 @@ async def _maybe_analyze_content(image):
             "SCENE_ANALYSIS_TIMEOUT_SECONDS).",
             timeout_seconds,
         )
-        return [], False, None, None
+        return [], False, None, None, None
 
 
-async def _process_photo(client, download_semaphore, dinov2_semaphore, scene_semaphore, media_url, timing):
+async def _process_photo(
+    client,
+    download_semaphore,
+    dinov2_semaphore,
+    scene_semaphore,
+    media_url,
+    timing,
+    progress_callback,
+    progress_state,
+    total,
+):
     """Descarga UNA foto y, si se pudo, la analiza con los dos modelos.
     Devuelve (image_or_None, estimate_or_None, scene_inferences,
-    indicio_pareja, description_or_None, description_general_or_None).
+    indicio_pareja, description_or_None, description_general_or_None,
+    description_codes_or_None -- ver VisualDescriptionCodes en
+    app/vision/scene_analysis.py, ADR-30).
     Pensada para lanzarse como tarea independiente por foto (ver
     `estimate_locations_for_posts`): así varias fotos pueden estar en
     distintas etapas (descargando / en cola para analizar / analizando) a
@@ -715,32 +723,93 @@ async def _process_photo(client, download_semaphore, dinov2_semaphore, scene_sem
     abajo sigue esperando a que las DOS terminen para ESTA foto en
     concreto antes de devolver su resultado (necesario: el resultado
     combinado de la foto se vuelca junto, ver `_collect_photo_result`),
-    pero eso ya no bloquea a las fotos siguientes."""
+    pero eso ya no bloquea a las fotos siguientes.
+
+    `progress_state`/`total`: el progreso (ver app/progress.py) se emite
+    aquí dentro, INDIVIDUALMENTE por etapa, en el momento exacto en que
+    esa etapa termina para ESTA foto -- no en el bucle exterior de
+    `estimate_locations_for_posts`, que solo consume los resultados en
+    orden original y por tanto (antes de este cambio) ataba el progreso
+    a esa misma cadencia artificial. Ver el docstring de
+    `estimate_locations_for_posts` para el porqué completo (dos bugs
+    reales de la pantalla de carga, ADR-33)."""
     image = await _download_image(client, download_semaphore, media_url)
     if image is None:
-        return None, None, [], False, None, None
+        # Sin foto que analizar, ninguna de las dos etapas llega a
+        # ejecutarse -- pero el progreso tiene que avanzar igual en las
+        # DOS pistas, o si alguna descarga falla la barra se quedaría
+        # clavada por debajo del 100% para siempre (esa foto nunca
+        # incrementaría ningún contador). Se cuenta como "terminada" en
+        # ambas de golpe, ya que no hay trabajo real de por medio que
+        # justifique separarlo en el tiempo.
+        progress_state["dinov2"] += 1
+        progress_state["scene"] += 1
+        await emit_progress(
+            progress_callback,
+            "Geolocalizando fotos...",
+            photos_analyzed=progress_state["dinov2"],
+            total_photos=total,
+            track="geolocalizacion",
+        )
+        await emit_progress(
+            progress_callback,
+            "Analizando fotos...",
+            photos_analyzed=progress_state["scene"],
+            total_photos=total,
+            track="fotos",
+        )
+        return None, None, [], False, None, None, None
 
     async def _run_dinov2():
         async with dinov2_semaphore:
             dinov2_start = time.monotonic()
             result = await asyncio.to_thread(estimate_location_from_image, image)
             timing.record_dinov2(time.monotonic() - dinov2_start)
-            return result
+        # Fuera del `async with` a propósito: el progreso no forma parte
+        # del trabajo que ocupa el semáforo, no hay motivo para retrasar
+        # la liberación del hueco por esto. Incremento de
+        # `progress_state["dinov2"]` seguro sin bloqueo explícito: entre
+        # leer y escribir el contador no hay ningún `await` de por medio,
+        # así que ninguna otra tarea puede intercalarse a mitad (modelo
+        # cooperativo de asyncio, un único hilo).
+        progress_state["dinov2"] += 1
+        await emit_progress(
+            progress_callback,
+            "Geolocalizando fotos...",
+            photos_analyzed=progress_state["dinov2"],
+            total_photos=total,
+            track="geolocalizacion",
+        )
+        return result
 
     async def _run_scene():
         async with scene_semaphore:
             scene_start = time.monotonic()
             result = await _maybe_analyze_content(image)
             timing.record_scene(time.monotonic() - scene_start)
-            return result
+        progress_state["scene"] += 1
+        await emit_progress(
+            progress_callback,
+            "Analizando fotos...",
+            photos_analyzed=progress_state["scene"],
+            total_photos=total,
+            # Desde que este análisis corre en PARALELO con el resto del
+            # pipeline (ver analysis_router._build_report), sus eventos
+            # pueden intercalarse con los de fingerprint/atributos/IA en
+            # el mismo stream SSE. `track` le permite al frontend
+            # mostrarlo como su propia línea independiente en vez de
+            # mezclarlo con la fase "actual" del resto del análisis.
+            track="fotos",
+        )
+        return result
 
     start = time.monotonic()
-    estimate, (scene_inferences, indicio_pareja, description, description_general) = await asyncio.gather(
-        _run_dinov2(), _run_scene()
+    estimate, (scene_inferences, indicio_pareja, description, description_general, description_codes) = (
+        await asyncio.gather(_run_dinov2(), _run_scene())
     )
     timing.record(time.monotonic() - start)
     # `image` sale de scope tras este bloque y se descarta (nunca se escribe a disco)
-    return image, estimate, scene_inferences, indicio_pareja, description, description_general
+    return image, estimate, scene_inferences, indicio_pareja, description, description_general, description_codes
 
 
 def _collect_photo_result(
@@ -752,23 +821,26 @@ def _collect_photo_result(
     partner_signal_permalinks: set,
     visual_descriptions: dict,
     general_descriptions: dict,
+    visual_description_codes: dict,
 ) -> None:
     """Vuelca el resultado de UNA foto (ya resuelto, ver `_process_photo`)
     en las listas/diccionarios compartidos de `estimate_locations_for_posts`.
     Extraído a su propia función para que el bucle principal se limite a
-    orquestar -- consumir la tarea, delegar el volcado, emitir progreso --
-    en vez de acumular aquí varias ramas `if` seguidas.
+    orquestar -- consumir la tarea y delegar el volcado -- en vez de acumular aquí varias ramas `if` seguidas.
 
     Dos claves distintas a propósito, cada una a su nivel: `permalink` es
     el de la PUBLICACIÓN (varias fotos de un carrusel comparten el mismo)
     -- se usa para `partner_signal_permalinks`, señal a nivel de
     publicación, no de foto concreta. `photo_link` (ver `_photo_link`) es
     ÚNICO por foto -- se usa como clave de `visual_descriptions`/
-    `general_descriptions` (arregla el bug real de que, antes, varias
-    fotos del mismo carrusel se sobrescribían entre sí al compartir la
-    misma clave) y se guarda en `estimate.photo_link` para que
-    `report/generator.py` pueda enlazar a la foto exacta."""
-    _image, estimate, scene_inferences, indicio_pareja, description, description_general = photo_result
+    `general_descriptions`/`visual_description_codes` (arregla el bug
+    real de que, antes, varias fotos del mismo carrusel se sobrescribían
+    entre sí al compartir la misma clave) y se guarda en
+    `estimate.photo_link` para que `report/generator.py` pueda enlazar a
+    la foto exacta."""
+    _image, estimate, scene_inferences, indicio_pareja, description, description_general, description_codes = (
+        photo_result
+    )
 
     if estimate is not None:
         estimate.photo_link = photo_link
@@ -782,6 +854,8 @@ def _collect_photo_result(
         visual_descriptions[photo_link] = description
     if description_general:
         general_descriptions[photo_link] = description_general
+    if description_codes is not None:
+        visual_description_codes[photo_link] = description_codes
 
 
 async def estimate_locations_for_posts(
@@ -823,14 +897,21 @@ async def estimate_locations_for_posts(
     analizaron fotos pero ninguna dio una estimación" -- son mensajes
     distintos de cara al usuario.
 
-    `progress_callback`, si se da, se llama tras CADA foto procesada
-    (llegue o no a producir una estimación válida), con el nº de fotos
-    procesadas hasta ahora y el total a procesar -- para que el endpoint
-    de streaming pueda mostrar "analizando foto X de Y" en tiempo real.
+    `progress_callback`, si se da, se llama dos veces por foto -- una
+    por CADA etapa (geolocalización con DINOv2, análisis de contenido
+    con Moondream2), justo cuando esa etapa concreta termina para esa
+    foto concreta, no cuando el bucle de acumulación de resultados llega
+    a su turno (ver ADR-33: antes ambas llamadas se hacían juntas, en
+    orden original de las fotos, lo que hacía que las dos pistas de
+    progreso subieran siempre a la vez y a trompicones -- de golpe varias
+    fotos si una más lenta bloqueaba el bucle -- aunque las dos etapas ya
+    corrieran desacopladas por dentro desde ADR-29). Cada llamada lleva
+    el nº de fotos que han terminado ESA etapa hasta ahora y el total a
+    procesar (`track` distingue cuál de las dos es) -- para que el
+    endpoint de streaming pueda mostrar dos líneas de progreso
+    independientes y verdaderamente en tiempo real, una por modelo.
     """
     import httpx
-
-    from app.progress import emit_progress
 
     index_available = _geolocation_available()
 
@@ -876,6 +957,7 @@ async def estimate_locations_for_posts(
     partner_signal_permalinks: set[str] = set()
     visual_descriptions: dict[str, str] = {}
     general_descriptions: dict[str, str] = {}
+    visual_description_codes: dict[str, VisualDescriptionCodes] = {}
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         # Se lanza YA el pipeline completo (descarga + análisis) de TODAS
@@ -917,9 +999,29 @@ async def estimate_locations_for_posts(
         scene_semaphore = asyncio.Semaphore(actual_concurrency)
         timing = PhotoAnalysisTiming()
         run_start = time.monotonic()
+        # Contadores de progreso COMPARTIDOS por las `total` tareas de
+        # foto que se lanzan a continuación -- cada `_process_photo`
+        # incrementa el que le corresponde (dinov2/scene) y emite el
+        # evento de progreso EN EL MOMENTO en que esa etapa termina para
+        # esa foto, no aquí en el bucle exterior (ver ADR-33: antes el
+        # progreso se emitía solo al llegar el turno de cada foto en
+        # orden original, lo que ataba ambas pistas a la misma cadencia y
+        # las hacía subir "a la vez" y "a trompicones" aunque por dentro
+        # ya corrieran desacopladas desde ADR-29).
+        progress_state = {"dinov2": 0, "scene": 0}
         photo_tasks = [
             asyncio.create_task(
-                _process_photo(client, download_semaphore, dinov2_semaphore, scene_semaphore, media_url, timing)
+                _process_photo(
+                    client,
+                    download_semaphore,
+                    dinov2_semaphore,
+                    scene_semaphore,
+                    media_url,
+                    timing,
+                    progress_callback,
+                    progress_state,
+                    total,
+                )
             )
             for _permalink, media_url, _index, _post_total in photo_units
         ]
@@ -936,39 +1038,15 @@ async def estimate_locations_for_posts(
                 partner_signal_permalinks,
                 visual_descriptions,
                 general_descriptions,
+                visual_description_codes,
             )
-
-            # Dos líneas de progreso independientes para dos análisis
-            # distintos sobre la misma foto (ver el asyncio.gather dentro
-            # de `_process_photo`): geolocalización por similitud visual
-            # (DINOv2) y análisis de contenido -- aficiones, pareja --
-            # (Moondream2, ver scene_analysis.py). Avanzan siempre a la vez
-            # en el backend (se esperan juntas con gather), pero se
-            # muestran como dos líneas separadas en el frontend porque son
-            # dos modelos y dos propósitos distintos -- mezclarlas en una
-            # sola línea ("Analizando fotos...") no dejaba claro que se
-            # estaban haciendo dos cosas diferentes sobre cada foto.
-            await emit_progress(
-                progress_callback,
-                "Geolocalizando fotos...",
-                photos_analyzed=i,
-                total_photos=total,
-                track="geolocalizacion",
-            )
-            await emit_progress(
-                progress_callback,
-                "Analizando fotos...",
-                photos_analyzed=i,
-                total_photos=total,
-                # Desde que este análisis corre en PARALELO con el resto
-                # del pipeline (ver analysis_router._build_report), sus
-                # eventos pueden intercalarse con los de fingerprint/
-                # atributos/IA en el mismo stream SSE. `track` le permite
-                # al frontend mostrarlo como su propia línea independiente
-                # en vez de mezclarlo con la fase "actual" del resto del
-                # análisis.
-                track="fotos",
-            )
+            # El progreso de esta foto YA se emitió dentro de
+            # `_process_photo`, en el momento real en que cada etapa
+            # terminó (ver ADR-33) -- este bucle solo se ocupa de
+            # acumular los resultados en el orden original de las fotos,
+            # necesario para que `results`/`visual_inferences` salgan
+            # deterministas independientemente del orden real de
+            # finalización.
 
     import os
 
@@ -990,18 +1068,6 @@ async def estimate_locations_for_posts(
         # log de rendimiento debe reflejar eso, no la config nominal (ver
         # el comentario de este mismo campo en log/performance_log.py).
         igpu_offload_used=_igpu_worker_device_index is not None and not _igpu_worker_failed,
-        # Dispositivo LOCAL de DINOv2 ("cuda"/"cpu") -- solo se usa
-        # cuando igpu_offload_used es False, ver docstring de
-        # `get_local_device()`. Con GPU dedicada disponible y offload
-        # desactivado, DINOv2 comparte esa misma GPU con Moondream2 (no
-        # corre en CPU) -- ver `_select_igpu_worker_device_index()`.
-        dinov2_local_device=get_local_device(),
-        # Dispositivo REAL en el que quedó cargado Moondream2 en este
-        # proceso -- ver scene_analysis.get_device() (importado aquí como
-        # get_moondream_device). Casi siempre "cuda" (misma GPU dedicada
-        # que DINOv2 si no hay offload) salvo que no haya CUDA disponible
-        # en absoluto, ver su docstring.
-        moondream_device=get_moondream_device(),
         total_wall_seconds=time.monotonic() - run_start,
         per_photo_seconds=timing.per_photo_seconds,
         per_photo_dinov2_seconds=timing.dinov2_seconds,
@@ -1015,4 +1081,5 @@ async def estimate_locations_for_posts(
         partner_signal_permalinks=partner_signal_permalinks,
         visual_descriptions=visual_descriptions,
         general_descriptions=general_descriptions,
+        visual_description_codes=visual_description_codes,
     )

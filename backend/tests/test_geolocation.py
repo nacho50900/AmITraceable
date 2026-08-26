@@ -460,7 +460,7 @@ class TestEstimateLocationsForPosts:
             url = list(descriptions_by_url.keys())[call_count["n"]]
             call_count["n"] += 1
             raw, general = descriptions_by_url[url]
-            return [], False, raw, general
+            return [], False, raw, general, None
 
         monkeypatch.setattr(geolocation, "analyze_image_content", _fake_analyze)
 
@@ -585,6 +585,7 @@ class TestEstimateLocationsForPosts:
                 True,
                 "DESCRIPCION: una persona jugando al baloncesto\nPERSONAS: una\nAFICION: Fan del baloncesto\nPAREJA: si",
                 "una persona jugando al baloncesto",
+                None,
             )
 
         monkeypatch.setattr(geolocation, "analyze_image_content", _fake_scene_analysis)
@@ -616,12 +617,75 @@ class TestEstimateLocationsForPosts:
         assert outcome.general_descriptions == {"https://ig/1": "una persona jugando al baloncesto"}
 
     @pytest.mark.asyncio
+    async def test_visual_description_codes_propagate_to_outcome(self, monkeypatch, respx_mock):
+        """ADR-30: visual_description_codes (VisualDescriptionCodes, sin
+        formatear a texto en español) debe llegar hasta GeolocationOutcome
+        con la MISMA clave (photo_link) que visual_descriptions -- pensado
+        para que el frontend traduzca sin depender del texto ya redactado."""
+        import httpx
+
+        from app.vision.scene_analysis import VisualDescriptionCodes
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        monkeypatch.setattr(geolocation.settings, "enable_scene_analysis", True)
+        monkeypatch.setattr(geolocation, "estimate_location_from_image", lambda image, k=15: None)
+
+        codes = VisualDescriptionCodes(personas="una", aficion="baloncesto", texto_visible=None)
+
+        def _fake_scene_analysis(image):
+            return ([], False, "texto en español sin usar aquí", None, codes)
+
+        monkeypatch.setattr(geolocation, "analyze_image_content", _fake_scene_analysis)
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        outcome = await geolocation.estimate_locations_for_posts(posts)
+
+        assert outcome.visual_description_codes == {"https://ig/1": codes}
+
+    @pytest.mark.asyncio
+    async def test_visual_description_codes_absent_when_none(self, monkeypatch, respx_mock):
+        """Si el modelo no dio codes (fallo, no disponible...), la clave
+        simplemente no aparece en el diccionario -- mismo criterio que ya
+        usan visual_descriptions/general_descriptions con None."""
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        monkeypatch.setattr(geolocation.settings, "enable_scene_analysis", True)
+        monkeypatch.setattr(geolocation, "estimate_location_from_image", lambda image, k=15: None)
+        monkeypatch.setattr(geolocation, "analyze_image_content", lambda image: ([], False, None, None, None))
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        outcome = await geolocation.estimate_locations_for_posts(posts)
+
+        assert outcome.visual_description_codes == {}
+
+    @pytest.mark.asyncio
     async def test_no_pareja_signal_leaves_partner_signal_permalinks_empty(self, monkeypatch, respx_mock):
         import httpx
 
         monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
         monkeypatch.setattr(geolocation, "estimate_location_from_image", lambda image, k=15: None)
-        monkeypatch.setattr(geolocation, "analyze_image_content", lambda image: ([], False, None, None))
+        monkeypatch.setattr(geolocation, "analyze_image_content", lambda image: ([], False, None, None, None))
 
         Post = namedtuple("Post", ["type", "media_urls", "permalink"])
         posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]
@@ -663,7 +727,7 @@ class TestEstimateLocationsForPosts:
 
         calls: list[object] = []
         monkeypatch.setattr(
-            geolocation, "analyze_image_content", lambda image: calls.append(image) or ([], False, None, None)
+            geolocation, "analyze_image_content", lambda image: calls.append(image) or ([], False, None, None, None)
         )
 
         Post = namedtuple("Post", ["type", "media_urls", "permalink"])
@@ -710,7 +774,7 @@ class TestEstimateLocationsForPosts:
 
         def _hangs_forever(image):
             time.sleep(1)  # bastante más que el timeout de 0.05s de este test
-            return [], False, "nunca debería llegar a esto", "nunca debería llegar a esto"
+            return [], False, "nunca debería llegar a esto", "nunca debería llegar a esto", None
 
         monkeypatch.setattr(geolocation, "analyze_image_content", _hangs_forever)
 
@@ -745,7 +809,7 @@ class TestEstimateLocationsForPosts:
 
         monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
         monkeypatch.setattr(geolocation, "estimate_location_from_image", lambda image, k=15: None)
-        monkeypatch.setattr(geolocation, "analyze_image_content", lambda image: ([], False, None, None))
+        monkeypatch.setattr(geolocation, "analyze_image_content", lambda image: ([], False, None, None, None))
 
         Post = namedtuple("Post", ["type", "media_urls", "permalink"])
         posts = [Post(type="image", media_urls=["https://cdn.fake/1.jpg"], permalink="https://ig/1")]
@@ -828,12 +892,20 @@ class TestEstimateLocationsForPosts:
         assert outcome.results[1][1].province == "Sevilla"
         assert outcome.results[1][1].confidence == 0.1
 
-        assert progress_events == [
-            ("Geolocalizando fotos...", {"photos_analyzed": 1, "total_photos": 2, "track": "geolocalizacion"}),
-            ("Analizando fotos...", {"photos_analyzed": 1, "total_photos": 2, "track": "fotos"}),
-            ("Geolocalizando fotos...", {"photos_analyzed": 2, "total_photos": 2, "track": "geolocalizacion"}),
-            ("Analizando fotos...", {"photos_analyzed": 2, "total_photos": 2, "track": "fotos"}),
-        ]
+        # ADR-33: ya NO se asume un orden de intercalado concreto entre
+        # las dos pistas -- eso sería justo el bug que se corrigió (antes
+        # ambas pistas se emitían siempre juntas y en el mismo orden,
+        # aunque por dentro ya corrieran desacopladas desde ADR-29). Lo
+        # que sí debe cumplirse siempre: cada pista, por separado, avanza
+        # de forma monótona 1, 2, ..., total -- da igual en qué orden se
+        # intercalen entre sí las dos pistas.
+        geo_events = [c for stage, c in progress_events if c["track"] == "geolocalizacion"]
+        fotos_events = [c for stage, c in progress_events if c["track"] == "fotos"]
+        assert [c["photos_analyzed"] for c in geo_events] == [1, 2]
+        assert [c["photos_analyzed"] for c in fotos_events] == [1, 2]
+        assert all(c["total_photos"] == 2 for c in geo_events + fotos_events)
+        assert all(stage == "Geolocalizando fotos..." for stage, c in progress_events if c["track"] == "geolocalizacion")
+        assert all(stage == "Analizando fotos..." for stage, c in progress_events if c["track"] == "fotos")
 
     @pytest.mark.asyncio
     async def test_model_inference_does_not_block_the_event_loop(self, monkeypatch, respx_mock):
@@ -995,7 +1067,7 @@ class TestEstimateLocationsForPosts:
             events.append(("scene_start", time.monotonic()))
             await asyncio.sleep(_SCENE_SLEEP)
             events.append(("scene_end", time.monotonic()))
-            return [], False, None, None
+            return [], False, None, None, None
 
         monkeypatch.setattr(geolocation, "estimate_location_from_image", _fake_dinov2)
         monkeypatch.setattr(geolocation, "_maybe_analyze_content", _fake_scene)
@@ -1016,6 +1088,82 @@ class TestEstimateLocationsForPosts:
             "el DINOv2 de la segunda foto debería arrancar antes de que "
             "termine el Moondream2 de la primera -- si esto falla, ha "
             "vuelto la lógica de semáforo único (ver ADR-29)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_progress_tracks_advance_independently_not_in_lockstep(self, monkeypatch, respx_mock):
+        """ADR-33 -- regresión de dos bugs reales de la pantalla de carga:
+        (1) las pistas "geolocalizando" y "analizando fotos" subían
+        siempre juntas aunque por dentro ya corrieran desacopladas desde
+        ADR-29 (el progreso se emitía en el bucle exterior, atado al
+        orden original de las fotos, no al momento real en que cada
+        etapa termina); (2) los avances llegaban a trompicones (de golpe
+        varias fotos si una más lenta bloqueaba el bucle) en vez de uno
+        por foto terminada.
+
+        Mismo montaje que el test de pipelining de arriba (DINOv2 rápido,
+        Moondream2 mucho más lento, concurrencia 1 a propósito) pero
+        mirando los EVENTOS DE PROGRESO que ve de verdad el frontend, no
+        solo los tiempos internos."""
+        import asyncio
+        import time
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        monkeypatch.setattr(geolocation.settings, "photo_analysis_concurrency", 1)
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [
+            Post(type="image", media_urls=["https://cdn.fake/p1.jpg"], permalink="https://ig/p1"),
+            Post(type="image", media_urls=["https://cdn.fake/p2.jpg"], permalink="https://ig/p2"),
+        ]
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/p1.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+        respx_mock.get("https://cdn.fake/p2.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        _DINOV2_SLEEP = 0.02  # rápido, como DINOv2 en la práctica
+        _SCENE_SLEEP = 0.3  # mucho más lento, como Moondream2
+
+        def _fake_dinov2(image, k=15):
+            time.sleep(_DINOV2_SLEEP)
+            return None
+
+        async def _fake_scene(image):
+            await asyncio.sleep(_SCENE_SLEEP)
+            return [], False, None, None, None
+
+        monkeypatch.setattr(geolocation, "estimate_location_from_image", _fake_dinov2)
+        monkeypatch.setattr(geolocation, "_maybe_analyze_content", _fake_scene)
+
+        events = []
+
+        async def on_progress(stage, counts):
+            events.append((time.monotonic(), counts["track"], counts["photos_analyzed"]))
+
+        await geolocation.estimate_locations_for_posts(posts, progress_callback=on_progress)
+
+        geo_progression = [(t, n) for t, track, n in events if track == "geolocalizacion"]
+        fotos_progression = [(t, n) for t, track, n in events if track == "fotos"]
+
+        assert [n for _, n in geo_progression] == [1, 2]
+        assert [n for _, n in fotos_progression] == [1, 2]
+
+        # La prueba real de que NO suben "a la vez": la pista de
+        # geolocalización (rápida) debe completarse ENTERA -- sus dos
+        # fotos, 1 y 2 -- antes de que la pista de análisis de contenido
+        # (lenta) emita siquiera su PRIMER evento. Con el bug antiguo
+        # (ambas pistas atadas al mismo bucle exterior) esto era
+        # imposible: la pista rápida nunca podía adelantar a la lenta.
+        assert geo_progression[-1][0] < fotos_progression[0][0], (
+            "la pista de geolocalización (rápida) debería terminar del "
+            "todo antes de que la pista de análisis de contenido (lenta) "
+            "emita su primer evento -- si esto falla, las dos pistas han "
+            "vuelto a subir atadas entre sí (ver ADR-33)"
         )
 
     @pytest.mark.asyncio
@@ -1046,12 +1194,16 @@ class TestEstimateLocationsForPosts:
 
         async def _fake_scene(image):
             await asyncio.sleep(_SCENE_SLEEP)
-            return [], False, None, None
+            return [], False, None, None, None
 
         monkeypatch.setattr(geolocation, "estimate_location_from_image", _fake_dinov2)
         monkeypatch.setattr(geolocation, "_maybe_analyze_content", _fake_scene)
 
         timing = geolocation.PhotoAnalysisTiming()
+
+        async def _noop_progress(stage, counts):
+            pass
+
         async with httpx.AsyncClient(timeout=10.0) as client:
             await geolocation._process_photo(
                 client,
@@ -1060,6 +1212,9 @@ class TestEstimateLocationsForPosts:
                 asyncio.Semaphore(1),
                 "https://cdn.fake/p.jpg",
                 timing,
+                _noop_progress,
+                {"dinov2": 0, "scene": 0},
+                1,
             )
 
         assert len(timing.dinov2_seconds) == 1

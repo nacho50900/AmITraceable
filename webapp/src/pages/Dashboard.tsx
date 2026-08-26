@@ -84,9 +84,12 @@ const Dashboard: React.FC = () => {
   // líneas, no una: geolocalización por similitud visual (DINOv2,
   // track:"geolocalizacion") y análisis de contenido -- aficiones, pareja
   // -- (Moondream2, track:"fotos", ver app/vision/geolocation.py). Avanzan
-  // a la vez en el backend (se esperan juntas con asyncio.gather sobre la
-  // misma foto), pero son dos modelos y dos propósitos distintos, así que
-  // se muestran como dos líneas separadas.
+  // de forma INDEPENDIENTE entre sí (ver ADR-33): el backend emite el
+  // progreso de cada pista en el momento exacto en que esa etapa termina
+  // para cada foto, no en bloque -- así que es normal y esperado que una
+  // pista (normalmente "geolocalizacion", DINOv2 es mucho más rápido)
+  // llegue al 100% bastante antes que la otra ("fotos", Moondream2 es
+  // mucho más lento), en vez de subir siempre pegadas la una a la otra.
   const [photosCounts, setPhotosCounts] = useState<Record<string, unknown> | null>(null);
   const [photosDone, setPhotosDone] = useState(false);
   const [geoCounts, setGeoCounts] = useState<Record<string, unknown> | null>(null);

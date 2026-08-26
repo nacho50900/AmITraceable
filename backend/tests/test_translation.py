@@ -87,6 +87,26 @@ def _install_fake_ctranslate2(monkeypatch):
     )
 
 
+class TestSourceLanguageFor:
+    """source_language_for() -- extraída como función pública para que
+    app/log/translation_log.py (log_translation_run) pueda saber la
+    dirección exacta de una traducción sin repetir esta misma regla por
+    su cuenta. translate_texts_local()/translation_available() la
+    reutilizan internamente en vez de duplicarla (ver más abajo)."""
+
+    def test_es_target_implies_en_source(self):
+        assert translation.source_language_for("es") == "en"
+
+    def test_en_target_implies_es_source(self):
+        assert translation.source_language_for("en") == "es"
+
+    def test_unsupported_lang_returns_none(self):
+        assert translation.source_language_for("fr") is None
+
+    def test_empty_string_returns_none(self):
+        assert translation.source_language_for("") is None
+
+
 class TestTranslateTextsLocalNoOps:
     """Casos que NUNCA deben tocar disco ni intentar cargar nada --
     comprobados con `translation._MODELS_DIR` apuntando a un directorio
