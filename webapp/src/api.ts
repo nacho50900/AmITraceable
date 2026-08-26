@@ -1,5 +1,5 @@
 import i18n from './i18n';
-import type { AnalysisProgressEvent, AuthStatus, ExposureReport, Platform } from './types';
+import type { AnalysisProgressEvent, AuthStatus, ExposureReport, Platform, RecalculateRequest } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
@@ -91,4 +91,10 @@ export const api = {
         body: JSON.stringify(report),
       },
     ),
+  recalculateReport: (req: RecalculateRequest): Promise<ExposureReport> =>
+    request<ExposureReport>('/api/analyze/recalculate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    }),
 };

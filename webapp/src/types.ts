@@ -146,3 +146,13 @@ export type AnalysisProgressEvent =
 export interface AuthStatus {
   authenticated: boolean;
 }
+
+export interface ManualAttribute {
+  category: string;
+  value: string;
+}
+
+export interface RecalculateRequest {
+  report: ExposureReport;
+  manual_attributes: ManualAttribute[];
+}

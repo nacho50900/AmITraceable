@@ -53,9 +53,13 @@ from app.data.ine_reference import (
     STUDIES_DISTRIBUTION,
     TOTAL_POPULATION_ES,
     ZODIAC_DISTRIBUTION,
+    EYE_COLOR_DISTRIBUTION,
+    HAIR_COLOR_DISTRIBUTION,
+    SKIN_TONE_DISTRIBUTION,
     age_range_proportion,
 )
 from app.nlp.demographic_extraction import DemographicFindings
+from app.models.schemas import ManualAttribute
 from app import note_codes
 
 
@@ -135,6 +139,8 @@ _CHAINED_CATEGORIES = {
     # eso no impide que narrowee -- una proporción marginal sigue siendo
     # una proporción de población válida para multiplicar en la cadena.
     "practica_deportiva",
+    # Rasgos físicos manuales
+    "color_ojos", "color_pelo", "color_piel",
 }
 
 
@@ -836,7 +842,7 @@ _CHAINED_STEPS = (
 _STANDALONE_STEPS = (_step_universidad, _step_empresa)
 
 
-def estimate_population_narrowing(findings: DemographicFindings) -> list[PopulationNarrowingStep]:
+def estimate_population_narrowing(findings: DemographicFindings, manual_attributes: list[ManualAttribute] | None = None) -> list[PopulationNarrowingStep]:
     steps: list[PopulationNarrowingStep] = []
     remaining = float(TOTAL_POPULATION_ES)
 
@@ -844,6 +850,48 @@ def estimate_population_narrowing(findings: DemographicFindings) -> list[Populat
         remaining, step = step_fn(findings, remaining)
         if step:
             steps.append(step)
+            
+    if manual_attributes:
+        for attr in manual_attributes:
+            if attr.category == "color_ojos":
+                remaining, step = _apply_proportion(
+                    remaining,
+                    EYE_COLOR_DISTRIBUTION.get(attr.value),
+                    f"Color de ojos: {attr.value.title()}",
+                    attr.category,
+                    [],
+                    source="manual",
+                    note="Rasgo físico añadido manualmente. Proporción estimada contextualmente.",
+                    note_code=None,
+                    value_raw=attr.value,
+                )
+                if step: steps.append(step)
+            elif attr.category == "color_pelo":
+                remaining, step = _apply_proportion(
+                    remaining,
+                    HAIR_COLOR_DISTRIBUTION.get(attr.value),
+                    f"Color de pelo: {attr.value.title()}",
+                    attr.category,
+                    [],
+                    source="manual",
+                    note="Rasgo físico añadido manualmente. Proporción estimada contextualmente.",
+                    note_code=None,
+                    value_raw=attr.value,
+                )
+                if step: steps.append(step)
+            elif attr.category == "color_piel":
+                remaining, step = _apply_proportion(
+                    remaining,
+                    SKIN_TONE_DISTRIBUTION.get(attr.value),
+                    f"Color de piel: {attr.value.title()}",
+                    attr.category,
+                    [],
+                    source="manual",
+                    note="Rasgo físico añadido manualmente. Proporción estimada contextualmente.",
+                    note_code=None,
+                    value_raw=attr.value,
+                )
+                if step: steps.append(step)
 
     for standalone_fn in _STANDALONE_STEPS:
         step = standalone_fn(findings)

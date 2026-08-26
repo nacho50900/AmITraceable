@@ -241,11 +241,11 @@ body {
 }
 
 .platform-guide-tab-border-mask--left {
-  left: -2px;
+  left: -1px;
 }
 
 .platform-guide-tab-border-mask--right {
-  right: -2px;
+  right: -1px;
 }
 
 .platform-guide-tab--active .platform-guide-tab-border-mask {
@@ -264,6 +264,28 @@ body {
 
 .platform-guide-tab.platform-guide-item--reddit.platform-guide-tab--active .platform-guide-tab-border-mask--left {
   display: none;
+}
+
+/* Tapa el tramo del borde superior del panel (nuevo, ver
+   .platform-guide-tab-content-container) que queda justo debajo de la
+   pestaña activa, para que el panel tenga borde arriba en todo su ancho
+   salvo donde conecta con la pestaña seleccionada -- mismo criterio que
+   .platform-guide-tab-border-mask, pero para el borde del PANEL en vez
+   del borde lateral de la propia pestaña. Ancho completo de la pestaña
+   (no solo 10px como las otras máscaras) porque aquí hay que tapar TODO
+   el tramo bajo la pestaña, no solo donde arranca la curva. */
+.platform-guide-tab-panel-border-mask {
+  position: absolute;
+  bottom: -4px;
+  left: -1px;
+  width: calc(100% + 2px);
+  height: 1px;
+  background: transparent;
+  pointer-events: none;
+}
+
+.platform-guide-tab--active .platform-guide-tab-panel-border-mask {
+  background: var(--bg-card);
 }
 
 
@@ -288,7 +310,6 @@ body {
 .platform-guide-tab-content-container {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-top: none;
   border-radius: 0 8px 8px 8px;
   padding: 20px;
 }
@@ -374,6 +395,7 @@ body {
   background: var(--accent);
   color: #fff;
   text-decoration: none;
+  font: inherit;
   font-weight: 600;
   padding: 14px 28px;
   border: 1px solid transparent;

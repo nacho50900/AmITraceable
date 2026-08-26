@@ -278,3 +278,13 @@ class TranslateDescriptionsRequest(BaseModel):
     traducir al idioma pedido por query param `lang`."""
 
     texts: list[str]
+
+
+class ManualAttribute(BaseModel):
+    category: str
+    value: str
+
+
+class RecalculateRequest(BaseModel):
+    report: ExposureReport
+    manual_attributes: list[ManualAttribute]

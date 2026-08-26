@@ -364,7 +364,7 @@ ngrok http 8080
 (requiere cuenta gratuita en https://ngrok.com y `ngrok config add-authtoken <token>` una vez).
 
 <details>
-<summary>Notas importantes sobre ngrok y por qué no usar Cloudflare Quick Tunnel</summary>
+<summary>Notas sobre ngrok y por qué no usar Cloudflare Quick Tunnel</summary>
 
 ⚠️ **No usar `cloudflared tunnel --url ...` (Cloudflare Quick Tunnel)**:
 el edge de `trycloudflare.com` bufferiza por completo las respuestas

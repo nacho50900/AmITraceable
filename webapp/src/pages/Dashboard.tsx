@@ -9,7 +9,8 @@ import LanguageSwitcher from '../components/LanguageSwitcher';
 import LocationMap from '../components/LocationMap';
 import PopulationNarrowingTable from '../components/PopulationNarrowingTable';
 import ScoreBar from '../components/ScoreBar';
-import type { ExposureReport, Platform } from '../types';
+import { ManualTraitsSelector } from '../components/ManualTraitsSelector';
+import type { ExposureReport, Platform, ManualAttribute } from '../types';
 
 function readPlatform(): Platform {
   const value = new URLSearchParams(window.location.search).get('platform');
@@ -64,6 +65,7 @@ const Dashboard: React.FC = () => {
   const [report, setReport] = useState<ExposureReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isManualTraitsOpen, setIsManualTraitsOpen] = useState(false);
   // Fases YA completadas del pipeline, en el orden en que han llegado por
   // el stream -- para pintar la lista de progreso en vivo (no un
   // temporizador simulado: cada línea corresponde a un evento real emitido
@@ -228,6 +230,20 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const handleApplyTraits = async (traits: ManualAttribute[]) => {
+    if (!report || traits.length === 0) return;
+    try {
+      const newReport = await api.recalculateReport({
+        report,
+        manual_attributes: traits,
+      });
+      setReport(newReport);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Error al recalcular');
+    }
+  };
+
   const handleCancelAnalysis = async () => {
     stopStreamRef.current?.();
     try {
@@ -377,6 +393,11 @@ const Dashboard: React.FC = () => {
 
       <section className="card">
         <h2>{t('dashboard.whatCanBeInferred')}</h2>
+        <ManualTraitsSelector 
+          isOpen={isManualTraitsOpen}
+          setIsOpen={setIsManualTraitsOpen}
+          onApplyTraits={handleApplyTraits}
+        />
         <PopulationNarrowingTable
           steps={report.population_narrowing}
           remainingPopulationAllTraits={report.remaining_population_all_traits}

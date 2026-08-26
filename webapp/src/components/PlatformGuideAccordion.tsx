@@ -63,6 +63,7 @@ const PlatformGuideAccordion: React.FC<Props> = ({ activePlatform }) => {
                 onClick={() => setSelectedTab(item.key)}
               >
                 <span className="platform-guide-tab-border-mask platform-guide-tab-border-mask--left" aria-hidden="true" />
+                <span className="platform-guide-tab-panel-border-mask" aria-hidden="true" />
                 <span className="platform-guide-item-icon">{item.icon}</span>
                 <span className="platform-guide-item-name">{t(`landing.guide.${item.key}.name`)}</span>
                 <span className="platform-guide-tab-border-mask platform-guide-tab-border-mask--right" aria-hidden="true" />
