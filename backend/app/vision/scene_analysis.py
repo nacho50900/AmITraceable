@@ -78,6 +78,7 @@ el análisis del resto de fotos ni del resto del pipeline (best-effort, ver
 """
 import logging
 import re
+from dataclasses import dataclass
 
 from PIL import Image
 
@@ -775,9 +776,38 @@ def _upcast_bfloat16_tensors():
         _upcast_unregistered_dataclass_tensors(_model, target_dtype)
 
 
-def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | None, str | None]:
+@dataclass
+class VisualDescriptionCodes:
+    """Señales visuales de UNA foto SIN formatear a texto en español --
+    misma información que las cuatro líneas de `descripcion_cruda` (ver
+    `_build_clean_summary`), pero como códigos/valores planos en vez de
+    una frase ya redactada. Pensado para que el frontend pueda traducir
+    sin depender del texto en español ya construido -- ver ADR-30:
+    `personas` es un código cerrado ("una"/"varias"/None) que el propio
+    frontend traduce vía i18n sin llamar al backend; `aficion` es texto
+    semi-libre que solo se traduce de verdad (endpoint
+    `/analyze/translate-descriptions`) si la UI no está en español;
+    `texto_visible` NUNCA se traduce, es texto literal leído de la foto.
+
+    `app.models.schemas.VisualDescriptionCodes` es el espejo serializable
+    (Pydantic) de esta misma clase -- mismos cuatro campos, pero como
+    modelo Pydantic para poder formar parte de `ImageLocationPoint` sin
+    crear un import circular (este módulo ya importa de `app.models.schemas`
+    para `InferredAttribute`, ver import arriba). `report/generator.py`
+    hace la conversión trivial de un objeto al otro al construir
+    `ImageLocationPoint`."""
+
+    personas: str | None = None
+    aficion: str | None = None
+    texto_visible: str | None = None
+    indicio_pareja: bool = False
+
+
+def analyze_image_content(
+    image,
+) -> tuple[list[InferredAttribute], bool, str | None, str | None, VisualDescriptionCodes | None]:
     """Devuelve (inferencias_visuales, indicio_pareja, descripcion_cruda,
-    descripcion_general) para UNA foto ya decodificada (PIL.Image, la
+    descripcion_general, description_codes) para UNA foto ya decodificada (PIL.Image, la
     misma que usa geolocation.py para el embedding de DINOv2 -- no se
     descarga ni decodifica de nuevo). SÍNCRONA y con trabajo de CPU/GPU
     real (como `estimate_location_from_image`): quien llama debe
@@ -834,8 +864,12 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
     cabecera del módulo, mismo criterio que ya se aplica al resto de
     campos).
 
-    None en cualquiera de los cuatro valores si el modelo no está
-    disponible o la inferencia falla.
+    None en cualquiera de los cuatro primeros valores si el modelo no está
+    disponible o la inferencia falla. `description_codes` es None en los
+    mismos casos (mismo criterio: "esta foto no aportó nada"), y si no es
+    None, sus cuatro campos reflejan exactamente los mismos valores ya
+    parseados que `descripcion_cruda` -- ver VisualDescriptionCodes arriba
+    y ADR-30.
 
     `evidence` de cada InferredAttribute se deja vacío deliberadamente --
     quien llama (geolocation.py) rellena el permalink de la publicación,
@@ -843,8 +877,8 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
 
     Nunca lanza: cualquier fallo (dependencias no instaladas, modelo no
     descargable, respuesta con formato inesperado) se trata como "esta
-    foto no aportó nada" y devuelve ([], False, None, None), sin abortar
-    el análisis de las demás fotos."""
+    foto no aportó nada" y devuelve ([], False, None, None, None), sin
+    abortar el análisis de las demás fotos."""
     if not _scene_analysis_available():
         # Causa más habitual: no se ha instalado requirements-vision.txt
         # completo. En particular, construir el índice FAISS (ver
@@ -857,7 +891,7 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
             "timm o einops (ver requirements-vision.txt; 'pip install timm einops' "
             "si ya tienes torch/transformers instalados para la geolocalización)"
         )
-        return [], False, None, None
+        return [], False, None, None, None
 
     try:
         _lazy_load()
@@ -906,7 +940,7 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
         # bien instaladas. Ya está corregido; si reaparece tras cambiar
         # `_MODEL_REVISION` o la versión de `transformers`/`accelerate`,
         # revisar primero cómo se está pasando `device_map`.
-        return [], False, None, None
+        return [], False, None, None, None
 
     # `structured` (no un texto combinado con DESCRIPCION) es la única
     # fuente para PERSONAS/AFICION/PAREJA/TEXTO_VISIBLE -- ya no hace
@@ -925,8 +959,14 @@ def analyze_image_content(image) -> tuple[list[InferredAttribute], bool, str | N
 
     inferencias = _parse_inferences(structured)
     descripcion_cruda = _build_clean_summary(personas, aficion_raw, indicio_pareja, texto_visible)
+    description_codes = VisualDescriptionCodes(
+        personas=personas,
+        aficion=aficion_raw,
+        texto_visible=texto_visible,
+        indicio_pareja=indicio_pareja,
+    )
 
-    return inferencias, indicio_pareja, descripcion_cruda, descripcion_general
+    return inferencias, indicio_pareja, descripcion_cruda, descripcion_general, description_codes
 
 
 def _parse_descripcion(answer: str) -> str | None:

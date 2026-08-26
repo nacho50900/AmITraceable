@@ -42,6 +42,7 @@ from app.config import settings
 from app.models.schemas import InferredAttribute
 from app.log.performance_log import PhotoAnalysisTiming, log_photo_analysis_run
 from app.progress import emit_progress
+from app.vision import scene_analysis
 from app.vision.scene_analysis import VisualDescriptionCodes, analyze_image_content
 
 import numpy as np
@@ -96,6 +97,20 @@ _igpu_worker_device_index = None
 # reintentar el worker en cada foto: cae a `_device` (local) de forma
 # permanente para el resto de la vida del proceso.
 _igpu_worker_failed = False
+
+
+def get_local_device() -> str | None:
+    """Dispositivo torch REAL ("cuda" o "cpu") donde corre DINOv2 EN ESTE
+    PROCESO cuando NO se despacha al worker de iGPU (ver `_device` arriba),
+    o `None` si `_lazy_load()` no se ha llamado todavía (modelo no cargado
+    -- p. ej. sin ninguna foto procesada aún). Mismo patrón que
+    `app.vision.scene_analysis.get_device()`: pensado para el logging de
+    rendimiento (ver app/log/performance_log.py), que necesita saber de
+    verdad dónde corrió el modelo, no asumirlo a partir de
+    `igpu_offload_used` -- ver el docstring de `dinov2_local_device` en
+    `log_photo_analysis_run`."""
+    return _device
+
 # Timeout HTTP contra el worker de iGPU -- generoso en la parte de
 # lectura (30s) porque la PRIMERA petición incluye la carga en frío del
 # modelo dentro del worker (ver `_load_model` en igpu_worker/app.py);
@@ -1068,6 +1083,8 @@ async def estimate_locations_for_posts(
         # log de rendimiento debe reflejar eso, no la config nominal (ver
         # el comentario de este mismo campo en log/performance_log.py).
         igpu_offload_used=_igpu_worker_device_index is not None and not _igpu_worker_failed,
+        dinov2_local_device=get_local_device(),
+        moondream_device=scene_analysis.get_device(),
         total_wall_seconds=time.monotonic() - run_start,
         per_photo_seconds=timing.per_photo_seconds,
         per_photo_dinov2_seconds=timing.dinov2_seconds,
