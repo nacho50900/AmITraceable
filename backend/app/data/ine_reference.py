@@ -909,27 +909,26 @@ LANGUAGE_BY_CCAA = {
     "navarra": {"euskera": 0.146, "castellano_u_otra": 0.854},
 }
 
- 
- #   R e f e r e n c i a s   c o n t e x t u a l e s   p a r a   r a s g o s   f Ì s i c o s   ( a Ò a d i d o s   m a n u a l m e n t e ) .  
- E Y E _ C O L O R _ D I S T R I B U T I O N   =   {  
-         ' m a r r o n ' :   0 . 5 5 ,  
-         ' v e r d e ' :   0 . 1 5 ,  
-         ' a z u l ' :   0 . 1 5 ,  
-         ' m i e l ' :   0 . 1 0 ,  
-         ' n e g r o ' :   0 . 0 5 ,  
- }  
-  
- H A I R _ C O L O R _ D I S T R I B U T I O N   =   {  
-         ' m o r e n o ' :   0 . 4 5 ,  
-         ' c a s t a n o ' :   0 . 4 0 ,  
-         ' r u b i o ' :   0 . 1 0 ,  
-         ' p e l i r r o j o ' :   0 . 0 2 ,  
-         ' c a n o s o ' :   0 . 0 3 ,  
- }  
-  
- S K I N _ T O N E _ D I S T R I B U T I O N   =   {  
-         ' c l a r o ' :   0 . 6 0 ,  
-         ' m e d i o ' :   0 . 3 5 ,  
-         ' o s c u r o ' :   0 . 0 5 ,  
- }  
- 
+
+# Referencias contextuales para rasgos f√≠sicos (a√±adidos manualmente).
+EYE_COLOR_DISTRIBUTION = {
+    'marron': 0.55,
+    'verde': 0.15,
+    'azul': 0.15,
+    'miel': 0.10,
+    'negro': 0.05,
+}
+
+HAIR_COLOR_DISTRIBUTION = {
+    'moreno': 0.45,
+    'castano': 0.40,
+    'rubio': 0.10,
+    'pelirrojo': 0.02,
+    'canoso': 0.03,
+}
+
+SKIN_TONE_DISTRIBUTION = {
+    'claro': 0.60,
+    'medio': 0.35,
+    'oscuro': 0.05,
+}

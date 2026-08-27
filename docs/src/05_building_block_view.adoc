@@ -200,6 +200,28 @@ del mismo análisis:
   principal: recibe un `ExposureReport` ya generado y lo reenvía a
   `ai_analysis.py`. Se dispara automáticamente desde el frontend en
   cuanto el informe está listo, sin acción explícita del usuario.
+* `POST /api/analyze/recalculate` -- recibe un `ExposureReport` ya
+  generado más una lista de `ManualAttribute` (rasgos físicos que la
+  ley de protección de datos impide inferir automáticamente: color de
+  ojos/pelo/piel -- ver ADR-34 y `PopulationNarrowingTable.tsx` en la
+  vista de `webapp` más abajo) y devuelve el mismo informe con esos
+  rasgos añadidos a `inferred_attributes`, el `population_narrowing`
+  encadenado con las nuevas proporciones (`data/ine_reference.py`:
+  `EYE_COLOR_DISTRIBUTION`, `HAIR_COLOR_DISTRIBUTION`,
+  `SKIN_TONE_DISTRIBUTION`) y `privacy_score.inferable_data_risk`/
+  `overall_score` recalculados. Reutiliza `_apply_proportion` y
+  `final_remaining_population` de `scoring/k_anonymity.py`, la misma
+  lógica que usa el pipeline automático -- evita duplicar las tablas
+  del INE ni el cálculo de k-anonimato en el frontend.
++
+IMPORTANT: esta ruta está registrada **antes** que
+`POST /api/analyze/{platform}` en el código fuente. FastAPI/Starlette
+resuelve las rutas en el orden de registro: si `{platform}` fuera
+antes, capturaría el literal `"recalculate"` como valor de ese
+parámetro y la ruta de recalculo nunca se alcanzaría (404 encubierto,
+"Plataforma no soportada: recalculate"). Cualquier ruta estática nueva
+bajo `/analyze/` debe declararse antes que la ruta paramétrica por el
+mismo motivo.
 
 Interfaces::
 Ver arriba. Todos documentados con sus posibles códigos de respuesta en
@@ -362,9 +384,10 @@ población en España comparte esa combinación de características (ver
 <<section-concepts>>, "Estimación de k-anonimato sin base de datos
 sintética"). Devuelve una cascada de pasos (`PopulationNarrowingStep`)
 con la población restante, nivel de riesgo, fuente (texto / imagen / ia
-/ ia_nombre / ia_simbolica) y la proporción ya calculada sobre el total
-de España (para que el frontend pueda representarla visualmente sin
-conocer esa constante). Cada paso incluye además `reduction_percent`
+/ ia_nombre / ia_simbolica / **manual** -- ver más abajo) y la
+proporción ya calculada sobre el total de España (para que el frontend
+pueda representarla visualmente sin conocer esa constante). Cada paso
+incluye además `reduction_percent`
 -- cuánto reduce ESE rasgo concreto la población restante respecto al
 paso anterior de la cadena (no el porcentaje acumulado desde el
 principio) -- que la tabla de estrechamiento de población muestra junto
@@ -386,6 +409,18 @@ se muestra al final del informe ("En España hay X personas que comparten
 tus rasgos"). Se queda con el `remaining_population` del último escalón
 encadenable que sí se pudo estimar, aprovechando que cada escalón ya
 lleva el acumulado de los anteriores.
+
+`source="manual"` (ADR-34) es el único caso en que un paso no lo genera
+el pipeline automático de análisis, sino
+`POST /api/analyze/recalculate` a partir de rasgos que el usuario
+introduce a mano en el dashboard (color de ojos/pelo/piel -- protegidos
+por ley y no inferibles automáticamente). Usa las mismas funciones
+`_apply_proportion`/`final_remaining_population` que el resto de la
+cadena, contra tres tablas nuevas de `ine_reference.py`
+(`EYE_COLOR_DISTRIBUTION`, `HAIR_COLOR_DISTRIBUTION`,
+`SKIN_TONE_DISTRIBUTION`) que son estimaciones contextuales, no cifras
+oficiales del INE -- el INE no publica una distribución poblacional de
+estos rasgos.
 
 Ubicación::
 `backend/app/scoring/k_anonymity.py`, tablas en
@@ -646,6 +681,7 @@ webapp/
 │   ├── components/
 │   │   ├── ScoreBar.tsx                   - Barra de riesgo (0-100) con color semántico
 │   │   ├── HourlyActivityChart.tsx        - Gráfico de actividad horaria (Recharts)
+│   │   ├── ManualTraitsSelector.tsx       - Alta manual de rasgos físicos (ojos/pelo/piel)
 │   │   ├── PopulationNarrowingTable.tsx   - Qué se puede inferir sobre ti, con fuente
 │   │   ├── PopulationPictogram.tsx        - Representación visual (isotype) de esa proporción
 │   │   ├── LocationMap.tsx                - Mapa + lista de ubicaciones estimadas por foto
@@ -679,7 +715,9 @@ ti (estrechamiento de población con pictograma visual, con su fuente y
 evidencia, más el número absoluto de personas que comparten TODOS los
 rasgos detectados combinados -- "En España hay X personas que comparten
 tus rasgos", destacado en turquesa, calculado por
-`k_anonymity.py::final_remaining_population()`), mapa/lista de
+`k_anonymity.py::final_remaining_population()`), el selector de rasgos
+físicos manuales (`ManualTraitsSelector.tsx`, justo encima de esta
+sección -- ver más abajo), mapa/lista de
 ubicaciones estimadas por foto (con un aviso explícito si hubo fotos
 analizadas pero ninguna dio suficiente confianza para estimar la
 comunidad autónoma de residencia -- independiente de si el texto sí dio
@@ -692,8 +730,33 @@ recomendaciones también se retiró de la interfaz (siguen calculándose en
 el backend, pero como insumo de la IA, no como sección visible). Determina
 la plataforma activa por query param (`?platform=reddit|instagram`).
 
+`handleApplyTraits` es el único punto donde el dashboard reemplaza el
+informe completo tras el render inicial: envía los rasgos manuales más
+el informe actual a `POST /api/analyze/recalculate` (ADR-34) y sustituye
+`report` en su estado por la respuesta -- no fusiona campo a campo, para
+no arriesgarse a desincronizar `population_narrowing` del resto del
+informe si el backend cambia su forma en el futuro.
+
 Ubicación::
 `webapp/src/pages/Dashboard.tsx`.
+
+==== `ManualTraitsSelector.tsx`
+
+Propósito/Responsabilidad::
+Formulario plegable (colapsado por defecto tras un botón) con un
+`<select>` por rasgo (color de ojos, de pelo, tono de piel -- listas
+cerradas de opciones, coordinadas con las claves de
+`EYE_COLOR_DISTRIBUTION`/`HAIR_COLOR_DISTRIBUTION`/
+`SKIN_TONE_DISTRIBUTION` en `backend/app/data/ine_reference.py`; un
+valor fuera de esas listas no rompe la petición, pero el backend lo
+marca como `no_estimable` -- ver ADR-34) que la ley de protección de
+datos impide inferir automáticamente. Al enviar, delega en
+`onApplyTraits` (implementado por `Dashboard.tsx`) sin conocer ni
+llamar a la API directamente -- es un componente de presentación puro,
+igual que `PopulationNarrowingTable.tsx`.
+
+Ubicación::
+`webapp/src/components/ManualTraitsSelector.tsx`.
 
 ==== `PopulationNarrowingTable.tsx`
 
@@ -702,9 +765,13 @@ Muestra, en forma de tarjetas apiladas (una por atributo detectado, no
 una tabla clásica -- para dejar sitio al pictograma grande), la cascada
 de estrechamiento de población (k-anonimato): información detectada,
 representación visual de cuánta gente la comparte, nivel de riesgo, y la
-fuente (texto autodeclarado, imagen, IA sobre texto, o estimación por
+fuente (texto autodeclarado, imagen, IA sobre texto, estimación por
 nombre público de la cuenta -- estas dos últimas con aviso explícito de
-menor fiabilidad).
+menor fiabilidad--, o **manual**: los pasos añadidos vía
+`ManualTraitsSelector.tsx`/`POST /api/analyze/recalculate` (ADR-34) se
+distinguen con una insignia de color propio (morado) en vez del color
+semántico habitual por nivel de riesgo, para dejar claro de un vistazo
+que ese dato lo introdujo el propio usuario y no lo infirió el sistema.
 
 Ubicación::
 `webapp/src/components/PopulationNarrowingTable.tsx`.

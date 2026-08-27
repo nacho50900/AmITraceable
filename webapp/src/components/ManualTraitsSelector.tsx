@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ManualAttribute } from '../types';
+import type { ManualAttribute } from '../types';
 
 interface Props {
   onApplyTraits: (traits: ManualAttribute[]) => void;

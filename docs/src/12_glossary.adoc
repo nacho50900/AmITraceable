@@ -70,6 +70,17 @@ ifndef::imagesdir[:imagesdir: ../images]
   bajo el número resultante, más fácil sería, en teoría, identificar a
   esa persona a partir de esas características.
 
+| Rasgo físico manual
+| Atributo visible (color de ojos, de pelo, tono de piel) que el
+  pipeline automático nunca infiere -- ni de texto ni de imagen -- por
+  tratarse de un dato especialmente protegido (categorización por
+  características raciales/étnicas, art. 9 RGPD). El usuario puede
+  declararlo él mismo desde el dashboard (`ManualTraitsSelector.tsx`);
+  se suma al estrechamiento de población vía
+  `POST /api/analyze/recalculate` y se marca con `source = "manual"`
+  para distinguirlo visualmente de los rasgos que sí detecta el sistema
+  (ver ADR-34).
+
 | INE (Instituto Nacional de Estadística)
 | Organismo público español responsable de las estadísticas oficiales
   (Censo, Padrón, Encuesta de Población Activa...). Fuente de las

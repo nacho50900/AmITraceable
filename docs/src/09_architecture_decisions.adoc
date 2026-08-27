@@ -1849,3 +1849,80 @@ propósito, ver el test actualizado-- lo cual es correcto (refleja la
 concurrencia real) pero significa que cualquier futuro consumidor del
 stream de progreso no puede asumir nada sobre ese orden, solo sobre la
 monotonía dentro de cada pista por separado.
+
+=== ADR-34: Rasgos físicos manuales (ojos/pelo/piel) recalculados en el backend, no duplicando las tablas del INE en el frontend
+
+*Contexto*: hay atributos físicos visibles en cualquier foto de perfil
+(color de ojos, de pelo, tono de piel) que la Ley Orgánica de
+Protección de Datos desaconseja inferir automáticamente por
+categorizar a la persona por características raciales/étnicas (dato
+especialmente protegido, art. 9 RGPD), así que ni `vision/scene_analysis.py`
+ni `nlp/ai_attribute_extraction.py` los extraen -- pero si el propio
+usuario los declara explícitamente sobre su propio perfil, sí pueden
+sumarse al estrechamiento de población igual que cualquier otro rasgo
+autodeclarado. El estrechamiento de población (k-anonimato, ADR
+"Estimación de k-anonimato sin base de datos sintética" -- ver arriba)
+y el cálculo del `privacy_score` viven enteramente en el backend
+(`scoring/k_anonymity.py`, `scoring/privacy_score.py`, tablas de
+`data/ine_reference.py`); el frontend nunca ha conocido esa lógica ni
+esas tablas, solo consume proporciones ya calculadas.
+
+*Alternativas descartadas*: duplicar en el frontend (TypeScript) las
+tres tablas nuevas (`EYE_COLOR_DISTRIBUTION`, `HAIR_COLOR_DISTRIBUTION`,
+`SKIN_TONE_DISTRIBUTION`) y repetir ahí la multiplicación en cadena de
+`_apply_proportion`, para poder actualizar el pictograma sin ida y
+vuelta al servidor -- descartado: exactamente el tipo de duplicación de
+lógica de dominio entre frontend y backend que el proyecto ha evitado
+desde el principio (todas las tablas del INE y el cálculo de
+k-anonimato son responsabilidad exclusiva del backend); cualquier
+ajuste futuro a esas tablas (p. ej. si el INE publicase cifras propias
+para estos rasgos, o cambiase el peso de `inferable_data_risk` en el
+score) obligaría a mantener dos implementaciones sincronizadas a mano.
+
+*Decisión*: nuevo endpoint `POST /api/analyze/recalculate` (ver
+<<section-building-block-view>>) que recibe el `ExposureReport` ya
+generado más una lista de `ManualAttribute {category, value}`, y
+devuelve el mismo informe con: (1) los rasgos añadidos a
+`inferred_attributes` con `confidence=1.0` (autodeclaración directa,
+máxima fiabilidad posible); (2) un paso nuevo por rasgo en
+`population_narrowing`, encadenado sobre el `remaining_population` ya
+alcanzado por el resto de atributos (mismo `_apply_proportion` que usa
+el pipeline automático, `source="manual"` para que
+`PopulationNarrowingTable.tsx` lo distinga visualmente -- insignia de
+color propio en vez del semántico por riesgo); (3)
+`inferable_data_risk`/`overall_score` recalculados. El frontend
+(`ManualTraitsSelector.tsx` + `Dashboard.tsx::handleApplyTraits`) se
+limita a recoger la selección y sustituir su `ExposureReport` en
+memoria por la respuesta completa -- no fusiona campos sueltos.
+
+Las tres tablas de proporciones son estimaciones contextuales
+documentadas en el propio código, no cifras oficiales del INE (que no
+publica una distribución poblacional de estos rasgos) -- a diferencia
+del resto de `ine_reference.py`, cuyo criterio de "tabla desactualizada"
+(`stale_tables()`, ver ADR sobre concurrencia/GPU y `app/main.py`) no
+aplica aquí porque no hay una fuente oficial que pueda quedarse
+desactualizada.
+
+*Gotcha de implementación*: `POST /api/analyze/recalculate` debe
+registrarse ANTES que `POST /api/analyze/{platform}` en
+`analysis_router.py`. FastAPI/Starlette resuelve las rutas por orden de
+registro, no por especificidad; si la ruta paramétrica fuera antes,
+capturaría el literal `"recalculate"` como valor de `platform` y la de
+recalculo nunca se alcanzaría (404 "Plataforma no soportada:
+recalculate", sin ningún error en el arranque que lo delate). Cubierto
+por `TestRecalculateEndpoint` en `test_analysis_router.py`, que habría
+detectado la regresión si el orden se rompiera de nuevo.
+
+*Consecuencias*: (+) cero duplicación de las tablas del INE ni de la
+lógica de k-anonimato/scoring fuera del backend; (+) cualquier cambio
+futuro a esas tablas o a los pesos del score se aplica en un único
+sitio; (+) el rasgo manual queda visualmente distinguible del resto sin
+introducir un tipo de dato nuevo (reutiliza `PopulationNarrowingStep`
+con un valor más de `source`); (-) cada alta de rasgo manual exige un
+viaje de ida y vuelta al servidor con el informe completo en el cuerpo
+de la petición (potencialmente grande si hay muchas fotos analizadas),
+en vez de una actualización instantánea en el cliente -- aceptable
+dado que es una acción puntual del usuario, no algo que ocurra en un
+bucle o con alta frecuencia; (-) cualquier ruta estática nueva que se
+añada bajo `/analyze/` en el futuro debe recordar declararse antes que
+`/analyze/{platform}` por el mismo motivo (ver gotcha arriba).

@@ -37,7 +37,7 @@ export interface PopulationEstimate {
   remaining_population: number | null;
   risk_level: 'bajo' | 'medio' | 'alto' | 'critico' | 'no_estimable';
   evidence: string[];
-  source: 'texto' | 'imagen' | 'ia' | 'ia_nombre' | 'ia_simbolica' | 'ia_estimada';
+  source: 'texto' | 'imagen' | 'ia' | 'ia_nombre' | 'ia_simbolica' | 'ia_estimada' | 'manual';
   note: string | null;
   // Código estable (ver app/note_codes.py) para traducir `note` sin
   // parsear la frase en español; `note` se conserva para logs/descarga

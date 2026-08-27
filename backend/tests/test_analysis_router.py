@@ -456,3 +456,92 @@ class TestGeolocationRunsConcurrentlyFromTheStart:
         await analysis_router._build_report(profile)
 
         assert received["avatar_url"] == "https://cdn.fake/avatar.jpg"
+
+
+class TestRecalculateEndpoint:
+    """POST /api/analyze/recalculate -- rasgos fisicos manuales
+    (color de ojos/pelo/piel) que no pueden inferirse automaticamente
+    por proteccion de datos. Ver goal 'AmITraceable manual traits'."""
+
+    def test_adds_manual_attribute_and_narrows_population(self):
+        report = _make_report()
+
+        resp = client.post(
+            "/api/analyze/recalculate",
+            json={
+                "report": report.model_dump(mode="json"),
+                "manual_attributes": [{"category": "color_ojos", "value": "verde"}],
+            },
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+
+        assert len(body["inferred_attributes"]) == 1
+        assert body["inferred_attributes"][0]["category"] == "color_ojos"
+        assert body["inferred_attributes"][0]["value"] == "verde"
+        assert body["inferred_attributes"][0]["confidence"] == 1.0
+
+        # Un unico paso nuevo de estrechamiento, marcado como manual.
+        assert len(body["population_narrowing"]) == 1
+        step = body["population_narrowing"][0]
+        assert step["source"] == "manual"
+        assert step["category"] == "color_ojos"
+        assert step["remaining_population"] == pytest.approx(49_128_297 * 0.15)
+
+        assert body["remaining_population_all_traits"] == step["remaining_population"]
+
+    def test_multiple_manual_attributes_narrow_population_in_chain(self):
+        report = _make_report()
+
+        resp = client.post(
+            "/api/analyze/recalculate",
+            json={
+                "report": report.model_dump(mode="json"),
+                "manual_attributes": [
+                    {"category": "color_ojos", "value": "verde"},
+                    {"category": "color_pelo", "value": "rubio"},
+                ],
+            },
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+
+        assert len(body["inferred_attributes"]) == 2
+        assert len(body["population_narrowing"]) == 2
+
+        expected = 49_128_297 * 0.15 * 0.10
+        assert body["population_narrowing"][-1]["remaining_population"] == pytest.approx(expected)
+        assert body["remaining_population_all_traits"] == pytest.approx(expected)
+
+    def test_unknown_trait_value_marks_step_as_not_estimable(self):
+        report = _make_report()
+
+        resp = client.post(
+            "/api/analyze/recalculate",
+            json={
+                "report": report.model_dump(mode="json"),
+                "manual_attributes": [{"category": "color_ojos", "value": "valor_inexistente"}],
+            },
+        )
+
+        assert resp.status_code == 200
+        step = resp.json()["population_narrowing"][0]
+        assert step["risk_level"] == "no_estimable"
+        assert step["remaining_population"] is None
+
+    def test_no_manual_attributes_returns_report_unchanged(self):
+        report = _make_report()
+
+        resp = client.post(
+            "/api/analyze/recalculate",
+            json={"report": report.model_dump(mode="json"), "manual_attributes": []},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == report.model_dump(mode="json")
+
+    def test_malformed_body_returns_422(self):
+        resp = client.post("/api/analyze/recalculate", json={"not": "valid"})
+        assert resp.status_code == 422

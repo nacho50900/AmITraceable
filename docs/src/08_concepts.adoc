@@ -231,6 +231,23 @@ estimar (`final_remaining_population()`): un escalón "no estimable" es un
 no-op sobre el acumulado, no lo resetea, así que basta con el último
 válido para tener el resultado final de toda la cadena.
 
+**Rasgos declarados por el usuario a posteriori (`source = "manual"`,
+ADR-34)**: hay atributos físicos visibles (color de ojos, de pelo, tono
+de piel) que el pipeline automático nunca intenta inferir -- ni de
+texto ni de imagen -- porque categorizar a alguien por características
+raciales/étnicas de forma automática es precisamente el tipo de dato
+especialmente protegido que el RGPD desaconseja procesar sin
+intervención humana explícita. Si el propio usuario los declara sobre
+sí mismo, sin embargo, aportan la misma señal de k-anonimato que
+cualquier otro rasgo autodeclarado: `POST /api/analyze/recalculate`
+reutiliza el mismo `_apply_proportion`/`final_remaining_population` de
+esta sección contra tres tablas nuevas y separadas de
+`ine_reference.py` (estimaciones contextuales, no cifras oficiales del
+INE -- no existe una distribución poblacional publicada de estos
+rasgos) y marca el escalón resultante con `source = "manual"`, que el
+frontend distingue visualmente del resto en vez de mezclarlo con las
+fuentes automáticas.
+
 === Geolocalización de fotos por similitud visual (módulo opcional)
 
 `vision/geolocation.py` estima la provincia más probable de una foto de

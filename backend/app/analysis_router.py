@@ -29,7 +29,7 @@ from app.log.translation_log import log_translation_run
 from app.analysis_timing import run_with_timer, timed_stage
 from app.config import settings
 from app.instagram_client import InstagramClient
-from app.models.schemas import ExposureReport, SocialProfile, TranslateDescriptionsRequest
+from app.models.schemas import ExposureReport, RecalculateRequest, SocialProfile, TranslateDescriptionsRequest
 from app.nlp.attribute_inference import infer_attributes
 from app.nlp.fingerprint import build_fingerprint
 from app.progress import ProgressCallback, emit_progress
@@ -293,6 +293,94 @@ async def translate_descriptions(request: Annotated[TranslateDescriptionsRequest
     return {"translations": translations}
 
 
+@router.post("/analyze/recalculate", response_model=ExposureReport)
+async def recalculate_report(request: Annotated[RecalculateRequest, Body(...)]):
+    """
+    Recalcula el informe de exposición añadiendo los rasgos físicos manuales proporcionados.
+    Actualiza `population_narrowing` multiplicando las proporciones en cadena y
+    recalcula el `inferable_data_risk` dentro del score de privacidad.
+
+    NOTA: esta ruta estática DEBE registrarse antes que `/analyze/{platform}`
+    (justo debajo) -- FastAPI/Starlette resuelve las rutas en el orden en que
+    se registran, así que si `/analyze/{platform}` fuera antes, capturaría
+    "recalculate" como valor del parámetro `platform` y esta ruta nunca se
+    llegaría a ejecutar (404 "Plataforma no soportada: recalculate").
+    """
+    from app.models.schemas import InferredAttribute
+
+    report = request.report
+    manual_attributes = request.manual_attributes
+
+    if not manual_attributes:
+        return report
+
+    # 1. Añadir a inferred_attributes
+    new_inferred = []
+    for attr in manual_attributes:
+        new_inferred.append(InferredAttribute(
+            category=attr.category,
+            value=attr.value,
+            confidence=1.0,  # Autodeclaración manual es 100% fiable
+            evidence=[],
+        ))
+    report.inferred_attributes.extend(new_inferred)
+
+    # 2. Recalcular score (sólo inferable_data_risk se ve afectado)
+    weighted = sum(a.confidence for a in report.inferred_attributes)
+    inferable_data_risk = min((weighted / 6) * 100, 100.0)
+
+    old_score = report.privacy_score
+    overall = (
+        old_score.geolocation_risk * 0.35
+        + old_score.identity_consistency_risk * 0.0
+        + inferable_data_risk * 0.45
+        + old_score.deanonymization_ease * 0.20
+    )
+    report.privacy_score.inferable_data_risk = round(inferable_data_risk, 1)
+    report.privacy_score.overall_score = round(overall, 1)
+
+    # 3. Recalcular estrechamiento de población
+    steps = report.population_narrowing
+    last_remaining = final_remaining_population(steps)
+    remaining = float(last_remaining) if last_remaining is not None else float(TOTAL_POPULATION_ES)
+
+    for attr in manual_attributes:
+        proportion = None
+        label = ""
+        if attr.category == "color_ojos":
+            proportion = EYE_COLOR_DISTRIBUTION.get(attr.value)
+            label = f"Color de ojos: {attr.value.title()}"
+        elif attr.category == "color_pelo":
+            proportion = HAIR_COLOR_DISTRIBUTION.get(attr.value)
+            label = f"Color de pelo: {attr.value.title()}"
+        elif attr.category == "color_piel":
+            proportion = SKIN_TONE_DISTRIBUTION.get(attr.value)
+            label = f"Color de piel: {attr.value.title()}"
+
+        remaining, step = _apply_proportion(
+            remaining,
+            proportion,
+            label,
+            attr.category,
+            [],
+            source="manual",
+            note="Rasgo físico añadido manualmente. Proporción estimada contextualmente.",
+            note_code=None,
+            value_raw=attr.value,
+        )
+        if step:
+            steps.append(step)
+
+    report.population_narrowing = steps
+    report.remaining_population_all_traits = final_remaining_population(steps)
+    report.remaining_population_all_traits_proportion = (
+        report.remaining_population_all_traits / TOTAL_POPULATION_ES
+        if report.remaining_population_all_traits is not None else None
+    )
+
+    return report
+
+
 @router.post(
     "/analyze/{platform}",
     response_model=ExposureReport,
@@ -404,85 +492,3 @@ async def analyze_stream(platform: str, request: Request):
             "X-Accel-Buffering": "no",
         },
     )
-
-
-@router.post("/analyze/recalculate", response_model=ExposureReport)
-async def recalculate_report(request: Annotated[RecalculateRequest, Body(...)]):
-    """
-    Recalcula el informe de exposición añadiendo los rasgos físicos manuales proporcionados.
-    Actualiza `population_narrowing` multiplicando las proporciones en cadena y
-    recalcula el `inferable_data_risk` dentro del score de privacidad.
-    """
-    from app.models.schemas import InferredAttribute
-
-    report = request.report
-    manual_attributes = request.manual_attributes
-
-    if not manual_attributes:
-        return report
-
-    # 1. Añadir a inferred_attributes
-    new_inferred = []
-    for attr in manual_attributes:
-        new_inferred.append(InferredAttribute(
-            category=attr.category,
-            value=attr.value,
-            confidence=1.0,  # Autodeclaración manual es 100% fiable
-            evidence=[],
-        ))
-    report.inferred_attributes.extend(new_inferred)
-
-    # 2. Recalcular score (sólo inferable_data_risk se ve afectado)
-    weighted = sum(a.confidence for a in report.inferred_attributes)
-    inferable_data_risk = min((weighted / 6) * 100, 100.0)
-    
-    old_score = report.privacy_score
-    overall = (
-        old_score.geolocation_risk * 0.35
-        + old_score.identity_consistency_risk * 0.0
-        + inferable_data_risk * 0.45
-        + old_score.deanonymization_ease * 0.20
-    )
-    report.privacy_score.inferable_data_risk = round(inferable_data_risk, 1)
-    report.privacy_score.overall_score = round(overall, 1)
-
-    # 3. Recalcular estrechamiento de población
-    steps = report.population_narrowing
-    last_remaining = final_remaining_population(steps)
-    remaining = float(last_remaining) if last_remaining is not None else float(TOTAL_POPULATION_ES)
-
-    for attr in manual_attributes:
-        proportion = None
-        label = ""
-        if attr.category == "color_ojos":
-            proportion = EYE_COLOR_DISTRIBUTION.get(attr.value)
-            label = f"Color de ojos: {attr.value.title()}"
-        elif attr.category == "color_pelo":
-            proportion = HAIR_COLOR_DISTRIBUTION.get(attr.value)
-            label = f"Color de pelo: {attr.value.title()}"
-        elif attr.category == "color_piel":
-            proportion = SKIN_TONE_DISTRIBUTION.get(attr.value)
-            label = f"Color de piel: {attr.value.title()}"
-            
-        remaining, step = _apply_proportion(
-            remaining,
-            proportion,
-            label,
-            attr.category,
-            [],
-            source="manual",
-            note="Rasgo físico añadido manualmente. Proporción estimada contextualmente.",
-            note_code=None,
-            value_raw=attr.value,
-        )
-        if step:
-            steps.append(step)
-
-    report.population_narrowing = steps
-    report.remaining_population_all_traits = final_remaining_population(steps)
-    report.remaining_population_all_traits_proportion = (
-        report.remaining_population_all_traits / TOTAL_POPULATION_ES 
-        if report.remaining_population_all_traits is not None else None
-    )
-
-    return report
