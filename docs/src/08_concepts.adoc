@@ -248,6 +248,18 @@ rasgos) y marca el escalón resultante con `source = "manual"`, que el
 frontend distingue visualmente del resto en vez de mezclarlo con las
 fuentes automáticas.
 
+**Categorías especiales que nunca se detectan, ni siquiera de forma
+manual (ADR-35)**: la excepción anterior (autodeclaración manual) NO
+se extiende a cualquier categoría especial del art. 9 RGPD por
+igual. Salud/discapacidad y opinión política/afiliación se descartan
+también como selector manual -- a diferencia de un rasgo físico
+visible, no son equiparables a "lo que ya se ve en la foto de perfil".
+Y para origen étnico/racial, ADR-35 cierra explícitamente también la
+vía textual (NLP sobre bios/posts/comentarios) que ADR-34 no llegaba a
+mencionar: ni `vision/scene_analysis.py` ni
+`nlp/ai_attribute_extraction.py` la detectarán nunca, ni siquiera como
+mención textual explícita.
+
 === Geolocalización de fotos por similitud visual (módulo opcional)
 
 `vision/geolocation.py` estima la provincia más probable de una foto de

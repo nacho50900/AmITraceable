@@ -1926,3 +1926,67 @@ dado que es una acción puntual del usuario, no algo que ocurra en un
 bucle o con alta frecuencia; (-) cualquier ruta estática nueva que se
 añada bajo `/analyze/` en el futuro debe recordar declararse antes que
 `/analyze/{platform}` por el mismo motivo (ver gotcha arriba).
+
+=== ADR-35: Atributos que nunca se detectarán automáticamente (origen étnico/racial, salud/discapacidad, opinión política)
+
+*Contexto*: el pipeline automático (`vision/scene_analysis.py`,
+`nlp/ai_attribute_extraction.py`) ya infiere de forma autónoma varios
+atributos a partir de fotos y texto (edad, aficiones, estado
+sentimental...) para alimentar el estrechamiento de población y el
+`privacy_score`. El RGPD (art. 9) define como "categorías especiales"
+un conjunto de datos con riesgo de tratamiento agravado: origen
+étnico/racial, salud, opinión política, creencias religiosas,
+orientación sexual, datos biométricos/genéticos y afiliación sindical.
+ADR-34 ya excluyó la detección automática de rasgos físicos
+(ojos/pelo/piel) como proxy racial/étnico, permitiéndolos solo como
+autodeclaración manual del propio usuario -- pero esa decisión se
+limita a lo VISUAL y no fija un principio general para el resto de
+categorías especiales ni para otras vías de detección (texto).
+
+*Decisión*: tres atributos NUNCA se detectarán de forma automática --
+ni por visión (fotos) ni por texto (bios, posts, comentarios), ni
+siquiera como "detección textual explícita" de menciones -- en ningún
+punto futuro del pipeline:
+
+1. *Origen étnico/racial*: categoría especial de máximo riesgo del
+   RGPD. Generaliza y refuerza ADR-34: aquel ADR ya impedía inferirlo
+   de fotos (permitiendo solo la autodeclaración manual de
+   ojos/pelo/piel); este ADR cierra también la vía textual, que
+   ADR-34 no llegaba a mencionar explícitamente.
+2. *Salud/discapacidad*: también categoría especial (art. 9 RGPD). El
+   INE sí publica proporciones de discapacidad a nivel poblacional
+   (podrían alimentar una tabla de k-anonimato con el mismo patrón que
+   ADR-34), pero es información médica y se descarta incluso como
+   autodeclaración manual -- a diferencia de un rasgo físico visible,
+   una condición de salud no es equiparable a "lo que ya se ve en la
+   foto de perfil".
+3. *Opinión política/afiliación*: también categoría especial (art. 9
+   RGPD). El INE no la publica (haría falta recurrir al CIS), y más
+   allá de la calificación legal, el riesgo de sesgo o desinformación
+   de cualquier inferencia sobre postura política se considera
+   demasiado alto para justificar la función, incluso como opción
+   manual.
+
+*Alternativas descartadas*: replicar para salud y para opinión
+política el mismo patrón que ADR-34 usa para ojos/pelo/piel --
+selector manual (`ManualTraitsSelector.tsx`) + tabla de proporciones
+(INE para discapacidad, CIS para opinión política) + paso nuevo en
+`population_narrowing` vía `POST /api/analyze/recalculate`. Descartada
+para ambos casos: aunque el patrón técnico ya existe y sería trivial
+de replicar, salud y opinión política son cualitativamente distintas
+de un rasgo físico visible -- la primera es información médica; la
+segunda tiene, además, un problema de fiabilidad/sesgo que no depende
+de la fuente de datos.
+
+*Consecuencias*: (+) el límite del pipeline automático (y de
+`ManualTraitsSelector.tsx`) queda documentado como decisión
+deliberada, no como omisión -- cualquier ampliación futura que toque
+alguna de estas tres categorías debe justificarse explícitamente
+contra este ADR, no solo añadirse por analogía con ADR-34; (+) reduce
+el riesgo legal/ético del proyecto al no tocar las categorías de mayor
+riesgo del RGPD bajo ninguna vía (ni automática ni manual, salvo la
+excepción ya acotada de ADR-34 para rasgos físicos); (-) dos fuentes
+de datos potencialmente disponibles (discapacidad en INE, opinión
+política en CIS) quedan sin aprovechar en el cálculo de k-anonimato,
+que en teoría podría ser más completo con ellas.
+
