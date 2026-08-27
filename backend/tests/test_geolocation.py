@@ -630,7 +630,7 @@ class TestEstimateLocationsForPosts:
         monkeypatch.setattr(geolocation.settings, "enable_scene_analysis", True)
         monkeypatch.setattr(geolocation, "estimate_location_from_image", lambda image, k=15: None)
 
-        codes = VisualDescriptionCodes(personas="una", aficion="baloncesto", texto_visible=None)
+        codes = VisualDescriptionCodes(personas="una", aficion="baloncesto", texto_visible=None, indicio_pareja=True)
 
         def _fake_scene_analysis(image):
             return ([], False, "texto en español sin usar aquí", None, codes)

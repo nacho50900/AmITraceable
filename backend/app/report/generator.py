@@ -15,6 +15,7 @@ from app.models.schemas import (
     PopulationEstimate,
     PrivacyScore,
     SocialPost,
+    VisualDescriptionCodes,
     WritingFingerprint,
 )
 from app.data.ine_reference import (
@@ -293,6 +294,24 @@ def _apply_home_candidate(demographic_findings: DemographicFindings, home_candid
         demographic_findings.source["comunidad_autonoma"] = "imagen"
 
 
+def _to_visual_description_codes_schema(codes) -> VisualDescriptionCodes | None:
+    """Convierte el dataclass `scene_analysis.VisualDescriptionCodes`
+    (interno, ver geolocation.py::GeolocationOutcome.visual_description_codes)
+    al modelo Pydantic homónimo de app/models/schemas.py -- son dos tipos
+    distintos a propósito, para evitar un import circular (scene_analysis.py
+    ya importa de schemas.py para InferredAttribute). None si no había
+    codes para esta foto (modelo no disponible, inferencia falló...),
+    mismo criterio que ya usan visual_description/visual_description_general."""
+    if codes is None:
+        return None
+    return VisualDescriptionCodes(
+        personas=codes.personas,
+        aficion=codes.aficion,
+        texto_visible=codes.texto_visible,
+        indicio_pareja=codes.indicio_pareja,
+    )
+
+
 async def _apply_image_geolocation(
     platform: str,
     posts: list[SocialPost],
@@ -368,6 +387,9 @@ async def _apply_image_geolocation(
             created_utc=post_dates_by_permalink.get(permalink),
             visual_description=geo_outcome.visual_descriptions.get(estimate.photo_link or permalink),
             visual_description_general=geo_outcome.general_descriptions.get(estimate.photo_link or permalink),
+            visual_description_codes=_to_visual_description_codes_schema(
+                geo_outcome.visual_description_codes.get(estimate.photo_link or permalink)
+            ),
             # `permalink` aquí es el de la publicación SINTÉTICA que
             # estimate_locations_for_posts crea para el avatar -- que es
             # literalmente `avatar_url` (ver su docstring) -- así que

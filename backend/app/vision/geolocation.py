@@ -97,20 +97,6 @@ _igpu_worker_device_index = None
 # reintentar el worker en cada foto: cae a `_device` (local) de forma
 # permanente para el resto de la vida del proceso.
 _igpu_worker_failed = False
-
-
-def get_local_device() -> str | None:
-    """Dispositivo torch REAL ("cuda" o "cpu") donde corre DINOv2 EN ESTE
-    PROCESO cuando NO se despacha al worker de iGPU (ver `_device` arriba),
-    o `None` si `_lazy_load()` no se ha llamado todavía (modelo no cargado
-    -- p. ej. sin ninguna foto procesada aún). Mismo patrón que
-    `app.vision.scene_analysis.get_device()`: pensado para el logging de
-    rendimiento (ver app/log/performance_log.py), que necesita saber de
-    verdad dónde corrió el modelo, no asumirlo a partir de
-    `igpu_offload_used` -- ver el docstring de `dinov2_local_device` en
-    `log_photo_analysis_run`."""
-    return _device
-
 # Timeout HTTP contra el worker de iGPU -- generoso en la parte de
 # lectura (30s) porque la PRIMERA petición incluye la carga en frío del
 # modelo dentro del worker (ver `_load_model` en igpu_worker/app.py);
@@ -364,6 +350,22 @@ def _select_dinov2_device() -> str:
     import torch
 
     return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def get_local_device() -> str | None:
+    """Dispositivo LOCAL ("cuda" o "cpu", ver `_select_dinov2_device()`)
+    en el que correría DINOv2 en este proceso si no se despachase al
+    worker de iGPU -- o `None` si `_lazy_load()` no se ha llamado
+    todavía (índice no disponible, o análisis sin ninguna foto procesada
+    aún). Pensado para el logging de rendimiento (ver
+    app/log/performance_log.py), que necesita saber la GPU dedicada real
+    de esta máquina para poder explicar por qué DINOv2 y Moondream2
+    compiten entre sí cuando el offload a iGPU NO está activo -- devuelve
+    el dispositivo LOCAL siempre, independientemente de si el offload
+    acabó despachando la foto al worker o no (ver el docstring de
+    `_device` más arriba: el offload no cambia cuál sería el dispositivo
+    local, solo si se llega a usar de verdad para una foto concreta)."""
+    return _device
 
 
 def _select_igpu_worker_device_index(cuda_available: bool) -> int | None:

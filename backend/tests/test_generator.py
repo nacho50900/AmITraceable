@@ -179,6 +179,92 @@ class TestGenerateReportPlatformBranching:
         assert points_by_link["https://ig/carousel?img_index=2"].visual_description_general == "two people at a restaurant"
 
     @pytest.mark.asyncio
+    async def test_carousel_photos_get_their_own_visual_description_codes_by_photo_link(self, monkeypatch):
+        """ADR-30: visual_description_codes se busca por photo_link, EXACTAMENTE
+        igual que visual_description/visual_description_general (test de
+        arriba) -- mismo bug de carrusel posible si se buscara por
+        permalink en su lugar. También comprueba la conversión del
+        dataclass interno de scene_analysis.py al modelo Pydantic de
+        schemas.py (_to_visual_description_codes_schema)."""
+        from app.vision.scene_analysis import VisualDescriptionCodes as InternalCodes
+
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[
+                    (
+                        "https://ig/carousel",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.5, k_neighbors=15, mean_similarity=0.6,
+                            photo_link="https://ig/carousel?img_index=1",
+                        ),
+                    ),
+                    (
+                        "https://ig/carousel",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.5, k_neighbors=15, mean_similarity=0.6,
+                            photo_link="https://ig/carousel?img_index=2",
+                        ),
+                    ),
+                ],
+                visual_description_codes={
+                    "https://ig/carousel?img_index=1": InternalCodes(
+                        personas="una", aficion="playa", texto_visible=None, indicio_pareja=False
+                    ),
+                    "https://ig/carousel?img_index=2": InternalCodes(
+                        personas="varias", aficion=None, texto_visible="Restaurante Los Olivos", indicio_pareja=True
+                    ),
+                },
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+
+        report = await generate_report(
+            "instagram", "user",
+            [_post(platform="instagram", permalink="https://ig/carousel", media_urls=["https://cdn/1.jpg", "https://cdn/2.jpg"])],
+            _fingerprint(), [], _score(),
+        )
+
+        points_by_link = {p.permalink: p for p in report.image_location_points}
+        codes_1 = points_by_link["https://ig/carousel?img_index=1"].visual_description_codes
+        codes_2 = points_by_link["https://ig/carousel?img_index=2"].visual_description_codes
+        assert codes_1 is not None and codes_1.personas == "una" and codes_1.aficion == "playa"
+        assert codes_1.indicio_pareja is False
+        assert codes_2 is not None and codes_2.personas == "varias" and codes_2.texto_visible == "Restaurante Los Olivos"
+        assert codes_2.indicio_pareja is True
+
+    @pytest.mark.asyncio
+    async def test_visual_description_codes_none_when_absent(self, monkeypatch):
+        """Sin codes para una foto (modelo no disponible, fallo...),
+        visual_description_codes debe salir None -- no reventar ni dejar
+        un objeto vacío que el frontend interprete como "sí hay señales"."""
+
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[
+                    (
+                        "https://ig/1",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.5, k_neighbors=15, mean_similarity=0.6,
+                            photo_link="https://ig/1",
+                        ),
+                    ),
+                ],
+                visual_description_codes={},
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+
+        report = await generate_report(
+            "instagram", "user",
+            [_post(platform="instagram", permalink="https://ig/1", media_urls=["https://cdn/1.jpg"])],
+            _fingerprint(), [], _score(),
+        )
+
+        assert report.image_location_points[0].visual_description_codes is None
+
+    @pytest.mark.asyncio
     async def test_image_location_points_include_the_post_publication_date(self, monkeypatch):
         async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
             return geolocation.GeolocationOutcome(

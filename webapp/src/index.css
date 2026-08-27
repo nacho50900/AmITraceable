@@ -164,8 +164,8 @@ body {
 
 .platform-guide-tab-list {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  overflow-x: auto;
   padding-bottom: 0;
 }
 

@@ -74,7 +74,7 @@ class TestAnalyzeImageContent:
             "PERSONAS: una\nAFICION: Posible fan de baloncesto, aparece jugando\nPAREJA: no",
         )
 
-        inferences, indicio_pareja, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, indicio_pareja, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert len(inferences) == 1
         assert inferences[0].category == "aficion"
@@ -89,7 +89,7 @@ class TestAnalyzeImageContent:
         atribuírselo."""
         _install_fake_model(monkeypatch, "PERSONAS: ninguna\nAFICION: vinilo de música visible\nPAREJA: no")
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert len(inferences) == 1
 
@@ -99,7 +99,7 @@ class TestAnalyzeImageContent:
             "PERSONAS: varias\nAFICION: ninguno\nPAREJA: no\nTEXTO_VISIBLE: Bar Manolo",
         )
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert len(inferences) == 1
         assert inferences[0].category == "texto_visible"
@@ -118,7 +118,7 @@ class TestAnalyzeImageContent:
             "PERSONAS: varias\nAFICION: ninguno\nPAREJA: no\nTEXTO_VISIBLE: Ayuntamiento de Badajoz",
         )
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert len(inferences) == 1
         assert inferences[0].category == "texto_visible"
@@ -129,7 +129,7 @@ class TestAnalyzeImageContent:
             "PERSONAS: una\nAFICION: guitarra\nPAREJA: no\nTEXTO_VISIBLE: Bar Manolo",
         )
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         categories = {inferred.category for inferred in inferences}
         assert categories == {"aficion", "texto_visible"}
@@ -140,7 +140,7 @@ class TestAnalyzeImageContent:
             "PERSONAS: varias\nAFICION: ninguno\nPAREJA: no\nTEXTO_VISIBLE: ninguno",
         )
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
 
@@ -154,7 +154,7 @@ class TestAnalyzeImageContent:
             monkeypatch, "PERSONAS: varias\nAFICION: toca la guitarra\nPAREJA: no"
         )
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
 
@@ -164,7 +164,7 @@ class TestAnalyzeImageContent:
         personas es el caso típico para esta señal."""
         _install_fake_model(monkeypatch, "PERSONAS: varias\nAFICION: ninguno\nPAREJA: si")
 
-        inferences, indicio_pareja, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, indicio_pareja, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
         assert indicio_pareja is True
@@ -172,14 +172,14 @@ class TestAnalyzeImageContent:
     def test_unparseable_personas_value_discards_aficion_by_precaution(self, monkeypatch):
         _install_fake_model(monkeypatch, "PERSONAS: no lo sé\nAFICION: toca la guitarra\nPAREJA: no")
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
 
     def test_missing_personas_line_discards_aficion_by_precaution(self, monkeypatch):
         _install_fake_model(monkeypatch, "AFICION: toca la guitarra\nPAREJA: no")
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
 
@@ -187,14 +187,14 @@ class TestAnalyzeImageContent:
     def test_ninguno_variants_produce_no_inference(self, monkeypatch, negative_value):
         _install_fake_model(monkeypatch, f"PERSONAS: una\nAFICION: {negative_value}\nPAREJA: no")
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
 
     def test_missing_aficion_line_is_ignored_without_crashing(self, monkeypatch):
         _install_fake_model(monkeypatch, "PERSONAS: una\nPAREJA: no")
 
-        inferences, indicio_pareja, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, indicio_pareja, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -202,7 +202,7 @@ class TestAnalyzeImageContent:
     def test_missing_pareja_line_defaults_to_false(self, monkeypatch):
         _install_fake_model(monkeypatch, "PERSONAS: una\nAFICION: toca la guitarra")
 
-        inferences, indicio_pareja, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, indicio_pareja, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert len(inferences) == 1
         assert indicio_pareja is False
@@ -210,7 +210,7 @@ class TestAnalyzeImageContent:
     def test_completely_unexpected_format_degrades_without_crashing(self, monkeypatch):
         _install_fake_model(monkeypatch, "esto no sigue el formato pedido en absoluto")
 
-        inferences, indicio_pareja, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, indicio_pareja, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -218,7 +218,7 @@ class TestAnalyzeImageContent:
     def test_dependencies_not_installed_returns_empty_without_crashing(self, monkeypatch):
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: False)
 
-        inferences, indicio_pareja, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, indicio_pareja, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -227,7 +227,7 @@ class TestAnalyzeImageContent:
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
         monkeypatch.setattr(scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _RaisingModel()))
 
-        inferences, indicio_pareja, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, indicio_pareja, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -314,7 +314,7 @@ class TestAnalyzeImageContent:
             caption_answer="a person playing basketball",
         )
 
-        _, _, description, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        _, _, description, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert description == "Personas en la foto: una\nPosible afición o interés: Posible fan de baloncesto"
         # La descripción general (caption) NO se repite dentro de este bloque.
@@ -337,7 +337,7 @@ class TestAnalyzeImageContent:
             caption_answer="una escena cualquiera",
         )
 
-        _, _, description, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        _, _, description, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert description == "Personas en la foto: varias"
         assert "solo puede" not in description
@@ -349,7 +349,7 @@ class TestAnalyzeImageContent:
             caption_answer="una escena cualquiera",
         )
 
-        _, _, description, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        _, _, description, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert description == (
             "Personas en la foto: varias\nIndicio de contexto de pareja: sí\nTexto visible: Bar Manolo"
@@ -358,7 +358,7 @@ class TestAnalyzeImageContent:
     def test_description_is_none_when_dependencies_not_installed(self, monkeypatch):
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: False)
 
-        _, _, description, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        _, _, description, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert description is None
 
@@ -366,7 +366,7 @@ class TestAnalyzeImageContent:
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
         monkeypatch.setattr(scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _RaisingModel()))
 
-        _, _, description, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        _, _, description, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert description is None
 
@@ -377,14 +377,14 @@ class TestAnalyzeImageContent:
             caption_answer="4 people happily eating pizza on a terrace",
         )
 
-        _, _, _, descripcion_general, _ = scene_analysis.analyze_image_content(_fake_image())
+        _, _, _, descripcion_general, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert descripcion_general == "4 people happily eating pizza on a terrace"
 
     def test_descripcion_general_is_none_when_dependencies_not_installed(self, monkeypatch):
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: False)
 
-        _, _, _, descripcion_general, _ = scene_analysis.analyze_image_content(_fake_image())
+        _, _, _, descripcion_general, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert descripcion_general is None
 
@@ -480,6 +480,64 @@ class TestAnalyzeImageContent:
         la elimine de uno de los dos sin darse cuenta."""
         assert "variant" in scene_analysis._CAPTION_SETTINGS
         assert "variant" in scene_analysis._STRUCTURED_SETTINGS
+
+
+class TestVisualDescriptionCodes:
+    """ADR-30: codes es el 5º valor de analyze_image_content(), pensado
+    para que el frontend traduzca sin depender del texto ya redactado en
+    español de `descripcion_cruda` (el 3er valor, que se mantiene
+    intacto). Aquí solo se comprueba que `codes` refleja fielmente lo que
+    el modelo devolvió -- el parseo en sí (personas/afición/texto
+    visible) ya está cubierto en las clases TestParse* de abajo."""
+
+    def test_codes_mirror_the_parsed_values(self, monkeypatch):
+        _install_fake_model(
+            monkeypatch,
+            "PERSONAS: una\nAFICION: guitarra eléctrica\nPAREJA: no\nTEXTO_VISIBLE: Bar El Rincón",
+        )
+
+        _, _, _, _, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert codes.personas == "una"
+        assert codes.aficion is not None and "guitarra" in codes.aficion.lower()
+        assert codes.texto_visible == "Bar El Rincón"
+        assert codes.indicio_pareja is False
+
+    def test_codes_indicio_pareja_true(self, monkeypatch):
+        _install_fake_model(monkeypatch, "PERSONAS: varias\nAFICION: ninguno\nPAREJA: si")
+
+        _, _, _, _, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert codes.indicio_pareja is True
+
+    def test_codes_personas_never_ninguna(self, monkeypatch):
+        """Mismo filtro que _build_clean_summary aplica al texto en
+        español: 'ninguna' no es señal, así que codes.personas debe salir
+        None, no la cadena 'ninguna' -- para que el frontend nunca tenga
+        que replicar este filtro por su cuenta ni pueda mostrarlo por
+        error si algún día deja de usar _build_clean_summary."""
+        _install_fake_model(monkeypatch, "PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no")
+
+        _, _, _, _, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert codes.personas is None
+
+    def test_codes_none_on_model_unavailable(self, monkeypatch):
+        monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: False)
+
+        *_, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert codes is None
+
+    def test_codes_none_on_model_failure(self, monkeypatch):
+        monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
+        monkeypatch.setattr(
+            scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _RaisingModel())
+        )
+
+        *_, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert codes is None
 
 
 class TestParseDescripcion:

@@ -89,6 +89,39 @@ logger = logging.getLogger(__name__)
 _MODEL_NAME = "vikhyatk/moondream2"
 _MODEL_REVISION = "2025-06-21"  # fijado explícitamente, ver docstring del modelo en HuggingFace
 
+
+@dataclass(frozen=True)
+class VisualDescriptionCodes:
+    """Señales de este módulo ya parseadas pero SIN formatear a texto en
+    español -- a diferencia de `descripcion_cruda` (la frase ya redactada
+    que se sigue devolviendo tal cual, sin tocar, para no romper nada de
+    lo que ya consume: la vista de detalle del frontend en español y el
+    contexto que recibe Mistral en app/ai_analysis.py), esto es para
+    internacionalización (ver ADR-30): el frontend traduce `personas`
+    (vocabulario cerrado: "una"/"varias", nunca "ninguna" -- mismo filtro
+    que ya aplica `_build_clean_summary`) él mismo, sin llamar al backend,
+    y solo pide traducción real a `/analyze/translate-descriptions` para
+    `aficion` (vocabulario semi-libre) cuando la UI está en un idioma
+    distinto del español.
+
+    `texto_visible` NUNCA se traduce (es texto literal leído de la foto --
+    un cartel, una matrícula -- traducirlo falsearía la evidencia; el
+    frontend lo muestra tal cual venga, en cualquier idioma de UI).
+
+    `indicio_pareja` es un booleano (vocabulario cerrado, como `personas`)
+    -- se repite aquí aunque `analyze_image_content()` ya lo devuelve por
+    separado como su propio valor de retorno (2º de la tupla, usado para
+    `partner_signal_permalinks` a nivel de PUBLICACIÓN en geolocation.py),
+    porque ese otro valor no llega intacto hasta el frontend por FOTO --
+    aquí sí, con la misma clave (`photo_link`) que el resto de estas
+    señales."""
+
+    personas: str | None
+    aficion: str | None
+    texto_visible: str | None
+    indicio_pareja: bool
+
+
 _model = None
 # Dispositivo REAL en el que quedó cargado Moondream2 tras `_lazy_load()`
 # ("cuda:0" o "cpu", ver el `_actual_device = next(_model.parameters()).device`
@@ -776,38 +809,11 @@ def _upcast_bfloat16_tensors():
         _upcast_unregistered_dataclass_tensors(_model, target_dtype)
 
 
-@dataclass
-class VisualDescriptionCodes:
-    """Señales visuales de UNA foto SIN formatear a texto en español --
-    misma información que las cuatro líneas de `descripcion_cruda` (ver
-    `_build_clean_summary`), pero como códigos/valores planos en vez de
-    una frase ya redactada. Pensado para que el frontend pueda traducir
-    sin depender del texto en español ya construido -- ver ADR-30:
-    `personas` es un código cerrado ("una"/"varias"/None) que el propio
-    frontend traduce vía i18n sin llamar al backend; `aficion` es texto
-    semi-libre que solo se traduce de verdad (endpoint
-    `/analyze/translate-descriptions`) si la UI no está en español;
-    `texto_visible` NUNCA se traduce, es texto literal leído de la foto.
-
-    `app.models.schemas.VisualDescriptionCodes` es el espejo serializable
-    (Pydantic) de esta misma clase -- mismos cuatro campos, pero como
-    modelo Pydantic para poder formar parte de `ImageLocationPoint` sin
-    crear un import circular (este módulo ya importa de `app.models.schemas`
-    para `InferredAttribute`, ver import arriba). `report/generator.py`
-    hace la conversión trivial de un objeto al otro al construir
-    `ImageLocationPoint`."""
-
-    personas: str | None = None
-    aficion: str | None = None
-    texto_visible: str | None = None
-    indicio_pareja: bool = False
-
-
 def analyze_image_content(
     image,
 ) -> tuple[list[InferredAttribute], bool, str | None, str | None, VisualDescriptionCodes | None]:
     """Devuelve (inferencias_visuales, indicio_pareja, descripcion_cruda,
-    descripcion_general, description_codes) para UNA foto ya decodificada (PIL.Image, la
+    descripcion_general) para UNA foto ya decodificada (PIL.Image, la
     misma que usa geolocation.py para el embedding de DINOv2 -- no se
     descarga ni decodifica de nuevo). SÍNCRONA y con trabajo de CPU/GPU
     real (como `estimate_location_from_image`): quien llama debe
@@ -864,12 +870,8 @@ def analyze_image_content(
     cabecera del módulo, mismo criterio que ya se aplica al resto de
     campos).
 
-    None en cualquiera de los cuatro primeros valores si el modelo no está
-    disponible o la inferencia falla. `description_codes` es None en los
-    mismos casos (mismo criterio: "esta foto no aportó nada"), y si no es
-    None, sus cuatro campos reflejan exactamente los mismos valores ya
-    parseados que `descripcion_cruda` -- ver VisualDescriptionCodes arriba
-    y ADR-30.
+    None en cualquiera de los cuatro valores si el modelo no está
+    disponible o la inferencia falla.
 
     `evidence` de cada InferredAttribute se deja vacío deliberadamente --
     quien llama (geolocation.py) rellena el permalink de la publicación,
@@ -877,8 +879,8 @@ def analyze_image_content(
 
     Nunca lanza: cualquier fallo (dependencias no instaladas, modelo no
     descargable, respuesta con formato inesperado) se trata como "esta
-    foto no aportó nada" y devuelve ([], False, None, None, None), sin
-    abortar el análisis de las demás fotos."""
+    foto no aportó nada" y devuelve ([], False, None, None), sin abortar
+    el análisis de las demás fotos."""
     if not _scene_analysis_available():
         # Causa más habitual: no se ha instalado requirements-vision.txt
         # completo. En particular, construir el índice FAISS (ver
@@ -959,14 +961,18 @@ def analyze_image_content(
 
     inferencias = _parse_inferences(structured)
     descripcion_cruda = _build_clean_summary(personas, aficion_raw, indicio_pareja, texto_visible)
-    description_codes = VisualDescriptionCodes(
-        personas=personas,
+    # Mismo filtro que _build_clean_summary aplica a `personas` para el
+    # texto en español (solo "una"/"varias" son señal, no "ninguna") --
+    # se repite aquí para que los códigos estructurados y el texto ya
+    # redactado nunca se contradigan entre sí.
+    codes = VisualDescriptionCodes(
+        personas=personas if personas in ("una", "varias") else None,
         aficion=aficion_raw,
         texto_visible=texto_visible,
         indicio_pareja=indicio_pareja,
     )
 
-    return inferencias, indicio_pareja, descripcion_cruda, descripcion_general, description_codes
+    return inferencias, indicio_pareja, descripcion_cruda, descripcion_general, codes
 
 
 def _parse_descripcion(answer: str) -> str | None:
