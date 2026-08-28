@@ -768,6 +768,30 @@ class TestPracticaDeportivaStep:
             steps = estimate_population_narrowing(DemographicFindings(practica_deportiva=value))
             assert steps[0].attribute_label == f"Práctica deportiva: {label}"
 
+    def test_second_batch_of_modalities_have_distinct_labels(self):
+        """Segunda ampliación de la tabla (mismas fuente y edición 2022,
+        modalidades que faltaban): mismo criterio que el test anterior."""
+        expected = {
+            "futbol_sala": "Fútbol sala",
+            "golf": "Golf",
+            "yoga_pilates": "Yoga / pilates",
+            "gimnasia_intensa": "Gimnasia intensa (aerobic/zumba/spinning)",
+        }
+        for value, label in expected.items():
+            steps = estimate_population_narrowing(DemographicFindings(practica_deportiva=value))
+            assert steps[0].attribute_label == f"Práctica deportiva: {label}"
+
+    def test_golf_is_not_double_discounted_by_the_573_percent_filter(self):
+        """Regresión específica para el único caso especial de la tabla
+        (ver comentario en ine_reference.py): golf ya viene expresado
+        sobre la POBLACIÓN TOTAL (1,2%), no sobre quienes practicaron
+        algún deporte -- si alguien "corrigiera" esto multiplicándolo por
+        0.573 como el resto de modalidades, la población restante
+        calculada sería artificialmente más pequeña de lo real."""
+        steps = estimate_population_narrowing(DemographicFindings(practica_deportiva="golf"))
+        assert SPORT_PRACTICE_DISTRIBUTION["golf"] == 0.012
+        assert steps[0].remaining_population == round(TOTAL_POPULATION_ES * 0.012)
+
     def test_none_produces_no_step(self):
         assert estimate_population_narrowing(DemographicFindings(practica_deportiva=None)) == []
 
@@ -781,12 +805,13 @@ class TestPracticaDeportivaStep:
         """Regresión conceptual: a diferencia de ZODIAC_DISTRIBUTION o
         SEXUAL_ORIENTATION_DISTRIBUTION (que SÍ deben sumar 1, ver sus
         propios tests), SPORT_PRACTICE_DISTRIBUTION es de una encuesta de
-        respuesta múltiple -- que la suma actual (~0,98 con las 9
-        modalidades cubiertas) esté cerca de 1 es COINCIDENCIA, no una
-        señal de que en realidad sea una partición: si mañana se añade
-        una décima modalidad y la suma superase 1, seguiría siendo
-        correcto (cada persona puede sumar en varias a la vez). Este test
-        documenta la intención (no debe forzarse a sumar exactamente 1),
-        no impone un valor concreto de la suma."""
+        respuesta múltiple -- que la suma actual esté cerca de 1 (o lo
+        supere, como ocurre ahora con 13 modalidades) es COINCIDENCIA/
+        consecuencia esperada, no una señal de que en realidad sea una
+        partición: cada persona puede sumar en varias modalidades a la
+        vez, así que la suma puede superar 1 sin que eso sea un error.
+        Este test documenta la intención (no debe forzarse a sumar
+        exactamente 1 ni a quedarse por debajo), no impone un límite
+        concreto de la suma."""
         total = sum(SPORT_PRACTICE_DISTRIBUTION.values())
-        assert total < 1.0
+        assert total > 0.5  # sanity check: no vacío ni con valores absurdamente bajos

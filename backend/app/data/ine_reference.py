@@ -795,17 +795,39 @@ OCCUPATION_DISTRIBUTION = {
 # tabla porque 2022 sí tiene cifras verificadas de TODAS estas
 # modalidades desde una única edición consistente (misma base
 # poblacional para las 9), evitando mezclar años distintos.
+#
+# "yoga_pilates" y "gimnasia_intensa" son aproximaciones: la encuesta NO
+# desglosa yoga/pilates/tai-chi por separado, los agrupa en la categoría
+# "gimnasia suave, mantenimiento" (igual que agrupa aerobic/step/zumba/
+# spinning en "gimnasia intensa"). Se usa la cifra del grupo completo
+# porque no existe un desglose más fino en ninguna edición de la
+# encuesta -- a diferencia del resto de la tabla, no hay una
+# correspondencia 1:1 exacta entre la frase-ancla del regex y la
+# categoría de la encuesta, solo una aproximación razonable (el resto de
+# actividades del grupo que NO se declaran con esas frases-ancla
+# concretas -- p. ej. "hago gimnasia de mantenimiento" sin más detalle --
+# simplemente no se detectan, no se cuentan de más).
 SPORT_PRACTICE_DISTRIBUTION = {
     "senderismo": round(0.308 * 0.573, 3),   # "senderismo y montañismo"
     "ciclismo": round(0.284 * 0.573, 3),
+    "gimnasia_intensa": round(0.280 * 0.573, 3),  # aerobic/step/zumba/spinning -- ver nota arriba
     "natacion": round(0.272 * 0.573, 3),
+    "yoga_pilates": round(0.264 * 0.573, 3),  # "gimnasia suave, mantenimiento" -- ver nota arriba
     "running": round(0.190 * 0.573, 3),      # "carrera a pie"
     "musculacion": round(0.170 * 0.573, 3),  # "musculación y halterofilia"
     "padel": round(0.158 * 0.573, 3),
     "futbol": round(0.145 * 0.573, 3),       # "fútbol 11 y 7"
     "baloncesto": round(0.097 * 0.573, 3),
+    "futbol_sala": round(0.081 * 0.573, 3),  # "fútbol sala, futbito, fútbol 7 y fútbol playa" -- distinto de "futbol" (11 y 7) de arriba
     "tenis": round(0.080 * 0.573, 3),
+    # Golf es la ÚNICA excepción de toda la tabla: el dato publicado ya
+    # viene expresado directamente sobre la POBLACIÓN TOTAL (1,2%), no
+    # sobre quienes practicaron algún deporte -- por eso NO se multiplica
+    # por 0.573 como el resto (multiplicarlo otra vez sería aplicar el
+    # filtro de "practicó algún deporte" dos veces).
+    "golf": 0.012,
 }
+
 
 # Reparto por nacionalidad (española vs. extranjera), INE -- Censo Anual de
 # Población a 1 de enero de 2025, mismo corte temporal que

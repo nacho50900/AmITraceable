@@ -406,6 +406,67 @@ class TestSportPractice:
         findings = extract_demographics([_post("Vi el partido de baloncesto anoche")])
         assert findings.practica_deportiva is None
 
+    def test_detects_futbol_sala_practice(self):
+        findings = extract_demographics([_post("Juego al futbol sala en una liga amateur los jueves")])
+        assert findings.practica_deportiva == "futbol_sala"
+
+    def test_detects_futbito_as_futbol_sala(self):
+        findings = extract_demographics([_post("Juego al futbito con mis amigos los viernes")])
+        assert findings.practica_deportiva == "futbol_sala"
+
+    def test_futbol_sala_is_not_confused_with_futbol(self):
+        """Caso motivador: 'futbol' es substring de 'futbol sala', así que
+        el orden de alternancia en _SPORT_PRACTICE_RE importa -- si el
+        grupo 'futbol' se comprobara primero, 'juego al futbol sala'
+        haría match como 'futbol' (con \\b justo antes de 'sala'), nunca
+        llegando a probar la alternativa 'futbol_sala'."""
+        findings = extract_demographics([_post("Juego al futbol sala todos los jueves")])
+        assert findings.practica_deportiva == "futbol_sala"
+        assert findings.practica_deportiva != "futbol"
+
+    def test_futbol_sala_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Vi un torneo de futbol sala este finde")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_golf_practice(self):
+        findings = extract_demographics([_post("Juego al golf todos los fines de semana")])
+        assert findings.practica_deportiva == "golf"
+
+    def test_golf_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Vi el masters de golf en la television")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_yoga_practice(self):
+        findings = extract_demographics([_post("Practico yoga cada manana antes de trabajar")])
+        assert findings.practica_deportiva == "yoga_pilates"
+
+    def test_detects_pilates_as_yoga_pilates(self):
+        findings = extract_demographics([_post("Voy a clases de pilates dos veces por semana")])
+        assert findings.practica_deportiva == "yoga_pilates"
+
+    def test_yoga_generic_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Me encanta el yoga como filosofia de vida")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_zumba_as_gimnasia_intensa(self):
+        findings = extract_demographics([_post("Hago zumba los martes y jueves en el polideportivo")])
+        assert findings.practica_deportiva == "gimnasia_intensa"
+
+    def test_detects_spinning_as_gimnasia_intensa(self):
+        findings = extract_demographics([_post("Voy a spinning tres veces por semana")])
+        assert findings.practica_deportiva == "gimnasia_intensa"
+
+    def test_gimnasia_intensa_generic_mention_is_not_detected(self):
+        findings = extract_demographics([_post("La gimnasia intensa quema muchas calorias")])
+        assert findings.practica_deportiva is None
+
+    def test_crossfit_stays_musculacion_not_gimnasia_intensa(self):
+        """'hago crossfit' debe seguir cayendo en 'musculacion' (donde ya
+        estaba antes de añadir 'gimnasia_intensa'), no detectarse dos
+        veces ni cambiar de categoria."""
+        findings = extract_demographics([_post("Hago crossfit en el box de mi barrio")])
+        assert findings.practica_deportiva == "musculacion"
+
     def test_no_match_leaves_none(self):
         findings = extract_demographics([_post("Hoy fui al parque con mi perro")])
         assert findings.practica_deportiva is None

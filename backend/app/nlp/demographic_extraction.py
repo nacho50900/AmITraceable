@@ -462,6 +462,8 @@ def _try_detect_ocupacion(text: str, permalink: str, findings: DemographicFindin
 # `match.lastgroup` sea directamente la clave de la modalidad detectada.
 _SPORT_PRACTICE_RE = re.compile(
     r"\b(?:"
+    r"(?P<futbol_sala>juego (?:al |a )?futbol sala\b|juego (?:al |a )?futbito\b|"
+    r"practico futbol sala\b|practico futbito\b|entreno (?:al |a )?futbol sala\b)|"
     r"(?P<futbol>juego (?:al |a )?futbol\b|soy futbolista\b|practico futbol\b|entreno (?:al |a )?futbol\b)|"
     r"(?P<running>hago running\b|soy runner\b|salgo a correr\b|"
     r"corro (?:todas las semanas|cada semana|a diario|con regularidad)\b|"
@@ -478,7 +480,24 @@ _SPORT_PRACTICE_RE = re.compile(
     r"(?P<padel>juego (?:al |a )?padel\b|practico padel\b)|"
     r"(?P<tenis>juego (?:al |a )?tenis\b|practico tenis\b)|"
     r"(?P<baloncesto>juego (?:al |a )?baloncesto\b|practico baloncesto\b|"
-    r"soy jugador de baloncesto\b|soy jugadora de baloncesto\b)"
+    r"soy jugador de baloncesto\b|soy jugadora de baloncesto\b)|"
+    r"(?P<golf>juego (?:al |a )?golf\b|practico golf\b|soy golfista\b)|"
+    # yoga_pilates: aproxima la categoría "gimnasia suave" de la encuesta
+    # (ver nota en ine_reference.py) -- yoga, pilates y tai-chi son las
+    # formas más habituales en que la gente lo declara en primera
+    # persona; "gimnasia de mantenimiento" sin más detalle no tiene una
+    # frase-ancla propia porque es demasiado genérica para distinguirla
+    # de una mención de espectador o de otra actividad.
+    r"(?P<yoga_pilates>hago yoga\b|practico yoga\b|voy a clases de yoga\b|"
+    r"hago pilates\b|practico pilates\b|voy a clases de pilates\b|"
+    r"hago tai chi\b|practico tai chi\b)|"
+    # gimnasia_intensa: aproxima la categoría homónima de la encuesta
+    # (aerobic/step/zumba/spinning) -- "hago crossfit" queda deliberadamente
+    # en el grupo de musculacion de arriba, no aquí, para no detectar dos
+    # veces la misma frase.
+    r"(?P<gimnasia_intensa>hago aerobic\b|hago step\b|hago zumba\b|"
+    r"voy a clases de zumba\b|hago spinning\b|voy a spinning\b|"
+    r"voy a clases dirigidas de gimnasia\b)"
     r")",
     re.I,
 )

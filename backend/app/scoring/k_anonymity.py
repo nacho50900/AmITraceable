@@ -489,10 +489,14 @@ _SPORT_LABELS = {
     "running": "Running / atletismo",
     "natacion": "Natación",
     "futbol": "Fútbol",
+    "futbol_sala": "Fútbol sala",
     "ciclismo": "Ciclismo",
     "padel": "Pádel",
     "tenis": "Tenis",
     "baloncesto": "Baloncesto",
+    "golf": "Golf",
+    "yoga_pilates": "Yoga / pilates",
+    "gimnasia_intensa": "Gimnasia intensa (aerobic/zumba/spinning)",
 }
 
 
