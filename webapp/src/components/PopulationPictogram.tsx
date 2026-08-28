@@ -58,7 +58,7 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({
 
   if (totalFigures > MAX_FIGURES) {
     const compactSize = isLarge ? 220 : 20;
-    // El icono compacto representa la PROPORCIÓN ("1 de cada X"), no el
+    // El icono compacto representa la PROPORCIÓN ("en X"), no el
     // total absoluto de personas -- ese total ya se muestra por separado
     // encima, en la frase "En España hay X personas..." (ver
     // PopulationNarrowingTable.tsx). Mostrar aquí también el total
@@ -66,7 +66,13 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({
     // semánticamente incorrecto: el monigote no representa "eres 1 de
     // 17.838 personas", representa "1 de cada X españoles al azar tiene
     // tus rasgos" -- X es `totalFigures` (1/proportion), no
-    // `remainingPopulation`.
+    // `remainingPopulation`. El monigote turquesa (uno mismo) + "en X" +
+    // el icono de grupo (grupo.png, el resto de los X) van en una sola
+    // fila -- ver `.pictogram-compact { flex-wrap: nowrap }` en index.css.
+    // A diferencia del monigote turquesa, grupo.png tiene tamaño FIJO
+    // (15x15px) tanto en modo compacto normal como en `size="large"`: es
+    // un icono decorativo pequeño junto a la frase, no debe escalar como
+    // el resto de la ilustración.
     const ratioLabel = totalFigures.toLocaleString(numberLocale);
     return (
       <div
@@ -86,6 +92,12 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({
         <span className="pictogram-compact-label">
           {t('components.populationPictogram.compactLabel', { ratio: ratioLabel })}
         </span>
+        <img
+          src="/grupo.png"
+          alt=""
+          className="pictogram-figure pictogram-group-figure"
+          style={{ width: 15, height: 15 }}
+        />
       </div>
     );
   }

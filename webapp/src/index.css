@@ -860,11 +860,24 @@ body {
 
 .pictogram-compact {
   gap: 6px;
+  /* Monigote + "en X" + icono de grupo deben ir siempre en una sola fila,
+     nunca partirse en dos líneas aunque el contenedor sea estrecho (a
+     diferencia de .pictogram, que si puede envolver su rejilla grande de
+     monigotes). */
+  flex-wrap: nowrap;
 }
 
 .pictogram-compact .pictogram-figure {
   width: 20px;
   height: 20px;
+  flex-shrink: 0;
+}
+
+.pictogram-group-figure {
+  /* Icono de grupo (grupo.png): representa al resto de personas de la
+     proporción ("en X"), en contraste con el monigote individual
+     turquesa que representa a uno mismo. */
+  opacity: 0.85;
 }
 
 .pictogram-compact-label {
