@@ -10,6 +10,11 @@
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=nacho50900_Echo&metric=coverage)](https://sonarcloud.io/summary/new_code?id=nacho50900_Echo)
 [![Release](https://github.com/nacho50900/AmITraceable/actions/workflows/release-deploy.yml/badge.svg)](https://github.com/nacho50900/AmITraceable/actions/workflows/release-deploy.yml)
 
+
+https://github.com/user-attachments/assets/bc91d3e4-bbb0-44b1-be25-00c0aba36d51
+
+
+
 > Base de este proyecto: plantilla de laboratorio ASW (Uniovi) `yovi_en1b`.
 > Se ha adaptado sustituyendo el dominio (usuarios/juego → análisis de
 > exposición de identidad digital) y sustituyendo el servicio `users` de
