@@ -262,6 +262,39 @@ class TestEstimateLocationFromImage:
 
         assert geolocation.estimate_location_from_image(_FakeImage(), k=4) is not None
 
+    def test_marks_non_representative_when_confidence_is_too_low_even_with_low_spread(self, monkeypatch):
+        """Segundo criterio independiente de `representative=False` (ver
+        `_MIN_CONFIDENCE_FOR_REPRESENTATIVE`): aunque los vecinos estén
+        geográficamente CERCA entre sí (spread bajo), si la provincia
+        "ganadora" solo se lleva un 20% de los votos (5 provincias
+        distintas repartidas casi a partes iguales entre 10 vecinos), esa
+        "victoria" no es significativa. No debe confundirse con el
+        criterio de dispersión geográfica, que aquí NO se dispara."""
+        meta = pd.DataFrame(
+            {
+                "id": [str(i) for i in range(10)],
+                # Todos los vecinos casi en el mismo punto: spread muy bajo.
+                "lat": [40.0 + i * 0.001 for i in range(10)],
+                "lon": [-3.7 + i * 0.001 for i in range(10)],
+                # 5 provincias con 2 votos cada una: la ganadora empata a 2/10 = 0.20.
+                "region": [
+                    "Madrid", "Madrid",
+                    "Toledo", "Toledo",
+                    "Avila", "Avila",
+                    "Segovia", "Segovia",
+                    "Guadalajara", "Guadalajara",
+                ],
+            }
+        )
+        _install_fake_index(monkeypatch, meta, search_indices=list(range(10)))
+        _install_fake_embedding(monkeypatch)
+
+        result = geolocation.estimate_location_from_image(_FakeImage(), k=10)
+
+        assert result is not None
+        assert result.confidence == 0.2
+        assert result.representative is False
+
     def test_uses_exif_gps_directly_without_calling_the_model(self, monkeypatch):
         """Si la foto trae GPS real en el EXIF, se usa directamente (la
         región conocida más cercana a esas coordenadas) y NO se llama al

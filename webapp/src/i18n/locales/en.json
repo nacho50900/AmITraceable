@@ -252,13 +252,17 @@
       "practica_deportiva": {
         "senderismo": "Hiking / mountaineering",
         "ciclismo": "Cycling",
+        "gimnasia_intensa": "High-intensity fitness classes (aerobics/zumba/spinning)",
         "natacion": "Swimming",
+        "yoga_pilates": "Yoga / pilates",
         "running": "Running / athletics",
         "musculacion": "Weight training / gym",
         "padel": "Padel",
         "futbol": "Football",
+        "futbol_sala": "Futsal",
         "baloncesto": "Basketball",
-        "tenis": "Tennis"
+        "tenis": "Tennis",
+        "golf": "Golf"
       }
     }
   },

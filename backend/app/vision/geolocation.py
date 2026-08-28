@@ -21,12 +21,14 @@ descarta) una estimación cuando la foto no tiene contenido suficientemente
 distintivo como para geolocalizarla con algún sentido -- p.ej. una foto
 donde solo se ve el mar y la espalda de alguien puede parecerse,
 visualmente, a imágenes de referencia de medio litoral español a la vez.
-Ver `_neighbor_spread_km` / `_MAX_NEIGHBOR_SPREAD_KM`: si los vecinos más
-parecidos están repartidos por una zona demasiado amplia, ninguna
-provincia "ganadora" sería significativa como CONCLUSIÓN de residencia
-(ver `_infer_home_region` en report/generator.py, que filtra por este
-campo) -- pero la estimación sigue siendo información real y se sigue
-mostrando en el mapa con su confianza real, no se oculta.
+Dos criterios independientes, cualquiera de los dos basta:
+ver `_neighbor_spread_km` / `_MAX_NEIGHBOR_SPREAD_KM` (vecinos repartidos
+por una zona demasiado amplia) y `_MIN_CONFIDENCE_FOR_REPRESENTATIVE`
+(menos del 30% de los vecinos coincidieron en la provincia "ganadora").
+En ambos casos ninguna provincia "ganadora" sería significativa como
+CONCLUSIÓN de residencia (ver `_infer_home_region` en report/generator.py,
+que filtra por este campo) -- pero la estimación sigue siendo información
+real y se sigue mostrando en el mapa con su confianza real, no se oculta.
 """
 import asyncio
 import io
@@ -68,6 +70,19 @@ _MODEL_NAME = "facebook/dinov2-small"
 # práctica resulta demasiado (o poco) permisivo.
 _MAX_NEIGHBOR_SPREAD_KM = 300.0
 _MIN_NEIGHBORS_WITH_COORDS_FOR_SPREAD_CHECK = 3
+
+# Segundo criterio (independiente del anterior) de "foto no representativa":
+# si menos del 30% de los k vecinos más parecidos coinciden en la provincia
+# "ganadora" (confidence = votes / k), esa mayoría es demasiado débil para
+# significar nada -- casi tan probable habría sido cualquier otra provincia
+# de las que aparecen repartidas entre el resto de vecinos. Igual que con
+# _MAX_NEIGHBOR_SPREAD_KM, NO se descarta la estimación (sigue siendo
+# información real, se sigue mostrando en el mapa con su confianza real),
+# solo se marca `representative=False` para excluirla de la conclusión de
+# residencia. 0.30 es un punto de partida razonable, no una cifra derivada
+# de ningún estudio -- ajustable si en la práctica resulta demasiado (o
+# poco) permisivo.
+_MIN_CONFIDENCE_FOR_REPRESENTATIVE = 0.30
 
 # Carga perezosa: el modelo/índice solo se cargan la primera vez que se usan,
 # para no penalizar el arranque de la app cuando este módulo no se necesita.
@@ -578,6 +593,7 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
 
     vote_counts = Counter(provinces)
     top_province, votes = vote_counts.most_common(1)[0]
+    confidence = round(votes / k, 2)
 
     # Centroide de los vecinos que coincidieron con la provincia ganadora
     # (no de todos los k, para que el punto no se desplace hacia vecinos de
@@ -586,20 +602,25 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
     lat = float(matching["lat"].mean()) if "lat" in matching and not matching["lat"].isna().all() else None
     lon = float(matching["lon"].mean()) if "lon" in matching and not matching["lon"].isna().all() else None
 
-    # Foto no representativa (ver _MAX_NEIGHBOR_SPREAD_KM más arriba): sus
-    # vecinos más parecidos están repartidos por medio país, así que
-    # cualquier provincia "ganadora" sería arbitraria. NO se descarta la
-    # estimación entera (eso la haría desaparecer también del mapa, donde
-    # es información legítima: "esto es lo más parecido que encontramos,
-    # aunque poco fiable") -- se marca `representative=False` para que
+    # Foto no representativa (dos criterios independientes, ver constantes
+    # arriba): (a) sus vecinos más parecidos están repartidos por medio
+    # país, así que cualquier provincia "ganadora" sería arbitraria, o (b)
+    # la confianza de esa "victoria" es demasiado baja (menos del 30% de
+    # los vecinos coincidieron). NO se descarta la estimación entera (eso
+    # la haría desaparecer también del mapa, donde es información
+    # legítima: "esto es lo más parecido que encontramos, aunque poco
+    # fiable") -- se marca `representative=False` para que
     # `_infer_home_region` la excluya de la conclusión de residencia, sin
     # dejar de mostrarla con su confianza real en `image_location_points`.
     spread = _neighbor_spread_km(neighbor_rows)
-    representative = spread is None or spread <= _MAX_NEIGHBOR_SPREAD_KM
+    representative = (
+        (spread is None or spread <= _MAX_NEIGHBOR_SPREAD_KM)
+        and confidence >= _MIN_CONFIDENCE_FOR_REPRESENTATIVE
+    )
 
     return ImageLocationEstimate(
         province=top_province,
-        confidence=round(votes / k, 2),
+        confidence=confidence,
         k_neighbors=k,
         mean_similarity=round(float(np.mean(similarities)), 3),
         lat=round(lat, 4) if lat is not None else None,

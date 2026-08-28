@@ -252,13 +252,17 @@
       "practica_deportiva": {
         "senderismo": "Senderismo / montañismo",
         "ciclismo": "Ciclismo",
+        "gimnasia_intensa": "Gimnasia intensa (aerobic/zumba/spinning)",
         "natacion": "Natación",
+        "yoga_pilates": "Yoga / pilates",
         "running": "Running / atletismo",
         "musculacion": "Musculación / gimnasio",
         "padel": "Pádel",
         "futbol": "Fútbol",
+        "futbol_sala": "Fútbol sala",
         "baloncesto": "Baloncesto",
-        "tenis": "Tenis"
+        "tenis": "Tenis",
+        "golf": "Golf"
       }
     }
   },
