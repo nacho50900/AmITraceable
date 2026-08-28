@@ -323,7 +323,7 @@
     "populationPictogram": {
       "compactAriaLabel": "Aproximadamente {{percent}} de la población: 1 de cada {{ratio}} personas",
       "gridAriaLabel": "Aproximadamente {{percent}} de la población comparte esta característica ({{population}} personas)",
-      "compactLabel": "1 de cada {{ratio}}"
+      "compactLabel": "en {{ratio}}"
     },
     "locationMap": {
       "unknownDate": "fecha desconocida",
