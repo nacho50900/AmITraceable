@@ -68,17 +68,18 @@ _LAST_VERIFIED: dict[str, date | None] = {
     # saltaría permanentemente sin que haya nada nuevo que revisar. Se
     # comprueba con un umbral mucho más largo (ver STALE_THRESHOLDS).
     "LANGUAGE_BY_CCAA": date(2021, 1, 1),
-    # Encuesta de Hábitos Deportivos en España (Ministerio de Cultura y
-    # Deporte + Consejo Superior de Deportes, con colaboración del INE en
-    # el diseño muestral) -- periodicidad quinquenal. Edición usada: 2022
-    # (trabajo de campo may.-sep.2022, publicada dic.2022), la más
-    # reciente con desglose completo verificado por modalidad (incluye
-    # ciclismo/pádel/tenis/baloncesto, que la edición 2020 no traía en
-    # las fuentes consultadas). Hay indicios de una edición 2024/25 ya
-    # publicada (csd.gob.es la menciona actualizada a enero de 2026), pero
-    # no se ha verificado su desglose por modalidad al escribir esto --
-    # revisar csd.gob.es/es/estadisticas-deportivas al actualizar.
-    "SPORT_PRACTICE_DISTRIBUTION": date(2022, 5, 1),
+    # Encuesta de Hábitos Deportivos en España (Ministerio de Educación,
+    # FP y Deportes + CSD + INE), tabla 1.21. Edición usada: 2024/25
+    # (fichero oficial descargado del portal de estadísticas del
+    # Ministerio en esta sesión, con el desglose completo de las 41
+    # modalidades que trae esa tabla -- reemplaza un primer borrador
+    # basado en cifras sueltas de prensa sobre la edición 2022, que solo
+    # cubría 9 modalidades). Periodicidad quinquenal: no se espera una
+    # edición más reciente hasta dentro de varios años.
+    "SPORT_PRACTICE_DISTRIBUTION": date(2025, 1, 1),
+    # Tabla 1.22 de la misma encuesta y edición (2024/25) -- mismo
+    # fichero, mismo día de descarga.
+    "SPORT_PRACTICE_BY_SEX": date(2025, 1, 1),
 }
 
 # Umbral de antigüedad (días) a partir del cual `stale_tables()` avisa,
@@ -108,6 +109,7 @@ _STALE_THRESHOLDS: dict[str, timedelta] = {
     # umbral anual saltaría constantemente sin que haya nada nuevo que
     # revisar, igual que ECEPOV/Censo.
     "SPORT_PRACTICE_DISTRIBUTION": _STALE_THRESHOLD_MULTIYEAR,
+    "SPORT_PRACTICE_BY_SEX": _STALE_THRESHOLD_MULTIYEAR,
 }
 
 
@@ -788,44 +790,177 @@ OCCUPATION_DISTRIBUTION = {
 # modalidad en concreto"), no probabilidades mutuamente excluyentes -- no
 # tiene sentido comprobar que sumen 1, y no deberían forzarse a sumarlo.
 #
-# Cálculo: (% de quienes practicaron ALGÚN deporte en el último año que
-# practican esta modalidad) × 0.573 (% de la población de 15+ años que
-# practicó algún deporte en el último año, cifra 2022). Se eligió la
-# edición 2022 en vez de la 2020 usada en un primer borrador de esta
-# tabla porque 2022 sí tiene cifras verificadas de TODAS estas
-# modalidades desde una única edición consistente (misma base
-# poblacional para las 9), evitando mezclar años distintos.
+# Fuente: Encuesta de Hábitos Deportivos en España 2024/25 (Ministerio de
+# Educación, FP y Deportes + CSD + INE), tabla 1.21 "Personas que
+# practicaron deporte en el último año por modalidad deportiva y
+# frecuencia" -- a diferencia de un primer borrador de esta tabla (basado
+# en cifras de prensa sobre la edición 2022, que solo cubrían 9
+# modalidades porque la prensa nunca cita la tabla completa), esta
+# versión sale directamente del fichero oficial descargado del portal de
+# estadísticas del Ministerio, con el dato exacto de practicantes en
+# miles de TODAS las modalidades que desglosa la encuesta.
 #
-# "yoga_pilates" y "gimnasia_intensa" son aproximaciones: la encuesta NO
-# desglosa yoga/pilates/tai-chi por separado, los agrupa en la categoría
-# "gimnasia suave, mantenimiento" (igual que agrupa aerobic/step/zumba/
-# spinning en "gimnasia intensa"). Se usa la cifra del grupo completo
-# porque no existe un desglose más fino en ninguna edición de la
-# encuesta -- a diferencia del resto de la tabla, no hay una
-# correspondencia 1:1 exacta entre la frase-ancla del regex y la
-# categoría de la encuesta, solo una aproximación razonable (el resto de
-# actividades del grupo que NO se declaran con esas frases-ancla
-# concretas -- p. ej. "hago gimnasia de mantenimiento" sin más detalle --
-# simplemente no se detectan, no se cuentan de más).
+# Cálculo: (practicantes de esta modalidad en miles ÷ 26.605, total de
+# practicantes de ALGÚN deporte en miles) × 0.627 (% de la población de
+# 15+ años que practicó algún deporte en el último año, cifra 2024/25 --
+# confirmada por prensa oficial del CSD, no viene en este fichero
+# concreto). El primer factor es la cuota de esta modalidad DENTRO de
+# quienes hacen deporte; el segundo la convierte a proporción sobre la
+# POBLACIÓN TOTAL, que es lo que necesita _apply_proportion.
+#
+# Se excluyen deliberadamente dos filas de la tabla original:
+#   - "Total" -- es la fila de cabecera (26.605 miles = 100% de
+#     practicantes), no una modalidad.
+#   - "Otro deporte" -- es un cajón de sastre sin identidad propia; no
+#     existe ninguna frase-ancla de práctica que distinga a alguien
+#     declarando "otro deporte" de cualquier otra frase genérica del
+#     texto, así que no se puede detectar con el mismo criterio que el
+#     resto (frase-ancla específica de la modalidad).
+#
+# "yoga_pilates" y "baile_fitness" son aproximaciones -- ver comentario
+# en cada clave: la encuesta agrupa actividades bajo un paraguas más
+# amplio que la frase-ancla concreta que la gente usa para declararlas en
+# primera persona (p. ej. "gimnasia suave" también incluye "gimnasia de
+# mantenimiento" sin más detalle, que no tiene una frase-ancla propia
+# distinguible de una mención genérica). El resto de claves SÍ tiene
+# correspondencia 1:1 exacta con una fila de la encuesta.
 SPORT_PRACTICE_DISTRIBUTION = {
-    "senderismo": round(0.308 * 0.573, 3),   # "senderismo y montañismo"
-    "ciclismo": round(0.284 * 0.573, 3),
-    "gimnasia_intensa": round(0.280 * 0.573, 3),  # aerobic/step/zumba/spinning -- ver nota arriba
-    "natacion": round(0.272 * 0.573, 3),
-    "yoga_pilates": round(0.264 * 0.573, 3),  # "gimnasia suave, mantenimiento" -- ver nota arriba
-    "running": round(0.190 * 0.573, 3),      # "carrera a pie"
-    "musculacion": round(0.170 * 0.573, 3),  # "musculación y halterofilia"
-    "padel": round(0.158 * 0.573, 3),
-    "futbol": round(0.145 * 0.573, 3),       # "fútbol 11 y 7"
-    "baloncesto": round(0.097 * 0.573, 3),
-    "futbol_sala": round(0.081 * 0.573, 3),  # "fútbol sala, futbito, fútbol 7 y fútbol playa" -- distinto de "futbol" (11 y 7) de arriba
-    "tenis": round(0.080 * 0.573, 3),
-    # Golf es la ÚNICA excepción de toda la tabla: el dato publicado ya
-    # viene expresado directamente sobre la POBLACIÓN TOTAL (1,2%), no
-    # sobre quienes practicaron algún deporte -- por eso NO se multiplica
-    # por 0.573 como el resto (multiplicarlo otra vez sería aplicar el
-    # filtro de "practicó algún deporte" dos veces).
-    "golf": 0.012,
+    "yoga_pilates": 0.183,           # "Gimnasia suave" -- yoga, pilates, tai-chi, gimnasia de mantenimiento (aproximación, ver nota arriba)
+    "gimnasia_intensa": 0.171,       # "Gimnasia intensa" -- aerobic, step, spinning (distinto de baile_fitness, ver esa clave)
+    "senderismo": 0.156,             # "Senderismo, montañismo"
+    "musculacion": 0.147,            # "Musculación, halterofilia"
+    "natacion": 0.140,               # "Natación"
+    "ciclismo": 0.134,               # "Ciclismo"
+    "running": 0.111,                # "Carrera a pie, running, marcha" -- DISTINTO de "atletismo" (ver esa clave), son dos filas separadas en la encuesta
+    "padel": 0.096,                  # "Pádel"
+    "futbol": 0.068,                 # "Fútbol 11 y 7"
+    "baloncesto": 0.041,             # "Baloncesto"
+    "baile_fitness": 0.039,          # "Otra act. fís. con música" -- zumba, baile fitness, aerobic con coreografía (aproximación, ver nota arriba)
+    "futbol_sala": 0.039,            # "Fútbol sala, fútbol playa" -- DISTINTO de "futbol" (11 y 7) de arriba
+    "ajedrez": 0.038,                # "Ajedrez" -- sedentario, pero la propia encuesta oficial lo cuenta como modalidad deportiva (federado en España)
+    "tenis": 0.033,                  # "Tenis"
+    "tenis_mesa": 0.033,             # "Tenis de mesa" -- ping-pong
+    "atletismo": 0.029,              # "Atletismo" -- DISTINTO de "running" de arriba
+    "esqui": 0.028,                  # "Deportes de invierno" -- esquí, snowboard
+    "voleibol": 0.026,               # "Voleibol"
+    "boxeo": 0.021,                  # "Boxeo"
+    "submarinismo": 0.020,           # "Actividades subacuáticas" -- buceo, submarinismo
+    "pesca": 0.019,                  # "Pesca"
+    "patinaje": 0.019,               # "Patinaje, monopatín"
+    "petanca": 0.014,                # "Petanca o bolos"
+    "golf": 0.014,                   # "Golf, pitch and putt, minigolf" -- ya no es un caso especial (ver ADR): esta tabla oficial lo trata igual que el resto, no como % directo sobre población total
+    "artes_marciales": 0.012,        # "Artes marciales" -- DISTINTO de "lucha_defensa_personal" (ver esa clave)
+    "piraguismo_remo": 0.012,        # "Piragüismo, remo, descensos"
+    "badminton": 0.011,              # "Bádminton"
+    "pelota_vasca": 0.011,           # "Frontón, frontenis, trinquete"
+    "caza": 0.010,                   # "Caza"
+    "motociclismo": 0.009,           # "Motociclismo"
+    "surf": 0.008,                   # "Surf"
+    "automovilismo": 0.006,          # "Automovilismo"
+    "vela": 0.005,                   # "Vela"
+    "hipica": 0.005,                 # "Hípica"
+    "balonmano": 0.005,              # "Balonmano"
+    "triatlon": 0.004,               # "Triatlón"
+    "rugby": 0.004,                  # "Rugby, rugby 7"
+    "lucha_defensa_personal": 0.003, # "Lucha o defensa personal" -- DISTINTO de "artes_marciales" de arriba
+    "esqui_nautico": 0.003,          # "Esquí náutico, motonáutica"
+    "squash": 0.002,                 # "Squash"
+    "aeronautica": 0.002,            # "Actividades aeronáuticas" -- parapente, ala delta, paracaidismo
+}
+
+# Práctica deportiva CONDICIONADA por sexo (tabla 1.22 de la misma
+# encuesta y edición, "Personas que practicaron deporte en el último año
+# por modalidad deportiva, sexo, edad y nivel de estudios"), es decir
+# P(practica X | sexo). Mismo patrón que MARITAL_STATUS_BY_SEX (ver
+# arriba) -- se usa en k_anonymity.py::_step_practica_deportiva SOLO
+# cuando también se conoce el sexo de la persona (aplicado antes en la
+# cadena): da la proporción REAL de esa combinación concreta en vez de
+# aplicar la marginal de SPORT_PRACTICE_DISTRIBUTION sin distinguir sexo.
+# El efecto es grande: p. ej. "caza" lo practican los hombres ~32 veces
+# más que las mujeres; "yoga_pilates" lo practican las mujeres ~4 veces
+# más que los hombres. Aplicar la marginal a alguien que ya declaró su
+# sexo desperdicia esa señal.
+#
+# A DIFERENCIA de MARITAL_STATUS_BY_SEX (donde cada sub-diccionario suma
+# 1.0 porque es una partición sobre categorías excluyentes), aquí cada
+# sub-diccionario NO suma 1.0 -- mismo motivo que SPORT_PRACTICE_DISTRIBUTION
+# (encuesta de respuesta múltiple, ver esa tabla arriba): son proporciones
+# marginales dentro de cada sexo, no una partición.
+#
+# Cálculo: la tabla 1.22 da, para cada modalidad, el % de practicantes DE
+# ESE SEXO (no de la población total) que hacen esa modalidad -- p. ej.
+# "19,0% de los hombres que practican algún deporte juegan al fútbol".
+# Para convertirlo a P(fútbol | hombre) sobre la POBLACIÓN masculina total
+# (no solo los practicantes), se multiplica por la tasa de práctica
+# deportiva DENTRO de cada sexo (practicantes de ese sexo ÷ población de
+# ese sexo). Esa tasa no viene en esta tabla -- se ha derivado aquí mismo
+# a partir de datos YA presentes en este fichero (TOTAL_POPULATION_ES,
+# SEX_DISTRIBUTION y age_range_proportion(0, 14) para estimar población
+# 15+), asumiendo que el reparto hombre/mujer es igual dentro de la
+# población 15+ que en la población total -- aproximación razonable (el
+# desequilibrio de sexos por esperanza de vida se concentra sobre todo en
+# edades muy avanzadas, no en el corte "menor/mayor de 15 años"), no una
+# cifra oficial de "población española de 15+ por sexo":
+#   población_15+ = TOTAL_POPULATION_ES × (1 − age_range_proportion(0, 14))
+#   población_hombres_15+ = población_15+ × SEX_DISTRIBUTION["hombre"]
+#   tasa_hombres = 13.661.000 (practicantes hombres, tabla 1.21) ÷ población_hombres_15+ = 0,6467
+#   población_mujeres_15+ = población_15+ × SEX_DISTRIBUTION["mujer"]
+#   tasa_mujeres = 12.945.000 (practicantes mujeres, tabla 1.21) ÷ población_mujeres_15+ = 0,5935
+# Y luego, por modalidad: P(X | sexo) = (%_de_practicantes_de_ese_sexo_que_hacen_X ÷ 100) × tasa_ese_sexo
+#
+# CASOS OMITIDOS A PROPÓSITO: cuando la tabla 1.22 redondea el % de un
+# sexo a 0,0 (solo pasa con "squash" y mujeres -- muestra demasiado
+# pequeña para el diseño muestral de la encuesta en esa combinación
+# concreta), NO se incluye esa clave de sexo en el sub-diccionario. Un
+# 0,0% redondeado no significa "cero mujeres practican squash", significa
+# "por debajo del umbral de detección de esta encuesta" -- forzar un 0.0
+# literal aquí haría que el escalón de estrechamiento mostrara "0
+# personas comparten tus rasgos", una certeza que el dato real no
+# respalda. Al faltar la clave, _step_practica_deportiva cae de vuelta a
+# la marginal de SPORT_PRACTICE_DISTRIBUTION para ese caso -- ver esa
+# función.
+SPORT_PRACTICE_BY_SEX = {
+    "yoga_pilates": {"hombre": 0.0731, "mujer": 0.2849},
+    "gimnasia_intensa": {"hombre": 0.1474, "mujer": 0.1899},
+    "senderismo": {"hombre": 0.1714, "mujer": 0.1377},
+    "musculacion": {"hombre": 0.1908, "mujer": 0.1015},
+    "natacion": {"hombre": 0.1365, "mujer": 0.1407},
+    "ciclismo": {"hombre": 0.1966, "mujer": 0.0700},
+    "running": {"hombre": 0.1306, "mujer": 0.0902},
+    "padel": {"hombre": 0.1345, "mujer": 0.0576},
+    "futbol": {"hombre": 0.1229, "mujer": 0.0137},
+    "baloncesto": {"hombre": 0.0595, "mujer": 0.0220},
+    "baile_fitness": {"hombre": 0.0103, "mujer": 0.0665},
+    "futbol_sala": {"hombre": 0.0731, "mujer": 0.0059},
+    "ajedrez": {"hombre": 0.0576, "mujer": 0.0172},
+    "tenis": {"hombre": 0.0479, "mujer": 0.0178},
+    "tenis_mesa": {"hombre": 0.0485, "mujer": 0.0166},
+    "atletismo": {"hombre": 0.0407, "mujer": 0.0166},
+    "esqui": {"hombre": 0.0349, "mujer": 0.0202},
+    "voleibol": {"hombre": 0.0265, "mujer": 0.0255},
+    "boxeo": {"hombre": 0.0285, "mujer": 0.0125},
+    "submarinismo": {"hombre": 0.0252, "mujer": 0.0148},
+    "patinaje": {"hombre": 0.0175, "mujer": 0.0208},
+    "pesca": {"hombre": 0.0323, "mujer": 0.0059},
+    "petanca": {"hombre": 0.0194, "mujer": 0.0089},
+    "golf": {"hombre": 0.0188, "mujer": 0.0083},
+    "badminton": {"hombre": 0.0116, "mujer": 0.0113},
+    "artes_marciales": {"hombre": 0.0168, "mujer": 0.0059},
+    "piraguismo_remo": {"hombre": 0.0162, "mujer": 0.0065},
+    "pelota_vasca": {"hombre": 0.0168, "mujer": 0.0059},
+    "caza": {"hombre": 0.0194, "mujer": 0.0006},
+    "motociclismo": {"hombre": 0.0142, "mujer": 0.0024},
+    "surf": {"hombre": 0.0097, "mujer": 0.0059},
+    "automovilismo": {"hombre": 0.0110, "mujer": 0.0012},
+    "vela": {"hombre": 0.0071, "mujer": 0.0030},
+    "balonmano": {"hombre": 0.0071, "mujer": 0.0030},
+    "hipica": {"hombre": 0.0052, "mujer": 0.0047},
+    "triatlon": {"hombre": 0.0065, "mujer": 0.0018},
+    "rugby": {"hombre": 0.0058, "mujer": 0.0018},
+    "lucha_defensa_personal": {"hombre": 0.0045, "mujer": 0.0024},
+    "esqui_nautico": {"hombre": 0.0039, "mujer": 0.0012},
+    "squash": {"hombre": 0.0045},  # sin "mujer": redondeaba a 0,0 en la encuesta -- ver nota arriba
+    "aeronautica": {"hombre": 0.0013, "mujer": 0.0030},
 }
 
 

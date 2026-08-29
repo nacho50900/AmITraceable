@@ -460,6 +460,15 @@ def _try_detect_ocupacion(text: str, permalink: str, findings: DemographicFindin
 # claves de SPORT_PRACTICE_DISTRIBUTION por subcadena. Un grupo con
 # nombre por modalidad (en vez de una tabla de mapeo aparte) para que
 # `match.lastgroup` sea directamente la clave de la modalidad detectada.
+#
+# ORDEN DE ALTERNANCIA: cuando la frase-ancla de una modalidad es
+# literalmente un PREFIJO de la de otra ("tenis" dentro de "tenis de
+# mesa", "futbol" dentro de "futbol sala", "esqui" dentro de "esqui
+# nautico"), la más específica va SIEMPRE primero -- si no, "juego al
+# tenis de mesa" haría match como "tenis" (el \b encaja justo antes del
+# espacio, antes de llegar a probar "tenis_mesa"), sin llegar nunca a la
+# alternativa correcta. Ver test_futbol_sala_is_not_confused_with_futbol
+# para el caso que motivó esta regla.
 _SPORT_PRACTICE_RE = re.compile(
     r"\b(?:"
     r"(?P<futbol_sala>juego (?:al |a )?futbol sala\b|juego (?:al |a )?futbito\b|"
@@ -467,7 +476,8 @@ _SPORT_PRACTICE_RE = re.compile(
     r"(?P<futbol>juego (?:al |a )?futbol\b|soy futbolista\b|practico futbol\b|entreno (?:al |a )?futbol\b)|"
     r"(?P<running>hago running\b|soy runner\b|salgo a correr\b|"
     r"corro (?:todas las semanas|cada semana|a diario|con regularidad)\b|"
-    r"practico running\b|practico atletismo\b)|"
+    r"practico running\b)|"
+    r"(?P<atletismo>practico atletismo\b|hago atletismo\b|soy atleta\b|entreno atletismo\b)|"
     r"(?P<natacion>hago natacion\b|voy a nadar\b|nado en la piscina\b|"
     r"practico natacion\b|soy nadador\b|soy nadadora\b)|"
     r"(?P<senderismo>hago senderismo\b|voy de senderismo\b|practico montanismo\b|"
@@ -478,10 +488,56 @@ _SPORT_PRACTICE_RE = re.compile(
     r"monto en bici (?:todas las semanas|cada semana|con regularidad)\b|"
     r"practico ciclismo\b|soy ciclista\b)|"
     r"(?P<padel>juego (?:al |a )?padel\b|practico padel\b)|"
+    r"(?P<tenis_mesa>juego (?:al |a )?tenis de mesa\b|practico tenis de mesa\b|"
+    r"juego (?:al |a )?ping pong\b|practico ping pong\b)|"
     r"(?P<tenis>juego (?:al |a )?tenis\b|practico tenis\b)|"
     r"(?P<baloncesto>juego (?:al |a )?baloncesto\b|practico baloncesto\b|"
     r"soy jugador de baloncesto\b|soy jugadora de baloncesto\b)|"
+    r"(?P<balonmano>juego (?:al |a )?balonmano\b|practico balonmano\b|entreno balonmano\b)|"
+    r"(?P<voleibol>juego (?:al |a )?voleibol\b|practico voleibol\b|"
+    r"juego (?:al |a )?voley\b|practico voley\b)|"
+    r"(?P<rugby>juego (?:al |a )?rugby\b|practico rugby\b)|"
+    r"(?P<pelota_vasca>juego (?:al |a )?fronton\b|practico fronton\b|"
+    r"juego (?:al |a )?frontenis\b|practico frontenis\b|"
+    r"juego (?:a la |a )?pelota vasca\b|practico pelota vasca\b)|"
+    r"(?P<petanca>juego a la petanca\b|juego a petanca\b|practico petanca\b)|"
+    r"(?P<patinaje>hago patinaje\b|practico patinaje\b|salgo a patinar\b|voy a patinar\b|"
+    r"hago monopatin\b|practico monopatin\b)|"
+    r"(?P<motociclismo>practico motociclismo\b|hago motocross\b|compito en motocross\b|"
+    r"soy piloto de motociclismo\b)|"
+    r"(?P<automovilismo>practico automovilismo\b|hago rallies\b|compito en rallies\b|"
+    r"soy piloto de carreras\b)|"
+    r"(?P<aeronautica>hago parapente\b|practico parapente\b|hago ala delta\b|"
+    r"practico ala delta\b|hago paracaidismo\b|practico paracaidismo\b)|"
+    r"(?P<squash>juego (?:al |a )?squash\b|practico squash\b)|"
+    r"(?P<badminton>juego (?:al |a )?badminton\b|practico badminton\b)|"
     r"(?P<golf>juego (?:al |a )?golf\b|practico golf\b|soy golfista\b)|"
+    r"(?P<surf>hago surf\b|practico surf\b|salgo a hacer surf\b|soy surfista\b)|"
+    r"(?P<vela>practico vela\b|hago vela\b|navego en velero\b)|"
+    r"(?P<esqui_nautico>hago esqui nautico\b|practico esqui nautico\b|"
+    r"hago motonautica\b|practico motonautica\b)|"
+    r"(?P<piraguismo_remo>hago piraguismo\b|practico piraguismo\b|hago remo\b|"
+    r"practico remo\b|hago kayak\b|practico kayak\b)|"
+    r"(?P<submarinismo>hago submarinismo\b|practico submarinismo\b|hago buceo\b|"
+    r"practico buceo\b|voy a bucear\b|soy buceador\b|soy buceadora\b)|"
+    r"(?P<esqui>hago esqui\b|practico esqui\b|voy a esquiar\b|"
+    r"hago snowboard\b|practico snowboard\b)|"
+    r"(?P<triatlon>hago triatlon\b|practico triatlon\b|compito en triatlon\b|soy triatleta\b)|"
+    r"(?P<boxeo>hago boxeo\b|practico boxeo\b|entreno boxeo\b|"
+    r"soy boxeador\b|soy boxeadora\b)|"
+    r"(?P<artes_marciales>practico artes marciales\b|hago artes marciales\b|"
+    r"hago karate\b|practico karate\b|hago judo\b|practico judo\b|"
+    r"hago taekwondo\b|practico taekwondo\b|hago kung fu\b|practico kung fu\b)|"
+    r"(?P<lucha_defensa_personal>practico defensa personal\b|hago defensa personal\b|"
+    r"practico lucha libre\b|hago lucha libre\b|practico jiu jitsu\b|hago jiu jitsu\b|"
+    r"practico bjj\b|hago bjj\b)|"
+    r"(?P<caza>voy de caza\b|salgo de caza\b|practico caza\b|"
+    r"soy cazador\b|soy cazadora\b)|"
+    r"(?P<pesca>voy de pesca\b|salgo a pescar\b|practico pesca\b|"
+    r"soy pescador\b|soy pescadora\b)|"
+    r"(?P<hipica>practico hipica\b|hago hipica\b|monto a caballo\b|"
+    r"practico equitacion\b|hago equitacion\b)|"
+    r"(?P<ajedrez>juego (?:al |a )?ajedrez\b|practico ajedrez\b|compito en ajedrez\b)|"
     # yoga_pilates: aproxima la categoría "gimnasia suave" de la encuesta
     # (ver nota en ine_reference.py) -- yoga, pilates y tai-chi son las
     # formas más habituales en que la gente lo declara en primera
@@ -491,12 +547,18 @@ _SPORT_PRACTICE_RE = re.compile(
     r"(?P<yoga_pilates>hago yoga\b|practico yoga\b|voy a clases de yoga\b|"
     r"hago pilates\b|practico pilates\b|voy a clases de pilates\b|"
     r"hago tai chi\b|practico tai chi\b)|"
+    # baile_fitness: aproxima "Otra actividad física con música" de la
+    # encuesta -- zumba es, con diferencia, la forma más habitual de
+    # declarar esta categoría en primera persona.
+    r"(?P<baile_fitness>hago zumba\b|voy a clases de zumba\b|"
+    r"hago baile fitness\b|hago bailoterapia\b)|"
     # gimnasia_intensa: aproxima la categoría homónima de la encuesta
-    # (aerobic/step/zumba/spinning) -- "hago crossfit" queda deliberadamente
-    # en el grupo de musculacion de arriba, no aquí, para no detectar dos
-    # veces la misma frase.
-    r"(?P<gimnasia_intensa>hago aerobic\b|hago step\b|hago zumba\b|"
-    r"voy a clases de zumba\b|hago spinning\b|voy a spinning\b|"
+    # (aerobic/step/spinning) -- DISTINTA de "baile_fitness" de arriba
+    # (que es la propia encuesta la que las separa en dos filas). "hago
+    # crossfit" queda deliberadamente en el grupo de musculacion de
+    # arriba, no aquí, para no detectar dos veces la misma frase.
+    r"(?P<gimnasia_intensa>hago aerobic\b|hago step\b|"
+    r"hago spinning\b|voy a spinning\b|"
     r"voy a clases dirigidas de gimnasia\b)"
     r")",
     re.I,

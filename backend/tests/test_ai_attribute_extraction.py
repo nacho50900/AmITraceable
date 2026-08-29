@@ -857,13 +857,16 @@ class TestPracticaDeportivaFromAI:
         """Regresión del mismo tipo que orientacion_sexual/religion: si el
         modelo inventa una categoría (p. ej. porque el deporte real no
         está en la lista cerrada), se descarta en vez de guardarse tal
-        cual -- ver _SPORT_PRACTICE_VALUES."""
+        cual -- ver _SPORT_PRACTICE_VALUES. "balonmano" ya no sirve como
+        ejemplo de valor fuera del enum (es una modalidad válida desde la
+        ampliación a la encuesta 2024/25 completa), se usa un deporte que
+        realmente no está en ninguna fila de esa encuesta."""
         monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
         respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(practica_deportiva="balonmano"))
+            return_value=httpx.Response(200, json=_mock_content(practica_deportiva="curling"))
         )
 
-        findings = await extract_demographics_with_ai([_post("juego a balonmano")], username="x")
+        findings = await extract_demographics_with_ai([_post("juego a curling")], username="x")
 
         assert findings.practica_deportiva is None
 

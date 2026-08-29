@@ -62,11 +62,19 @@ const PlatformGuideAccordion: React.FC<Props> = ({ activePlatform }) => {
                 className={`platform-guide-tab ${item.className} ${isActive ? 'platform-guide-tab--active' : ''}`}
                 onClick={() => setSelectedTab(item.key)}
               >
+                <span className="platform-guide-tab-corner platform-guide-tab-corner--left" aria-hidden="true" />
+                <span className="platform-guide-tab-corner-ring-wrap platform-guide-tab-corner-ring-wrap--left" aria-hidden="true">
+                  <span className="platform-guide-tab-corner-circle" />
+                </span>
                 <span className="platform-guide-tab-border-mask platform-guide-tab-border-mask--left" aria-hidden="true" />
                 <span className="platform-guide-tab-panel-border-mask" aria-hidden="true" />
                 <span className="platform-guide-item-icon">{item.icon}</span>
                 <span className="platform-guide-item-name">{t(`landing.guide.${item.key}.name`)}</span>
                 <span className="platform-guide-tab-border-mask platform-guide-tab-border-mask--right" aria-hidden="true" />
+                <span className="platform-guide-tab-corner platform-guide-tab-corner--right" aria-hidden="true" />
+                <span className="platform-guide-tab-corner-ring-wrap platform-guide-tab-corner-ring-wrap--right" aria-hidden="true">
+                  <span className="platform-guide-tab-corner-circle" />
+                </span>
               </button>
             );
           })}

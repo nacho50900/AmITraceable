@@ -49,6 +49,7 @@ from app.data.ine_reference import (
     SEX_DISTRIBUTION,
     SEXUAL_ORIENTATION_DISTRIBUTION,
     SITUACION_LABORAL_DISTRIBUTION,
+    SPORT_PRACTICE_BY_SEX,
     SPORT_PRACTICE_DISTRIBUTION,
     STUDIES_DISTRIBUTION,
     TOTAL_POPULATION_ES,
@@ -486,7 +487,7 @@ def _step_ocupacion(findings: DemographicFindings, remaining: float) -> tuple[fl
 _SPORT_LABELS = {
     "musculacion": "Musculación / gimnasio",
     "senderismo": "Senderismo / montañismo",
-    "running": "Running / atletismo",
+    "running": "Running / carrera a pie",
     "natacion": "Natación",
     "futbol": "Fútbol",
     "futbol_sala": "Fútbol sala",
@@ -496,7 +497,35 @@ _SPORT_LABELS = {
     "baloncesto": "Baloncesto",
     "golf": "Golf",
     "yoga_pilates": "Yoga / pilates",
-    "gimnasia_intensa": "Gimnasia intensa (aerobic/zumba/spinning)",
+    "gimnasia_intensa": "Gimnasia intensa (aerobic/step/spinning)",
+    "baile_fitness": "Baile fitness (zumba)",
+    "tenis_mesa": "Tenis de mesa",
+    "atletismo": "Atletismo",
+    "esqui": "Esquí / snowboard",
+    "voleibol": "Voleibol",
+    "boxeo": "Boxeo",
+    "submarinismo": "Submarinismo / buceo",
+    "pesca": "Pesca",
+    "patinaje": "Patinaje",
+    "petanca": "Petanca / bolos",
+    "artes_marciales": "Artes marciales",
+    "piraguismo_remo": "Piragüismo / remo",
+    "badminton": "Bádminton",
+    "pelota_vasca": "Pelota vasca (frontón)",
+    "caza": "Caza",
+    "motociclismo": "Motociclismo",
+    "surf": "Surf",
+    "automovilismo": "Automovilismo",
+    "vela": "Vela",
+    "hipica": "Hípica",
+    "balonmano": "Balonmano",
+    "triatlon": "Triatlón",
+    "rugby": "Rugby",
+    "lucha_defensa_personal": "Lucha / defensa personal",
+    "esqui_nautico": "Esquí náutico",
+    "squash": "Squash",
+    "aeronautica": "Actividades aeronáuticas",
+    "ajedrez": "Ajedrez",
 }
 
 
@@ -509,22 +538,52 @@ def _step_practica_deportiva(findings: DemographicFindings, remaining: float) ->
     ver OCCUPATION_DISTRIBUTION, que tampoco suma 1 -- ahí es porque solo
     cubre un subconjunto de ocupaciones, aquí es porque el propio dato de
     origen no es una partición), así que no hace falta ningún ajuste
-    especial aquí: el cálculo es idéntico al resto de pasos."""
+    especial aquí para eso: el cálculo es idéntico al resto de pasos.
+
+    Lo que SÍ tiene un ajuste especial, mismo patrón que _step_relacion
+    con MARITAL_STATUS_BY_SEX: si ya se conoce el sexo (se aplica antes en
+    la cadena, ver _CHAINED_STEPS), se usa la proporción REAL de esa
+    combinación sexo+deporte concreta (SPORT_PRACTICE_BY_SEX, tabla 1.22
+    de la encuesta) en vez de la marginal sin distinguir sexo -- el efecto
+    es grande para deportes con sesgo fuerte (ver comentario en
+    ine_reference.py). Si el sexo no se conoce, o la modalidad concreta no
+    tiene entrada para ESE sexo en la tabla (ver "squash" ahí, caso de
+    muestra insuficiente), se cae de vuelta a la marginal."""
     if not findings.practica_deportiva:
         return remaining, None
     label = _SPORT_LABELS.get(findings.practica_deportiva, findings.practica_deportiva.title())
+
+    sex_distribution = SPORT_PRACTICE_BY_SEX.get(findings.practica_deportiva, {})
+    proportion = sex_distribution.get(findings.sexo) if findings.sexo else None
+    exact = proportion is not None
+    if not exact:
+        proportion = SPORT_PRACTICE_DISTRIBUTION.get(findings.practica_deportiva)
+
+    note = (
+        "Proporción marginal de la Encuesta de Hábitos Deportivos en España (no es "
+        "una partición: la encuesta es de respuesta múltiple, una persona puede "
+        "practicar varios deportes a la vez, así que este dato por sí solo no implica "
+        "que sea el ÚNICO deporte que practica)."
+    )
+    note_code = note_codes.PRACTICA_DEPORTIVA_NO_PARTICION
+    if exact:
+        note += (
+            " Al conocerse también el sexo, se usa el porcentaje de esa combinación "
+            "concreta (práctica deportiva condicionada a sexo, misma encuesta), no una "
+            "aproximación multiplicando proporciones independientes -- sigue sin ser una "
+            "partición por el mismo motivo de arriba."
+        )
+        note_code = note_codes.PRACTICA_DEPORTIVA_AJUSTADA_POR_SEXO
+
     return _apply_proportion(
         remaining,
-        SPORT_PRACTICE_DISTRIBUTION.get(findings.practica_deportiva),
+        proportion,
         f"Práctica deportiva: {label}",
         "practica_deportiva",
         findings.evidence.get("practica_deportiva", []),
         source=findings.source.get("practica_deportiva", "texto"),
-        note="Proporción marginal de la Encuesta de Hábitos Deportivos en España (no es "
-             "una partición: la encuesta es de respuesta múltiple, una persona puede "
-             "practicar varios deportes a la vez, así que este dato por sí solo no implica "
-             "que sea el ÚNICO deporte que practica).",
-        note_code=note_codes.PRACTICA_DEPORTIVA_NO_PARTICION,
+        note=note,
+        note_code=note_code,
         value_raw=findings.practica_deportiva,
     )
 

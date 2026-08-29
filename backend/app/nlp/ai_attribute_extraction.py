@@ -197,7 +197,11 @@ _SYSTEM_PROMPT = (
     '"tipo_hogar": "unipersonal"|"pareja_sin_hijos"|"pareja_con_hijos"|"monoparental"|null, '
     '"lengua_materna": "catalan"|"euskera"|"gallego"|"valenciano"|null, '
     '"practica_deportiva": "senderismo"|"ciclismo"|"gimnasia_intensa"|"natacion"|"yoga_pilates"|'
-    '"running"|"musculacion"|"padel"|"futbol"|"futbol_sala"|"baloncesto"|"tenis"|"golf"|null, '
+    '"running"|"musculacion"|"padel"|"futbol"|"futbol_sala"|"baloncesto"|"baile_fitness"|"ajedrez"|'
+    '"tenis"|"tenis_mesa"|"atletismo"|"esqui"|"voleibol"|"boxeo"|"submarinismo"|"pesca"|"patinaje"|'
+    '"petanca"|"golf"|"artes_marciales"|"piraguismo_remo"|"badminton"|"pelota_vasca"|"caza"|'
+    '"motociclismo"|"surf"|"automovilismo"|"vela"|"hipica"|"balonmano"|"triatlon"|"rugby"|'
+    '"lucha_defensa_personal"|"esqui_nautico"|"squash"|"aeronautica"|null, '
     '"sexo_por_nombre": "hombre"|"mujer"|null, '
     '"fotos_de_viaje": [<identificador_de_publicacion>, ...], '
     '"estado_civil": "soltero"|"con_pareja"|"casado"|"divorciado"|"viudo"|null, '
@@ -238,16 +242,32 @@ _SYSTEM_PROMPT = (
     "correr', 'voy al gimnasio', 'practico...', 'soy runner/nadador/futbolista'. NO uses "
     "este campo si el texto solo MENCIONA el deporte sin indicar que la persona lo practica "
     "-- p. ej. 'vi el partido de fútbol', 'me encanta el fútbol' (como afición de "
-    "espectador), un resultado deportivo, o una noticia sobre un equipo NO cuentan; solo "
-    "cuenta una autodeclaración de PRÁCTICA real. Los únicos valores válidos son "
-    "'musculacion' (gimnasio, pesas, musculación, halterofilia, crossfit), 'senderismo' "
-    "(senderismo, montañismo, rutas de montaña), 'running' (running, atletismo, correr con "
-    "regularidad), 'natacion' (natación, nadar), 'futbol' (fútbol 11 o 7, jugador/futbolista), "
-    "'futbol_sala' (fútbol sala, futbito, fútbol 7 o fútbol playa -- DISTINTO de 'futbol'), "
-    "'ciclismo' (ciclismo, ir en bici con regularidad, ciclista), 'padel' (pádel), 'tenis' "
-    "(tenis), 'baloncesto' (baloncesto, jugador/jugadora de baloncesto), 'golf' (golf, "
-    "golfista), 'yoga_pilates' (yoga, pilates, tai-chi) y 'gimnasia_intensa' (aerobic, step, "
-    "zumba, spinning) -- si "
+    "espectador), un resultado deportivo, una retransmisión, o una noticia sobre un equipo "
+    "NO cuentan; solo cuenta una autodeclaración de PRÁCTICA real. Esto aplica con especial "
+    "cuidado a deportes de motor (motociclismo, automovilismo), hípica y deportes de "
+    "invierno, donde la mención como espectador es mucho más frecuente que la práctica real. "
+    "Los únicos valores válidos, con la fila exacta de la Encuesta de Hábitos Deportivos en "
+    "España 2024/25 que representa cada uno entre paréntesis, son: "
+    "'musculacion' (musculación, halterofilia, crossfit), 'senderismo' (senderismo, "
+    "montañismo), 'running' (carrera a pie, running, marcha -- DISTINTO de 'atletismo'), "
+    "'atletismo' (atletismo como disciplina, DISTINTO de 'running'), 'natacion' (natación), "
+    "'futbol' (fútbol 11 o 7), 'futbol_sala' (fútbol sala o fútbol playa -- DISTINTO de "
+    "'futbol'), 'ciclismo' (ciclismo), 'padel' (pádel), 'tenis' (tenis), 'tenis_mesa' (tenis "
+    "de mesa, ping-pong -- DISTINTO de 'tenis'), 'baloncesto' (baloncesto), 'balonmano' "
+    "(balonmano), 'voleibol' (voleibol, vóley), 'rugby' (rugby), 'pelota_vasca' (frontón, "
+    "frontenis, trinquete), 'petanca' (petanca, bolos), 'patinaje' (patinaje, monopatín), "
+    "'motociclismo' (motociclismo, motocross), 'automovilismo' (automovilismo, rallies), "
+    "'aeronautica' (parapente, ala delta, paracaidismo), 'squash' (squash), 'badminton' "
+    "(bádminton), 'golf' (golf, pitch and putt, minigolf), 'surf' (surf), 'vela' (vela), "
+    "'esqui_nautico' (esquí náutico, motonáutica -- DISTINTO de 'esqui'), 'piraguismo_remo' "
+    "(piragüismo, remo, kayak), 'submarinismo' (submarinismo, buceo), 'esqui' (esquí, "
+    "snowboard -- DISTINTO de 'esqui_nautico'), 'triatlon' (triatlón), 'boxeo' (boxeo), "
+    "'artes_marciales' (karate, judo, taekwondo, artes marciales en general -- DISTINTO de "
+    "'lucha_defensa_personal'), 'lucha_defensa_personal' (defensa personal, lucha libre, "
+    "jiu-jitsu -- DISTINTO de 'artes_marciales'), 'caza' (caza), 'pesca' (pesca), 'hipica' "
+    "(hípica, equitación), 'ajedrez' (ajedrez), 'yoga_pilates' (yoga, pilates, tai-chi) y "
+    "'baile_fitness' (zumba, baile fitness -- DISTINTO de 'gimnasia_intensa') y "
+    "'gimnasia_intensa' (aerobic, step, spinning -- DISTINTO de 'baile_fitness') -- si "
     "practica otro deporte no listado aquí, usa null (no inventes una categoría nueva ni "
     "fuerces la más parecida). Usa null si no hay ninguna autodeclaración de práctica. "
     "'fotos_de_viaje' es una lista aparte, "

@@ -10,6 +10,7 @@ from app.data.ine_reference import (
     RELIGION_DISTRIBUTION,
     SEXUAL_ORIENTATION_DISTRIBUTION,
     SITUACION_LABORAL_DISTRIBUTION,
+    SPORT_PRACTICE_BY_SEX,
     SPORT_PRACTICE_DISTRIBUTION,
     TOTAL_POPULATION_ES,
     ZODIAC_DISTRIBUTION,
@@ -755,9 +756,10 @@ class TestPracticaDeportivaStep:
             assert steps[0].remaining_population is not None
 
     def test_ciclismo_padel_tenis_baloncesto_have_distinct_labels(self):
-        """Las 4 modalidades añadidas en la ampliación de la tabla (fuente
-        2022, ver ine_reference.py) también deben tener su propio label
-        legible, no caer en el fallback genérico .title()."""
+        """Las 4 modalidades añadidas en la primera ampliación de la tabla
+        (fuente 2022, ver historial de ine_reference.py) también deben
+        tener su propio label legible, no caer en el fallback genérico
+        .title()."""
         expected = {
             "ciclismo": "Ciclismo",
             "padel": "Pádel",
@@ -769,28 +771,89 @@ class TestPracticaDeportivaStep:
             assert steps[0].attribute_label == f"Práctica deportiva: {label}"
 
     def test_second_batch_of_modalities_have_distinct_labels(self):
-        """Segunda ampliación de la tabla (mismas fuente y edición 2022,
-        modalidades que faltaban): mismo criterio que el test anterior."""
+        """Segunda ampliación de la tabla (2022): mismo criterio que el
+        test anterior."""
         expected = {
             "futbol_sala": "Fútbol sala",
             "golf": "Golf",
             "yoga_pilates": "Yoga / pilates",
-            "gimnasia_intensa": "Gimnasia intensa (aerobic/zumba/spinning)",
+            "gimnasia_intensa": "Gimnasia intensa (aerobic/step/spinning)",
         }
         for value, label in expected.items():
             steps = estimate_population_narrowing(DemographicFindings(practica_deportiva=value))
             assert steps[0].attribute_label == f"Práctica deportiva: {label}"
 
-    def test_golf_is_not_double_discounted_by_the_573_percent_filter(self):
-        """Regresión específica para el único caso especial de la tabla
-        (ver comentario en ine_reference.py): golf ya viene expresado
-        sobre la POBLACIÓN TOTAL (1,2%), no sobre quienes practicaron
-        algún deporte -- si alguien "corrigiera" esto multiplicándolo por
-        0.573 como el resto de modalidades, la población restante
-        calculada sería artificialmente más pequeña de lo real."""
-        steps = estimate_population_narrowing(DemographicFindings(practica_deportiva="golf"))
-        assert SPORT_PRACTICE_DISTRIBUTION["golf"] == 0.012
-        assert steps[0].remaining_population == round(TOTAL_POPULATION_ES * 0.012)
+    def test_full_2024_25_survey_expansion_all_have_distinct_labels(self):
+        """Tercera ampliación: tabla 1.21 completa de la Encuesta de
+        Hábitos Deportivos en España 2024/25 (41 modalidades en total,
+        ver ine_reference.py) -- las 28 modalidades nuevas de esta
+        ampliación también deben tener su propio label legible."""
+        expected = {
+            "baile_fitness": "Baile fitness (zumba)",
+            "tenis_mesa": "Tenis de mesa",
+            "atletismo": "Atletismo",
+            "esqui": "Esquí / snowboard",
+            "voleibol": "Voleibol",
+            "boxeo": "Boxeo",
+            "submarinismo": "Submarinismo / buceo",
+            "pesca": "Pesca",
+            "patinaje": "Patinaje",
+            "petanca": "Petanca / bolos",
+            "artes_marciales": "Artes marciales",
+            "piraguismo_remo": "Piragüismo / remo",
+            "badminton": "Bádminton",
+            "pelota_vasca": "Pelota vasca (frontón)",
+            "caza": "Caza",
+            "motociclismo": "Motociclismo",
+            "surf": "Surf",
+            "automovilismo": "Automovilismo",
+            "vela": "Vela",
+            "hipica": "Hípica",
+            "balonmano": "Balonmano",
+            "triatlon": "Triatlón",
+            "rugby": "Rugby",
+            "lucha_defensa_personal": "Lucha / defensa personal",
+            "esqui_nautico": "Esquí náutico",
+            "squash": "Squash",
+            "aeronautica": "Actividades aeronáuticas",
+            "ajedrez": "Ajedrez",
+        }
+        assert len(expected) == 28
+        for value, label in expected.items():
+            steps = estimate_population_narrowing(DemographicFindings(practica_deportiva=value))
+            assert steps[0].attribute_label == f"Práctica deportiva: {label}"
+
+    def test_running_and_atletismo_are_distinct_categories(self):
+        """Regresión: en un borrador anterior 'practico atletismo' caía en
+        el grupo 'running' (ver historial de demographic_extraction.py).
+        La encuesta 2024/25 (tabla 1.21) los trata como DOS filas
+        separadas con población muy distinta -- deben seguir siendo
+        categorías independientes, con proporciones distintas."""
+        assert "atletismo" in SPORT_PRACTICE_DISTRIBUTION
+        assert "running" in SPORT_PRACTICE_DISTRIBUTION
+        assert SPORT_PRACTICE_DISTRIBUTION["atletismo"] != SPORT_PRACTICE_DISTRIBUTION["running"]
+
+    def test_golf_uses_the_same_formula_as_every_other_modality(self):
+        """Regresión conceptual: en un borrador anterior (basado en una
+        cifra de prensa suelta sobre la edición 2022) golf era un caso
+        especial que NO se multiplicaba por la tasa general de práctica
+        deportiva, porque esa cifra de prensa venía ya expresada sobre
+        población total. La tabla oficial 1.21 de la edición 2024/25
+        desmiente eso: golf sale exactamente con la misma fórmula que
+        cualquier otra modalidad (practicantes de golf ÷ total de
+        practicantes de algún deporte × tasa general). Este test
+        documenta que YA NO hay ningún caso especial en la tabla -- si
+        alguien reintrodujera esa excepción por error, este test lo
+        detectaría."""
+        assert SPORT_PRACTICE_DISTRIBUTION["golf"] == 0.014
+
+    def test_all_41_modalities_of_the_2024_25_survey_are_present(self):
+        """Sanity check de cobertura completa: la tabla 1.21 de la
+        encuesta 2024/25 tiene 41 modalidades detectables (se excluyen
+        deliberadamente 'Total', que es la fila de cabecera, y 'Otro
+        deporte', que no tiene una frase-ancla de práctica distinguible
+        -- ver comentario en ine_reference.py)."""
+        assert len(SPORT_PRACTICE_DISTRIBUTION) == 41
 
     def test_none_produces_no_step(self):
         assert estimate_population_narrowing(DemographicFindings(practica_deportiva=None)) == []
@@ -815,3 +878,78 @@ class TestPracticaDeportivaStep:
         concreto de la suma."""
         total = sum(SPORT_PRACTICE_DISTRIBUTION.values())
         assert total > 0.5  # sanity check: no vacío ni con valores absurdamente bajos
+
+    def test_uses_exact_sex_conditioned_proportion_when_sexo_is_already_known(self):
+        """Mismo patrón que TestEstadoCivilStep.test_uses_exact_cross_tab_
+        when_sexo_is_already_known (tabla 1.22 de la encuesta, en vez de
+        la tabla 1.21 marginal): cuando también se conoce el sexo, debe
+        usarse SPORT_PRACTICE_BY_SEX, no SPORT_PRACTICE_DISTRIBUTION --
+        son números distintos a propósito, así que dan un
+        remaining_population distinto."""
+        with_sexo = estimate_population_narrowing(
+            DemographicFindings(sexo="mujer", practica_deportiva="yoga_pilates")
+        )
+        sexo_step = next(s for s in with_sexo if s.category == "sexo")
+        deporte_step = next(s for s in with_sexo if s.category == "practica_deportiva")
+
+        expected = round(sexo_step.remaining_population * SPORT_PRACTICE_BY_SEX["yoga_pilates"]["mujer"])
+        assert deporte_step.remaining_population == expected
+
+        # Y debe ser DISTINTO de aplicar la marginal sobre pop_mujeres (lo
+        # que se haría si no se usara la tabla condicionada), para
+        # confirmar que de verdad se está usando SPORT_PRACTICE_BY_SEX y
+        # no SPORT_PRACTICE_DISTRIBUTION. "yoga_pilates" es un buen caso
+        # de prueba precisamente porque el sesgo por sexo es enorme (las
+        # mujeres lo practican ~4 veces más).
+        marginal_equivalent = round(sexo_step.remaining_population * SPORT_PRACTICE_DISTRIBUTION["yoga_pilates"])
+        assert deporte_step.remaining_population != marginal_equivalent
+        assert deporte_step.note_code == "practica_deportiva_ajustada_por_sexo"
+
+    def test_falls_back_to_marginal_when_sexo_unknown(self):
+        findings = DemographicFindings(practica_deportiva="yoga_pilates")
+        steps = estimate_population_narrowing(findings)
+
+        expected = round(TOTAL_POPULATION_ES * SPORT_PRACTICE_DISTRIBUTION["yoga_pilates"])
+        assert steps[0].remaining_population == expected
+        assert steps[0].note_code == "practica_deportiva_no_particion"
+
+    def test_falls_back_to_marginal_when_modality_has_no_entry_for_that_sex(self):
+        """'squash' no tiene clave 'mujer' en SPORT_PRACTICE_BY_SEX a
+        propósito (la encuesta redondeó a 0,0% con esa muestra concreta,
+        ver comentario en ine_reference.py) -- para una mujer que declara
+        practicar squash, debe caer de vuelta a la marginal en vez de
+        devolver una población de 0 (que sería una certeza que el dato
+        real no respalda)."""
+        assert "mujer" not in SPORT_PRACTICE_BY_SEX["squash"]
+
+        steps = estimate_population_narrowing(DemographicFindings(sexo="mujer", practica_deportiva="squash"))
+        deporte_step = next(s for s in steps if s.category == "practica_deportiva")
+
+        assert deporte_step.remaining_population is not None
+        assert deporte_step.remaining_population > 0
+        assert deporte_step.note_code == "practica_deportiva_no_particion"
+
+    def test_uses_exact_proportion_for_a_male_biased_sport_too(self):
+        """Mismo test que el de yoga_pilates pero en la dirección
+        contraria del sesgo (hombres, deporte muy masculinizado) -- para
+        confirmar que el ajuste funciona en ambos sentidos, no solo
+        cuando el sexo declarado coincide con el sexo mayoritario de un
+        ejemplo concreto."""
+        with_sexo = estimate_population_narrowing(
+            DemographicFindings(sexo="hombre", practica_deportiva="caza")
+        )
+        sexo_step = next(s for s in with_sexo if s.category == "sexo")
+        deporte_step = next(s for s in with_sexo if s.category == "practica_deportiva")
+
+        expected = round(sexo_step.remaining_population * SPORT_PRACTICE_BY_SEX["caza"]["hombre"])
+        assert deporte_step.remaining_population == expected
+        assert deporte_step.note_code == "practica_deportiva_ajustada_por_sexo"
+
+    def test_sport_practice_by_sex_does_not_need_to_sum_to_one(self):
+        """A diferencia de MARITAL_STATUS_BY_SEX (partición, cada
+        sub-diccionario SÍ debe sumar 1 -- ver ese test), esta tabla es de
+        una encuesta de respuesta múltiple igual que SPORT_PRACTICE_DISTRIBUTION:
+        no tiene sentido exigir que sume 1, y no debería forzarse."""
+        for sexo, distribution in SPORT_PRACTICE_BY_SEX.items():
+            assert sum(distribution.values()) < 1.0, sexo
+

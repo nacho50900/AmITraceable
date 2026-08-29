@@ -201,28 +201,83 @@ body {
 }
 
 /* Curvas de fusión donde la pestaña activa se une al panel, al estilo de
-   una pestaña de navegador (Chrome/Edge): rellenas de --bg-card (como el
-   propio panel/pestaña) hasta el radio, con un filo de 1px --border
-   marcando el borde curvo, y transparente a partir de ahí (deja ver el
-   hueco oscuro del fondo de la página, igual que el resto del borde). */
-.platform-guide-tab--active::before,
-.platform-guide-tab--active::after {
-  content: '';
+   una pestaña de navegador (Chrome/Edge). Dos capas independientes:
+   1. .platform-guide-tab-corner: el RELLENO. Un cuadrado de 10x10 con
+      fondo --bg-card, recortado con clip-path (regla evenodd: cuadrado
+      MENOS un cuarto de círculo) -- así el hueco del círculo (la esquina
+      EXTERIOR de la pestaña, lejos de ella) queda transparente y revela
+      el fondo de la página, y el resto del cuadrado (más cerca de la
+      propia pestaña) queda pintado de --bg-card. Antes se rellenaba el
+      círculo en sí en vez de "cuadrado menos círculo", y por eso el
+      color de dentro y el de fuera salían invertidos.
+   2. .platform-guide-tab-corner-ring-wrap: el TRAZO del borde, en una
+      capa aparte para que el clip-path de la capa 1 no le corte la mitad
+      del grosor -- un círculo real (el doble de grande, solo con border,
+      sin relleno) recortado con overflow:hidden.
+   Los parámetros exactos del arco (sweep-flag) están verificados con el
+   algoritmo del spec SVG (centro real calculado, no a ojo): para la
+   izquierda sweep=1 da centro (0,0); para la derecha sweep=0 da centro
+   (10,0) -- el centro debe caer en la esquina EXTERIOR (lejos de la
+   pestaña) para que el relleno quede del lado correcto. */
+.platform-guide-tab-corner,
+.platform-guide-tab-corner-ring-wrap {
   position: absolute;
   bottom: -3px;
   width: 10px;
   height: 10px;
   pointer-events: none;
+  display: none;
 }
 
-.platform-guide-tab--active::before {
+.platform-guide-tab--active .platform-guide-tab-corner,
+.platform-guide-tab--active .platform-guide-tab-corner-ring-wrap {
+  display: block;
+}
+
+.platform-guide-tab-corner {
+  background: var(--bg-card);
+}
+
+.platform-guide-tab-corner--left {
   left: -11px;
-  background: radial-gradient(circle 10px at 0% 0%, var(--bg-card) 0 9px, var(--border) 9px 10px, transparent 10px);
+  clip-path: path(evenodd, "M0,0 L10,0 L10,10 L0,10 Z M0,0 L10,0 A10,10 0 0 1 0,10 Z");
 }
 
-.platform-guide-tab--active::after {
-  right: -11px;
-  background: radial-gradient(circle 10px at 100% 0%, var(--bg-card) 0 9px, var(--border) 9px 10px, transparent 10px);
+.platform-guide-tab-corner--right {
+  right: -12px;
+  clip-path: path(evenodd, "M0,0 L10,0 L10,10 L0,10 Z M10,0 L0,0 A10,10 0 0 0 10,10 Z");
+}
+
+.platform-guide-tab-corner-ring-wrap {
+  overflow: hidden;
+}
+
+.platform-guide-tab-corner-ring-wrap--left {
+  left: -11px;
+}
+
+.platform-guide-tab-corner-ring-wrap--right {
+  right: -12px;
+}
+
+.platform-guide-tab-corner-circle {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.platform-guide-tab-corner-ring-wrap--left .platform-guide-tab-corner-circle {
+  top: -10px;
+  left: -10px;
+}
+
+.platform-guide-tab-corner-ring-wrap--right .platform-guide-tab-corner-circle {
+  top: -10px;
+  left: 0;
 }
 
 /* Tapa el último tramo (10px) del borde lateral recto de la pestaña activa,
@@ -258,8 +313,9 @@ body {
 
 /* Reddit es siempre la primera pestaña (extremo izquierdo): el panel no se
    extiende más a la izquierda que ella, así que no hay curva que dibujar ahí. */
-.platform-guide-tab.platform-guide-item--reddit.platform-guide-tab--active::before {
-  content: none;
+.platform-guide-tab.platform-guide-item--reddit.platform-guide-tab--active .platform-guide-tab-corner--left,
+.platform-guide-tab.platform-guide-item--reddit.platform-guide-tab--active .platform-guide-tab-corner-ring-wrap--left {
+  display: none;
 }
 
 .platform-guide-tab.platform-guide-item--reddit.platform-guide-tab--active .platform-guide-tab-border-mask--left {
@@ -268,17 +324,19 @@ body {
 
 /* Tapa el tramo del borde superior del panel (nuevo, ver
    .platform-guide-tab-content-container) que queda justo debajo de la
-   pestaña activa, para que el panel tenga borde arriba en todo su ancho
-   salvo donde conecta con la pestaña seleccionada -- mismo criterio que
-   .platform-guide-tab-border-mask, pero para el borde del PANEL en vez
-   del borde lateral de la propia pestaña. Ancho completo de la pestaña
-   (no solo 10px como las otras máscaras) porque aquí hay que tapar TODO
-   el tramo bajo la pestaña, no solo donde arranca la curva. */
+   pestaña activa Y de sus dos curvas de fusión, para que el panel tenga
+   borde arriba en todo su ancho salvo donde conecta con la pestaña
+   seleccionada -- mismo criterio que .platform-guide-tab-border-mask,
+   pero para el borde del PANEL en vez del borde lateral de la propia
+   pestaña. 11px de margen a cada lado (no solo el ancho de la pestaña)
+   porque las curvas se extienden esos 11px más allá del propio ancho de
+   la pestaña -- si no se cubre esa franja extra, el borde del panel sigue
+   asomando justo debajo de la curva. */
 .platform-guide-tab-panel-border-mask {
   position: absolute;
   bottom: -4px;
-  left: -1px;
-  width: calc(100% + 2px);
+  left: -13px;
+  width: calc(100% + 26px);
   height: 1px;
   background: transparent;
   pointer-events: none;
