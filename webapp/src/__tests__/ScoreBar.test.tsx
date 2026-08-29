@@ -21,4 +21,16 @@ describe('ScoreBar', () => {
     const fill = track?.querySelector('.score-fill') as HTMLElement;
     expect(fill.style.width).toBe('100%');
   });
+
+  test('sin tooltip no se muestra ningún icono ⓘ', () => {
+    render(<ScoreBar label="Riesgo de prueba" value={10} />);
+    expect(screen.queryByTitle(/./)).not.toBeInTheDocument();
+  });
+
+  test('con tooltip se muestra un icono ⓘ con el texto en title', () => {
+    render(<ScoreBar label="Riesgo de prueba" value={10} tooltip="Explicación de prueba" />);
+    const icon = screen.getByTitle('Explicación de prueba');
+    expect(icon).toBeInTheDocument();
+    expect(icon).toHaveTextContent('ⓘ');
+  });
 });

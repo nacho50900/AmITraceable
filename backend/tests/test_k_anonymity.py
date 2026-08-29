@@ -2,6 +2,8 @@ import pytest
 
 from app.nlp.demographic_extraction import DemographicFindings
 from app.data.ine_reference import (
+    EYE_COLOR_DISTRIBUTION,
+    HAIR_COLOR_DISTRIBUTION,
     HOUSEHOLD_TYPE_DISTRIBUTION,
     LANGUAGE_BY_CCAA,
     MARITAL_STATUS_BY_SEX,
@@ -10,11 +12,13 @@ from app.data.ine_reference import (
     RELIGION_DISTRIBUTION,
     SEXUAL_ORIENTATION_DISTRIBUTION,
     SITUACION_LABORAL_DISTRIBUTION,
+    SKIN_TONE_DISTRIBUTION,
     SPORT_PRACTICE_BY_SEX,
     SPORT_PRACTICE_DISTRIBUTION,
     TOTAL_POPULATION_ES,
     ZODIAC_DISTRIBUTION,
 )
+from app.models.schemas import ManualAttribute
 from app.scoring.k_anonymity import (
     PopulationNarrowingStep,
     _risk_level,
@@ -952,4 +956,94 @@ class TestPracticaDeportivaStep:
         no tiene sentido exigir que sume 1, y no debería forzarse."""
         for sexo, distribution in SPORT_PRACTICE_BY_SEX.items():
             assert sum(distribution.values()) < 1.0, sexo
+
+
+class TestManualAttributesNarrowing:
+    """`estimate_population_narrowing(findings, manual_attributes=...)` --
+    rasgos físicos que el usuario declara a mano (ver ManualTraitsSelector.tsx
+    en el frontend) porque el RGPD prohíbe inferirlos automáticamente de
+    fotos (ver ADR-34/ADR-35). A diferencia del resto de pasos (encadenados,
+    de `findings`), estos son independientes entre sí y se aplican todos
+    seguidos si se declaran varios a la vez."""
+
+    def test_no_manual_attributes_produces_no_extra_steps(self):
+        assert estimate_population_narrowing(DemographicFindings(), manual_attributes=[]) == []
+        assert estimate_population_narrowing(DemographicFindings(), manual_attributes=None) == []
+
+    def test_color_ojos_produces_step_with_manual_source(self):
+        steps = estimate_population_narrowing(
+            DemographicFindings(), manual_attributes=[ManualAttribute(category="color_ojos", value="verde")]
+        )
+        assert len(steps) == 1
+        assert steps[0].category == "color_ojos"
+        assert steps[0].source == "manual"
+        assert steps[0].value_raw == "verde"
+        assert steps[0].attribute_label == "Color de ojos: Verde"
+        assert steps[0].remaining_population == round(TOTAL_POPULATION_ES * EYE_COLOR_DISTRIBUTION["verde"])
+
+    def test_color_pelo_produces_step_with_manual_source(self):
+        steps = estimate_population_narrowing(
+            DemographicFindings(), manual_attributes=[ManualAttribute(category="color_pelo", value="pelirrojo")]
+        )
+        assert len(steps) == 1
+        assert steps[0].category == "color_pelo"
+        assert steps[0].source == "manual"
+        assert steps[0].remaining_population == round(TOTAL_POPULATION_ES * HAIR_COLOR_DISTRIBUTION["pelirrojo"])
+
+    def test_color_piel_produces_step_with_manual_source(self):
+        steps = estimate_population_narrowing(
+            DemographicFindings(), manual_attributes=[ManualAttribute(category="color_piel", value="oscuro")]
+        )
+        assert len(steps) == 1
+        assert steps[0].category == "color_piel"
+        assert steps[0].source == "manual"
+        assert steps[0].remaining_population == round(TOTAL_POPULATION_ES * SKIN_TONE_DISTRIBUTION["oscuro"])
+
+    def test_unknown_value_produces_no_estimable_step_not_a_crash(self):
+        # Un valor que no está en la tabla de referencia (no debería poder
+        # pasar desde el desplegable del frontend, pero la API es pública)
+        # no debe reventar -- mismo criterio que el resto de pasos cuando
+        # no hay dato del INE para un valor concreto.
+        steps = estimate_population_narrowing(
+            DemographicFindings(), manual_attributes=[ManualAttribute(category="color_ojos", value="purpura")]
+        )
+        assert len(steps) == 1
+        assert steps[0].risk_level == "no_estimable"
+        assert steps[0].remaining_population is None
+
+    def test_unknown_category_is_ignored_silently(self):
+        # Categoría que no es ninguna de las tres soportadas por el
+        # selector manual -- no debe producir ningún step ni reventar.
+        steps = estimate_population_narrowing(
+            DemographicFindings(), manual_attributes=[ManualAttribute(category="altura", value="alto")]
+        )
+        assert steps == []
+
+    def test_multiple_manual_attributes_all_applied_independently(self):
+        steps = estimate_population_narrowing(
+            DemographicFindings(),
+            manual_attributes=[
+                ManualAttribute(category="color_ojos", value="azul"),
+                ManualAttribute(category="color_pelo", value="rubio"),
+                ManualAttribute(category="color_piel", value="claro"),
+            ],
+        )
+        assert [s.category for s in steps] == ["color_ojos", "color_pelo", "color_piel"]
+        # Independientes entre sí (se multiplican en cadena sobre el
+        # `remaining` que va quedando, en el orden declarado) -- no una
+        # combinación conjunta de tabla cruzada del INE.
+        expected = TOTAL_POPULATION_ES * EYE_COLOR_DISTRIBUTION["azul"] * HAIR_COLOR_DISTRIBUTION["rubio"] * SKIN_TONE_DISTRIBUTION["claro"]
+        assert steps[-1].remaining_population == round(expected)
+
+    def test_manual_attributes_combine_with_chained_findings(self):
+        # Los rasgos manuales se aplican DESPUÉS de la cadena de `findings`
+        # (sexo, edad...), sobre el `remaining` ya estrechado por esos
+        # atributos -- no de forma independiente/paralela.
+        findings = DemographicFindings(sexo="mujer")
+        steps = estimate_population_narrowing(
+            findings, manual_attributes=[ManualAttribute(category="color_pelo", value="pelirrojo")]
+        )
+        assert [s.category for s in steps] == ["sexo", "color_pelo"]
+        assert final_remaining_population(steps) == steps[-1].remaining_population
+        assert steps[-1].remaining_population < steps[0].remaining_population
 

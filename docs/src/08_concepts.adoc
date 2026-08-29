@@ -42,6 +42,13 @@ ifndef::imagesdir[:imagesdir: ../images]
    estimación visual aproximada; se documenta igualmente porque, si
    alguna vez SÍ hay EXIF, el dato que se procesa (aunque no se persista)
    es cualitativamente distinto de una estimación.
+* **Categorías especiales del RGPD, excluidas sin excepción**: origen
+  étnico/racial, salud/discapacidad y opinión/afiliación política
+  (art. 9 RGPD) no se detectan por ninguna vía del sistema -- ni por
+  IA sobre foto o texto, ni como acotación de k-anonimato, ni siquiera
+  como autodeclaración textual explícita -- ver ADR-34 (rasgos
+  físicos manuales, ojos/pelo/piel) y ADR-35 (las tres categorías,
+  todas las vías).
 * **Excepción consciente y documentada — extracción de atributos con IA**:
   a diferencia del análisis del informe con IA (que solo envía agregados
   ya generados), `nlp/ai_attribute_extraction.py` envía TEXTO CRUDO

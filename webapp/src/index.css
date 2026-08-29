@@ -803,6 +803,11 @@ body {
   margin-bottom: 6px;
 }
 
+.score-row-tooltip {
+  color: #6b7280;
+  cursor: help;
+}
+
 .score-track {
   height: 8px;
   background: #1f2530;

@@ -1990,3 +1990,125 @@ de datos potencialmente disponibles (discapacidad en INE, opinión
 política en CIS) quedan sin aprovechar en el cálculo de k-anonimato,
 que en teoría podría ser más completo con ellas.
 
+=== ADR-36: Margen de gracia antes de dar por perdido un stream SSE de análisis
+
+*Contexto*: bug real detectado en pruebas manuales: un corte de
+conexión de pocos segundos (wifi inestable, roaming, WSL2 renovando la
+red) tiraba todo el análisis en curso, obligando a repetirlo desde
+cero. La causa: en `webapp/src/api.ts`, `analyzeStream` cerraba el
+`EventSource` inmediatamente en cualquier `onerror`, aunque el propio
+navegador ya reintenta la reconexión solo si no se le cierra la
+conexión. Ese `close()` es justo lo que hace que el backend
+(`analyze_stream` en `analysis_router.py`) detecte al cliente como
+desconectado y cancele `pipeline_task` -- matando el análisis por un
+corte de un par de segundos.
+
+*Decisión*: ya no se cierra el stream a la primera señal de error. Se
+espera un margen de gracia de 10 segundos (`STREAM_LOST_GRACE_MS`)
+dando la oportunidad de que el propio `EventSource` reconecte solo
+(`onopen`) o vuelva a llegar algún mensaje (`onmessage`); solo si
+pasan esos 10s sin recuperarse se cierra de verdad la conexión y se
+avisa al usuario, como antes. Reintentos repetidos del navegador
+durante ese margen no lo alargan (el margen cuenta desde el primer
+error, no se reinicia con cada reintento fallido).
+
+*Alternativas consideradas*: subir/bajar el margen. Un margen mayor
+(30s, 1 min) deja al usuario mirando una pantalla de progreso inmóvil
+sin ningún indicio de qué está pasando, peor experiencia que un error
+claro y rápido; uno menor (2-3s) apenas le da margen al reintento
+nativo del navegador (que por defecto reintenta cada ~3s) y en la
+práctica se comporta casi igual que antes del fix.
+
+*Consecuencias*: (+) un corte de conexión breve ya no tira el análisis
+en curso; (+) reintentos del navegador durante el margen no generan
+avisos duplicados ni alargan la espera; (-) si el corte de red real
+supera los 10s y además llega a tirar la conexión TCP subyacente (no
+garantizado: muchos cortes breves sobreviven a nivel de TCP sin que el
+`EventSource` llegue a reconectar desde cero), el backend sí cancela
+el pipeline y hay que repetir el análisis completo -- no hay
+resumibilidad real del lado del servidor, que queda fuera de alcance
+de este fix.
+
+=== ADR-37: Sesgo por muestra pequeña en `deanonymization_ease` -- concentración horaria y riqueza de vocabulario poco fiables con pocos posts
+
+*Contexto*: bug real detectado en una prueba manual: una cuenta con
+apenas contenido aprovechable (solo se pudo inferir "sexo: hombre", con
+baja confianza) mostraba "Facilidad de deanonimización: Medio (30.2)"
+-- un score llamativamente alto para un perfil del que casi no se sabe
+nada. La cuenta de prueba tenía **1 solo post**.
+
+Investigando `_score_deanonymization_ease()` (`app/scoring/
+privacy_score.py`), dos de sus tres señales son estadísticas sobre el
+conjunto de posts, no factores fijos, y con muestras muy pequeñas son
+ruidosas, no simplemente "menos precisas":
+
+- `concentration = max(hour_values)` (proporción de posts en la hora
+  pico) es, con 1 solo post, **matemáticamente 1.0 siempre** -- el 100%
+  de "tus posts" cae por definición en la única hora que hay, sin que
+  eso indique ninguna rutina real. Antes del fix, esa señal por sí sola
+  ya aportaba 30 de los 100 puntos posibles (peso 0.3), reproducido a
+  mano: con `volume_factor≈0`, `distinctiveness_factor≈0` y
+  `concentration=1.0`, el score sale exactamente 30.2 -- el mismo
+  número visto en la prueba manual.
+- `vocabulary_richness` (type-token ratio) también tiende a salir
+  inflada en textos cortos, por la simple falta de oportunidad de
+  repetir palabras -- no porque el vocabulario sea de verdad
+  distintivo.
+
+*Alternativas consideradas*:
+
+- Corrección estadística rigurosa: comparar `concentration` contra el
+  valor esperado bajo un modelo nulo (publicación uniforme al azar en
+  24 franjas) para el tamaño de muestra dado, en vez de un factor de
+  confianza lineal. Más correcto en teoría, pero añade complejidad y
+  otro parámetro que justificar/validar para un MVP de TFG cuyas
+  ponderaciones ya se documentan como "hipótesis a validar
+  empíricamente" (ver docstring del módulo).
+- Umbral duro: no contar `concentration`/`distinctiveness_factor` en
+  absoluto por debajo de un mínimo de posts. Más simple, pero genera un
+  salto brusco (p. ej. de 0 a pleno peso al cruzar el umbral) en vez de
+  una transición gradual según la cantidad de contenido real
+  disponible.
+
+*Decisión*: se introduce `sample_confidence = min(len(posts) /
+_MIN_POSTS_FOR_RELIABLE_STYLE, 1.0)` (`_MIN_POSTS_FOR_RELIABLE_STYLE =
+20`), y se escala por ese factor la contribución de
+`distinctiveness_factor` y `concentration` -- pero NO la de
+`volume_factor`, que no tiene este problema (más posts SIEMPRE implica
+más superficie real de fingerprinting, sin importar si esos dos
+factores concretos son ruidosos o no). El umbral de 20 es
+deliberadamente más bajo que el de saturación de `volume_factor`
+(200): estas dos estadísticas concretas dejan de ser puro ruido bastante
+antes de que haya "suficiente contenido" en términos absolutos.
+
+De paso se corrigió `breakdown_explanation["deanonymization_ease"]`,
+que mencionaba "antigüedad de la cuenta" (nunca usada en la fórmula) y
+no mencionaba la riqueza de vocabulario (sí usada) -- inconsistencia
+encontrada durante la misma revisión, sin relación causal con el bug
+numérico pero igual de real.
+
+*Verificación*: `backend/tests/test_privacy_score.py` (nuevo, el
+módulo no tenía tests dedicados hasta ahora) -- incluye un test de
+regresión directo del caso de la prueba manual (1 post, score debe
+quedar por debajo de 10 en vez de rondar 30) y un test que confirma que
+la MISMA concentración/riqueza "cruda" puntúa más alto con más posts
+detrás, que es la propiedad que de verdad se quería arreglar.
+
+*Consecuencias*: (+) el score de deanonimización ya no puede salir
+"Medio" o "Alto" únicamente por la certeza matemática trivial de tener
+poquísimos posts; (+) el texto explicativo vuelve a coincidir con la
+fórmula real; (-) la fórmula gana un parámetro más
+(`_MIN_POSTS_FOR_RELIABLE_STYLE`) sin validación empírica propia,
+mismo nivel de rigor -- e igual de "hipótesis a validar"-- que el resto
+de pesos y umbrales ya documentados en el módulo; (-) sigue sin resolver
+la confusión de fondo de que `deanonymization_ease` mide un riesgo
+DISTINTO (fingerprinting de estilo de escritura) al de "Qué se puede
+inferir sobre ti" (atributos demográficos concretos), lo cual puede
+seguir generando la misma pregunta en el futuro si un usuario con pocos
+atributos inferidos pero bastante volumen de posts mundanos obtiene un
+score de deanonimización no despreciable -- correcto en este caso, pero
+posible candidato a aclarar en la propia UI del informe. Mitigado
+parcialmente ya en la propia UI: las tres barras de `ScoreBar` llevan
+ahora un icono ⓘ con tooltip explicando qué mide cada una (ver
+`dashboard.scoreLabels.*Tooltip` en los locales de i18n).
+

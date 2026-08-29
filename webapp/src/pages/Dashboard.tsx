@@ -43,10 +43,17 @@ function formatPhotosLabel(
 }
 
 function StatusIcon({ done }: { done: boolean }) {
+  // `key` distinta a propósito: si spinner y check compartieran nodo del DOM
+  // (mismo tipo de elemento -- <span> -- en la misma posición), React lo
+  // reciclaría y dejaría pegado el `transform: rotate(...)` que el efecto de
+  // arriba aplica imperativamente sobre `.spinner` en cada fotograma -- el
+  // check heredaría el último ángulo del giro (a veces boca abajo) en vez de
+  // aparecer recto. La `key` obliga a montar un nodo nuevo y limpio, sin
+  // transform heredado, aunque ambos sean <span>.
   return done ? (
-    <span className="progress-icon progress-icon-done" aria-hidden="true">✓</span>
+    <span key="done" className="progress-icon progress-icon-done" aria-hidden="true">✓</span>
   ) : (
-    <span className="spinner spinner-sm" aria-hidden="true" />
+    <span key="spinner" className="spinner spinner-sm" aria-hidden="true" />
   );
 }
 
@@ -379,14 +386,20 @@ const Dashboard: React.FC = () => {
 
       <section className="card">
         <h2>{t('dashboard.overallScore', { score: report.privacy_score.overall_score.toFixed(1) })}</h2>
-        <ScoreBar label={t('dashboard.scoreLabels.geolocationRisk')} value={report.privacy_score.geolocation_risk} />
+        <ScoreBar
+          label={t('dashboard.scoreLabels.geolocationRisk')}
+          value={report.privacy_score.geolocation_risk}
+          tooltip={t('dashboard.scoreLabels.geolocationRiskTooltip')}
+        />
         <ScoreBar
           label={t('dashboard.scoreLabels.inferableDataRisk')}
           value={report.privacy_score.inferable_data_risk}
+          tooltip={t('dashboard.scoreLabels.inferableDataRiskTooltip')}
         />
         <ScoreBar
           label={t('dashboard.scoreLabels.deanonymizationEase')}
           value={report.privacy_score.deanonymization_ease}
+          tooltip={t('dashboard.scoreLabels.deanonymizationEaseTooltip')}
         />
         <p className="note">{report.privacy_score.breakdown_explanation.identity_consistency}</p>
       </section>

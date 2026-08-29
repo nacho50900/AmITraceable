@@ -89,8 +89,11 @@
     "overallScore": "Overall exposure score: {{score}} / 100",
     "scoreLabels": {
       "geolocationRisk": "Geolocation risk",
+      "geolocationRiskTooltip": "Measures how easy it is to figure out where you live or have been from your photos (EXIF metadata, recognizable background elements, place mentions).",
       "inferableDataRisk": "Inferable personal data",
-      "deanonymizationEase": "Ease of de-anonymization"
+      "inferableDataRiskTooltip": "Measures how many of your attributes (age, occupation, education, marital status...) can be deduced from what you post, and with what confidence.",
+      "deanonymizationEase": "Ease of de-anonymization",
+      "deanonymizationEaseTooltip": "Measures how identifiable your writing style is (volume, vocabulary, timing), not the specific data that could be inferred about you -- it can be high even when little else was inferred below."
     },
     "whatCanBeInferred": "What can be inferred about you",
     "estimatedLocations": "Locations estimated from your photos",

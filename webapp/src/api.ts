@@ -47,7 +47,33 @@ export const api = {
   analyzeStream: (platform: Platform, onEvent: (event: AnalysisProgressEvent) => void): (() => void) => {
     const source = new EventSource(`${API_URL}/api/analyze/${platform}/stream`, { withCredentials: true });
 
+    // Un corte de conexión breve (wifi inestable, roaming, WSL2 renovando
+    // la red...) NO debe tirar todo el análisis en curso. El EventSource
+    // del navegador ya reintenta la reconexión por sí solo mientras no lo
+    // cerremos nosotros -- y en el backend (ver analyze_stream en
+    // analysis_router.py), el pipeline solo se cancela cuando de verdad
+    // detecta al cliente desconectado, así que basta con NO cerrar la
+    // conexión a la primera y darle un margen para que se recupere sola.
+    // Solo si pasan STREAM_LOST_GRACE_MS sin lograrlo se da la conexión
+    // por perdida de verdad y se avisa al usuario.
+    const STREAM_LOST_GRACE_MS = 10_000;
+    let graceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const cancelPendingStreamLost = () => {
+      if (graceTimer !== null) {
+        clearTimeout(graceTimer);
+        graceTimer = null;
+      }
+    };
+
+    source.onopen = () => {
+      // Reconexión nativa lograda: se cancela el aviso de "conexión
+      // perdida" pendiente, si lo había.
+      cancelPendingStreamLost();
+    };
+
     source.onmessage = (message) => {
+      cancelPendingStreamLost(); // ha llegado algo: la conexión está viva de nuevo
       let parsed: AnalysisProgressEvent;
       try {
         parsed = JSON.parse(message.data);
@@ -64,14 +90,22 @@ export const api = {
       // El navegador dispara este mismo evento tanto ante una caída de red
       // real como, a veces, tras el cierre normal del stream si no
       // llegamos a cerrarlo nosotros primero arriba -- readyState permite
-      // distinguir ambos casos y no duplicar el error.
-      if (source.readyState !== EventSource.CLOSED) {
+      // distinguir ambos casos y no duplicar el error. Mientras reintenta
+      // solo (readyState CONNECTING), no se toca nada más que armar el
+      // aviso de gracia una única vez -- reintentos repetidos durante ese
+      // margen no lo alargan.
+      if (source.readyState === EventSource.CLOSED || graceTimer !== null) return;
+      graceTimer = setTimeout(() => {
+        graceTimer = null;
         onEvent({ done: true, error: i18n.t('api.streamLost') });
-      }
-      source.close();
+        source.close();
+      }, STREAM_LOST_GRACE_MS);
     };
 
-    return () => source.close();
+    return () => {
+      cancelPendingStreamLost();
+      source.close();
+    };
   },
   // Endpoint aislado del pipeline principal: manda el informe YA generado
   // (que el frontend ya tiene en memoria) para que una IA externa (Mistral,

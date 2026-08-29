@@ -21,6 +21,7 @@ class FakeEventSource {
   readyState = 1;
   onmessage: ((event: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
+  onopen: (() => void) | null = null;
 
   constructor(url: string, options?: { withCredentials?: boolean }) {
     this.url = url;
@@ -38,6 +39,10 @@ class FakeEventSource {
 
   triggerError() {
     this.onerror?.();
+  }
+
+  triggerOpen() {
+    this.onopen?.();
   }
 }
 
@@ -203,7 +208,8 @@ describe('api', () => {
       expect(onEvent).not.toHaveBeenCalled();
     });
 
-    test('error de red real (readyState no CLOSED) entrega un evento de error', () => {
+    test('error de red que no se recupera en 10s entrega un evento de error (tras el margen de gracia)', () => {
+      vi.useFakeTimers();
       vi.stubGlobal('EventSource', FakeEventSource);
       const onEvent = vi.fn();
 
@@ -211,11 +217,86 @@ describe('api', () => {
       const source = FakeEventSource.instances[0];
       source.triggerError();
 
+      // Dentro del margen de gracia todavía no se avisa: se le da tiempo a
+      // que el propio EventSource reconecte solo.
+      expect(onEvent).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(10_000);
+
       expect(onEvent).toHaveBeenCalledWith({
         done: true,
         error: 'Se perdió la conexión con el servidor durante el análisis.',
       });
       expect(source.readyState).toBe(FakeEventSource.CLOSED);
+      vi.useRealTimers();
+    });
+
+    test('si el EventSource reconecta solo (onopen) dentro del margen de gracia, no se avisa de conexión perdida', () => {
+      vi.useFakeTimers();
+      vi.stubGlobal('EventSource', FakeEventSource);
+      const onEvent = vi.fn();
+
+      api.analyzeStream('reddit', onEvent);
+      const source = FakeEventSource.instances[0];
+      source.triggerError();
+      vi.advanceTimersByTime(5_000); // corte breve: reconecta antes de los 10s
+      source.triggerOpen();
+      vi.advanceTimersByTime(10_000); // pasa de sobra el margen original sin que salte el aviso
+
+      expect(onEvent).not.toHaveBeenCalled();
+      expect(source.readyState).not.toBe(FakeEventSource.CLOSED);
+      vi.useRealTimers();
+    });
+
+    test('si llega un mensaje dentro del margen de gracia, se cancela el aviso de conexión perdida pendiente', () => {
+      vi.useFakeTimers();
+      vi.stubGlobal('EventSource', FakeEventSource);
+      const onEvent = vi.fn();
+
+      api.analyzeStream('reddit', onEvent);
+      const source = FakeEventSource.instances[0];
+      source.triggerError();
+      vi.advanceTimersByTime(5_000);
+      source.emit({ done: false, stage: 'Analizando fotos...' });
+      onEvent.mockClear();
+      vi.advanceTimersByTime(10_000);
+
+      expect(onEvent).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
+    test('reintentos de error repetidos dentro del margen no lo alargan (el aviso llega a los 10s del primer error)', () => {
+      vi.useFakeTimers();
+      vi.stubGlobal('EventSource', FakeEventSource);
+      const onEvent = vi.fn();
+
+      api.analyzeStream('reddit', onEvent);
+      const source = FakeEventSource.instances[0];
+      source.triggerError();
+      vi.advanceTimersByTime(8_000);
+      source.triggerError(); // el navegador reintenta y vuelve a fallar
+      vi.advanceTimersByTime(2_000); // 10s desde el PRIMER error, no desde el segundo
+
+      expect(onEvent).toHaveBeenCalledWith({
+        done: true,
+        error: 'Se perdió la conexión con el servidor durante el análisis.',
+      });
+      vi.useRealTimers();
+    });
+
+    test('la función de limpieza cancela el aviso de conexión perdida pendiente', () => {
+      vi.useFakeTimers();
+      vi.stubGlobal('EventSource', FakeEventSource);
+      const onEvent = vi.fn();
+
+      const stop = api.analyzeStream('reddit', onEvent);
+      const source = FakeEventSource.instances[0];
+      source.triggerError();
+      stop();
+      vi.advanceTimersByTime(10_000);
+
+      expect(onEvent).not.toHaveBeenCalled();
+      vi.useRealTimers();
     });
 
     test('error tras un cierre ya limpio (readyState CLOSED) no duplica el evento de error', () => {

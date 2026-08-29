@@ -68,8 +68,9 @@ export const ManualTraitsSelector: React.FC<Props> = ({ onApplyTraits, isOpen, s
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
         {Object.entries(MANUAL_CATEGORIES).map(([category, data]) => (
           <div key={category} className="flex flex-col gap-2">
-            <label className="text-sm font-semibold text-slate-300 uppercase tracking-wider">{data.label}</label>
+            <label htmlFor={category} className="text-sm font-semibold text-slate-300 uppercase tracking-wider">{data.label}</label>
             <select
+              id={category}
               className="bg-slate-900 border border-slate-700 rounded-lg p-3 text-slate-100 focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none transition-all"
               value={selectedTraits[category] || ""}
               onChange={(e) => handleSelect(category, e.target.value)}

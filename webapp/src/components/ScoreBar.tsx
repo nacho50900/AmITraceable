@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 interface ScoreBarProps {
   label: string;
   value: number;
+  tooltip?: string;
 }
 
 function riskLabel(value: number, t: (key: string) => string): { text: string; color: string } {
@@ -13,14 +14,21 @@ function riskLabel(value: number, t: (key: string) => string): { text: string; c
   return { text: t('components.scoreBar.veryHigh'), color: '#d3403a' };
 }
 
-const ScoreBar: React.FC<ScoreBarProps> = ({ label, value }) => {
+const ScoreBar: React.FC<ScoreBarProps> = ({ label, value, tooltip }) => {
   const { t } = useTranslation();
   const risk = riskLabel(value, t);
 
   return (
     <div className="score-row">
       <div className="score-row-header">
-        <span>{label}</span>
+        <span>
+          {label}
+          {tooltip && (
+            <span className="score-row-tooltip" title={tooltip} aria-label={tooltip}>
+              {' '}ⓘ
+            </span>
+          )}
+        </span>
         <span style={{ color: risk.color, fontWeight: 600 }}>
           {risk.text} ({value.toFixed(1)})
         </span>

@@ -89,8 +89,11 @@
     "overallScore": "Score global de exposición: {{score}} / 100",
     "scoreLabels": {
       "geolocationRisk": "Riesgo de geolocalización",
+      "geolocationRiskTooltip": "Mide qué tan fácil es averiguar dónde vives o estuviste a partir de tus fotos (metadatos EXIF, elementos reconocibles del fondo, menciones de lugares).",
       "inferableDataRisk": "Datos personales inferibles",
-      "deanonymizationEase": "Facilidad de deanonimización"
+      "inferableDataRiskTooltip": "Mide cuántos atributos tuyos (edad, ocupación, estudios, estado civil...) se pueden deducir de lo que publicas, y con qué confianza.",
+      "deanonymizationEase": "Facilidad de deanonimización",
+      "deanonymizationEaseTooltip": "Mide lo identificable que es tu forma de escribir (volumen, vocabulario, horarios), no los datos concretos que se han podido inferir sobre ti -- puede salir alto aunque abajo apenas se haya inferido nada."
     },
     "whatCanBeInferred": "Qué se puede inferir sobre ti",
     "estimatedLocations": "Ubicaciones estimadas a partir de tus fotos",
