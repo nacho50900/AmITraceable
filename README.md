@@ -17,6 +17,12 @@
 > NLP: spaCy, scikit-learn, DINOv2/FAISS). El servicio `gamey` (Rust) se
 > ha eliminado por no aplicar a este TFG.
 
+
+
+https://github.com/user-attachments/assets/bc91d3e4-bbb0-44b1-be25-00c0aba36d51
+
+
+
 TFG: análisis defensivo de la propia huella digital mediante OSINT e IA. El
 usuario autentica **su propia cuenta** de Reddit y/o Instagram vía OAuth, y
 la herramienta genera un informe con lo que es públicamente inferible sobre
