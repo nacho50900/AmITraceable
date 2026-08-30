@@ -89,11 +89,8 @@
     "overallScore": "Score global de exposición: {{score}} / 100",
     "scoreLabels": {
       "geolocationRisk": "Riesgo de geolocalización",
-      "geolocationRiskTooltip": "Mide qué tan fácil es averiguar dónde vives o estuviste a partir de tus fotos (metadatos EXIF, elementos reconocibles del fondo, menciones de lugares).",
       "inferableDataRisk": "Datos personales inferibles",
-      "inferableDataRiskTooltip": "Mide cuántos atributos tuyos (edad, ocupación, estudios, estado civil...) se pueden deducir de lo que publicas, y con qué confianza.",
-      "deanonymizationEase": "Facilidad de deanonimización",
-      "deanonymizationEaseTooltip": "Mide lo identificable que es tu forma de escribir (volumen, vocabulario, horarios), no los datos concretos que se han podido inferir sobre ti -- puede salir alto aunque abajo apenas se haya inferido nada."
+      "deanonymizationEase": "Facilidad de deanonimización"
     },
     "whatCanBeInferred": "Qué se puede inferir sobre ti",
     "estimatedLocations": "Ubicaciones estimadas a partir de tus fotos",
@@ -135,13 +132,17 @@
       "religion_categoria_especial": "Categoría especial de datos (art. 9 RGPD): se calcula únicamente porque la propia persona lo autodeclaró o lo indicó con un símbolo/emoji explícito en público, nunca por inferencia indirecta. La proporción usada es una estimación contextual para España (CIS y fuentes comunitarias), no un censo oficial del INE -- España no recoge la afiliación religiosa en el censo.",
       "signo_zodiacal_note": "La distribución es uniforme (~8,33% cada signo, un doceavo del año) porque las fechas de nacimiento se reparten de forma prácticamente uniforme a lo largo del año -- no es un dato inventado: revela directamente un rango real de ~30 días de nacimiento, aunque la creencia astrológica en sí no tenga base científica.",
       "practica_deportiva_no_particion": "Proporción marginal de la Encuesta de Hábitos Deportivos en España (no es una partición: la encuesta es de respuesta múltiple, una persona puede practicar varios deportes a la vez, así que este dato por sí solo no implica que sea el ÚNICO deporte que practica).",
-      "practica_deportiva_ajustada_por_sexo": "Proporción marginal de la Encuesta de Hábitos Deportivos en España (no es una partición: la encuesta es de respuesta múltiple, una persona puede practicar varios deportes a la vez, así que este dato por sí solo no implica que sea el ÚNICO deporte que practica). Al conocerse también el sexo, se usa el porcentaje de esa combinación concreta (práctica deportiva condicionada a sexo, misma encuesta), no una aproximación multiplicando proporciones independientes."
+      "practica_deportiva_ajustada_por_sexo": "Proporción marginal de la Encuesta de Hábitos Deportivos en España (no es una partición: la encuesta es de respuesta múltiple, una persona puede practicar varios deportes a la vez, así que este dato por sí solo no implica que sea el ÚNICO deporte que practica). Al conocerse también el sexo, se usa el porcentaje de esa combinación concreta (práctica deportiva condicionada a sexo, misma encuesta), no una aproximación multiplicando proporciones independientes.",
+      "practica_deportiva_ajustada_por_edad": "Proporción marginal de la Encuesta de Hábitos Deportivos en España (no es una partición: la encuesta es de respuesta múltiple, una persona puede practicar varios deportes a la vez, así que este dato por sí solo no implica que sea el ÚNICO deporte que practica). Al conocerse también la edad, se usa el porcentaje de esa combinación concreta (práctica deportiva condicionada a tramo de edad, misma encuesta), no una aproximación multiplicando proporciones independientes.",
+      "practica_deportiva_ajustada_por_estudios": "Proporción marginal de la Encuesta de Hábitos Deportivos en España (no es una partición: la encuesta es de respuesta múltiple, una persona puede practicar varios deportes a la vez, así que este dato por sí solo no implica que sea el ÚNICO deporte que practica). Al conocerse también el nivel de estudios, se usa el porcentaje de esa combinación concreta (práctica deportiva condicionada a nivel de estudios, misma encuesta), no una aproximación multiplicando proporciones independientes.",
+      "nivel_estudios_aproximacion_25_64": "Aproximación: la cifra oficial (INE/EPA) cubre población de 25 a 64 años, no toda la población adulta."
     },
     "attribute": {
       "sexo": "Sexo: {{value}}",
       "edad": "Edad: {{value}} años",
       "estado_civil": "{{value}}",
       "estudios": "Estudió: {{value}}",
+      "nivel_estudios": "Nivel de estudios: {{value}}",
       "ocupacion": "Ocupación: {{value}}",
       "nacionalidad": "Nacionalidad: {{value}}",
       "situacion_laboral": "Situación laboral: {{value}}",
@@ -207,6 +208,11 @@
         "periodismo": "Periodismo",
         "economia": "Economía",
         "veterinaria": "Veterinaria"
+      },
+      "nivel_estudios": {
+        "superior": "educación superior",
+        "secundaria_superior": "2ª etapa de educación secundaria (bachillerato o FP grado medio)",
+        "secundaria_o_inferior": "1ª etapa de educación secundaria o inferior (ESO, primaria)"
       },
       "ocupacion": {
         "docente": "Docente",

@@ -70,6 +70,17 @@ ifndef::imagesdir[:imagesdir: ../images]
   bajo el número resultante, más fácil sería, en teoría, identificar a
   esa persona a partir de esas características.
 
+| Proporción condicionada
+| Porcentaje de población que comparte un rasgo, calculado CRUZANDO ese
+  rasgo con otra variable ya conocida de la misma persona (sexo, edad,
+  nivel de estudios), en vez de usar la proporción marginal general.
+  Ejemplo: `SPORT_PRACTICE_BY_SEX` da "qué % de HOMBRES practica
+  fútbol", más preciso que "qué % de la población total practica
+  fútbol" cuando ya se sabe que la persona es hombre. `practica_deportiva`
+  prueba varias en cascada (sexo > edad > nivel de estudios > marginal,
+  ver ADR-37) sin combinarlas nunca entre sí, porque no existe un cruce
+  publicado a más de una variable a la vez.
+
 | Rasgo físico manual
 | Atributo visible (color de ojos, de pelo, tono de piel) que el
   pipeline automático nunca infiere -- ni de texto ni de imagen -- por
@@ -80,6 +91,22 @@ ifndef::imagesdir[:imagesdir: ../images]
   `POST /api/analyze/recalculate` y se marca con `source = "manual"`
   para distinguirlo visualmente de los rasgos que sí detecta el sistema
   (ver ADR-34).
+
+| Estudios
+| Carrera universitaria concreta que la persona nombra explícitamente
+  ("estudié Medicina"), campo `estudios` (`STUDIES_DISTRIBUTION`).
+  DISTINTO de "Nivel de estudios" (más abajo): este campo requiere una
+  titulación nombrada, no cubre a quien solo dice "tengo el
+  bachillerato" o "no tengo estudios" -- para eso está `nivel_estudios`.
+
+| Nivel de estudios
+| Nivel de formación MÁXIMO completado (superior / 2ª etapa de
+  secundaria / 1ª etapa de secundaria o inferior -- clasificación
+  CNED-2014/ISCED del INE), campo `nivel_estudios`. DISTINTO de
+  "Estudios" (arriba): alguien puede tener nivel "superior" sin haber
+  nombrado ninguna carrera (p. ej. "tengo el título de FP grado
+  superior"), y nombrar una carrera concreta implica automáticamente
+  nivel "superior" sin declaración aparte (ver ADR-38).
 
 | INE (Instituto Nacional de Estadística)
 | Organismo público español responsable de las estadísticas oficiales

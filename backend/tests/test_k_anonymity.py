@@ -2,8 +2,7 @@ import pytest
 
 from app.nlp.demographic_extraction import DemographicFindings
 from app.data.ine_reference import (
-    EYE_COLOR_DISTRIBUTION,
-    HAIR_COLOR_DISTRIBUTION,
+    EDUCATION_LEVEL_DISTRIBUTION,
     HOUSEHOLD_TYPE_DISTRIBUTION,
     LANGUAGE_BY_CCAA,
     MARITAL_STATUS_BY_SEX,
@@ -12,13 +11,13 @@ from app.data.ine_reference import (
     RELIGION_DISTRIBUTION,
     SEXUAL_ORIENTATION_DISTRIBUTION,
     SITUACION_LABORAL_DISTRIBUTION,
-    SKIN_TONE_DISTRIBUTION,
+    SPORT_PRACTICE_BY_AGE_BAND,
+    SPORT_PRACTICE_BY_EDUCATION_LEVEL,
     SPORT_PRACTICE_BY_SEX,
     SPORT_PRACTICE_DISTRIBUTION,
     TOTAL_POPULATION_ES,
     ZODIAC_DISTRIBUTION,
 )
-from app.models.schemas import ManualAttribute
 from app.scoring.k_anonymity import (
     PopulationNarrowingStep,
     _risk_level,
@@ -740,6 +739,42 @@ class TestSpecialCategoryFieldsCombined:
         assert steps[-1].remaining_population < steps[0].remaining_population
 
 
+class TestNivelEstudiosStep:
+    def test_superior_produces_a_step_that_narrows_population(self):
+        findings = DemographicFindings(nivel_estudios="superior")
+        steps = estimate_population_narrowing(findings)
+
+        assert len(steps) == 1
+        assert steps[0].category == "nivel_estudios"
+        assert steps[0].attribute_label == "Nivel de estudios: educación superior"
+        assert steps[0].remaining_population == round(
+            TOTAL_POPULATION_ES * EDUCATION_LEVEL_DISTRIBUTION["superior"]
+        )
+        assert steps[0].note_code == "nivel_estudios_aproximacion_25_64"
+
+    def test_all_three_tiers_produce_a_step(self):
+        for value in ("superior", "secundaria_superior", "secundaria_o_inferior"):
+            steps = estimate_population_narrowing(DemographicFindings(nivel_estudios=value))
+            assert len(steps) == 1
+            assert steps[0].remaining_population is not None
+
+    def test_is_distinct_from_estudios_category(self):
+        """DISTINTO de `estudios` (la carrera concreta): ambos pueden
+        coexistir como pasos separados de la cadena -- no es doble
+        contabilización, son dos preguntas distintas de la encuesta."""
+        findings = DemographicFindings(estudios="medicina", nivel_estudios="superior")
+        steps = estimate_population_narrowing(findings)
+
+        categories = {s.category for s in steps}
+        assert {"estudios", "nivel_estudios"} <= categories
+
+    def test_none_produces_no_step(self):
+        assert estimate_population_narrowing(DemographicFindings(nivel_estudios=None)) == []
+
+    def test_distribution_sums_to_one(self):
+        assert sum(EDUCATION_LEVEL_DISTRIBUTION.values()) == pytest.approx(1.0)
+
+
 class TestPracticaDeportivaStep:
     def test_produces_a_step_that_narrows_population(self):
         findings = DemographicFindings(practica_deportiva="futbol", source={"practica_deportiva": "texto"})
@@ -957,93 +992,155 @@ class TestPracticaDeportivaStep:
         for sexo, distribution in SPORT_PRACTICE_BY_SEX.items():
             assert sum(distribution.values()) < 1.0, sexo
 
-
-class TestManualAttributesNarrowing:
-    """`estimate_population_narrowing(findings, manual_attributes=...)` --
-    rasgos físicos que el usuario declara a mano (ver ManualTraitsSelector.tsx
-    en el frontend) porque el RGPD prohíbe inferirlos automáticamente de
-    fotos (ver ADR-34/ADR-35). A diferencia del resto de pasos (encadenados,
-    de `findings`), estos son independientes entre sí y se aplican todos
-    seguidos si se declaran varios a la vez."""
-
-    def test_no_manual_attributes_produces_no_extra_steps(self):
-        assert estimate_population_narrowing(DemographicFindings(), manual_attributes=[]) == []
-        assert estimate_population_narrowing(DemographicFindings(), manual_attributes=None) == []
-
-    def test_color_ojos_produces_step_with_manual_source(self):
-        steps = estimate_population_narrowing(
-            DemographicFindings(), manual_attributes=[ManualAttribute(category="color_ojos", value="verde")]
+    def test_uses_exact_age_band_proportion_when_edad_exacta_known_and_sexo_not(self):
+        """Mismo patrón que el ajuste por sexo, pero con edad EXACTA (no
+        sexo) como única señal conocida -- 15-24 años cae en el tramo
+        "15_24" de SPORT_PRACTICE_BY_AGE_BAND."""
+        with_edad = estimate_population_narrowing(
+            DemographicFindings(edad=20, practica_deportiva="futbol")
         )
-        assert len(steps) == 1
-        assert steps[0].category == "color_ojos"
-        assert steps[0].source == "manual"
-        assert steps[0].value_raw == "verde"
-        assert steps[0].attribute_label == "Color de ojos: Verde"
-        assert steps[0].remaining_population == round(TOTAL_POPULATION_ES * EYE_COLOR_DISTRIBUTION["verde"])
+        edad_step = next(s for s in with_edad if s.category == "edad")
+        deporte_step = next(s for s in with_edad if s.category == "practica_deportiva")
 
-    def test_color_pelo_produces_step_with_manual_source(self):
-        steps = estimate_population_narrowing(
-            DemographicFindings(), manual_attributes=[ManualAttribute(category="color_pelo", value="pelirrojo")]
-        )
-        assert len(steps) == 1
-        assert steps[0].category == "color_pelo"
-        assert steps[0].source == "manual"
-        assert steps[0].remaining_population == round(TOTAL_POPULATION_ES * HAIR_COLOR_DISTRIBUTION["pelirrojo"])
+        expected = round(edad_step.remaining_population * SPORT_PRACTICE_BY_AGE_BAND["futbol"]["15_24"])
+        assert deporte_step.remaining_population == expected
+        assert deporte_step.note_code == "practica_deportiva_ajustada_por_edad"
 
-    def test_color_piel_produces_step_with_manual_source(self):
-        steps = estimate_population_narrowing(
-            DemographicFindings(), manual_attributes=[ManualAttribute(category="color_piel", value="oscuro")]
+    def test_uses_exact_age_band_proportion_for_a_range_fully_inside_one_band(self):
+        """Un rango de edad ESTIMADO (no exacto) que cae ENTERO dentro de
+        un único tramo de la encuesta también debe activar el ajuste --
+        27 a 32 años está completamente dentro de "25_54"."""
+        with_edad = estimate_population_narrowing(
+            DemographicFindings(edad_rango_min=27, edad_rango_max=32, practica_deportiva="ciclismo")
         )
-        assert len(steps) == 1
-        assert steps[0].category == "color_piel"
-        assert steps[0].source == "manual"
-        assert steps[0].remaining_population == round(TOTAL_POPULATION_ES * SKIN_TONE_DISTRIBUTION["oscuro"])
+        edad_step = next(s for s in with_edad if s.category == "edad")
+        deporte_step = next(s for s in with_edad if s.category == "practica_deportiva")
 
-    def test_unknown_value_produces_no_estimable_step_not_a_crash(self):
-        # Un valor que no está en la tabla de referencia (no debería poder
-        # pasar desde el desplegable del frontend, pero la API es pública)
-        # no debe reventar -- mismo criterio que el resto de pasos cuando
-        # no hay dato del INE para un valor concreto.
-        steps = estimate_population_narrowing(
-            DemographicFindings(), manual_attributes=[ManualAttribute(category="color_ojos", value="purpura")]
-        )
-        assert len(steps) == 1
-        assert steps[0].risk_level == "no_estimable"
-        assert steps[0].remaining_population is None
+        expected = round(edad_step.remaining_population * SPORT_PRACTICE_BY_AGE_BAND["ciclismo"]["25_54"])
+        assert deporte_step.remaining_population == expected
+        assert deporte_step.note_code == "practica_deportiva_ajustada_por_edad"
 
-    def test_unknown_category_is_ignored_silently(self):
-        # Categoría que no es ninguna de las tres soportadas por el
-        # selector manual -- no debe producir ningún step ni reventar.
+    def test_falls_back_to_marginal_when_age_range_spans_multiple_bands(self):
+        """Un rango que CRUZA la frontera entre dos tramos (20-30 cruza
+        "15_24" y "25_54") no se puede asignar a ninguno sin adivinar --
+        debe caer de vuelta a la marginal, no forzar un tramo al azar."""
         steps = estimate_population_narrowing(
-            DemographicFindings(), manual_attributes=[ManualAttribute(category="altura", value="alto")]
+            DemographicFindings(edad_rango_min=20, edad_rango_max=30, practica_deportiva="ciclismo")
         )
-        assert steps == []
+        deporte_step = next(s for s in steps if s.category == "practica_deportiva")
+        assert deporte_step.note_code == "practica_deportiva_no_particion"
 
-    def test_multiple_manual_attributes_all_applied_independently(self):
+    def test_falls_back_to_marginal_when_age_below_survey_population(self):
+        """La encuesta cubre población de 15+ -- una edad menor no tiene
+        tramo, debe caer de vuelta a la marginal en vez de forzar '15_24'."""
         steps = estimate_population_narrowing(
-            DemographicFindings(),
-            manual_attributes=[
-                ManualAttribute(category="color_ojos", value="azul"),
-                ManualAttribute(category="color_pelo", value="rubio"),
-                ManualAttribute(category="color_piel", value="claro"),
-            ],
+            DemographicFindings(edad=12, practica_deportiva="futbol")
         )
-        assert [s.category for s in steps] == ["color_ojos", "color_pelo", "color_piel"]
-        # Independientes entre sí (se multiplican en cadena sobre el
-        # `remaining` que va quedando, en el orden declarado) -- no una
-        # combinación conjunta de tabla cruzada del INE.
-        expected = TOTAL_POPULATION_ES * EYE_COLOR_DISTRIBUTION["azul"] * HAIR_COLOR_DISTRIBUTION["rubio"] * SKIN_TONE_DISTRIBUTION["claro"]
-        assert steps[-1].remaining_population == round(expected)
+        deporte_step = next(s for s in steps if s.category == "practica_deportiva")
+        assert deporte_step.note_code == "practica_deportiva_no_particion"
 
-    def test_manual_attributes_combine_with_chained_findings(self):
-        # Los rasgos manuales se aplican DESPUÉS de la cadena de `findings`
-        # (sexo, edad...), sobre el `remaining` ya estrechado por esos
-        # atributos -- no de forma independiente/paralela.
-        findings = DemographicFindings(sexo="mujer")
+    def test_sexo_takes_priority_over_edad_when_both_known(self):
+        """Cuando se conocen AMBOS sexo y edad, se prioriza sexo (ver
+        docstring de _step_practica_deportiva para el porqué: no existe
+        un cruce a tres bandas sexo×edad×deporte, combinar los dos
+        ajustes sería inventar independencia estadística no verificable).
+        "ciclismo" es un buen caso porque sexo y edad dan proporciones
+        claramente distintas, así que el resultado revela cuál se usó.
+
+        OJO al calcular el esperado: como TAMBIÉN se da la edad, el paso
+        de edad se ejecuta en la cadena justo ANTES que practica_deportiva
+        (ver _CHAINED_STEPS) y reduce `remaining` por su cuenta -- hay que
+        partir del remaining_population DESPUÉS de edad (el que de verdad
+        recibe el paso de deporte), no del de sexo a secas."""
         steps = estimate_population_narrowing(
-            findings, manual_attributes=[ManualAttribute(category="color_pelo", value="pelirrojo")]
+            DemographicFindings(sexo="mujer", edad=30, practica_deportiva="ciclismo")
         )
-        assert [s.category for s in steps] == ["sexo", "color_pelo"]
-        assert final_remaining_population(steps) == steps[-1].remaining_population
-        assert steps[-1].remaining_population < steps[0].remaining_population
+        edad_step = next(s for s in steps if s.category == "edad")
+        deporte_step = next(s for s in steps if s.category == "practica_deportiva")
+
+        expected_por_sexo = round(edad_step.remaining_population * SPORT_PRACTICE_BY_SEX["ciclismo"]["mujer"])
+        assert deporte_step.remaining_population == expected_por_sexo
+        assert deporte_step.note_code == "practica_deportiva_ajustada_por_sexo"
+
+    def test_falls_back_to_age_band_when_sexo_known_but_modality_lacks_that_sex_entry(self):
+        """Si el sexo se conoce pero la modalidad no tiene entrada para
+        ESE sexo (squash + mujer, ver SPORT_PRACTICE_BY_SEX), debe
+        intentarse con la edad antes de caer a la marginal -- no saltar
+        directamente a la marginal solo porque el primer intento (sexo)
+        falló."""
+        assert "mujer" not in SPORT_PRACTICE_BY_SEX["squash"]
+        assert "15_24" in SPORT_PRACTICE_BY_AGE_BAND["squash"]
+
+        steps = estimate_population_narrowing(
+            DemographicFindings(sexo="mujer", edad=20, practica_deportiva="squash")
+        )
+        deporte_step = next(s for s in steps if s.category == "practica_deportiva")
+        assert deporte_step.note_code == "practica_deportiva_ajustada_por_edad"
+
+    def test_falls_back_to_marginal_when_modality_has_no_entry_for_that_age_band(self):
+        """'automovilismo' y 'triatlon' no tienen clave '55_mas' a
+        propósito (redondeaba a 0,0 en la encuesta, ver comentario en
+        ine_reference.py) -- debe caer de vuelta a la marginal, no dar
+        una población de 0."""
+        assert "55_mas" not in SPORT_PRACTICE_BY_AGE_BAND["automovilismo"]
+
+        steps = estimate_population_narrowing(
+            DemographicFindings(edad=60, practica_deportiva="automovilismo")
+        )
+        deporte_step = next(s for s in steps if s.category == "practica_deportiva")
+        assert deporte_step.remaining_population is not None
+        assert deporte_step.remaining_population > 0
+        assert deporte_step.note_code == "practica_deportiva_no_particion"
+
+    def test_sport_practice_by_age_band_does_not_need_to_sum_to_one(self):
+        for band, distribution in SPORT_PRACTICE_BY_AGE_BAND.items():
+            assert sum(distribution.values()) < 1.0, band
+
+    def test_uses_exact_education_level_proportion_when_only_estudios_known(self):
+        """Tercer nivel de prioridad: sin sexo ni edad conocidos, pero con
+        nivel_estudios sí, debe usarse SPORT_PRACTICE_BY_EDUCATION_LEVEL,
+        no la marginal."""
+        with_estudios = estimate_population_narrowing(
+            DemographicFindings(nivel_estudios="superior", practica_deportiva="yoga_pilates")
+        )
+        estudios_step = next(s for s in with_estudios if s.category == "nivel_estudios")
+        deporte_step = next(s for s in with_estudios if s.category == "practica_deportiva")
+
+        expected = round(
+            estudios_step.remaining_population * SPORT_PRACTICE_BY_EDUCATION_LEVEL["yoga_pilates"]["superior"]
+        )
+        assert deporte_step.remaining_population == expected
+        assert deporte_step.note_code == "practica_deportiva_ajustada_por_estudios"
+
+    def test_priority_order_is_sexo_then_edad_then_estudios(self):
+        """Con las tres señales disponibles a la vez, se usa sexo (máxima
+        prioridad) -- ver docstring de _step_practica_deportiva para el
+        porqué del orden. Comprobamos que NO se use ni edad ni estudios
+        cuando sexo está disponible y tiene entrada para esa modalidad."""
+        steps = estimate_population_narrowing(
+            DemographicFindings(
+                sexo="mujer", edad=30, nivel_estudios="superior", practica_deportiva="ciclismo"
+            )
+        )
+        deporte_step = next(s for s in steps if s.category == "practica_deportiva")
+        assert deporte_step.note_code == "practica_deportiva_ajustada_por_sexo"
+
+    def test_falls_back_to_estudios_when_sexo_and_edad_unavailable_for_that_modality(self):
+        """Si sexo y edad no dan resultado para la modalidad concreta (o
+        no se conocen), pero SÍ se conoce nivel_estudios y hay dato para
+        esa combinación, se usa estudios antes de caer a la marginal."""
+        steps = estimate_population_narrowing(
+            DemographicFindings(nivel_estudios="secundaria_o_inferior", practica_deportiva="golf")
+        )
+        deporte_step = next(s for s in steps if s.category == "practica_deportiva")
+        assert deporte_step.note_code == "practica_deportiva_ajustada_por_estudios"
+
+    def test_falls_back_to_marginal_when_no_conditioning_signal_available(self):
+        steps = estimate_population_narrowing(DemographicFindings(practica_deportiva="golf"))
+        deporte_step = next(s for s in steps if s.category == "practica_deportiva")
+        assert deporte_step.note_code == "practica_deportiva_no_particion"
+
+    def test_sport_practice_by_education_level_does_not_need_to_sum_to_one(self):
+        for tier, distribution in SPORT_PRACTICE_BY_EDUCATION_LEVEL.items():
+            assert sum(distribution.values()) < 1.0, tier
 

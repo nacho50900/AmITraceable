@@ -138,6 +138,64 @@ class TestStudies:
         assert findings.estudios is None
 
 
+class TestEducationLevel:
+    def test_detects_superior_universitario(self):
+        findings = extract_demographics([_post("Soy universitario y estudio por las tardes")])
+        assert findings.nivel_estudios == "superior"
+
+    def test_detects_superior_master(self):
+        findings = extract_demographics([_post("Tengo un master en finanzas")])
+        assert findings.nivel_estudios == "superior"
+
+    def test_detects_superior_doctorado(self):
+        findings = extract_demographics([_post("Tengo un doctorado en fisica")])
+        assert findings.nivel_estudios == "superior"
+
+    def test_detects_superior_fp_grado_superior(self):
+        """Regresión conceptual: un Ciclo Formativo de Grado SUPERIOR
+        cuenta como 'superior' en la clasificación CNED-2014/ISCED del
+        INE (nivel 5), no como 'secundaria_superior' -- a diferencia del
+        Grado Medio, que sí cae en 'secundaria_superior' (ver test de
+        abajo)."""
+        findings = extract_demographics([_post("Tengo un ciclo formativo de grado superior")])
+        assert findings.nivel_estudios == "superior"
+
+    def test_infers_superior_when_estudios_already_detected(self):
+        """Nombrar una carrera universitaria concreta (ver TestStudies)
+        ya implica nivel 'superior' automáticamente, sin necesidad de una
+        frase-ancla propia de nivel_estudios."""
+        findings = extract_demographics([_post("Estudio Ingenieria Informatica en la universidad")])
+        assert findings.estudios == "ingenieria informatica"
+        assert findings.nivel_estudios == "superior"
+
+    def test_detects_secundaria_superior_bachillerato(self):
+        findings = extract_demographics([_post("Tengo el bachillerato y quiero hacer un grado")])
+        assert findings.nivel_estudios == "secundaria_superior"
+
+    def test_detects_secundaria_superior_fp_grado_medio(self):
+        findings = extract_demographics([_post("Tengo un ciclo formativo de grado medio")])
+        assert findings.nivel_estudios == "secundaria_superior"
+
+    def test_detects_secundaria_o_inferior_eso(self):
+        findings = extract_demographics([_post("Solo tengo la eso, deje de estudiar pronto")])
+        assert findings.nivel_estudios == "secundaria_o_inferior"
+
+    def test_detects_secundaria_o_inferior_sin_estudios(self):
+        findings = extract_demographics([_post("No tengo estudios")])
+        assert findings.nivel_estudios == "secundaria_o_inferior"
+
+    def test_studying_in_progress_is_not_detected(self):
+        """Requiere COMPLETAR el nivel, no solo estar cursándolo --
+        'estoy estudiando en la universidad' no implica que ya lo haya
+        terminado."""
+        findings = extract_demographics([_post("Estoy estudiando en la universidad")])
+        assert findings.nivel_estudios is None
+
+    def test_generic_university_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Me encanta ir a la universidad a ver a mis amigos")])
+        assert findings.nivel_estudios is None
+
+
 class TestOccupation:
     def test_detects_known_occupation_keyword(self):
         findings = extract_demographics([_post("Trabajo como docente en un instituto")])

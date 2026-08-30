@@ -83,7 +83,8 @@ backend/app/
 │   ├── attribute_inference.py      - Inferencia de atributos por comunidad/hashtag
 │   ├── demographic_extraction.py   - Declaraciones explícitas en texto (edad, sexo,
 │   │                                  ubicación -- municipio/provincia/comunidad autónoma --,
-│   │                                  estudios, ocupación, universidad, empresa), por regex
+│   │                                  estudios, nivel de estudios, práctica deportiva,
+│   │                                  ocupación, universidad, empresa), por regex
 │   ├── ai_attribute_extraction.py  - Lo mismo, vía IA (Mistral, opcional) -- complementa
 │   │                                  a la regex, nunca la sustituye; también marca fotos
 │   │                                  "de viaje" (ver travel_detection.py)
@@ -279,6 +280,30 @@ texto) o `report/generator.py` (señal de pareja detectada en fotos, ver
 `vision/scene_analysis.py`) -- este módulo solo define el campo para que
 ambos tengan un sitio común donde escribirlo.
 
+`practica_deportiva` (41 modalidades, `_SPORT_PRACTICE_RE`) exige una
+frase-ancla de PRÁCTICA en primera persona ("juego al...", "hago...",
+"practico...") -- una simple mención del deporte ("vi el partido de
+fútbol") no cuenta, es mucho más frecuente en redes sociales que una
+autodeclaración real y colaría un falso positivo. Cuando la frase-ancla
+de una modalidad es literalmente un PREFIJO de la de otra ("tenis"
+dentro de "tenis de mesa", "fútbol" dentro de "fútbol sala", "esquí"
+dentro de "esquí náutico"), el orden de alternancia del regex importa:
+la más específica va siempre primero, o la más genérica capturaría el
+match antes de llegar a probar la correcta.
+
+`nivel_estudios` (superior / secundaria_superior / secundaria_o_inferior,
+clasificación CNED-2014/ISCED del INE) es DISTINTO de `estudios` (la
+carrera universitaria concreta, más abajo): exige haber COMPLETADO ese
+nivel ("tengo el bachillerato", no "estoy estudiando bachillerato"), y
+se infiere automáticamente como `superior` si `estudios` ya detectó una
+carrera nombrada, sin necesitar su propia frase-ancla. Los Ciclos
+Formativos de FP son el caso delicado: un Grado SUPERIOR cuenta como
+`superior` (nivel 5 en la clasificación del INE, igual que la
+universidad), mientras que un Grado MEDIO cae en
+`secundaria_superior` -- de ahí que las frases-ancla exijan
+"superior"/"medio" explícito en vez de un "ciclo formativo" genérico
+sin cualificar.
+
 Ubicación::
 `backend/app/nlp/demographic_extraction.py`.
 
@@ -410,6 +435,20 @@ tus rasgos"). Se queda con el `remaining_population` del último escalón
 encadenable que sí se pudo estimar, aprovechando que cada escalón ya
 lleva el acumulado de los anteriores.
 
+El paso de `practica_deportiva` (41 modalidades, ver ADR-37) es el único
+que consulta OTROS campos de `findings` además del suyo propio: si ya se
+conoce sexo, edad o nivel_estudios, usa la proporción de esa combinación
+concreta (`SPORT_PRACTICE_BY_SEX`/`BY_AGE_BAND`/`BY_EDUCATION_LEVEL` en
+`ine_reference.py`, tabla 1.22 de la encuesta) en vez de la marginal sin
+distinguir. Prueba las tres en cascada -- sexo > edad > nivel_estudios --
+y usa la PRIMERA que esté disponible y tenga dato para esa combinación
+concreta; nunca combina dos ajustes a la vez (no existe un cruce a
+cuatro bandas simultáneo en la encuesta, solo tres cruces independientes
+de a uno). Un rango de edad declarado que cruza la frontera entre dos
+tramos de la encuesta (`_sport_age_band`) no se puede asignar a ninguno
+sin adivinar, así que cuenta como "no disponible" para ese nivel de la
+cascada.
+
 `source="manual"` (ADR-34) es el único caso en que un paso no lo genera
 el pipeline automático de análisis, sino
 `POST /api/analyze/recalculate` a partir de rasgos que el usuario
@@ -421,6 +460,17 @@ cadena, contra tres tablas nuevas de `ine_reference.py`
 `SKIN_TONE_DISTRIBUTION`) que son estimaciones contextuales, no cifras
 oficiales del INE -- el INE no publica una distribución poblacional de
 estos rasgos.
+
+`AGE_DISTRIBUTION_1Y` (proporción de población por edad exacta, año a
+año, usada por `age_range_proportion`) es DATO REAL del Censo (tabla
+01003 del INE, año 2022), no una interpolación (ADR-36) -- antes se
+derivaba repartiendo uniformemente `AGE_DISTRIBUTION_5Y` dentro de cada
+tramo quinquenal, aproximación que llegó a dar tasas de práctica
+deportiva por encima del 100% al cruzarla con tramos de edad estrechos.
+Ahora la relación entre las dos tablas está invertida: `1Y` es la
+fuente y `AGE_DISTRIBUTION_5Y` se deriva sumando `1Y` dentro de cada
+tramo (`_build_age_distribution_5y_from_1y`), así que nunca pueden
+desincronizarse entre sí.
 
 Ubicación::
 `backend/app/scoring/k_anonymity.py`, tablas en

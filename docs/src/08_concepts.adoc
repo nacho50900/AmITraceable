@@ -42,13 +42,6 @@ ifndef::imagesdir[:imagesdir: ../images]
    estimación visual aproximada; se documenta igualmente porque, si
    alguna vez SÍ hay EXIF, el dato que se procesa (aunque no se persista)
    es cualitativamente distinto de una estimación.
-* **Categorías especiales del RGPD, excluidas sin excepción**: origen
-  étnico/racial, salud/discapacidad y opinión/afiliación política
-  (art. 9 RGPD) no se detectan por ninguna vía del sistema -- ni por
-  IA sobre foto o texto, ni como acotación de k-anonimato, ni siquiera
-  como autodeclaración textual explícita -- ver ADR-34 (rasgos
-  físicos manuales, ojos/pelo/piel) y ADR-35 (las tres categorías,
-  todas las vías).
 * **Excepción consciente y documentada — extracción de atributos con IA**:
   a diferencia del análisis del informe con IA (que solo envía agregados
   ya generados), `nlp/ai_attribute_extraction.py` envía TEXTO CRUDO
@@ -237,6 +230,27 @@ ocupación), no el porcentaje de uno aislado. Se calcula quedándose con el
 estimar (`final_remaining_population()`): un escalón "no estimable" es un
 no-op sobre el acumulado, no lo resetea, así que basta con el último
 válido para tener el resultado final de toda la cadena.
+
+**Proporciones condicionadas en cascada, cuando existen (ADR-37)**: la
+mayoría de pasos usan una proporción MARGINAL fija (misma cifra para
+cualquiera que comparta ese rasgo, sin distinguir nada más). Cuando SÍ
+existe una tabla oficial que cruza el rasgo con otra variable ya
+conocida (sexo, edad, nivel de estudios), usar la marginal desperdicia
+esa señal -- por ejemplo, aplicar la tasa general de "practica yoga" a
+un hombre ignora que las mujeres lo practican ~4 veces más. El paso de
+`practica_deportiva` prueba, en cascada, sexo > edad > nivel de
+estudios > marginal, y se queda con la primera que tenga dato para esa
+combinación exacta. Nunca combina dos ajustes condicionados a la vez
+(p. ej. sexo Y edad multiplicados): la encuesta de origen solo publica
+cruces INDEPENDIENTES de a una variable, no un cruce conjunto a varias
+bandas simultáneas, así que combinarlos exigiría asumir una
+independencia estadística entre esas variables que no se puede
+verificar con los datos disponibles -- mismo principio de "no inventar
+precisión que el dato no respalda" que rige el resto de este documento.
+Cuando la encuesta redondea el porcentaje de una combinación concreta a
+0,0 (muestra insuficiente, no "cero personas"), esa combinación se omite
+de la tabla condicionada a propósito, y el paso cae al siguiente nivel
+de la cascada en vez de mostrar una población de cero.
 
 **Rasgos declarados por el usuario a posteriori (`source = "manual"`,
 ADR-34)**: hay atributos físicos visibles (color de ojos, de pelo, tono

@@ -89,11 +89,8 @@
     "overallScore": "Overall exposure score: {{score}} / 100",
     "scoreLabels": {
       "geolocationRisk": "Geolocation risk",
-      "geolocationRiskTooltip": "Measures how easy it is to figure out where you live or have been from your photos (EXIF metadata, recognizable background elements, place mentions).",
       "inferableDataRisk": "Inferable personal data",
-      "inferableDataRiskTooltip": "Measures how many of your attributes (age, occupation, education, marital status...) can be deduced from what you post, and with what confidence.",
-      "deanonymizationEase": "Ease of de-anonymization",
-      "deanonymizationEaseTooltip": "Measures how identifiable your writing style is (volume, vocabulary, timing), not the specific data that could be inferred about you -- it can be high even when little else was inferred below."
+      "deanonymizationEase": "Ease of de-anonymization"
     },
     "whatCanBeInferred": "What can be inferred about you",
     "estimatedLocations": "Locations estimated from your photos",
@@ -135,13 +132,17 @@
       "religion_categoria_especial": "Special category of data (GDPR Art. 9): only calculated because the person explicitly self-declared it or indicated it with an unambiguous symbol/emoji in public, never by indirect inference. The proportion used is a contextual estimate for Spain (CIS and community sources), not an official INE census figure -- Spain does not collect religious affiliation in its census.",
       "signo_zodiacal_note": "The distribution is uniform (~8.33% per sign, one twelfth of the year) because birth dates are spread almost uniformly across the year -- it isn't a made-up figure: it directly reveals a real ~30-day birth window, even though the astrological belief itself has no scientific basis.",
       "practica_deportiva_no_particion": "Marginal proportion from the Spanish Sports Habits Survey (Encuesta de Hábitos Deportivos en España) -- not a partition: the survey allows multiple answers, a person can practice several sports at once, so this data point alone doesn't mean it's the ONLY sport they practice.",
-      "practica_deportiva_ajustada_por_sexo": "Marginal proportion from the Spanish Sports Habits Survey (Encuesta de Hábitos Deportivos en España) -- not a partition: the survey allows multiple answers, a person can practice several sports at once, so this data point alone doesn't mean it's the ONLY sport they practice. Since sex is also known, the exact proportion for that specific combination is used (sport practice conditioned on sex, same survey), instead of approximating by multiplying independent proportions."
+      "practica_deportiva_ajustada_por_sexo": "Marginal proportion from the Spanish Sports Habits Survey (Encuesta de Hábitos Deportivos en España) -- not a partition: the survey allows multiple answers, a person can practice several sports at once, so this data point alone doesn't mean it's the ONLY sport they practice. Since sex is also known, the exact proportion for that specific combination is used (sport practice conditioned on sex, same survey), instead of approximating by multiplying independent proportions.",
+      "practica_deportiva_ajustada_por_edad": "Marginal proportion from the Spanish Sports Habits Survey (Encuesta de Hábitos Deportivos en España) -- not a partition: the survey allows multiple answers, a person can practice several sports at once, so this data point alone doesn't mean it's the ONLY sport they practice. Since age is also known, the exact proportion for that specific combination is used (sport practice conditioned on age band, same survey), instead of approximating by multiplying independent proportions.",
+      "practica_deportiva_ajustada_por_estudios": "Marginal proportion from the Spanish Sports Habits Survey (Encuesta de Hábitos Deportivos en España) -- not a partition: the survey allows multiple answers, a person can practice several sports at once, so this data point alone doesn't mean it's the ONLY sport they practice. Since education level is also known, the exact proportion for that specific combination is used (sport practice conditioned on education level, same survey), instead of approximating by multiplying independent proportions.",
+      "nivel_estudios_aproximacion_25_64": "Approximation: the official figure (INE/EPA) covers the population aged 25 to 64, not the whole adult population."
     },
     "attribute": {
       "sexo": "Sex: {{value}}",
       "edad": "Age: {{value}} years old",
       "estado_civil": "{{value}}",
       "estudios": "Studied: {{value}}",
+      "nivel_estudios": "Education level: {{value}}",
       "ocupacion": "Occupation: {{value}}",
       "nacionalidad": "Nationality: {{value}}",
       "situacion_laboral": "Employment status: {{value}}",
@@ -207,6 +208,11 @@
         "periodismo": "Journalism",
         "economia": "Economics",
         "veterinaria": "Veterinary Science"
+      },
+      "nivel_estudios": {
+        "superior": "higher education",
+        "secundaria_superior": "upper secondary education (bachillerato or mid-level vocational training)",
+        "secundaria_o_inferior": "lower secondary education or below (ESO, primary school)"
       },
       "ocupacion": {
         "docente": "Teacher",

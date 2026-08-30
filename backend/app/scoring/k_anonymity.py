@@ -33,6 +33,7 @@ como umbral de riesgo alto para variables demográficas):
 from dataclasses import dataclass
 
 from app.data.ine_reference import (
+    EDUCATION_LEVEL_DISTRIBUTION,
     AGE_DISTRIBUTION_1Y,
     AUTONOMOUS_COMMUNITY_DISPLAY_NAMES,
     CCAA_POPULATION,
@@ -49,6 +50,8 @@ from app.data.ine_reference import (
     SEX_DISTRIBUTION,
     SEXUAL_ORIENTATION_DISTRIBUTION,
     SITUACION_LABORAL_DISTRIBUTION,
+    SPORT_PRACTICE_BY_AGE_BAND,
+    SPORT_PRACTICE_BY_EDUCATION_LEVEL,
     SPORT_PRACTICE_BY_SEX,
     SPORT_PRACTICE_DISTRIBUTION,
     STUDIES_DISTRIBUTION,
@@ -470,6 +473,42 @@ def _step_estudios(findings: DemographicFindings, remaining: float) -> tuple[flo
     )
 
 
+_NIVEL_ESTUDIOS_LABELS = {
+    "superior": "Nivel de estudios: educación superior",
+    "secundaria_superior": "Nivel de estudios: 2ª etapa de secundaria",
+    "secundaria_o_inferior": "Nivel de estudios: 1ª etapa de secundaria o inferior",
+}
+
+
+def _step_nivel_estudios(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
+    """DISTINTO de `_step_estudios` de arriba: aquel es la CARRERA
+    universitaria concreta (STUDIES_DISTRIBUTION, solo aplica a quien
+    cursa/cursó estudios superiores CON una titulación nombrada); este es
+    el nivel de formación MÁXIMO alcanzado (EDUCATION_LEVEL_DISTRIBUTION,
+    3 tramos, aplica a cualquiera). No son mutuamente excluyentes: alguien
+    puede tener AMBOS pasos en su informe si nombra la carrera Y el nivel
+    queda registrado (de hecho `nivel_estudios` se infiere automáticamente
+    como "superior" cuando se detecta una carrera concreta, ver
+    `_try_detect_nivel_estudios` en demographic_extraction.py) -- eso está
+    bien, no es doble contabilización: son dos preguntas distintas de la
+    encuesta ("¿qué estudiaste?" vs. "¿hasta qué nivel llegaste?")."""
+    if not findings.nivel_estudios:
+        return remaining, None
+    return _apply_proportion(
+        remaining,
+        EDUCATION_LEVEL_DISTRIBUTION.get(findings.nivel_estudios),
+        _NIVEL_ESTUDIOS_LABELS[findings.nivel_estudios],
+        "nivel_estudios",
+        findings.evidence.get("nivel_estudios", []),
+        source=findings.source.get("nivel_estudios", "texto"),
+        note="Aproximación: la cifra oficial (INE/EPA) cubre población de 25 a 64 años, "
+             "no toda la población adulta -- ver comentario en EDUCATION_LEVEL_DISTRIBUTION "
+             "(ine_reference.py) para el porqué de esa limitación.",
+        note_code=note_codes.NIVEL_ESTUDIOS_APROXIMACION_25_64,
+        value_raw=findings.nivel_estudios,
+    )
+
+
 def _step_ocupacion(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
     if not findings.ocupacion:
         return remaining, None
@@ -529,6 +568,37 @@ _SPORT_LABELS = {
 }
 
 
+def _sport_age_band(findings: DemographicFindings) -> str | None:
+    """Determina a qué tramo de SPORT_PRACTICE_BY_AGE_BAND (15_24/25_54/
+    55_mas -- fronteras de la Encuesta de Hábitos Deportivos, coinciden
+    con quinquenios INE) corresponde `findings`, o None si no se puede
+    determinar sin adivinar. Con una edad exacta es directo; con un rango
+    (`edad_rango_min/max`, ver DemographicFindings) solo se usa si el
+    rango ENTERO cae dentro de un único tramo -- si abarca más de uno
+    (p. ej. un rango estimado 20-30 cruza 15-24 y 25-54), no hay forma de
+    saber a cuál pertenece de verdad sin inventar un reparto, así que se
+    devuelve None y el llamante cae de vuelta a la marginal."""
+    if findings.edad is not None:
+        edad = findings.edad
+        if 15 <= edad <= 24:
+            return "15_24"
+        if 25 <= edad <= 54:
+            return "25_54"
+        if edad >= 55:
+            return "55_mas"
+        return None  # <15, fuera de la población que cubre la encuesta
+    if findings.edad_rango_min is not None and findings.edad_rango_max is not None:
+        lo, hi = findings.edad_rango_min, findings.edad_rango_max
+        if lo >= 15 and hi <= 24:
+            return "15_24"
+        if lo >= 25 and hi <= 54:
+            return "25_54"
+        if lo >= 55:
+            return "55_mas"
+        return None  # el rango cruza más de un tramo, o cae parcialmente fuera de 15+
+    return None
+
+
 def _step_practica_deportiva(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
     """A diferencia del resto de pasos, SPORT_PRACTICE_DISTRIBUTION (ver
     ine_reference.py) NO es una partición -- son proporciones MARGINALES
@@ -541,23 +611,34 @@ def _step_practica_deportiva(findings: DemographicFindings, remaining: float) ->
     especial aquí para eso: el cálculo es idéntico al resto de pasos.
 
     Lo que SÍ tiene un ajuste especial, mismo patrón que _step_relacion
-    con MARITAL_STATUS_BY_SEX: si ya se conoce el sexo (se aplica antes en
-    la cadena, ver _CHAINED_STEPS), se usa la proporción REAL de esa
-    combinación sexo+deporte concreta (SPORT_PRACTICE_BY_SEX, tabla 1.22
-    de la encuesta) en vez de la marginal sin distinguir sexo -- el efecto
-    es grande para deportes con sesgo fuerte (ver comentario en
-    ine_reference.py). Si el sexo no se conoce, o la modalidad concreta no
-    tiene entrada para ESE sexo en la tabla (ver "squash" ahí, caso de
-    muestra insuficiente), se cae de vuelta a la marginal."""
+    con MARITAL_STATUS_BY_SEX: si ya se conoce el sexo o la edad (se
+    aplican antes en la cadena, ver _CHAINED_STEPS), se usa la proporción
+    REAL de esa combinación concreta (SPORT_PRACTICE_BY_SEX o
+    SPORT_PRACTICE_BY_AGE_BAND, tabla 1.22 de la encuesta) en vez de la
+    marginal sin distinguir -- el efecto es grande para deportes con
+    sesgo fuerte (ver comentarios en ine_reference.py).
+
+    PRIORIDAD cuando se conocen VARIAS señales a la vez (sexo, edad,
+    nivel_estudios): se usa sexo > edad > nivel_estudios, en ese orden. La
+    tabla 1.22 da TRES cruces INDEPENDIENTES (deporte×sexo, deporte×edad,
+    deporte×estudios), no un cruce a cuatro bandas simultáneo -- no existe
+    ese dato. Aplicar varios ajustes a la vez sería inventar una
+    independencia estadística entre esas variables DENTRO de cada deporte
+    que no se puede verificar con los datos disponibles, y probablemente
+    sobre-estimaría el estrechamiento. El orden de prioridad es por
+    limpieza de la señal, no por "mejor" en abstracto: sexo es binario sin
+    ambigüedad; edad puede tener tramos sin ambigüedad (edad exacta) o con
+    ambigüedad resoluble (rango que cabe en un tramo, ver
+    _sport_age_band); nivel_estudios depende además de una aproximación
+    de población adicional (25-64 años, ver EDUCATION_LEVEL_DISTRIBUTION)
+    que no tienen ni sexo ni edad, así que va último. Si una señal no está
+    disponible, o la modalidad concreta no tiene entrada para ESE valor
+    (ver "squash" en SPORT_PRACTICE_BY_SEX, caso de muestra insuficiente),
+    se prueba con la siguiente; si ninguna sirve, se cae de vuelta a la
+    marginal."""
     if not findings.practica_deportiva:
         return remaining, None
     label = _SPORT_LABELS.get(findings.practica_deportiva, findings.practica_deportiva.title())
-
-    sex_distribution = SPORT_PRACTICE_BY_SEX.get(findings.practica_deportiva, {})
-    proportion = sex_distribution.get(findings.sexo) if findings.sexo else None
-    exact = proportion is not None
-    if not exact:
-        proportion = SPORT_PRACTICE_DISTRIBUTION.get(findings.practica_deportiva)
 
     note = (
         "Proporción marginal de la Encuesta de Hábitos Deportivos en España (no es "
@@ -565,15 +646,47 @@ def _step_practica_deportiva(findings: DemographicFindings, remaining: float) ->
         "practicar varios deportes a la vez, así que este dato por sí solo no implica "
         "que sea el ÚNICO deporte que practica)."
     )
+
+    proportion = None
     note_code = note_codes.PRACTICA_DEPORTIVA_NO_PARTICION
-    if exact:
-        note += (
-            " Al conocerse también el sexo, se usa el porcentaje de esa combinación "
-            "concreta (práctica deportiva condicionada a sexo, misma encuesta), no una "
-            "aproximación multiplicando proporciones independientes -- sigue sin ser una "
-            "partición por el mismo motivo de arriba."
-        )
-        note_code = note_codes.PRACTICA_DEPORTIVA_AJUSTADA_POR_SEXO
+
+    if findings.sexo:
+        proportion = SPORT_PRACTICE_BY_SEX.get(findings.practica_deportiva, {}).get(findings.sexo)
+        if proportion is not None:
+            note += (
+                " Al conocerse también el sexo, se usa el porcentaje de esa combinación "
+                "concreta (práctica deportiva condicionada a sexo, misma encuesta), no una "
+                "aproximación multiplicando proporciones independientes -- sigue sin ser una "
+                "partición por el mismo motivo de arriba."
+            )
+            note_code = note_codes.PRACTICA_DEPORTIVA_AJUSTADA_POR_SEXO
+
+    if proportion is None:
+        age_band = _sport_age_band(findings)
+        if age_band is not None:
+            proportion = SPORT_PRACTICE_BY_AGE_BAND.get(findings.practica_deportiva, {}).get(age_band)
+            if proportion is not None:
+                note += (
+                    " Al conocerse también la edad, se usa el porcentaje de esa combinación "
+                    "concreta (práctica deportiva condicionada a tramo de edad, misma encuesta), "
+                    "no una aproximación multiplicando proporciones independientes -- sigue sin "
+                    "ser una partición por el mismo motivo de arriba."
+                )
+                note_code = note_codes.PRACTICA_DEPORTIVA_AJUSTADA_POR_EDAD
+
+    if proportion is None and findings.nivel_estudios:
+        proportion = SPORT_PRACTICE_BY_EDUCATION_LEVEL.get(findings.practica_deportiva, {}).get(findings.nivel_estudios)
+        if proportion is not None:
+            note += (
+                " Al conocerse también el nivel de estudios, se usa el porcentaje de esa "
+                "combinación concreta (práctica deportiva condicionada a nivel de estudios, "
+                "misma encuesta), no una aproximación multiplicando proporciones "
+                "independientes -- sigue sin ser una partición por el mismo motivo de arriba."
+            )
+            note_code = note_codes.PRACTICA_DEPORTIVA_AJUSTADA_POR_ESTUDIOS
+
+    if proportion is None:
+        proportion = SPORT_PRACTICE_DISTRIBUTION.get(findings.practica_deportiva)
 
     return _apply_proportion(
         remaining,
@@ -873,7 +986,7 @@ def _step_empresa(findings: DemographicFindings) -> PopulationNarrowingStep | No
 # orden importa: cada paso condiciona al siguiente, ver docstring del
 # módulo sobre la asunción de independencia).
 _CHAINED_STEPS = (
-    _step_sexo, _step_edad, _step_location, _step_estudios, _step_ocupacion,
+    _step_sexo, _step_edad, _step_location, _step_estudios, _step_nivel_estudios, _step_ocupacion,
     _step_nacionalidad, _step_situacion_laboral, _step_tipo_hogar,
     # Depende de que _step_location ya haya podido resolver comunidad
     # autónoma o provincia (ver _resolve_ccaa_for_language) -- por eso va

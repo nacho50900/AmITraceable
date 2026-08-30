@@ -83,6 +83,45 @@ class TestSuccessfulExtraction:
         assert findings.evidence["estudios"] == ["https://x/1"]
 
     @pytest.mark.asyncio
+    async def test_ai_infers_nivel_estudios_superior_from_estudios(self, monkeypatch, respx_mock):
+        """Mismo criterio que en demographic_extraction.py: si la IA
+        detecta una carrera concreta pero no declara 'nivel_estudios'
+        explícitamente, se infiere 'superior' igualmente."""
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(estudios="enfermeria", evidence={"estudios": "https://x/1"}),
+            )
+        )
+
+        findings = await extract_demographics_with_ai(
+            [_post("Voy a 2o de Enfermeria y no doy abasto", permalink="https://x/1")],
+            username="ana_gz",
+        )
+
+        assert findings.nivel_estudios == "superior"
+        assert findings.source["nivel_estudios"] == "ia"
+        assert findings.evidence["nivel_estudios"] == ["https://x/1"]
+
+    @pytest.mark.asyncio
+    async def test_ai_detects_nivel_estudios_directly(self, monkeypatch, respx_mock):
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(nivel_estudios="secundaria_superior"),
+            )
+        )
+
+        findings = await extract_demographics_with_ai(
+            [_post("Tengo el bachillerato desde hace un par de años")], username="x"
+        )
+
+        assert findings.nivel_estudios == "secundaria_superior"
+        assert findings.source["nivel_estudios"] == "ia"
+
+    @pytest.mark.asyncio
     async def test_unrecognized_studies_value_is_not_estimated(self, monkeypatch, respx_mock):
         """El LLM propone un valor libre; si no coincide con ninguna clave del INE,
         no se acepta -- nunca se inventa una categoría no auditable."""

@@ -113,6 +113,7 @@ _FREE_TEXT_FIELDS = ("universidad", "empresa")
 # STUDIES_DISTRIBUTION/OCCUPATION_DISTRIBUTION, ver `_set_normalized`).
 _NATIONALITY_VALUES = ("espanola", "extranjera")
 _EMPLOYMENT_VALUES = ("activo", "parado", "jubilado", "estudiante", "otro_inactivo")
+_NIVEL_ESTUDIOS_VALUES = ("superior", "secundaria_superior", "secundaria_o_inferior")
 _LANGUAGE_VALUES = ("catalan", "euskera", "gallego", "valenciano")
 _HOUSEHOLD_VALUES = ("unipersonal", "pareja_sin_hijos", "pareja_con_hijos", "monoparental")
 # Igual que las cuatro de arriba: valores exactos, no texto libre a
@@ -160,7 +161,7 @@ _AGE_RANGE_MIN_CONFIDENCE = 0.7
 # `DemographicFindings`, usado por `merge_findings`.
 _ALL_FIELDS = (
     "sexo", "edad", "provincia", "municipio", "comunidad_autonoma",
-    "estudios", "ocupacion", "universidad", "empresa",
+    "estudios", "nivel_estudios", "ocupacion", "universidad", "empresa",
     "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
     "practica_deportiva",
     # Rango de edad estimado INDIRECTAMENTE (ver docstring del campo en
@@ -191,6 +192,7 @@ _SYSTEM_PROMPT = (
     '"edad_estimada": {"edad_min": <entero>|null, "edad_max": <entero>|null, "confianza": <0-1>}|null, '
     '"provincia": <string>|null, '
     '"municipio": <string>|null, "comunidad_autonoma": <string>|null, "estudios": <string>|null, '
+    '"nivel_estudios": "superior"|"secundaria_superior"|"secundaria_o_inferior"|null, '
     '"ocupacion": <string>|null, "universidad": <string>|null, "empresa": <string>|null, '
     '"nacionalidad": "espanola"|"extranjera"|null, '
     '"situacion_laboral": "activo"|"parado"|"jubilado"|"estudiante"|"otro_inactivo"|null, '
@@ -230,6 +232,18 @@ _SYSTEM_PROMPT = (
     "actualmente ('activo'), busca trabajo ('parado'), está jubilada/pensionista "
     "('jubilado'), estudia ('estudiante') o ninguna de las anteriores, p. ej. labores del "
     "hogar ('otro_inactivo') -- distinto del SECTOR profesional, que va en 'ocupacion'. "
+    "'nivel_estudios' es el nivel de formación MÁXIMO ya completado -- 'superior' "
+    "(universidad, grado, licenciatura, master, doctorado, o un Ciclo Formativo de Grado "
+    "SUPERIOR -- ojo, el de grado superior cuenta como 'superior', no como "
+    "'secundaria_superior'), 'secundaria_superior' (bachillerato, o un Ciclo Formativo de "
+    "Grado MEDIO) o 'secundaria_o_inferior' (ESO, primaria, o sin estudios). Requiere una "
+    "declaración de haber COMPLETADO ese nivel ('tengo el bachillerato', 'soy licenciado "
+    "en...', 'termine un master') -- estar CURSANDO algo actualmente sin decir que lo ha "
+    "terminado ('estoy estudiando en la universidad', 'estudio Derecho') NO cuenta para "
+    "'nivel_estudios' (aunque sí cuente para 'estudios', el campo de la carrera concreta, "
+    "que es sobre qué estudia, no sobre qué nivel ya alcanzó). Si el texto nombra una "
+    "carrera universitaria concreta en 'estudios', dedúcelo tú mismo: pon 'nivel_estudios' "
+    "en 'superior' también, sin necesidad de una frase aparte sobre el nivel. "
     "'tipo_hogar' es SOLO si la persona dice explícitamente con quién vive o si menciona "
     "vivir sola: 'unipersonal' (vive sola), 'pareja_sin_hijos'/'pareja_con_hijos' (vive con "
     "su pareja, con o sin hijos en el mismo hogar) o 'monoparental' (un solo progenitor con "
@@ -766,6 +780,14 @@ def _to_findings(parsed: dict) -> DemographicFindings:
     _set_edad(findings, parsed, evidence_map)
     _set_edad_rango(findings, parsed)
     _set_normalized(findings, parsed, "estudios", STUDIES_DISTRIBUTION, evidence_map)
+    _set_exact_enum(findings, parsed, "nivel_estudios", _NIVEL_ESTUDIOS_VALUES, evidence_map)
+    if findings.estudios is not None and findings.nivel_estudios is None:
+        # Mismo criterio que _try_detect_nivel_estudios en demographic_extraction.py:
+        # nombrar una carrera universitaria concreta ya implica nivel "superior",
+        # sin necesidad de que el modelo lo declare aparte en 'nivel_estudios'.
+        findings.nivel_estudios = "superior"
+        findings.evidence.setdefault("nivel_estudios", []).extend(findings.evidence.get("estudios", []))
+        findings.source["nivel_estudios"] = "ia"
     _set_normalized(findings, parsed, "ocupacion", OCCUPATION_DISTRIBUTION, evidence_map)
     _set_location(findings, parsed, evidence_map)
     _set_free_text_fields(findings, parsed, evidence_map)

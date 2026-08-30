@@ -99,6 +99,17 @@ class DemographicFindings:
     # exclusión que se une con travel_detection.py, no se sobrescribe).
     travel_permalinks: set[str] = field(default_factory=set)
     estudios: str | None = None
+    # Nivel de formación alcanzado (tramos INE/EPA -- CNED-2014): "superior"
+    # (universidad, grado, licenciatura, master, doctorado, FP de grado
+    # superior) | "secundaria_superior" (bachillerato, FP de grado medio) |
+    # "secundaria_o_inferior" (ESO, primaria, sin estudios) | None. DISTINTO
+    # de `estudios` (que es la CARRERA concreta -- "medicina", "derecho" --
+    # solo para quien ya cursa/cursó estudios superiores). Si `estudios` ya
+    # se detectó, `nivel_estudios` se infiere automáticamente como
+    # "superior" sin necesidad de una frase-ancla propia (ver
+    # _try_detect_nivel_estudios) -- nombrar una carrera concreta ya es
+    # evidencia suficiente de haber cursado educación superior.
+    nivel_estudios: str | None = None
     ocupacion: str | None = None
     universidad: str | None = None
     empresa: str | None = None
@@ -249,6 +260,32 @@ _EMPLOYMENT_ACTIVO_RE = re.compile(
     r"\b(trabajo (?:en|de|para|como)|soy autónomo|soy autónoma|tengo trabajo)\b", re.I
 )
 
+# Nivel de estudios (tramos INE/EPA, ver _try_detect_nivel_estudios para
+# el porqué del orden y de exigir "superior"/"medio" explícito en la FP).
+_NIVEL_ESTUDIOS_SUPERIOR_RE = re.compile(
+    r"\b(soy universitari[oa]|tengo una carrera universitaria|"
+    r"tengo un grado universitario|soy graduad[oa] en|"
+    r"termine la carrera|acabe la carrera|termine la universidad|"
+    r"tengo una licenciatura|soy licenciad[oa]|"
+    r"tengo un master|hice un master|termine un master|"
+    r"tengo un doctorado|soy doctorand[oa]|"
+    r"tengo un ciclo formativo de grado superior|"
+    r"tengo un grado superior de fp|soy tecnico superior|soy tecnica superior)\b",
+    re.I,
+)
+_NIVEL_ESTUDIOS_SECUNDARIA_SUPERIOR_RE = re.compile(
+    r"\b(tengo el bachillerato|termine bachillerato|termine el bachillerato|"
+    r"tengo un ciclo formativo de grado medio|tengo un grado medio de fp|"
+    r"soy tecnico de grado medio|soy tecnica de grado medio|termine la fp)\b",
+    re.I,
+)
+_NIVEL_ESTUDIOS_SECUNDARIA_O_INFERIOR_RE = re.compile(
+    r"\b(solo tengo la eso|tengo la eso|no termine el instituto|"
+    r"solo estudios primarios|no tengo estudios|abandone los estudios|"
+    r"no termine la eso|no termine secundaria)\b",
+    re.I,
+)
+
 # Tipo de hogar: señales que se combinan sobre TODOS los posts (no una
 # regex "ganadora" por post, ver `_detect_household_type`).
 _HOUSEHOLD_ALONE_RE = re.compile(r"\bvivo sol[oa]\b", re.I)
@@ -364,6 +401,7 @@ def extract_demographics(posts: list[SocialPost]) -> DemographicFindings:
         _try_detect_sexo(text, post.permalink, findings)
         _try_detect_location(text, post.permalink, findings)
         _try_detect_estudios(text, post.permalink, findings)
+        _try_detect_nivel_estudios(text, post.permalink, findings)
         _try_detect_ocupacion(text, post.permalink, findings)
         _try_detect_practica_deportiva(text, post.permalink, findings)
         _try_detect_universidad(text, post.permalink, findings)
@@ -386,7 +424,7 @@ def _mark_all_detected_as_texto(findings: DemographicFindings) -> None:
     el frontend pueda distinguirlo de lo que venga de geolocation.py."""
     for attr_name in (
         "sexo", "edad", "provincia", "municipio", "comunidad_autonoma",
-        "estudios", "ocupacion", "universidad", "empresa",
+        "estudios", "nivel_estudios", "ocupacion", "universidad", "empresa",
         "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
         "orientacion_sexual", "signo_zodiacal", "religion",
         "practica_deportiva",
@@ -436,6 +474,45 @@ def _try_detect_estudios(text: str, permalink: str, findings: DemographicFinding
     if matched:
         findings.estudios = matched
         findings.evidence.setdefault("estudios", []).append(permalink)
+
+
+def _try_detect_nivel_estudios(text: str, permalink: str, findings: DemographicFindings) -> None:
+    """Requiere una autodeclaración de haber CURSADO/COMPLETADO ese nivel
+    (verbos como "tengo...", "termine...", "soy licenciado/a en...") --
+    "estoy estudiando en la universidad" (en curso, no completado) NO
+    cuenta, mismo criterio que practica_deportiva con espectador vs.
+    práctica real: contar aspiraciones o estudios en curso como si ya
+    estuvieran completados sobre-estimaría el nivel real de la persona.
+
+    Orden de comprobación: de mayor a menor nivel. Los ciclos de
+    Formación Profesional son el caso más delicado -- un Ciclo Formativo
+    de Grado Superior (CFGS) cuenta como "superior" en la clasificación
+    CNED-2014/ISCED que usa el INE (nivel 5, no 3-4), mientras que un
+    Ciclo Formativo de Grado Medio (CFGM) y el Bachillerato caen en
+    "secundaria_superior" -- de ahí que las frases-ancla exijan
+    "superior"/"medio" explícito en vez de un "tengo un ciclo formativo"
+    genérico sin cualificar, que sería ambiguo entre los dos niveles."""
+    if findings.nivel_estudios is not None:
+        return
+
+    # Nombrar una carrera universitaria concreta (ver _try_detect_estudios
+    # / STUDIES_DISTRIBUTION) ya implica nivel "superior" sin necesidad de
+    # una frase-ancla propia de nivel_estudios.
+    if findings.estudios is not None:
+        findings.nivel_estudios = "superior"
+        findings.evidence.setdefault("nivel_estudios", []).append(permalink)
+        return
+
+    if _NIVEL_ESTUDIOS_SUPERIOR_RE.search(text):
+        findings.nivel_estudios = "superior"
+    elif _NIVEL_ESTUDIOS_SECUNDARIA_SUPERIOR_RE.search(text):
+        findings.nivel_estudios = "secundaria_superior"
+    elif _NIVEL_ESTUDIOS_SECUNDARIA_O_INFERIOR_RE.search(text):
+        findings.nivel_estudios = "secundaria_o_inferior"
+    else:
+        return
+
+    findings.evidence.setdefault("nivel_estudios", []).append(permalink)
 
 
 def _try_detect_ocupacion(text: str, permalink: str, findings: DemographicFindings) -> None:
