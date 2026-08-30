@@ -369,6 +369,34 @@ ngrok http 8080
 
 (requiere cuenta gratuita en https://ngrok.com y `ngrok config add-authtoken <token>` una vez).
 
+**Restringir quién puede entrar (Basic Auth):** el plan gratuito de ngrok
+incluye un dominio propio estable (no cambia en cada reinicio) y
+permite añadir autenticación sin plan de pago, vía **Traffic Policy**.
+Copia `backend/policy.example.yaml` a `backend/policy.yaml` (este
+segundo nombre está en `.gitignore`, nunca se sube) y pon tu
+usuario/contraseña real dentro:
+
+```yaml
+on_http_request:
+  - actions:
+      - type: basic-auth
+        config:
+          realm: "AmITraceable"
+          credentials:
+            - "usuario:contraseña-larga-y-unica"
+```
+
+Y arranca el túnel apuntando a ese archivo:
+
+```bash
+ngrok http 8080 --url=tu-dominio.ngrok-free.app --traffic-policy-file=backend/policy.yaml
+```
+
+Así, quien no tenga esas credenciales ni siquiera llega al backend --
+ngrok rechaza la petición en su propio borde, antes de reenviarla.
+Ver ADR-39 sobre por qué esto (y no dominio propio + Cloudflare) es la
+solución elegida.
+
 <details>
 <summary>Notas sobre ngrok y por qué no usar Cloudflare Quick Tunnel</summary>
 

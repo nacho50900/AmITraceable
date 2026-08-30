@@ -2194,3 +2194,73 @@ superiores); (-) atributo nuevo completo (regex + IA + paso propio) es
 más superficie de mantenimiento que reutilizar algo existente, pero no
 había nada reutilizable que cubriera esta pregunta concreta.
 
+=== ADR-39: ngrok + Basic Auth en vez de dominio propio + Cloudflare, para exponer la app fuera de local
+
+*Contexto*: hace falta HTTPS público para poder probar el login de
+Instagram (exige `redirect_uri` con HTTPS incluso en desarrollo, ver
+README) y para poder enseñar la app fuera de la propia máquina. Ya
+existía la nota en el README que descarta `cloudflared tunnel --url`
+(Cloudflare Quick Tunnel) por un motivo técnico concreto: su edge
+bufferiza por completo las respuestas `text/event-stream`, así que el
+streaming SSE de `/api/analyze/{platform}/stream` deja de verse en
+tiempo real. Esa nota ya dejaba claro que un *named tunnel* de
+Cloudflare (con dominio propio) sí respetaría el streaming -- pero
+igualmente no se ha montado, por un motivo distinto y más de fondo.
+
+*Motivo real de no montar dominio propio + Cloudflare*: la app corre
+con capacidad de cómputo para **una persona a la vez** (Moondream2 y
+DINOv2 comparten los recursos disponibles, ver ADR-29 sobre los
+semáforos por modelo). Un dominio propio con Cloudflare por delante
+tiene sentido cuando el objetivo es que cualquiera pueda entrar sin
+pedir permiso -- exactamente lo contrario de lo que hace falta aquí.
+Montar dominio + tunnel con nombre + WAF para luego tener que limitar
+igualmente quién entra sería resolver un problema (tráfico público sin
+control) que este proyecto no tiene, a costa de más piezas que
+mantener (DNS, certificados renovándose, reglas de WAF) para un caso
+de uso que es, en la práctica, "que yo pueda entrar desde fuera, y
+enseñárselo a alguien puntualmente cuando yo decida".
+
+*Alternativas descartadas*:
+
+- *Dominio propio + Cloudflare Tunnel (named tunnel) + Access*:
+  técnicamente resolvería el streaming Y permitiría restringir acceso
+  (Cloudflare Access, gratis hasta 50 usuarios). Descartado por lo de
+  arriba: es infraestructura pensada para servir a más de una persona
+  a la vez, que es precisamente lo que este proyecto no puede hacer
+  todavía. Además, el plan gratuito de Cloudflare (a diferencia de
+  ngrok) no dio buenos resultados en pruebas propias con las
+  actualizaciones de página en tiempo real que necesita el streaming
+  SSE de este proyecto -- sin llegar a diagnosticarse con el mismo
+  detalle que el problema, ya documentado, de Quick Tunnel.
+- *Dominio gratuito (DigitalPlat FreeDomain u otro) sin Cloudflare
+  delante*: no resuelve el streaming (seguiría sirviendo directamente,
+  sin problema de buffering) pero tampoco aporta nada que ngrok no dé
+  ya (dominio estable, HTTPS) -- añadiría un proveedor más sin
+  necesidad real.
+- *Dominio de pago*: mismo razonamiento que el punto anterior más un
+  coste recurrente injustificado mientras el cuello de botella siga
+  siendo el cómputo, no el nombre de dominio.
+
+*Decisión*: usar **ngrok** (plan gratuito) con **Basic Auth vía Traffic
+Policy** (`backend/policy.yaml`, ver README) como control de acceso. El
+plan gratuito de ngrok ya incluye un dominio propio estable (no cambia
+entre reinicios) y streaming SSE en tiempo real sin el problema de
+Cloudflare, y Traffic Policy permite Basic Auth sin necesidad de plan
+de pago -- cubre exactamente las dos necesidades reales (HTTPS estable
++ que solo entre quien yo decida) sin montar infraestructura pensada
+para más carga de la que la app puede atender.
+
+*Consecuencias*: (+) cero coste recurrente y cero infraestructura
+nueva que mantener (DNS, certificados, reglas de firewall); (+) el
+control de acceso vive en un único archivo (`policy.yaml`, fuera del
+repo) en vez de repartirse entre proveedor de DNS + Cloudflare Access;
+(+) streaming SSE funciona correctamente, a diferencia de Quick
+Tunnel; (-) el plan gratuito de ngrok muestra una página intermedia de
+aviso la primera vez que alguien abre la URL en el navegador (ver nota
+en el README) -- fricción menor, no un problema de seguridad; (-) si
+en el futuro la capacidad de cómputo deja de ser el factor limitante
+(por ejemplo, si se separa el análisis en una cola con varios
+workers), esta decisión habría que revisarla -- en ese momento sí
+tendría sentido un dominio propio pensado para más de un usuario
+simultáneo.
+

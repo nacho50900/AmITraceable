@@ -5,6 +5,7 @@ docs/build
 .env
 webapp/.env
 backend/.env
+backend/policy.yaml
 .vscode/
 .idea/
 
