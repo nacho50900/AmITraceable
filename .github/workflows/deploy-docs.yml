@@ -27,8 +27,8 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Graphviz (requerido por PlantUML)
-        run: sudo apt-get update && sudo apt-get install -y graphviz
+      - name: Install Graphviz y PlantUML
+        run: sudo apt-get update && sudo apt-get install -y graphviz plantuml
 
       - name: Install Asciidoctor gems
         run: gem install asciidoctor asciidoctor-diagram

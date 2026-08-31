@@ -48,4 +48,4 @@ If you check the `package.json` in this directory you can see how deploying is a
 
 The `gh-pages` package is in charge of pushing the documentation generated directory (basically some htmls) to a special github branch called gh-pages. Everything pushed to this branch is accessible on the repository page. Note that we only want to push there the documentation. Also is important that the documentation build is not pushed to the other branches of the project.
 
-Autoamtion of deployment by selecting as deploymeny branch the autocreated gh-pages.
+Autoamtion of deployment by selecting as deploymeny branch the autocreated gh-pages. 
