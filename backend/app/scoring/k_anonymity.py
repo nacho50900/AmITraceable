@@ -34,6 +34,7 @@ from dataclasses import dataclass
 
 from app.data.ine_reference import (
     EDUCATION_LEVEL_DISTRIBUTION,
+    RAMA_ESTUDIOS_DISTRIBUTION,
     AGE_DISTRIBUTION_1Y,
     AUTONOMOUS_COMMUNITY_DISPLAY_NAMES,
     CCAA_POPULATION,
@@ -127,7 +128,7 @@ class PopulationNarrowingStep:
 # que _CHAINED_STEPS, ver más abajo -- se define aquí arriba porque
 # `final_remaining_population` la necesita y así queda cerca de donde se usa).
 _CHAINED_CATEGORIES = {
-    "sexo", "edad", "ubicacion", "estudios", "ocupacion", "estado_civil",
+    "sexo", "edad", "ubicacion", "estudios", "nivel_estudios", "rama_estudios", "ocupacion", "estado_civil",
     "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
     # Categorías especiales del art. 9 RGPD (orientacion_sexual, religion)
     # y signo_zodiacal -- SÍ participan en la cadena que afina el número
@@ -506,6 +507,58 @@ def _step_nivel_estudios(findings: DemographicFindings, remaining: float) -> tup
              "(ine_reference.py) para el porqué de esa limitación.",
         note_code=note_codes.NIVEL_ESTUDIOS_APROXIMACION_25_64,
         value_raw=findings.nivel_estudios,
+    )
+
+
+_RAMA_ESTUDIOS_LABELS = {
+    "ciencias_sociales_juridicas": "Rama de estudios: Ciencias Sociales y Jurídicas",
+    "ingenieria_arquitectura": "Rama de estudios: Ingeniería y Arquitectura",
+    "ciencias_salud": "Rama de estudios: Ciencias de la Salud",
+    "artes_humanidades": "Rama de estudios: Artes y Humanidades",
+    "ciencias": "Rama de estudios: Ciencias",
+}
+
+
+def _step_rama_estudios(findings: DemographicFindings, remaining: float) -> tuple[float, PopulationNarrowingStep | None]:
+    """DISTINTO de `_step_estudios` (carrera concreta) y de
+    `_step_nivel_estudios` (nivel alcanzado): esto es la RAMA de
+    conocimiento (RD 1393/2007) a la que pertenece la carrera.
+
+    A DIFERENCIA de `nivel_estudios` (que SÍ genera su propio paso aunque
+    se infiera de `estudios`, porque son preguntas distintas de la
+    encuesta -- ver ese docstring), este paso se SALTA por completo si
+    `findings.estudios` ya está informado: quien estudia "derecho" ya
+    está, con probabilidad 1, dentro de "Ciencias Sociales y Jurídicas"
+    (STUDIES_TO_RAMA, ver ine_reference.py) -- la proporción de la rama
+    NO es un hecho adicional independiente, es un subconjunto exacto del
+    que ya informa `_step_estudios` con una cifra más precisa (la de la
+    carrera concreta). Aplicar ambas proporciones multiplicándolas
+    contaría el mismo hecho dos veces y estrecharía la población sin
+    ninguna base estadística.
+
+    Este paso SOLO aporta información nueva cuando `rama_estudios` se
+    detectó de forma independiente -- una carrera mencionada en el texto
+    que NO es una de las 14 de STUDIES_DISTRIBUTION, pero sí reconocible
+    como perteneciente a una rama (p. ej. "estudio Sociología", ver
+    _RAMA_ESTUDIOS_VOCABULARY en demographic_extraction.py)."""
+    if findings.estudios is not None:
+        return remaining, None
+    if not findings.rama_estudios:
+        return remaining, None
+    return _apply_proportion(
+        remaining,
+        RAMA_ESTUDIOS_DISTRIBUTION.get(findings.rama_estudios),
+        _RAMA_ESTUDIOS_LABELS[findings.rama_estudios],
+        "rama_estudios",
+        findings.evidence.get("rama_estudios", []),
+        source=findings.source.get("rama_estudios", "texto"),
+        note="Proporción de matriculados universitarios por rama de conocimiento "
+             "(mezcla de cursos académicos distintos para públicas y privadas, ver "
+             "comentario en RAMA_ESTUDIOS_DISTRIBUTION en ine_reference.py) -- no cubre "
+             "toda la población adulta que alguna vez estudió esa rama, solo una "
+             "aproximación basada en matriculación reciente.",
+        note_code=note_codes.RAMA_ESTUDIOS_APROXIMACION_MATRICULACION,
+        value_raw=findings.rama_estudios,
     )
 
 
@@ -986,7 +1039,7 @@ def _step_empresa(findings: DemographicFindings) -> PopulationNarrowingStep | No
 # orden importa: cada paso condiciona al siguiente, ver docstring del
 # módulo sobre la asunción de independencia).
 _CHAINED_STEPS = (
-    _step_sexo, _step_edad, _step_location, _step_estudios, _step_nivel_estudios, _step_ocupacion,
+    _step_sexo, _step_edad, _step_location, _step_estudios, _step_nivel_estudios, _step_rama_estudios, _step_ocupacion,
     _step_nacionalidad, _step_situacion_laboral, _step_tipo_hogar,
     # Depende de que _step_location ya haya podido resolver comunidad
     # autónoma o provincia (ver _resolve_ccaa_for_language) -- por eso va

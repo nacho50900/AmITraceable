@@ -304,6 +304,21 @@ universidad), mientras que un Grado MEDIO cae en
 "superior"/"medio" explícito en vez de un "ciclo formativo" genérico
 sin cualificar.
 
+`rama_estudios` (Ciencias Sociales y Jurídicas / Ingeniería y
+Arquitectura / Ciencias de la Salud / Artes y Humanidades / Ciencias,
+clasificación oficial del RD 1393/2007) es DISTINTO de ambos: ni el
+nivel alcanzado ni la carrera concreta, sino la categoría amplia a la
+que pertenece esa carrera (ver ADR-40). Se infiere automáticamente vía
+`STUDIES_TO_RAMA` cuando `estudios` ya detectó una de las 14 carreras
+con proporción propia, pero también tiene su propio vocabulario
+AMPLIADO (~25 carreras más: sociología, filología, física...) que
+reutiliza la misma frase-ancla que `estudios` (`_STUDY_VERB_RE`) contra
+un diccionario más amplio, para cubrir carreras que `estudios` no tiene
+registradas individualmente. Cuando una carrera queda contenida como
+substring de otra ("quimica" dentro de "ingenieria quimica", "historia"
+dentro de "historia del arte"), aplica la misma regla de orden que
+`_SPORT_PRACTICE_RE`: la más específica se comprueba primero.
+
 Ubicación::
 `backend/app/nlp/demographic_extraction.py`.
 
@@ -435,10 +450,11 @@ tus rasgos"). Se queda con el `remaining_population` del último escalón
 encadenable que sí se pudo estimar, aprovechando que cada escalón ya
 lleva el acumulado de los anteriores.
 
-El paso de `practica_deportiva` (41 modalidades, ver ADR-37) es el único
-que consulta OTROS campos de `findings` además del suyo propio: si ya se
-conoce sexo, edad o nivel_estudios, usa la proporción de esa combinación
-concreta (`SPORT_PRACTICE_BY_SEX`/`BY_AGE_BAND`/`BY_EDUCATION_LEVEL` en
+El paso de `practica_deportiva` (41 modalidades, ver ADR-37) consulta
+OTROS campos de `findings` además del suyo propio (no es el único, ver
+`rama_estudios` más abajo): si ya se conoce sexo, edad o nivel_estudios,
+usa la proporción de esa combinación concreta
+(`SPORT_PRACTICE_BY_SEX`/`BY_AGE_BAND`/`BY_EDUCATION_LEVEL` en
 `ine_reference.py`, tabla 1.22 de la encuesta) en vez de la marginal sin
 distinguir. Prueba las tres en cascada -- sexo > edad > nivel_estudios --
 y usa la PRIMERA que esté disponible y tenga dato para esa combinación
@@ -448,6 +464,19 @@ de a uno). Un rango de edad declarado que cruza la frontera entre dos
 tramos de la encuesta (`_sport_age_band`) no se puede asignar a ninguno
 sin adivinar, así que cuenta como "no disponible" para ese nivel de la
 cascada.
+
+El paso de `rama_estudios` (ver ADR-40) también consulta otro campo,
+pero al revés que `practica_deportiva`: en vez de AFINAR la proporción
+cuando otro campo ya se conoce, se SALTA por completo si `estudios` ya
+está informado. La razón es que, a diferencia de sexo/edad/estudios
+(variables independientes entre sí que aportan señal adicional cada
+una), "estudia derecho" y "está en la rama Ciencias Sociales y
+Jurídicas" no son hechos independientes -- el segundo es una
+consecuencia exacta del primero. Aplicar la proporción de la rama
+ENCIMA de la proporción de la carrera concreta contaría el mismo hecho
+dos veces. El campo `rama_estudios` se sigue rellenando igualmente
+(para mostrarlo en el resto del pipeline), solo se omite el paso de
+`population_narrowing` cuando sería redundante.
 
 `source="manual"` (ADR-34) es el único caso en que un paso no lo genera
 el pipeline automático de análisis, sino

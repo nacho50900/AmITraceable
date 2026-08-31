@@ -26,6 +26,7 @@ from app.data.ine_reference import (
     PROVINCE_POPULATION,
     SPORT_PRACTICE_DISTRIBUTION,
     STUDIES_DISTRIBUTION,
+    STUDIES_TO_RAMA,
     resolve_autonomous_community_in_text,
 )
 from app.models.schemas import InferredAttribute, SocialPost
@@ -110,6 +111,19 @@ class DemographicFindings:
     # _try_detect_nivel_estudios) -- nombrar una carrera concreta ya es
     # evidencia suficiente de haber cursado educación superior.
     nivel_estudios: str | None = None
+    # Rama de conocimiento oficial (RD 1393/2007): "ciencias_sociales_juridicas"
+    # | "ingenieria_arquitectura" | "ciencias_salud" | "artes_humanidades" |
+    # "ciencias" | None. DISTINTO de `estudios` (la carrera concreta) y de
+    # `nivel_estudios` (el nivel alcanzado) -- esto es la categoría AMPLIA a
+    # la que pertenece la carrera, con vocabulario más amplio que las 14
+    # carreras de STUDIES_DISTRIBUTION (decenas de carreras adicionales que
+    # no tienen proporción propia pero sí rama reconocible). Si `estudios`
+    # ya se detectó, se infiere automáticamente vía STUDIES_TO_RAMA -- pero
+    # SOLO como dato informativo, nunca genera su propio paso de
+    # estrechamiento en ese caso (ver _step_rama_estudios en
+    # k_anonymity.py): la proporción de la rama ya está contenida en la de
+    # la carrera concreta, aplicar ambas contaría el mismo hecho dos veces.
+    rama_estudios: str | None = None
     ocupacion: str | None = None
     universidad: str | None = None
     empresa: str | None = None
@@ -402,6 +416,7 @@ def extract_demographics(posts: list[SocialPost]) -> DemographicFindings:
         _try_detect_location(text, post.permalink, findings)
         _try_detect_estudios(text, post.permalink, findings)
         _try_detect_nivel_estudios(text, post.permalink, findings)
+        _try_detect_rama_estudios(text, post.permalink, findings)
         _try_detect_ocupacion(text, post.permalink, findings)
         _try_detect_practica_deportiva(text, post.permalink, findings)
         _try_detect_universidad(text, post.permalink, findings)
@@ -424,7 +439,7 @@ def _mark_all_detected_as_texto(findings: DemographicFindings) -> None:
     el frontend pueda distinguirlo de lo que venga de geolocation.py."""
     for attr_name in (
         "sexo", "edad", "provincia", "municipio", "comunidad_autonoma",
-        "estudios", "nivel_estudios", "ocupacion", "universidad", "empresa",
+        "estudios", "nivel_estudios", "rama_estudios", "ocupacion", "universidad", "empresa",
         "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
         "orientacion_sexual", "signo_zodiacal", "religion",
         "practica_deportiva",
@@ -513,6 +528,90 @@ def _try_detect_nivel_estudios(text: str, permalink: str, findings: DemographicF
         return
 
     findings.evidence.setdefault("nivel_estudios", []).append(permalink)
+
+
+# Vocabulario AMPLIADO de rama de conocimiento (RD 1393/2007) -- carreras
+# adicionales que no tienen proporción propia en STUDIES_DISTRIBUTION (14
+# carreras concretas) pero sí una rama reconocible. Reutiliza el mismo
+# `_STUDY_VERB_RE` que _try_detect_estudios (misma frase-ancla de
+# práctica: "estudio...", "estudiante de...", "graduado en...") contra un
+# candidato de texto más amplio, en vez de un regex nuevo.
+#
+# ORDEN: cuando un término es sustring de otro más largo ("quimica"
+# dentro de "ingenieria quimica", "historia" dentro de "historia del
+# arte"), el más específico va SIEMPRE primero -- mismo motivo que el
+# orden de alternancia en _SPORT_PRACTICE_RE (ver ese comentario). Un
+# diccionario normal de Python conserva el orden de inserción (3.7+), así
+# que ese orden es el que determina qué entrada gana en `next()`.
+_RAMA_ESTUDIOS_VOCABULARY: dict[str, str] = {
+    # Ingeniería y Arquitectura -- variantes de "ingenieria X" antes de
+    # cualquier término corto que pudiera ser sustring de una de ellas.
+    "ingenieria de telecomunicaciones": "ingenieria_arquitectura",
+    "ingenieria aeroespacial": "ingenieria_arquitectura",
+    "ingenieria electronica": "ingenieria_arquitectura",
+    "ingenieria mecanica": "ingenieria_arquitectura",
+    "ingenieria quimica": "ingenieria_arquitectura",
+    "ingenieria agronoma": "ingenieria_arquitectura",
+    "ingenieria civil": "ingenieria_arquitectura",
+    # Ciencias Sociales y Jurídicas.
+    "comunicacion audiovisual": "ciencias_sociales_juridicas",
+    "relaciones laborales": "ciencias_sociales_juridicas",
+    "ciencias politicas": "ciencias_sociales_juridicas",
+    "trabajo social": "ciencias_sociales_juridicas",
+    "criminologia": "ciencias_sociales_juridicas",
+    "sociologia": "ciencias_sociales_juridicas",
+    "publicidad": "ciencias_sociales_juridicas",
+    "turismo": "ciencias_sociales_juridicas",
+    # Ciencias de la Salud.
+    "terapia ocupacional": "ciencias_salud",
+    "optica y optometria": "ciencias_salud",
+    "odontologia": "ciencias_salud",
+    "fisioterapia": "ciencias_salud",
+    "logopedia": "ciencias_salud",
+    "podologia": "ciencias_salud",
+    "nutricion": "ciencias_salud",
+    # Artes y Humanidades -- "historia del arte" antes que "historia" a
+    # secas (sustring).
+    "traduccion e interpretacion": "artes_humanidades",
+    "historia del arte": "artes_humanidades",
+    "bellas artes": "artes_humanidades",
+    "humanidades": "artes_humanidades",
+    "filologia": "artes_humanidades",
+    "filosofia": "artes_humanidades",
+    "historia": "artes_humanidades",
+    # Ciencias -- "ingenieria quimica" ya se comprobó arriba, así que
+    # "quimica" a secas aquí solo dispara si NO era esa combinación.
+    "ciencias ambientales": "ciencias",
+    "matematicas": "ciencias",
+    "bioquimica": "ciencias",
+    "geologia": "ciencias",
+    "quimica": "ciencias",
+    "fisica": "ciencias",
+}
+
+
+def _try_detect_rama_estudios(text: str, permalink: str, findings: DemographicFindings) -> None:
+    """SOLO rellena el campo -- NUNCA aplica un paso de estrechamiento
+    propio cuando se infiere desde `estudios` (ver comentario en
+    STUDIES_TO_RAMA y en _step_rama_estudios): la proporción de la rama
+    ya está contenida en la de la carrera concreta."""
+    if findings.rama_estudios is not None:
+        return
+
+    if findings.estudios is not None:
+        findings.rama_estudios = STUDIES_TO_RAMA[findings.estudios]
+        findings.evidence.setdefault("rama_estudios", []).extend(findings.evidence.get("estudios", []))
+        return
+
+    match = _STUDY_VERB_RE.search(text)
+    if not match:
+        return
+
+    candidate = _strip_accents(match.group(1).strip().lower())
+    matched_rama = next((rama for keyword, rama in _RAMA_ESTUDIOS_VOCABULARY.items() if keyword in candidate), None)
+    if matched_rama:
+        findings.rama_estudios = matched_rama
+        findings.evidence.setdefault("rama_estudios", []).append(permalink)
 
 
 def _try_detect_ocupacion(text: str, permalink: str, findings: DemographicFindings) -> None:

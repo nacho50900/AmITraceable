@@ -89,6 +89,11 @@ _LAST_VERIFIED: dict[str, date | None] = {
     "SPORT_PRACTICE_BY_AGE_BAND": date(2025, 1, 1),
     # INE/EPA, indicador "Nivel de formación de la población adulta", año 2024.
     "EDUCATION_LEVEL_DISTRIBUTION": date(2024, 1, 1),
+    # Ver comentario junto a RAMA_ESTUDIOS_DISTRIBUTION: mezcla 2015/16
+    # (público) + 2019/20 (privado) -- se usa la fecha más antigua de las
+    # dos como fecha de verificación, no la más reciente, para no
+    # aparentar más actualidad de la que realmente tiene el dato.
+    "RAMA_ESTUDIOS_DISTRIBUTION": date(2015, 9, 1),
     "SPORT_PRACTICE_BY_EDUCATION_LEVEL": date(2025, 1, 1),
 }
 
@@ -123,6 +128,7 @@ _STALE_THRESHOLDS: dict[str, timedelta] = {
     "SPORT_PRACTICE_BY_SEX": _STALE_THRESHOLD_MULTIYEAR,
     "SPORT_PRACTICE_BY_AGE_BAND": _STALE_THRESHOLD_MULTIYEAR,
     "EDUCATION_LEVEL_DISTRIBUTION": _STALE_THRESHOLD_ANNUAL,
+    "RAMA_ESTUDIOS_DISTRIBUTION": _STALE_THRESHOLD_MULTIYEAR,
     "SPORT_PRACTICE_BY_EDUCATION_LEVEL": _STALE_THRESHOLD_MULTIYEAR,
 }
 
@@ -824,6 +830,82 @@ STUDIES_DISTRIBUTION = {
     "periodismo": 0.0064,
     "economia": 0.0101,
     "veterinaria": 0.0027,
+}
+
+# Rama de conocimiento oficial de cada una de las 14 carreras de
+# STUDIES_DISTRIBUTION, según la clasificación de 5 ramas del Real
+# Decreto 1393/2007 (modificado por RD 43/2015), art. único: Artes y
+# Humanidades / Ciencias / Ciencias de la Salud / Ciencias Sociales y
+# Jurídicas / Ingeniería y Arquitectura -- la adscripción de cada título
+# concreto se registra en el RUCT (Registro de Universidades, Centros y
+# Títulos) del Ministerio.
+#
+# SOLO INFORMATIVO -- NUNCA genera un paso de estrechamiento de
+# población propio (ver _step_rama_estudios en k_anonymity.py): quien
+# estudia "derecho" ya está, con probabilidad 1, dentro de "Ciencias
+# Sociales y Jurídicas" -- aplicar la proporción de la rama ENCIMA de la
+# proporción de la carrera concreta (STUDIES_DISTRIBUTION) contaría el
+# mismo hecho dos veces y estrecharía la población sin ninguna
+# justificación estadística (el suceso "estudia derecho" no es
+# independiente del suceso "está en la rama CS y J", es un subconjunto
+# exacto). Por eso esta tabla es solo un mapeo de exhibición: se usa
+# para RELLENAR `rama_estudios` cuando `estudios` ya se conoce (mismo
+# patrón que `nivel_estudios` se infiere de `estudios`), pero el paso de
+# k-anonimato de `rama_estudios` se salta por completo en ese caso.
+#
+# Dos casos verificados explícitamente por no ser obvios (búsqueda
+# dedicada, no asumidos): "psicologia" está adscrita oficialmente a
+# Ciencias de la Salud como rama PRINCIPAL (BOE-A-2022-12576, código
+# RUCT 2502443), aunque muchas facultades también imparten créditos
+# básicos de Ciencias Sociales y Jurídicas como rama secundaria -- se
+# usa aquí solo la principal. "veterinaria" está adscrita a Ciencias de
+# la Salud (confirmado en documentación oficial de admisión de la
+# Universidad de Zaragoza y en el propio catálogo de asignaturas de la
+# USC), NO a "Ciencias" como podría parecer a primera vista.
+STUDIES_TO_RAMA = {
+    "medicina": "ciencias_salud",
+    "enfermeria": "ciencias_salud",
+    "farmacia": "ciencias_salud",
+    "psicologia": "ciencias_salud",
+    "veterinaria": "ciencias_salud",
+    "derecho": "ciencias_sociales_juridicas",
+    "administracion de empresas": "ciencias_sociales_juridicas",
+    "magisterio": "ciencias_sociales_juridicas",
+    "periodismo": "ciencias_sociales_juridicas",
+    "economia": "ciencias_sociales_juridicas",
+    "ingenieria informatica": "ingenieria_arquitectura",
+    "ingenieria industrial": "ingenieria_arquitectura",
+    "arquitectura": "ingenieria_arquitectura",
+    "biologia": "ciencias",
+}
+
+# Proporción de la población que ha estudiado en cada rama de
+# conocimiento (marginal, no depende de qué carrera concreta). Fuente:
+# Ministerio de Ciencia/Universidades, Estadística de Estudiantes
+# Universitarios (EEU) -- matriculados de Grado por rama de enseñanza,
+# universidades PÚBLICAS presenciales curso 2015/16 (última serie
+# encontrada con desglose completo de las 5 ramas en una sola fuente)
+# más universidades PRIVADAS curso 2019/20 (idem, fuente distinta).
+#
+# LIMITACIÓN DOCUMENTADA: mezcla dos cursos académicos distintos
+# (2015/16 público + 2019/20 privado) porque no se encontró una única
+# fuente con el desglose completo de las 5 ramas para ambos tipos de
+# universidad en el mismo curso. Se valida cruzando con una cifra
+# independiente de otro informe (EEU, nuevo ingreso curso 2021/22:
+# Ciencias Sociales y Jurídicas 46,4% de las nuevas matrículas, Ciencias
+# la menor con 6,3%) -- las proporciones calculadas aquí (46,66% y
+# 6,02% respectivamente) coinciden lo bastante bien como para dar
+# confianza en el orden de magnitud, a pesar del desfase de cursos.
+# Como con otras tablas de este fichero basadas en matriculación/
+# egresados en vez of población total, es una aproximación de "quién ha
+# pasado por la universidad recientemente", no un censo de toda la
+# población adulta que alguna vez estudió cada rama.
+RAMA_ESTUDIOS_DISTRIBUTION = {
+    "ciencias_sociales_juridicas": 0.4666,
+    "ingenieria_arquitectura": 0.1903,
+    "ciencias_salud": 0.1806,
+    "artes_humanidades": 0.1023,
+    "ciencias": 0.0602,
 }
 
 # Proporción de la población ocupada por gran categoría profesional

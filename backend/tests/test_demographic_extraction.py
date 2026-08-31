@@ -196,6 +196,59 @@ class TestEducationLevel:
         assert findings.nivel_estudios is None
 
 
+class TestFieldOfStudy:
+    def test_infers_rama_from_a_specific_career_in_studies_distribution(self):
+        """Si la carrera concreta ya está en STUDIES_DISTRIBUTION (una de
+        las 14), la rama se infiere vía STUDIES_TO_RAMA sin necesitar su
+        propia frase-ancla."""
+        findings = extract_demographics([_post("Estudio Derecho en la universidad")])
+        assert findings.estudios == "derecho"
+        assert findings.rama_estudios == "ciencias_sociales_juridicas"
+
+    def test_detects_a_career_outside_the_14_via_broader_vocabulary(self):
+        """'Sociologia' no es una de las 14 carreras de STUDIES_DISTRIBUTION,
+        pero sí tiene rama reconocible en el vocabulario ampliado."""
+        findings = extract_demographics([_post("Estudio Sociologia en la universidad")])
+        assert findings.estudios is None
+        assert findings.rama_estudios == "ciencias_sociales_juridicas"
+
+    def test_ingenieria_quimica_is_not_confused_with_quimica(self):
+        """Regresión del mismo tipo que futbol/futbol_sala: 'quimica' es
+        sustring de 'ingenieria quimica' -- debe ganar la entrada más
+        específica (Ingeniería y Arquitectura), no la genérica (Ciencias)."""
+        findings = extract_demographics([_post("Estudio Ingenieria Quimica en la universidad")])
+        assert findings.rama_estudios == "ingenieria_arquitectura"
+
+    def test_quimica_alone_still_detected_as_ciencias(self):
+        findings = extract_demographics([_post("Estudio Quimica en la universidad")])
+        assert findings.rama_estudios == "ciencias"
+
+    def test_historia_del_arte_is_not_confused_with_historia(self):
+        """Mismo tipo de regresión: 'historia' es sustring de 'historia
+        del arte' -- ambas caen en Artes y Humanidades de todos modos,
+        pero deben poder detectarse por separado sin que una rompa la
+        otra."""
+        findings = extract_demographics([_post("Estudio Historia del Arte en la universidad")])
+        assert findings.rama_estudios == "artes_humanidades"
+
+    def test_historia_alone_still_detected(self):
+        findings = extract_demographics([_post("Estudio Historia en la universidad")])
+        assert findings.rama_estudios == "artes_humanidades"
+
+    def test_detects_ciencias_de_la_salud_branch(self):
+        findings = extract_demographics([_post("Estudio Fisioterapia en la universidad")])
+        assert findings.rama_estudios == "ciencias_salud"
+
+    def test_detects_ingenieria_civil(self):
+        findings = extract_demographics([_post("Estudio Ingenieria Civil en la universidad")])
+        assert findings.rama_estudios == "ingenieria_arquitectura"
+
+    def test_unrecognized_field_leaves_rama_none(self):
+        findings = extract_demographics([_post("Estudio jardineria avanzada")])
+        assert findings.estudios is None
+        assert findings.rama_estudios is None
+
+
 class TestOccupation:
     def test_detects_known_occupation_keyword(self):
         findings = extract_demographics([_post("Trabajo como docente en un instituto")])

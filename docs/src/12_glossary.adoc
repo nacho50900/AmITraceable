@@ -108,6 +108,19 @@ ifndef::imagesdir[:imagesdir: ../images]
   superior"), y nombrar una carrera concreta implica automáticamente
   nivel "superior" sin declaración aparte (ver ADR-38).
 
+| Rama de estudios
+| Categoría amplia de conocimiento a la que pertenece una carrera
+  (Ciencias Sociales y Jurídicas / Ingeniería y Arquitectura / Ciencias
+  de la Salud / Artes y Humanidades / Ciencias -- clasificación oficial
+  del RD 1393/2007), campo `rama_estudios`. DISTINTO de "Estudios"
+  (la carrera concreta) y de "Nivel de estudios" (el nivel alcanzado).
+  Se infiere automáticamente de "Estudios" cuando ya se conoce la
+  carrera exacta, pero en ese caso NUNCA genera su propio paso de
+  estrechamiento de población (a diferencia de "Nivel de estudios", que
+  sí lo genera aunque se infiera igual) -- la rama es un subconjunto
+  exacto de la carrera concreta, no un hecho independiente, así que
+  aplicar ambas proporciones contaría lo mismo dos veces (ver ADR-40).
+
 | INE (Instituto Nacional de Estadística)
 | Organismo público español responsable de las estadísticas oficiales
   (Censo, Padrón, Encuesta de Población Activa...). Fuente de las

@@ -135,7 +135,8 @@
       "practica_deportiva_ajustada_por_sexo": "Marginal proportion from the Spanish Sports Habits Survey (Encuesta de Hábitos Deportivos en España) -- not a partition: the survey allows multiple answers, a person can practice several sports at once, so this data point alone doesn't mean it's the ONLY sport they practice. Since sex is also known, the exact proportion for that specific combination is used (sport practice conditioned on sex, same survey), instead of approximating by multiplying independent proportions.",
       "practica_deportiva_ajustada_por_edad": "Marginal proportion from the Spanish Sports Habits Survey (Encuesta de Hábitos Deportivos en España) -- not a partition: the survey allows multiple answers, a person can practice several sports at once, so this data point alone doesn't mean it's the ONLY sport they practice. Since age is also known, the exact proportion for that specific combination is used (sport practice conditioned on age band, same survey), instead of approximating by multiplying independent proportions.",
       "practica_deportiva_ajustada_por_estudios": "Marginal proportion from the Spanish Sports Habits Survey (Encuesta de Hábitos Deportivos en España) -- not a partition: the survey allows multiple answers, a person can practice several sports at once, so this data point alone doesn't mean it's the ONLY sport they practice. Since education level is also known, the exact proportion for that specific combination is used (sport practice conditioned on education level, same survey), instead of approximating by multiplying independent proportions.",
-      "nivel_estudios_aproximacion_25_64": "Approximation: the official figure (INE/EPA) covers the population aged 25 to 64, not the whole adult population."
+      "nivel_estudios_aproximacion_25_64": "Approximation: the official figure (INE/EPA) covers the population aged 25 to 64, not the whole adult population.",
+      "rama_estudios_aproximacion_matriculacion": "Proportion of university enrollment by field of study (mixes different academic years for public and private universities) -- doesn't cover the whole adult population that ever studied that field, only an approximation based on recent enrollment."
     },
     "attribute": {
       "sexo": "Sex: {{value}}",
@@ -143,6 +144,7 @@
       "estado_civil": "{{value}}",
       "estudios": "Studied: {{value}}",
       "nivel_estudios": "Education level: {{value}}",
+      "rama_estudios": "Field of study: {{value}}",
       "ocupacion": "Occupation: {{value}}",
       "nacionalidad": "Nationality: {{value}}",
       "situacion_laboral": "Employment status: {{value}}",
@@ -213,6 +215,13 @@
         "superior": "higher education",
         "secundaria_superior": "upper secondary education (bachillerato or mid-level vocational training)",
         "secundaria_o_inferior": "lower secondary education or below (ESO, primary school)"
+      },
+      "rama_estudios": {
+        "ciencias_sociales_juridicas": "Social and Legal Sciences",
+        "ingenieria_arquitectura": "Engineering and Architecture",
+        "ciencias_salud": "Health Sciences",
+        "artes_humanidades": "Arts and Humanities",
+        "ciencias": "Sciences"
       },
       "ocupacion": {
         "docente": "Teacher",

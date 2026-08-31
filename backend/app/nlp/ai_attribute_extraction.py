@@ -96,6 +96,7 @@ from app.data.ine_reference import (
     SEXUAL_ORIENTATION_DISTRIBUTION,
     SPORT_PRACTICE_DISTRIBUTION,
     STUDIES_DISTRIBUTION,
+    STUDIES_TO_RAMA,
     resolve_autonomous_community,
 )
 from app.models.schemas import InferredAttribute, SocialPost
@@ -114,6 +115,10 @@ _FREE_TEXT_FIELDS = ("universidad", "empresa")
 _NATIONALITY_VALUES = ("espanola", "extranjera")
 _EMPLOYMENT_VALUES = ("activo", "parado", "jubilado", "estudiante", "otro_inactivo")
 _NIVEL_ESTUDIOS_VALUES = ("superior", "secundaria_superior", "secundaria_o_inferior")
+_RAMA_ESTUDIOS_VALUES = (
+    "ciencias_sociales_juridicas", "ingenieria_arquitectura", "ciencias_salud",
+    "artes_humanidades", "ciencias",
+)
 _LANGUAGE_VALUES = ("catalan", "euskera", "gallego", "valenciano")
 _HOUSEHOLD_VALUES = ("unipersonal", "pareja_sin_hijos", "pareja_con_hijos", "monoparental")
 # Igual que las cuatro de arriba: valores exactos, no texto libre a
@@ -161,7 +166,7 @@ _AGE_RANGE_MIN_CONFIDENCE = 0.7
 # `DemographicFindings`, usado por `merge_findings`.
 _ALL_FIELDS = (
     "sexo", "edad", "provincia", "municipio", "comunidad_autonoma",
-    "estudios", "nivel_estudios", "ocupacion", "universidad", "empresa",
+    "estudios", "nivel_estudios", "rama_estudios", "ocupacion", "universidad", "empresa",
     "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
     "practica_deportiva",
     # Rango de edad estimado INDIRECTAMENTE (ver docstring del campo en
@@ -193,6 +198,8 @@ _SYSTEM_PROMPT = (
     '"provincia": <string>|null, '
     '"municipio": <string>|null, "comunidad_autonoma": <string>|null, "estudios": <string>|null, '
     '"nivel_estudios": "superior"|"secundaria_superior"|"secundaria_o_inferior"|null, '
+    '"rama_estudios": "ciencias_sociales_juridicas"|"ingenieria_arquitectura"|"ciencias_salud"|'
+    '"artes_humanidades"|"ciencias"|null, '
     '"ocupacion": <string>|null, "universidad": <string>|null, "empresa": <string>|null, '
     '"nacionalidad": "espanola"|"extranjera"|null, '
     '"situacion_laboral": "activo"|"parado"|"jubilado"|"estudiante"|"otro_inactivo"|null, '
@@ -244,6 +251,17 @@ _SYSTEM_PROMPT = (
     "que es sobre qué estudia, no sobre qué nivel ya alcanzó). Si el texto nombra una "
     "carrera universitaria concreta en 'estudios', dedúcelo tú mismo: pon 'nivel_estudios' "
     "en 'superior' también, sin necesidad de una frase aparte sobre el nivel. "
+    "'rama_estudios' es la RAMA de conocimiento oficial de la carrera (RD 1393/2007): "
+    "'ciencias_sociales_juridicas' (derecho, economía, sociología, magisterio, "
+    "periodismo, turismo, trabajo social...), 'ingenieria_arquitectura' (cualquier "
+    "ingeniería, arquitectura), 'ciencias_salud' (medicina, enfermería, farmacia, "
+    "psicología, veterinaria, fisioterapia, odontología...), 'artes_humanidades' "
+    "(historia, filología, filosofía, bellas artes, traducción...) o 'ciencias' "
+    "(física, química, biología, matemáticas, geología...). Si el texto nombra una "
+    "carrera concreta en 'estudios', dedúcelo tú mismo: pon también 'rama_estudios' "
+    "con la rama correspondiente, sin necesidad de una frase aparte. Si la carrera "
+    "mencionada no encaja claramente en ninguna rama, usa null (no fuerces la más "
+    "parecida). "
     "'tipo_hogar' es SOLO si la persona dice explícitamente con quién vive o si menciona "
     "vivir sola: 'unipersonal' (vive sola), 'pareja_sin_hijos'/'pareja_con_hijos' (vive con "
     "su pareja, con o sin hijos en el mismo hogar) o 'monoparental' (un solo progenitor con "
@@ -788,6 +806,16 @@ def _to_findings(parsed: dict) -> DemographicFindings:
         findings.nivel_estudios = "superior"
         findings.evidence.setdefault("nivel_estudios", []).extend(findings.evidence.get("estudios", []))
         findings.source["nivel_estudios"] = "ia"
+    _set_exact_enum(findings, parsed, "rama_estudios", _RAMA_ESTUDIOS_VALUES, evidence_map)
+    if findings.estudios is not None and findings.rama_estudios is None:
+        # Mismo criterio que _try_detect_rama_estudios: nombrar una carrera
+        # concreta ya implica su rama de conocimiento (STUDIES_TO_RAMA),
+        # sin necesidad de que el modelo lo declare aparte -- SOLO
+        # informativo, no genera paso de estrechamiento propio (ver
+        # _step_rama_estudios en k_anonymity.py).
+        findings.rama_estudios = STUDIES_TO_RAMA[findings.estudios]
+        findings.evidence.setdefault("rama_estudios", []).extend(findings.evidence.get("estudios", []))
+        findings.source["rama_estudios"] = "ia"
     _set_normalized(findings, parsed, "ocupacion", OCCUPATION_DISTRIBUTION, evidence_map)
     _set_location(findings, parsed, evidence_map)
     _set_free_text_fields(findings, parsed, evidence_map)

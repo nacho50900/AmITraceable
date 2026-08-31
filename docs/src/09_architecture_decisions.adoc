@@ -2264,3 +2264,101 @@ workers), esta decisión habría que revisarla -- en ese momento sí
 tendría sentido un dominio propio pensado para más de un usuario
 simultáneo.
 
+=== ADR-40: Nuevo atributo `rama_estudios` (rama de conocimiento), sin paso propio cuando `estudios` ya la cubre
+
+*Contexto*: `estudios` (`STUDIES_DISTRIBUTION`) solo cubre 14 carreras
+concretas con proporción propia -- cualquier otra carrera mencionada en
+el texto ("estudio Sociología", "estudio Filosofía") no aporta ninguna
+señal de estrechamiento, aunque sí sea perfectamente clasificable en
+una de las 5 ramas de conocimiento oficiales del sistema universitario
+español (Real Decreto 1393/2007, modificado por RD 43/2015: Artes y
+Humanidades, Ciencias, Ciencias de la Salud, Ciencias Sociales y
+Jurídicas, Ingeniería y Arquitectura).
+
+*Decisión*: añadir `rama_estudios` como atributo nuevo de punta a
+punta (regex + IA + paso de k-anonimato propio), con dos fuentes de
+detección:
+  - **Inferencia automática** desde `estudios` cuando ya se conoce una
+    de las 14 carreras concretas, vía `STUDIES_TO_RAMA` (mapeo fijo
+    1:1, sin ambigüedad -- cada carrera pertenece a exactamente una
+    rama oficial).
+  - **Vocabulario ampliado propio** (~25 carreras adicionales:
+    sociología, filología, física, fisioterapia, ingeniería civil...)
+    con su propia frase-ancla de detección, para cubrir carreras que
+    `estudios` no tiene registradas individualmente pero sí son
+    clasificables en una rama.
+
+Dos casos de la clasificación oficial se verificaron explícitamente por
+no ser evidentes en vez de asumirse: "psicología" está adscrita a
+Ciencias de la Salud como rama PRINCIPAL (BOE-A-2022-12576, código
+RUCT), no a Ciencias Sociales y Jurídicas como podría parecer por su
+objeto de estudio; "veterinaria" está adscrita a Ciencias de la Salud
+(documentación oficial de admisión de la Universidad de Zaragoza y
+catálogo de la USC), no a Ciencias como sugeriría la intuición.
+
+*Guard de no-duplicación (la decisión central de este ADR)*: a
+diferencia de `nivel_estudios` (que SÍ genera su propio paso aunque se
+infiera automáticamente de `estudios`, porque nivel y carrera son
+preguntas distintas de la encuesta de origen -- ver ADR-38),
+`rama_estudios` NUNCA genera un paso de estrechamiento cuando
+`findings.estudios` ya está informado. El motivo es puramente
+estadístico: quien estudia "derecho" ya está, con probabilidad
+exactamente 1, dentro de "Ciencias Sociales y Jurídicas" -- no es un
+hecho INDEPENDIENTE del ya conocido, es un subconjunto exacto de él.
+`_step_estudios` ya aplica la proporción de esa carrera concreta
+(3,08% para derecho), que es más precisa que la de toda su rama
+(46,66%); aplicar AMBAS multiplicándolas contaría el mismo hecho dos
+veces y estrecharía la población sin ninguna base -- el mismo tipo de
+error que motivó la cascada de prioridad de ADR-37 (nunca combinar dos
+ajustes condicionados que no son independientes entre sí).
+`_step_rama_estudios` solo produce un paso cuando `rama_estudios` se
+detectó de forma INDEPENDIENTE de `estudios` (carrera fuera de las 14,
+vía el vocabulario ampliado). El campo se sigue rellenando igualmente
+para mostrarlo de forma informativa en el resto del pipeline, solo se
+omite el paso de `population_narrowing`.
+
+*Bug encontrado y corregido de paso, no buscado*: al escribir el test
+de regresión numérica para el guard de arriba
+(`test_does_not_double_narrow_the_final_remaining_population`, que
+compara `final_remaining_population()` con y sin `rama_estudios` cuando
+`estudios` ya está presente, esperando que sea idéntico), se descubrió
+que `nivel_estudios` (ADR-38) llevaba desde su introducción sin estar
+incluido en `_CHAINED_CATEGORIES` -- el conjunto que
+`final_remaining_population()` consulta para decidir qué pasos cuentan
+hacia el número combinado final. El paso individual de `nivel_estudios`
+se calculaba y mostraba correctamente en la lista de
+`population_narrowing`, pero si era el ÚLTIMO paso encadenable con
+narrowing válido, el número final ("en España hay X personas que
+comparten tus rasgos") lo ignoraba y usaba el del paso anterior en su
+lugar. Ningún test existente lo cubría porque `TestFinalRemainingPopulation`
+no tenía ningún caso con `nivel_estudios` como único o último atributo
+encadenable. Corregido añadiendo tanto `nivel_estudios` como
+`rama_estudios` a `_CHAINED_CATEGORIES` en el mismo cambio.
+
+*Fuente de la tabla, limitación documentada*: `RAMA_ESTUDIOS_DISTRIBUTION`
+mezcla matriculados de universidades PÚBLICAS del curso 2015/16 con
+PRIVADAS del curso 2019/20 (Ministerio de Universidades, Estadística de
+Estudiantes Universitarios) porque no se encontró una única fuente con
+el desglose completo de las 5 ramas para ambos tipos de universidad en
+el mismo curso académico. Se validó cruzando con una cifra independiente
+de nuevo ingreso del curso 2021/22 (Ciencias Sociales y Jurídicas 46,4%,
+Ciencias 6,3% según esa fuente, frente al 46,66%/6,02% calculados aquí)
+-- la coincidencia razonable entre ambas cifras, pese al desfase de
+cursos y al ser métricas distintas (matriculación total frente a nuevo
+ingreso), da confianza en el orden de magnitud sin pretender exactitud
+absoluta.
+
+*Consecuencias*: (+) aprovecha menciones de carrera que antes no
+aportaban ninguna señal de estrechamiento (cualquier carrera fuera de
+las 14 de `STUDIES_DISTRIBUTION`); (+) el guard de no-duplicación es
+generalizable como patrón para futuros atributos que refinen uno ya
+existente (cualquier "categoría amplia de X" derivada de un "X
+concreto" ya cableado debería aplicar el mismo criterio); (+) efecto
+colateral positivo: destapó y corrigió un bug real de ADR-38 que
+llevaba una sesión entera sin detectarse; (-) la tabla de origen mezcla
+dos cursos académicos distintos, aproximación explícitamente
+documentada en vez de escondida; (-) atributo nuevo completo (regex +
+IA + paso propio) es más superficie de mantenimiento, aunque menor que
+`nivel_estudios` al reutilizar `_STUDY_VERB_RE` en vez de un regex de
+detección nuevo.
+

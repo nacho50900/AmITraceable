@@ -135,7 +135,8 @@
       "practica_deportiva_ajustada_por_sexo": "Proporción marginal de la Encuesta de Hábitos Deportivos en España (no es una partición: la encuesta es de respuesta múltiple, una persona puede practicar varios deportes a la vez, así que este dato por sí solo no implica que sea el ÚNICO deporte que practica). Al conocerse también el sexo, se usa el porcentaje de esa combinación concreta (práctica deportiva condicionada a sexo, misma encuesta), no una aproximación multiplicando proporciones independientes.",
       "practica_deportiva_ajustada_por_edad": "Proporción marginal de la Encuesta de Hábitos Deportivos en España (no es una partición: la encuesta es de respuesta múltiple, una persona puede practicar varios deportes a la vez, así que este dato por sí solo no implica que sea el ÚNICO deporte que practica). Al conocerse también la edad, se usa el porcentaje de esa combinación concreta (práctica deportiva condicionada a tramo de edad, misma encuesta), no una aproximación multiplicando proporciones independientes.",
       "practica_deportiva_ajustada_por_estudios": "Proporción marginal de la Encuesta de Hábitos Deportivos en España (no es una partición: la encuesta es de respuesta múltiple, una persona puede practicar varios deportes a la vez, así que este dato por sí solo no implica que sea el ÚNICO deporte que practica). Al conocerse también el nivel de estudios, se usa el porcentaje de esa combinación concreta (práctica deportiva condicionada a nivel de estudios, misma encuesta), no una aproximación multiplicando proporciones independientes.",
-      "nivel_estudios_aproximacion_25_64": "Aproximación: la cifra oficial (INE/EPA) cubre población de 25 a 64 años, no toda la población adulta."
+      "nivel_estudios_aproximacion_25_64": "Aproximación: la cifra oficial (INE/EPA) cubre población de 25 a 64 años, no toda la población adulta.",
+      "rama_estudios_aproximacion_matriculacion": "Proporción de matriculados universitarios por rama de conocimiento (mezcla de cursos académicos distintos para públicas y privadas) -- no cubre toda la población adulta que alguna vez estudió esa rama, solo una aproximación basada en matriculación reciente."
     },
     "attribute": {
       "sexo": "Sexo: {{value}}",
@@ -143,6 +144,7 @@
       "estado_civil": "{{value}}",
       "estudios": "Estudió: {{value}}",
       "nivel_estudios": "Nivel de estudios: {{value}}",
+      "rama_estudios": "Rama de estudios: {{value}}",
       "ocupacion": "Ocupación: {{value}}",
       "nacionalidad": "Nacionalidad: {{value}}",
       "situacion_laboral": "Situación laboral: {{value}}",
@@ -213,6 +215,13 @@
         "superior": "educación superior",
         "secundaria_superior": "2ª etapa de educación secundaria (bachillerato o FP grado medio)",
         "secundaria_o_inferior": "1ª etapa de educación secundaria o inferior (ESO, primaria)"
+      },
+      "rama_estudios": {
+        "ciencias_sociales_juridicas": "Ciencias Sociales y Jurídicas",
+        "ingenieria_arquitectura": "Ingeniería y Arquitectura",
+        "ciencias_salud": "Ciencias de la Salud",
+        "artes_humanidades": "Artes y Humanidades",
+        "ciencias": "Ciencias"
       },
       "ocupacion": {
         "docente": "Docente",

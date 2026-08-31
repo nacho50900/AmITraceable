@@ -104,7 +104,7 @@ class PrivacyScore(BaseModel):
 
 class PopulationEstimate(BaseModel):
     attribute_label: str  # p.ej. "Sexo: mujer", "Vive en municipio: Leon"
-    category: str  # sexo | edad | ubicacion | estudios | nivel_estudios | ocupacion | universidad | empresa
+    category: str  # sexo | edad | ubicacion | estudios | nivel_estudios | rama_estudios | ocupacion | universidad | empresa
     remaining_population: int | None  # None si no estimable con las tablas actuales
     risk_level: str  # bajo | medio | alto | critico | no_estimable
     evidence: list[str]

@@ -252,6 +252,23 @@ Cuando la encuesta redondea el porcentaje de una combinación concreta a
 de la tabla condicionada a propósito, y el paso cae al siguiente nivel
 de la cascada en vez de mostrar una población de cero.
 
+**El caso inverso: cuándo NO aplicar una proporción aunque exista dato
+(ADR-40)**: la cascada de arriba combina variables que SÍ son
+razonablemente independientes entre sí (sexo, edad y nivel de estudios
+no se determinan unas a otras). Pero cuando dos atributos NO son
+independientes -- uno es un caso particular exacto del otro, como
+"estudia derecho" dentro de "está en la rama Ciencias Sociales y
+Jurídicas" -- aplicar ambas proporciones multiplicándolas es un error
+distinto y más grave que desperdiciar señal: cuenta el mismo hecho dos
+veces y estrecha la población sin ninguna base estadística real (a
+diferencia de combinar sexo y edad, aquí ni siquiera haría falta asumir
+independencia porque la dependencia es total y conocida: P(rama | carrera
+concreta) = 1 exactamente). El paso de `rama_estudios` se salta por
+completo cuando `estudios` ya identificó la carrera concreta, en vez de
+aplicar su proporción (más amplia y por tanto menos informativa) encima
+de la ya aplicada. El campo se sigue rellenando para mostrarse
+informativamente, solo se omite el paso de estrechamiento redundante.
+
 **Rasgos declarados por el usuario a posteriori (`source = "manual"`,
 ADR-34)**: hay atributos físicos visibles (color de ojos, de pelo, tono
 de piel) que el pipeline automático nunca intenta inferir -- ni de

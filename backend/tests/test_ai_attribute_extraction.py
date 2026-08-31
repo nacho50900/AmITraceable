@@ -122,6 +122,50 @@ class TestSuccessfulExtraction:
         assert findings.source["nivel_estudios"] == "ia"
 
     @pytest.mark.asyncio
+    async def test_ai_infers_rama_estudios_from_estudios(self, monkeypatch, respx_mock):
+        """Mismo criterio que nivel_estudios: si la IA detecta una carrera
+        concreta pero no declara 'rama_estudios' explícitamente, se
+        infiere vía STUDIES_TO_RAMA igualmente -- SOLO informativo, no
+        genera paso de estrechamiento propio (ver test_k_anonymity.py)."""
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(estudios="enfermeria", evidence={"estudios": "https://x/1"}),
+            )
+        )
+
+        findings = await extract_demographics_with_ai(
+            [_post("Voy a 2o de Enfermeria y no doy abasto", permalink="https://x/1")],
+            username="ana_gz",
+        )
+
+        assert findings.rama_estudios == "ciencias_salud"
+        assert findings.source["rama_estudios"] == "ia"
+        assert findings.evidence["rama_estudios"] == ["https://x/1"]
+
+    @pytest.mark.asyncio
+    async def test_ai_detects_rama_estudios_directly(self, monkeypatch, respx_mock):
+        """La IA puede declarar 'rama_estudios' directamente para una
+        carrera fuera de las 14 de STUDIES_DISTRIBUTION (p. ej.
+        Sociología), sin que 'estudios' se rellene."""
+        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+        respx_mock.post(MISTRAL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_mock_content(rama_estudios="ciencias_sociales_juridicas"),
+            )
+        )
+
+        findings = await extract_demographics_with_ai(
+            [_post("Estudio Sociologia en la universidad")], username="x"
+        )
+
+        assert findings.estudios is None
+        assert findings.rama_estudios == "ciencias_sociales_juridicas"
+        assert findings.source["rama_estudios"] == "ia"
+
+    @pytest.mark.asyncio
     async def test_unrecognized_studies_value_is_not_estimated(self, monkeypatch, respx_mock):
         """El LLM propone un valor libre; si no coincide con ninguna clave del INE,
         no se acepta -- nunca se inventa una categoría no auditable."""

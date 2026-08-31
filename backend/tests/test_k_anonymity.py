@@ -3,6 +3,7 @@ import pytest
 from app.nlp.demographic_extraction import DemographicFindings
 from app.data.ine_reference import (
     EDUCATION_LEVEL_DISTRIBUTION,
+    RAMA_ESTUDIOS_DISTRIBUTION,
     HOUSEHOLD_TYPE_DISTRIBUTION,
     LANGUAGE_BY_CCAA,
     MARITAL_STATUS_BY_SEX,
@@ -15,6 +16,8 @@ from app.data.ine_reference import (
     SPORT_PRACTICE_BY_EDUCATION_LEVEL,
     SPORT_PRACTICE_BY_SEX,
     SPORT_PRACTICE_DISTRIBUTION,
+    STUDIES_DISTRIBUTION,
+    STUDIES_TO_RAMA,
     TOTAL_POPULATION_ES,
     ZODIAC_DISTRIBUTION,
 )
@@ -773,6 +776,68 @@ class TestNivelEstudiosStep:
 
     def test_distribution_sums_to_one(self):
         assert sum(EDUCATION_LEVEL_DISTRIBUTION.values()) == pytest.approx(1.0)
+
+
+class TestRamaEstudiosStep:
+    def test_produces_a_step_when_detected_independently_of_estudios(self):
+        """rama_estudios sin estudios (carrera fuera de las 14 de
+        STUDIES_DISTRIBUTION, ver TestFieldOfStudy) SÍ debe generar su
+        propio paso de estrechamiento."""
+        findings = DemographicFindings(rama_estudios="ciencias_sociales_juridicas")
+        steps = estimate_population_narrowing(findings)
+
+        assert len(steps) == 1
+        assert steps[0].category == "rama_estudios"
+        assert steps[0].attribute_label == "Rama de estudios: Ciencias Sociales y Jurídicas"
+        assert steps[0].remaining_population == round(
+            TOTAL_POPULATION_ES * RAMA_ESTUDIOS_DISTRIBUTION["ciencias_sociales_juridicas"]
+        )
+        assert steps[0].note_code == "rama_estudios_aproximacion_matriculacion"
+
+    def test_all_five_branches_produce_a_step(self):
+        for value in RAMA_ESTUDIOS_DISTRIBUTION:
+            steps = estimate_population_narrowing(DemographicFindings(rama_estudios=value))
+            assert len(steps) == 1
+            assert steps[0].remaining_population is not None
+
+    def test_skips_its_own_step_when_estudios_is_already_known(self):
+        """EL GUARD CLAVE de este atributo (ver docstring de
+        _step_rama_estudios): si `estudios` ya está informado (una
+        carrera concreta), NO debe generar un paso separado de
+        rama_estudios, aunque el campo `rama_estudios` sí esté relleno
+        (inferido automáticamente) -- la proporción de la rama ya está
+        contenida en la de la carrera concreta, y aplicar ambas contaría
+        el mismo hecho dos veces."""
+        findings = DemographicFindings(estudios="derecho", rama_estudios="ciencias_sociales_juridicas")
+        steps = estimate_population_narrowing(findings)
+
+        categories = [s.category for s in steps]
+        assert "estudios" in categories
+        assert "rama_estudios" not in categories
+        assert len(steps) == 1  # SOLO el de estudios, no dos
+
+    def test_does_not_double_narrow_the_final_remaining_population(self):
+        """Regresión numérica directa del guard de arriba: el
+        remaining_population final con AMBOS campos rellenos debe ser
+        IDÉNTICO al de solo `estudios` -- si rama_estudios contribuyera
+        también, el número sería más pequeño (doble narrowing)."""
+        only_estudios = estimate_population_narrowing(DemographicFindings(estudios="derecho"))
+        both = estimate_population_narrowing(
+            DemographicFindings(estudios="derecho", rama_estudios="ciencias_sociales_juridicas")
+        )
+        assert final_remaining_population(only_estudios) == final_remaining_population(both)
+
+    def test_none_produces_no_step(self):
+        assert estimate_population_narrowing(DemographicFindings(rama_estudios=None)) == []
+
+    def test_distribution_sums_to_one(self):
+        assert sum(RAMA_ESTUDIOS_DISTRIBUTION.values()) == pytest.approx(1.0)
+
+    def test_studies_to_rama_covers_exactly_the_14_careers(self):
+        """STUDIES_TO_RAMA debe cubrir EXACTAMENTE las mismas 14 claves
+        que STUDIES_DISTRIBUTION -- si se añade una carrera nueva a una
+        tabla sin la otra, este test debe detectarlo."""
+        assert set(STUDIES_TO_RAMA.keys()) == set(STUDIES_DISTRIBUTION.keys())
 
 
 class TestPracticaDeportivaStep:
