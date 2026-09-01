@@ -44,8 +44,15 @@ When('I select the {string} card', async function (cardName) {
   if (!page) throw new Error('Page not initialized')
   const index = CARD_ORDER.indexOf(cardName)
   if (index === -1) throw new Error(`Unknown platform card: "${cardName}"`)
-  const dots = await page.$$('.carousel-dot')
-  await dots[index].click()
+  // La landing muestra un spinner mientras comprueba el auth de
+  // reddit/instagram (ver `checking` en Landing.tsx) -- el carrusel, y por
+  // tanto los .carousel-dot, no existen hasta que eso resuelve. locator()
+  // con .nth() espera automáticamente a que aparezca, a diferencia de un
+  // page.$$() inmediato (que puede devolver un array vacío/incompleto si
+  // se ejecuta antes de ese punto).
+  const dot = page.locator('.carousel-dot').nth(index)
+  await dot.waitFor({ state: 'visible', timeout: 5000 })
+  await dot.click()
 })
 
 Then('I should see the X card marked as {string}', async function (badgeText) {
