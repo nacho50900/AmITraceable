@@ -62,6 +62,7 @@ celdas y al reanudar se salta lo ya hecho (lee _completed_cells.txt).
 import argparse
 import io
 import os
+import random
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -161,11 +162,23 @@ def _process_cell(
     accepted_hashes: list[imagehash.ImageHash] = []
     embeddings: list[np.ndarray] = []
     meta_rows: list[dict] = []
-    n_seen = 0
-    per_page = min(250, cap)  # 250 es el máximo por página que admite Flickr
-    page = 1
 
-    while len(meta_rows) < cap and page <= max_pages:
+    # Mismo fix que build_commons_index.py (ver su docstring/comentarios
+    # para el detalle completo, encontrado con datos reales sobre Madrid):
+    # per_page es FIJO (el máximo de Flickr), no depende de --cap-per-cell,
+    # y se recopila un pool de candidatos de varias páginas ANTES de
+    # barajar y solo entonces empezar a descargar hasta llenar el cap.
+    # Flickr devuelve resultados por relevancia/fecha por defecto, que
+    # tiende igual que geosearch de Commons a agrupar en torno a los
+    # puntos más fotografiados -- sin barajar, el cap se llenaría con el
+    # mismo punto turístico en vez de una muestra representativa de la
+    # celda.
+    per_page = 250
+    n_seen = 0
+    page = 1
+    candidates_pool: list[dict] = []
+
+    while page <= max_pages:
         try:
             photos = _search_cell(client, api_key, cell, per_page, page)
         except Exception as e:
@@ -180,12 +193,25 @@ def _process_cell(
         # El filtro de accuracy es gratis (ya viene en la respuesta de
         # búsqueda) -- se aplica ANTES de gastar ancho de banda descargando
         # nada.
-        candidates = [p for p in batch if int(p.get("accuracy", 0)) >= min_accuracy]
+        candidates_pool.extend(p for p in batch if int(p.get("accuracy", 0)) >= min_accuracy)
+
+        if len(batch) < per_page:
+            break  # ya no hay más páginas
+        page += 1
+        time.sleep(0.2)  # cortesía con el rate limit de Flickr entre páginas
+
+    random.shuffle(candidates_pool)
+
+    _DOWNLOAD_BATCH = 8
+    i = 0
+    while len(meta_rows) < cap and i < len(candidates_pool):
+        batch = candidates_pool[i : i + _DOWNLOAD_BATCH]
+        i += _DOWNLOAD_BATCH
 
         with ThreadPoolExecutor(max_workers=8) as pool:
-            downloaded = list(pool.map(lambda p: _download_photo_bytes(client, p), candidates))
+            downloaded = list(pool.map(lambda p: _download_photo_bytes(client, p), batch))
 
-        for photo, image_bytes in zip(candidates, downloaded):
+        for photo, image_bytes in zip(batch, downloaded):
             if len(meta_rows) >= cap:
                 break
             if image_bytes is None:
@@ -221,11 +247,6 @@ def _process_cell(
                 }
             )
             accepted_hashes.append(phash)
-
-        if len(batch) < per_page:
-            break  # ya no hay más páginas
-        page += 1
-        time.sleep(0.2)  # cortesía con el rate limit de Flickr entre páginas
 
     return embeddings, meta_rows, n_seen
 

@@ -44,6 +44,7 @@ Resumible con Ctrl+C igual que build_flickr_index.py.
 """
 import argparse
 import io
+import random
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -189,12 +190,28 @@ def _process_cell(
     accepted_hashes: list[imagehash.ImageHash] = []
     embeddings: list[np.ndarray] = []
     meta_rows: list[dict] = []
+
+    # FASE 1: recopilar candidatos (solo metadatos vía imageinfo, sin
+    # descargar ninguna imagen todavía) de hasta max_pages páginas.
+    #
+    # IMPORTANTE: per_page es un valor FIJO (el máximo que admite gslimit),
+    # NO depende de --cap-per-cell. La primera versión de este script usaba
+    # per_page = min(500, cap*2) -- con un cap pequeño (p.ej. 10, como en
+    # un test rápido) eso limitaba la propia BÚSQUEDA a los 20 resultados
+    # más cercanos al centro de la celda, así que el cap se llenaba
+    # siempre con el mismo punto hiper-local (un monumento, una plaza)
+    # antes de que la búsqueda llegara a cualquier otro rincón de la
+    # celda -- visto en un test real sobre Madrid: 10/10 fotos en un radio
+    # de ~250m, dos de ellas con coordenadas idénticas. Desacoplar
+    # per_page de cap evita que el TAMAÑO del cap decida, de rebote, cómo
+    # de amplia es la búsqueda.
+    per_page = 500
     n_seen = 0
-    per_page = min(500, cap * 2)  # 500 es el máximo admitido por gslimit sin bot flag
     gscontinue = None
     page = 0
+    candidates_pool: list[tuple[dict, dict]] = []
 
-    while len(meta_rows) < cap and page < max_pages:
+    while page < max_pages:
         page += 1
         try:
             results, gscontinue = _geosearch_cell(client, cell, per_page, gscontinue)
@@ -212,7 +229,6 @@ def _process_cell(
         for i in range(0, len(titles), 50):
             infos.update(_fetch_imageinfo(client, titles[i:i + 50]))
 
-        candidates = []
         for r in results:
             info = infos.get(r["title"])
             if not info or not info["url"]:
@@ -221,12 +237,29 @@ def _process_cell(
                 continue
             if info["width"] < _MIN_DIMENSION_PX or info["height"] < _MIN_DIMENSION_PX:
                 continue
-            candidates.append((r, info))
+            candidates_pool.append((r, info))
+
+        if gscontinue is None:
+            break
+        time.sleep(0.2)  # cortesía con el API, aunque no publique un límite estricto
+
+    # FASE 2: barajar ANTES de descargar nada -- así el cap se llena con
+    # una muestra aleatoria de toda la celda, no con los resultados más
+    # cercanos al centro (que es como los devuelve geosearch por defecto).
+    random.shuffle(candidates_pool)
+
+    # FASE 3: descargar/dedup/blur/embed en lotes, parando en cuanto se
+    # llena el cap -- no se descarga todo el pool si el cap se llena antes.
+    _DOWNLOAD_BATCH = 8
+    i = 0
+    while len(meta_rows) < cap and i < len(candidates_pool):
+        batch = candidates_pool[i : i + _DOWNLOAD_BATCH]
+        i += _DOWNLOAD_BATCH
 
         with ThreadPoolExecutor(max_workers=8) as pool:
-            downloaded = list(pool.map(lambda c: _download_bytes(client, c[1]["url"]), candidates))
+            downloaded = list(pool.map(lambda c: _download_bytes(client, c[1]["url"]), batch))
 
-        for (r, info), image_bytes in zip(candidates, downloaded):
+        for (r, info), image_bytes in zip(batch, downloaded):
             if len(meta_rows) >= cap:
                 break
             if image_bytes is None:
@@ -263,10 +296,6 @@ def _process_cell(
                 }
             )
             accepted_hashes.append(phash)
-
-        if gscontinue is None:
-            break
-        time.sleep(0.2)  # cortesía con el API, aunque no publique un límite estricto
 
     return embeddings, meta_rows, n_seen
 
