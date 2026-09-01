@@ -2362,3 +2362,87 @@ IA + paso propio) es más superficie de mantenimiento, aunque menor que
 `nivel_estudios` al reutilizar `_STUDY_VERB_RE` en vez de un regex de
 detección nuevo.
 
+=== ADR-41: Detección heurística de collages, para omitir DINOv2 y Moondream2 en fotos que combinan varias sub-fotos
+
+*Contexto*: tanto la geolocalización por similitud (DINOv2 + FAISS,
+`app/vision/geolocation.py`) como el análisis de contenido visual
+(Moondream2, `app/vision/scene_analysis.py`) asumen que cada foto
+analizada muestra UNA escena coherente. Un collage (varias sub-fotos
+combinadas en una sola imagen, típicamente con apps como Instagram
+Layout, PicCollage o Instasize) rompe ese supuesto en los dos módulos,
+por motivos distintos:
+
+  - **DINOv2/FAISS**: el índice se construyó con imágenes de calle de
+    UN solo lugar cada una (OSV-5M). El embedding de un collage de
+    varias sub-fotos de sitios distintos no se parece de forma
+    coherente a ningún vecino del índice -- el resultado más probable
+    no es "sin match" (que sería lo honesto), sino un match de baja
+    confianza pero sintácticamente válido: un falso positivo
+    silencioso, peor que no analizar la foto en absoluto.
+  - **Moondream2**: el prompt (ver docstring de cabecera de
+    `scene_analysis.py`) ya identifica como ambigüedad real el caso de
+    varias personas de protagonismo similar en una misma foto -- un
+    collage con sub-fotos de personas DISTINTAS es exactamente ese
+    problema, pero peor: ni siquiera son necesariamente la misma
+    escena ni el mismo momento.
+
+Además, con la GPU de 4GB VRAM de este proyecto (ver ADR-28/29), cada
+inferencia de Moondream2/DINOv2 sobre una foto que de entrada no va a
+dar una señal fiable es cómputo de GPU que no vuelve a recuperarse.
+
+*Decisión*: heurístico barato en CPU (`app/vision/collage_detection.py`,
+función `detect_collage`), NO otro modelo de ML -- coherente con la
+preferencia ya establecida de modelos locales/ligeros ajustados a las
+restricciones de hardware del proyecto. Se ejecuta en `_process_photo`
+(`geolocation.py`) justo después de descargar la foto y ANTES de
+despachar nada a ninguno de los dos modelos: una foto detectada como
+collage se omite de los dos por completo, con el mismo patrón de
+degradación best-effort que ya usaba la rama `image is None` (las dos
+pistas de progreso avanzan igual, para que la barra de carga siga
+llegando al 100%, pero sin ningún resultado que aportar para esa foto).
+
+Qué detecta: bandas de color casi uniforme (blanco o negro, los colores
+de margen que usan las apps de collage habituales) que dividen la
+imagen en una cuadrícula, en el INTERIOR de la imagen -- una franja
+pegada al borde EXTERIOR se descarta a propósito (letterboxing/padding
+normal, no dice nada sobre si hay varias sub-fotos combinadas).
+
+*Alternativa considerada y descartada*: leer el tag EXIF `Software`
+(algunas apps de collage lo dejan escrito, p. ej. "Instagram Layout").
+Se descarta porque Instagram/Reddit re-codifican las imágenes al
+servirlas desde su CDN y normalmente eliminan los metadatos EXIF no
+esenciales en el proceso -- para las fotos que este proyecto analiza
+(descargadas de esas CDN, no del carrete original del usuario), ese tag
+casi nunca sobrevive. Habría sido código muerto la mayoría de las
+veces, sin aportar nada que el heurístico de píxeles no cubra ya mejor.
+
+*Sesgo deliberado hacia falsos negativos*: los umbrales (franja fina,
+posición interior, color puro blanco/negro) están calibrados para
+evitar marcar como collage una foto normal que tiene una franja ancha
+de color uniforme por motivos legítimos (cielo despejado, pared lisa,
+horizonte del mar) -- ese tipo de foto ya se trata aparte por un
+mecanismo existente y distinto (`representative=False` en
+`geolocation.py`, ver `_MAX_NEIGHBOR_SPREAD_KM`). Perder una foto que
+SÍ era collage (se analiza igual, sin detectarla) es un coste menor que
+descartar sin motivo una foto normal que sí tenía señal real que
+aportar -- mismo criterio de "más vale no afirmar nada que afirmar algo
+sin base" que ya aplica el resto del pipeline (ver p. ej. la propia
+`representative`, o el guard de `rama_estudios` en ADR-40). Limitación
+conocida y documentada: collages sin margen visible entre sub-fotos, o
+con margen de un color distinto de blanco/negro, no se detectan -- se
+comportan como una foto normal.
+
+*Consecuencias*: (+) evita falsos positivos de geolocalización sobre
+fotos que estructuralmente no pueden dar una ubicación fiable; (+)
+evita que Moondream2 mezcle personas/contextos de sub-fotos distintas
+como si fueran la misma escena; (+) ahorra cómputo de GPU en fotos que
+de entrada no iban a aportar señal útil; (+) heurístico puro en
+CPU/numpy, sin dependencias nuevas (`numpy`/`Pillow` ya son
+dependencias base del proyecto, no del extra opcional de visión) y sin
+coste de carga de modelo; (-) no detecta todos los collages posibles
+(sin margen, o con margen de otro color) -- falso negativo documentado
+a propósito; (-) una foto real con una franja de margen blanco/negro
+fina y bien posicionada por casualidad (poco frecuente, pero no
+imposible) se descartaría sin necesidad -- falso positivo aceptado
+como coste residual del diseño.
+

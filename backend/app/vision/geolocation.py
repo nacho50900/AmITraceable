@@ -45,6 +45,7 @@ from app.models.schemas import InferredAttribute
 from app.log.performance_log import PhotoAnalysisTiming, log_photo_analysis_run
 from app.progress import emit_progress
 from app.vision import scene_analysis
+from app.vision.collage_detection import detect_collage
 from app.vision.scene_analysis import VisualDescriptionCodes, analyze_image_content
 
 import numpy as np
@@ -728,8 +729,9 @@ async def _process_photo(
     progress_state,
     total,
 ):
-    """Descarga UNA foto y, si se pudo, la analiza con los dos modelos.
-    Devuelve (image_or_None, estimate_or_None, scene_inferences,
+    """Descarga UNA foto y, si se pudo Y no es un probable collage (ver
+    app/vision/collage_detection.py y ADR-41), la analiza con los dos
+    modelos. Devuelve (image_or_None, estimate_or_None, scene_inferences,
     indicio_pareja, description_or_None, description_general_or_None,
     description_codes_or_None -- ver VisualDescriptionCodes en
     app/vision/scene_analysis.py, ADR-30).
@@ -797,6 +799,37 @@ async def _process_photo(
             track="fotos",
         )
         return None, None, [], False, None, None, None
+
+    if detect_collage(image):
+        # Foto descargada con éxito, pero con toda la pinta de ser un
+        # collage de varias sub-fotos (ver app/vision/collage_detection.py
+        # y ADR-41) -- ni DINOv2 ni Moondream2 dan una señal fiable sobre
+        # esto, así que se omiten los DOS modelos para esta foto en
+        # concreto, sin llegar siquiera a cargarlos. Mismo patrón de
+        # degradación best-effort que la rama `image is None` de arriba:
+        # las dos pistas de progreso avanzan igual (para que la barra siga
+        # llegando al 100%), pero sin ningún resultado que aportar.
+        logger.info(
+            "Foto omitida del análisis visual: detectada como probable collage "
+            "(varias sub-fotos combinadas), ver ADR-41."
+        )
+        progress_state["dinov2"] += 1
+        progress_state["scene"] += 1
+        await emit_progress(
+            progress_callback,
+            "Geolocalizando fotos...",
+            photos_analyzed=progress_state["dinov2"],
+            total_photos=total,
+            track="geolocalizacion",
+        )
+        await emit_progress(
+            progress_callback,
+            "Analizando fotos...",
+            photos_analyzed=progress_state["scene"],
+            total_photos=total,
+            track="fotos",
+        )
+        return image, None, [], False, None, None, None
 
     async def _run_dinov2():
         async with dinov2_semaphore:

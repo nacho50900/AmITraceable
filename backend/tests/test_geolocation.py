@@ -1296,6 +1296,94 @@ class TestEstimateLocationsForPosts:
         assert outcome.index_available is False
         assert outcome.results == []
 
+    @pytest.mark.asyncio
+    async def test_collage_detected_skips_both_models_but_progress_still_advances(self, monkeypatch, respx_mock):
+        """Ver ADR-41 / app/vision/collage_detection.py: una foto
+        detectada como probable collage no debe llegar a llamar a NINGUNO
+        de los dos modelos (ni estimate_location_from_image, ni
+        analyze_image_content) -- se comprueba forzando que ambos
+        lancen si se llaman, no solo comprobando que el resultado final
+        está vacío (eso también pasaría si el modelo real simplemente no
+        encontrara nada, un caso distinto). El progreso, en cambio, debe
+        seguir avanzando en las dos pistas igual que con cualquier otra
+        foto, para que la barra de carga llegue al 100%."""
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        monkeypatch.setattr(geolocation.settings, "enable_scene_analysis", True)
+        monkeypatch.setattr(geolocation, "detect_collage", lambda image: True)
+
+        def _fail_if_called(*args, **kwargs):
+            raise AssertionError("no debería llamarse: la foto se detectó como collage")
+
+        monkeypatch.setattr(geolocation, "estimate_location_from_image", _fail_if_called)
+        monkeypatch.setattr(geolocation, "analyze_image_content", _fail_if_called)
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/collage.jpg"], permalink="https://ig/1")]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/collage.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        progress_events = []
+
+        async def on_progress(stage, counts):
+            progress_events.append((stage, counts))
+
+        outcome = await geolocation.estimate_locations_for_posts(posts, progress_callback=on_progress)
+
+        assert outcome.results == []
+        assert outcome.visual_inferences == []
+        assert outcome.visual_descriptions == {}
+        assert outcome.general_descriptions == {}
+        assert outcome.partner_signal_permalinks == set()
+
+        geo_events = [c for stage, c in progress_events if c["track"] == "geolocalizacion"]
+        fotos_events = [c for stage, c in progress_events if c["track"] == "fotos"]
+        assert [c["photos_analyzed"] for c in geo_events] == [1]
+        assert [c["photos_analyzed"] for c in fotos_events] == [1]
+
+    @pytest.mark.asyncio
+    async def test_photo_not_detected_as_collage_is_analyzed_normally(self, monkeypatch, respx_mock):
+        """Complemento del test anterior: con detect_collage devolviendo
+        False (caso normal, mockeado aquí para no depender del heurístico
+        real sobre el jpeg mínimo de prueba), la foto SÍ llega a los dos
+        modelos -- confirma que la integración no rompe el camino
+        habitual cuando no hay collage."""
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        monkeypatch.setattr(geolocation, "detect_collage", lambda image: False)
+        monkeypatch.setattr(
+            geolocation,
+            "estimate_location_from_image",
+            lambda image, k=15: geolocation.ImageLocationEstimate(
+                province="Madrid", confidence=0.7, k_neighbors=15, mean_similarity=0.6
+            ),
+        )
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/normal.jpg"], permalink="https://ig/1")]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/normal.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        outcome = await geolocation.estimate_locations_for_posts(posts)
+
+        assert len(outcome.results) == 1
+        assert outcome.results[0][1].province == "Madrid"
+
+
 class TestSelectDinov2Device:
     """Tests de _select_dinov2_device() -- ahora solo decide el
     dispositivo LOCAL ("cuda"/"cpu"). La detección de iGPU vía worker
