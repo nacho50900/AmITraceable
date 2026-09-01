@@ -1371,25 +1371,48 @@ LANGUAGE_BY_CCAA = {
 }
 
 
-# Referencias contextuales para rasgos físicos (añadidos manualmente).
+# Referencias contextuales para rasgos físicos (añadidos manualmente, ver
+# ADR-34). A diferencia del resto de tablas de este fichero, esto NO sale
+# del INE (el INE no recoge pigmentación) -- son las proporciones
+# AUTODECLARADAS por cuestionario (no las predichas por HIrisPlex-S, que
+# tienen mucha menor precisión, especialmente en piel, ver el propio
+# artículo) en un estudio de fenotipado forense sobre población española:
+#
+#   Navarro-López, B.; Baeta, M.; Suárez-Ulloa, V.; Martos-Fernández, R.;
+#   Moreno-López, O.; Martínez-Jarreta, B.; Jiménez, S.; Olalde, I.;
+#   de Pancorbo, M.M. "Exploring Eye, Hair, and Skin Pigmentation in a
+#   Spanish Population: Insights from Hirisplex-S Predictions".
+#   Genes 2024, 15(10), 1330. DOI: 10.3390/genes15101330
+#
+# Muestra de 412 individuos de la población española (universidades,
+# centros de FP e institutos de País Vasco, Zaragoza, Alicante y Granada,
+# con minoría de otras regiones). Categorías simplificadas a las que el
+# propio estudio respalda con datos (se han excluido "muy claro" y
+# "negro-oscuro" en piel por tener 0% de representación en la muestra):
+#
+# Ojos (n=378, sección 3.2.1, HIrisPlex-S: azul/intermedio/marrón):
+#   marron 68.78%, intermedio 22.75%, azul 8.47%
 EYE_COLOR_DISTRIBUTION = {
-    'marron': 0.55,
-    'verde': 0.15,
-    'azul': 0.15,
-    'miel': 0.10,
-    'negro': 0.05,
+    'marron': 0.6878,
+    'intermedio': 0.2275,
+    'azul': 0.0847,
 }
 
+# Pelo (n=380, sección 3.2.2, HIrisPlex-S: rubio/pelirrojo/castaño/negro):
+#   castano 64.47%, negro 25.53%, rubio 9.74%, pelirrojo 0.26%
 HAIR_COLOR_DISTRIBUTION = {
-    'moreno': 0.45,
-    'castano': 0.40,
-    'rubio': 0.10,
-    'pelirrojo': 0.02,
-    'canoso': 0.03,
+    'castano': 0.6447,
+    'negro': 0.2553,
+    'rubio': 0.0974,
+    'pelirrojo': 0.0026,
 }
 
+# Piel (n=408, sección 3.2.3, HIrisPlex-S de 5 categorías colapsado a 3:
+#   claro=pale, medio=intermediate, oscuro=dark; muy_pale y dark-black sin
+#   representación en la muestra, 0%):
+#   claro 53.43%, medio 39.71%, oscuro 6.86%
 SKIN_TONE_DISTRIBUTION = {
-    'claro': 0.60,
-    'medio': 0.35,
-    'oscuro': 0.05,
+    'claro': 0.5343,
+    'medio': 0.3971,
+    'oscuro': 0.0686,
 }

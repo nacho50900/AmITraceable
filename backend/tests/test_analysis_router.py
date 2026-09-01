@@ -470,7 +470,7 @@ class TestRecalculateEndpoint:
             "/api/analyze/recalculate",
             json={
                 "report": report.model_dump(mode="json"),
-                "manual_attributes": [{"category": "color_ojos", "value": "verde"}],
+                "manual_attributes": [{"category": "color_ojos", "value": "azul"}],
             },
         )
 
@@ -479,7 +479,7 @@ class TestRecalculateEndpoint:
 
         assert len(body["inferred_attributes"]) == 1
         assert body["inferred_attributes"][0]["category"] == "color_ojos"
-        assert body["inferred_attributes"][0]["value"] == "verde"
+        assert body["inferred_attributes"][0]["value"] == "azul"
         assert body["inferred_attributes"][0]["confidence"] == 1.0
 
         # Un unico paso nuevo de estrechamiento, marcado como manual.
@@ -487,7 +487,9 @@ class TestRecalculateEndpoint:
         step = body["population_narrowing"][0]
         assert step["source"] == "manual"
         assert step["category"] == "color_ojos"
-        assert step["remaining_population"] == pytest.approx(49_128_297 * 0.15)
+        # 8.47% (ojos azules) -- ver cita de Navarro-Lopez et al. en
+        # ine_reference.py::EYE_COLOR_DISTRIBUTION.
+        assert step["remaining_population"] == pytest.approx(49_128_297 * 0.0847)
 
         assert body["remaining_population_all_traits"] == step["remaining_population"]
 
@@ -499,7 +501,7 @@ class TestRecalculateEndpoint:
             json={
                 "report": report.model_dump(mode="json"),
                 "manual_attributes": [
-                    {"category": "color_ojos", "value": "verde"},
+                    {"category": "color_ojos", "value": "azul"},
                     {"category": "color_pelo", "value": "rubio"},
                 ],
             },
@@ -511,9 +513,38 @@ class TestRecalculateEndpoint:
         assert len(body["inferred_attributes"]) == 2
         assert len(body["population_narrowing"]) == 2
 
-        expected = 49_128_297 * 0.15 * 0.10
+        # 8.47% (ojos azules) x 9.74% (pelo rubio) -- ver cita de
+        # Navarro-Lopez et al. en ine_reference.py.
+        expected = 49_128_297 * 0.0847 * 0.0974
         assert body["population_narrowing"][-1]["remaining_population"] == pytest.approx(expected)
         assert body["remaining_population_all_traits"] == pytest.approx(expected)
+
+    def test_color_piel_narrows_population_using_real_cited_data(self):
+        """`color_piel` no estaba cubierto por ningun test -- solo ojos y
+        pelo. Cubre el tercer atajo de `recalculate_report()` y confirma
+        que usa SKIN_TONE_DISTRIBUTION (datos citados de Navarro-Lopez et
+        al., Genes 2024, no los del INE)."""
+        report = _make_report()
+
+        resp = client.post(
+            "/api/analyze/recalculate",
+            json={
+                "report": report.model_dump(mode="json"),
+                "manual_attributes": [{"category": "color_piel", "value": "oscuro"}],
+            },
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+
+        assert len(body["population_narrowing"]) == 1
+        step = body["population_narrowing"][0]
+        assert step["source"] == "manual"
+        assert step["category"] == "color_piel"
+        # 6.86% (piel oscura) -- ver cita de Navarro-Lopez et al. en
+        # ine_reference.py::SKIN_TONE_DISTRIBUTION.
+        assert step["remaining_population"] == pytest.approx(49_128_297 * 0.0686)
+        assert body["remaining_population_all_traits"] == step["remaining_population"]
 
     def test_unknown_trait_value_marks_step_as_not_estimable(self):
         report = _make_report()
