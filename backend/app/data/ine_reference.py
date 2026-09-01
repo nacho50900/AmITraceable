@@ -53,6 +53,10 @@ _LAST_VERIFIED: dict[str, date | None] = {
     "AGE_DISTRIBUTION_1Y": date(2022, 1, 1),
     "AGE_DISTRIBUTION_5Y": date(2022, 1, 1),
     "PROVINCE_POPULATION": date(2026, 8, 11),
+    # Sistema de matriculación provincial: histórico, cerrado desde el 18
+    # de septiembre de 2000 -- no hay "fecha de verificación" que pueda
+    # caducar, los códigos no van a cambiar retroactivamente.
+    "PLATE_PROVINCE_CODE_TO_PROVINCE": None,
     # Sin tabla INE concreta citada al construir esta -- es un orden de
     # magnitud estimado a mano, no una cifra derivada de una fuente con
     # fecha de publicación. No tiene sentido marcarla "caducada" frente a
@@ -504,6 +508,79 @@ PROVINCE_POPULATION = {
     "soria": 90_183,
     "ceuta": 83_567,
     "melilla": 87_067,
+}
+
+# Código de provincia del sistema de matriculación antiguo (1971-2000):
+# 1 o 2 letras al inicio de la matrícula que identificaban la provincia de
+# matriculación, ANTES de las 4 cifras y el sufijo de 1-2 letras
+# (formato "M-1234-AB"). Desapareció el 18 de septiembre de 2000 al
+# adoptarse el sistema nacional actual (4 cifras + 3 consonantes, sin
+# código geográfico -- ver `_SPANISH_PLATE_OLD_FORMAT_RE`/
+# `_SPANISH_PLATE_NEW_FORMAT_RE` en scene_analysis.py). Claves EN
+# MAYÚSCULAS (así aparecen en la matrícula real, a diferencia del resto de
+# tablas de este fichero); valores con las mismas claves que
+# PROVINCE_POPULATION de arriba, para poder encadenarlas directamente.
+#
+# Dos provincias cambiaron de código poco antes de abandonarse el sistema
+# provincial (fuente: matriculasdelmundo.com/espana/codigos-por-provincia.php,
+# knowledge de dominio público sobre matriculación española) -- se aceptan
+# AMBOS códigos, antiguo y nuevo, para no perder matrículas más viejas:
+# Girona pasó de GE a GI, y Ourense de OR a OU.
+PLATE_PROVINCE_CODE_TO_PROVINCE = {
+    "VI": "alava",
+    "AB": "albacete",
+    "A": "alicante",
+    "AL": "almeria",
+    "O": "asturias",
+    "AV": "avila",
+    "BA": "badajoz",
+    "B": "barcelona",
+    "BU": "burgos",
+    "CA": "cadiz",
+    "S": "cantabria",
+    "CC": "caceres",
+    "CS": "castellon",
+    "CE": "ceuta",
+    "CR": "ciudad real",
+    "CO": "cordoba",
+    "C": "a coruna",
+    "CU": "cuenca",
+    "GC": "las palmas",
+    "GE": "gerona",  # código antiguo, sustituido por GI
+    "GI": "gerona",
+    "GR": "granada",
+    "GU": "guadalajara",
+    "SS": "guipuzcoa",
+    "H": "huelva",
+    "HU": "huesca",
+    "IB": "baleares",
+    "J": "jaen",
+    "LE": "leon",
+    "L": "lerida",
+    "LO": _CCAA_LA_RIOJA,
+    "LU": "lugo",
+    "M": "madrid",
+    "MA": "malaga",
+    "ML": "melilla",
+    "MU": "murcia",
+    "NA": "navarra",
+    "OR": "orense",  # código antiguo, sustituido por OU
+    "OU": "orense",
+    "P": "palencia",
+    "PO": "pontevedra",
+    "SA": "salamanca",
+    "SG": "segovia",
+    "SE": "sevilla",
+    "SO": "soria",
+    "T": "tarragona",
+    "TF": "santa cruz de tenerife",
+    "TE": "teruel",
+    "TO": "toledo",
+    "V": "valencia",
+    "VA": "valladolid",
+    "BI": "vizcaya",
+    "ZA": "zamora",
+    "Z": "zaragoza",
 }
 
 # Población por municipio (aprox.). Solo capitales/ciudades grandes de

@@ -209,10 +209,11 @@ class TestGenerateReportPlatformBranching:
                 ],
                 visual_description_codes={
                     "https://ig/carousel?img_index=1": InternalCodes(
-                        personas="una", aficion="playa", texto_visible=None, indicio_pareja=False
+                        personas="una", aficion="playa", texto_visible=None, matricula=None, indicio_pareja=False
                     ),
                     "https://ig/carousel?img_index=2": InternalCodes(
-                        personas="varias", aficion=None, texto_visible="Restaurante Los Olivos", indicio_pareja=True
+                        personas="varias", aficion=None, texto_visible="Restaurante Los Olivos",
+                        matricula=None, indicio_pareja=True
                     ),
                 },
             )

@@ -82,6 +82,7 @@ from dataclasses import dataclass
 
 from PIL import Image
 
+from app.data.ine_reference import PLATE_PROVINCE_CODE_TO_PROVINCE
 from app.models.schemas import InferredAttribute
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,14 @@ class VisualDescriptionCodes:
     un cartel, una matrícula -- traducirlo falsearía la evidencia; el
     frontend lo muestra tal cual venga, en cualquier idioma de UI).
 
+    `matricula` (añadido después, separado de `texto_visible` -- ver
+    comentario junto al campo MATRICULA en `_STRUCTURED_QUERY`) TAMPOCO
+    se traduce nunca por el mismo motivo, y además solo llega hasta aquí
+    si ya pasó la validación de formato de `_parse_matricula` (formato
+    español válido, antiguo o actual) -- si Moondream2 devuelve algo que
+    no tiene forma de matrícula real, se descarta como probable error de
+    lectura en vez de mostrarse.
+
     `indicio_pareja` es un booleano (vocabulario cerrado, como `personas`)
     -- se repite aquí aunque `analyze_image_content()` ya lo devuelve por
     separado como su propio valor de retorno (2º de la tupla, usado para
@@ -119,6 +128,7 @@ class VisualDescriptionCodes:
     personas: str | None
     aficion: str | None
     texto_visible: str | None
+    matricula: str | None
     indicio_pareja: bool
 
 
@@ -203,7 +213,23 @@ _STRUCTURED_QUERY = (
     # texto real de la foto puede incluir nombres propios (una insignia,
     # una camiseta con un nombre bordado) -- de ahí la advertencia
     # explícita más abajo, aparte de la general del final del prompt.
-    "Analiza esta imagen y responde EXACTAMENTE en este formato de cuatro líneas, sin nada más, "
+    #
+    # Campo MATRICULA añadido después, separado de TEXTO_VISIBLE aunque
+    # ambos sean "texto legible en la foto": TEXTO_VISIBLE solo captura EL
+    # texto "más relevante" de la imagen (uno solo, ver su explicación más
+    # abajo), así que una matrícula que comparta foto con un cartel más
+    # llamativo se perdería por completo si no tuviera su propia pregunta
+    # dedicada. Es, con diferencia, el campo de más riesgo de identificar
+    # de forma unívoca a la persona (o al menos su vehículo) de los cinco,
+    # así que el resultado se valida por formato antes de mostrarse (ver
+    # `_SPANISH_PLATE_OLD_FORMAT_RE`/`_SPANISH_PLATE_NEW_FORMAT_RE` más
+    # abajo) -- un OCR de un VQA pequeño como Moondream2 sobre texto
+    # diminuto y a menudo en ángulo es poco fiable, y una matrícula mal
+    # leída pero con apariencia de matrícula real sería peor que no leer
+    # ninguna. El aviso de "lectura automática, puede contener errores" se
+    # añade explícitamente al mostrarla (ver _parse_inferences), nunca se
+    # presenta como un dato cierto.
+    "Analiza esta imagen y responde EXACTAMENTE en este formato de cinco líneas, sin nada más, "
     "como en este ejemplo (sustituyendo los valores por los reales de ESTA imagen):\n"
     # HISTORIAL DEL SESGO EN PERSONAS (ver test de regresión más abajo en
     # este módulo -- test_scene_analysis.py::TestParsePersonas -- y el
@@ -237,7 +263,8 @@ _STRUCTURED_QUERY = (
     "PERSONAS: dos\n"
     "AFICION: ninguno\n"
     "PAREJA: no\n"
-    "TEXTO_VISIBLE: ninguno\n\n"
+    "TEXTO_VISIBLE: ninguno\n"
+    "MATRICULA: ninguna\n\n"
     "PERSONAS solo puede valer: 'ninguna' (no aparece ninguna persona), 'una' (aparece "
     "exactamente una persona protagonista), o 'varias' (dos o más personas de protagonismo "
     "similar, p. ej. una pareja o un grupo).\n"
@@ -249,14 +276,22 @@ _STRUCTURED_QUERY = (
     "claramente romántico, o cogidas de la mano en un contexto de pareja, o 'no' en cualquier "
     "otro caso.\n"
     "TEXTO_VISIBLE solo puede valer: el texto legible más relevante que aparezca en la imagen "
-    "(cartel, escaparate, pancarta, matrícula, nombre de una calle o un lugar), copiado tal cual, "
-    "o la palabra 'ninguno' si no hay texto legible. TEXTO_VISIBLE NUNCA puede ser el nombre "
-    "propio de una persona (en una camiseta, insignia, etiqueta con nombre, etc.), aunque se lea "
-    "con claridad -- en ese caso responde 'ninguno' para ese texto en concreto.\n\n"
+    "(cartel, escaparate, pancarta, nombre de una calle o un lugar -- NUNCA una matrícula, eso "
+    "va en MATRICULA, no aquí), copiado tal cual, o la palabra 'ninguno' si no hay texto legible. "
+    "TEXTO_VISIBLE NUNCA puede ser el nombre propio de una persona (en una camiseta, insignia, "
+    "etiqueta con nombre, etc.), aunque se lea con claridad -- en ese caso responde 'ninguno' "
+    "para ese texto en concreto.\n"
+    "MATRICULA solo puede valer: el texto de una matrícula de vehículo español visible en la "
+    "imagen, copiado tal cual, letra por letra y número por número, sin espacios ni guiones "
+    "añadidos por ti -- o la palabra 'ninguna' si no hay ninguna matrícula visible o legible. "
+    "Las matrículas españolas actuales tienen 4 números seguidos de 3 letras (p. ej. 1234BCD); "
+    "las antiguas (antes de 2000) tienen 1-2 letras, 4 números y 1-2 letras (p. ej. M1234AB). Si "
+    "hay una matrícula pero no puedes leerla con claridad, responde 'ninguna' -- NUNCA inventes "
+    "o completes caracteres que no puedas distinguir.\n\n"
     "No describas ni identifiques físicamente a ninguna persona que aparezca en la imagen -- "
     "ni su aspecto, ni su sexo, ni su edad, ni su raza o etnia -- más allá de contarlas y de si "
     "hay o no un contexto romántico entre ellas.\n\n"
-    "Responde ahora solo las cuatro líneas, con los valores reales para esta imagen concreta."
+    "Responde ahora solo las cinco líneas, con los valores reales para esta imagen concreta."
 )
 
 # Settings por separado para cada llamada -- cada una necesita un límite
@@ -289,7 +324,7 @@ _STRUCTURED_QUERY = (
 # natural, ya que es texto libre) y 0.1 en la estructurada (ya probado
 # fiable para mantener el formato de opciones fijas).
 _CAPTION_SETTINGS = {"max_tokens": 45, "temperature": 0.2, "variant": None}
-_STRUCTURED_SETTINGS = {"max_tokens": 45, "temperature": 0.1, "variant": None}
+_STRUCTURED_SETTINGS = {"max_tokens": 55, "temperature": 0.1, "variant": None}
 
 # Redimensionado específico para Moondream2, aparte del que ya aplica
 # geolocation.py para DINOv2 (_MAX_QUEUED_IMAGE_DIMENSION=1024, que ese
@@ -336,6 +371,38 @@ _PERSONAS_RE = re.compile(r"PERSONAS:[ \t]*(\S+)", re.IGNORECASE)
 _AFICION_RE = re.compile(r"AFICION:[ \t]*(.+)", re.IGNORECASE)
 _PAREJA_RE = re.compile(r"PAREJA:[ \t]*(\S+)", re.IGNORECASE)
 _TEXTO_VISIBLE_RE = re.compile(r"TEXTO_VISIBLE:[ \t]*(.+)", re.IGNORECASE)
+_MATRICULA_RE = re.compile(r"MATRICULA:[ \t]*(.+)", re.IGNORECASE)
+
+# Validación de FORMATO de matrícula española, aplicada al texto que
+# devuelve Moondream2 antes de mostrarlo -- un VQA pequeño leyendo texto
+# diminuto y a menudo en ángulo puede alucinar caracteres, y "algo con
+# forma de matrícula" pero mal leído es peor que no detectar nada (ver
+# comentario junto a MATRICULA en _STRUCTURED_QUERY). No confirma que la
+# matrícula sea REAL ni que esté bien leída letra por letra, solo que
+# tiene la FORMA correcta -- de ahí que el aviso de "lectura automática,
+# puede contener errores" se mantenga siempre, incluso cuando el formato
+# valida.
+#
+# Formato actual (desde el 18 de septiembre de 2000): 4 dígitos + 3
+# consonantes, excluidas las vocales, la Ñ y la Q (para evitar
+# confusiones). Ver PLATE_PROVINCE_CODE_TO_PROVINCE en ine_reference.py
+# para el formato antiguo (antes de esa fecha), que sí codificaba
+# provincia.
+_SPANISH_PLATE_NEW_FORMAT_RE = re.compile(r"^(\d{4})[ -]?([BCDFGHJKLMNPRSTVWXYZ]{3})$")
+# Formato antiguo (1971-2000): 1-2 letras (código de provincia) + 4
+# dígitos + 1-2 letras (sufijo, sin Ñ/Q -- ver fuentes en el comentario
+# de PLATE_PROVINCE_CODE_TO_PROVINCE). El sufijo se valida de forma
+# permisiva (cualquier letra excepto Ñ/Q, incluidas vocales) en vez de
+# replicar cada exclusión histórica exacta -- las reglas variaron por
+# época (el sufijo de una sola letra excluía además la R; el de dos no
+# usaba vocales salvo la U, pero eso no está confirmado con la misma
+# certeza) y ser demasiado estricto aquí arriesga rechazar una matrícula
+# antigua real más de lo que arriesga aceptar una inventada. Lo que de
+# verdad importa para este caso de uso es el CÓDIGO DE PROVINCIA del
+# principio, no la validación exhaustiva del sufijo.
+_SPANISH_PLATE_OLD_FORMAT_RE = re.compile(
+    r"^([A-Z]{1,2})[ -]?(\d{4})[ -]?([ABCDEFGHIJKLMNOPRSTUVWXYZ]{1,2})$"
+)
 
 
 def get_device() -> str | None:
@@ -958,9 +1025,10 @@ def analyze_image_content(
     aficion_raw = _parse_aficion_raw(structured)
     indicio_pareja = _parse_pareja(structured)
     texto_visible = _parse_texto_visible(structured)
+    matricula = _parse_matricula(structured)
 
     inferencias = _parse_inferences(structured)
-    descripcion_cruda = _build_clean_summary(personas, aficion_raw, indicio_pareja, texto_visible)
+    descripcion_cruda = _build_clean_summary(personas, aficion_raw, indicio_pareja, texto_visible, matricula)
     # Mismo filtro que _build_clean_summary aplica a `personas` para el
     # texto en español (solo "una"/"varias" son señal, no "ninguna") --
     # se repite aquí para que los códigos estructurados y el texto ya
@@ -969,6 +1037,7 @@ def analyze_image_content(
         personas=personas if personas in ("una", "varias") else None,
         aficion=aficion_raw,
         texto_visible=texto_visible,
+        matricula=matricula,
         indicio_pareja=indicio_pareja,
     )
 
@@ -1047,13 +1116,15 @@ def _parse_aficion_raw(answer: str) -> str | None:
 
 def _parse_texto_visible(answer: str) -> str | None:
     """Extrae el valor de la línea TEXTO_VISIBLE (texto legible en la
-    propia foto: carteles, escaparates, matrículas...). None si no se
-    pudo parsear o si el modelo respondió 'ninguno' (no hay texto
-    legible). El prompt (ver _STRUCTURED_QUERY) ya le prohíbe explícitamente
-    devolver el nombre propio de una persona aquí -- este parseo no repite
-    ese filtro (no hay forma fiable de detectar "esto es un nombre propio"
-    solo con regex), se confía en la instrucción del prompt, igual que ya
-    se hace con el resto de restricciones éticas/legales del módulo (ver
+    propia foto: carteles, escaparates, nombres de lugares... NUNCA
+    matrículas desde que existe el campo MATRICULA propio, ver
+    `_parse_matricula`). None si no se pudo parsear o si el modelo
+    respondió 'ninguno' (no hay texto legible). El prompt (ver
+    _STRUCTURED_QUERY) ya le prohíbe explícitamente devolver el nombre
+    propio de una persona aquí -- este parseo no repite ese filtro (no
+    hay forma fiable de detectar "esto es un nombre propio" solo con
+    regex), se confía en la instrucción del prompt, igual que ya se hace
+    con el resto de restricciones éticas/legales del módulo (ver
     docstring de cabecera)."""
     match = _TEXTO_VISIBLE_RE.search(answer)
     if match is None:
@@ -1062,6 +1133,51 @@ def _parse_texto_visible(answer: str) -> str | None:
     if not valor or valor.lower() in ("ninguno", "ninguna", "none", "n/a"):
         return None
     return valor
+
+
+def _parse_matricula(answer: str) -> str | None:
+    """Extrae y VALIDA por formato la línea MATRICULA. None si no se pudo
+    parsear, si el modelo respondió 'ninguna', o si el texto devuelto no
+    tiene forma de matrícula española real (formato antiguo o actual, ver
+    `_SPANISH_PLATE_OLD_FORMAT_RE`/`_SPANISH_PLATE_NEW_FORMAT_RE`) -- en
+    ese último caso se descarta como probable alucinación/error de OCR de
+    un VQA pequeño sobre texto diminuto, en vez de mostrarse igualmente.
+    Para el formato antiguo, además, el código de provincia capturado
+    debe ser uno de los 54 reales de PLATE_PROVINCE_CODE_TO_PROVINCE --
+    "tiene la forma de 1-2 letras" no basta, "XZ-1234-BC" tendría la
+    forma correcta pero "XZ" nunca fue un código de provincia real.
+
+    Este filtro de formato/código sigue sin confirmar que los caracteres
+    estén bien leídos, solo que la FORMA (y, para el antiguo, el código
+    de provincia) es plausible -- de ahí que quien consuma este valor
+    (`_parse_inferences`, `_build_clean_summary`) deba seguir avisando de
+    que es una lectura automática que puede contener errores.
+
+    Normaliza el separador a un guion (formato "XX-0000-XX"/"0000-XXX")
+    para que se muestre de forma consistente sin importar cómo lo haya
+    formateado el modelo (con espacios, sin separador, con guiones...)."""
+    match = _MATRICULA_RE.search(answer)
+    if match is None:
+        return None
+    valor = match.group(1).strip().rstrip(".")
+    if not valor or valor.lower() in ("ninguno", "ninguna", "none", "n/a"):
+        return None
+
+    candidato = valor.upper().replace(" ", "").replace("-", "")
+
+    new_match = _SPANISH_PLATE_NEW_FORMAT_RE.match(candidato)
+    if new_match:
+        digitos, letras = new_match.groups()
+        return f"{digitos}-{letras}"
+
+    old_match = _SPANISH_PLATE_OLD_FORMAT_RE.match(candidato)
+    if old_match:
+        provincia, digitos, sufijo = old_match.groups()
+        if provincia not in PLATE_PROVINCE_CODE_TO_PROVINCE:
+            return None
+        return f"{provincia}-{digitos}-{sufijo}"
+
+    return None
 
 
 def _parse_inferences(answer: str) -> list[InferredAttribute]:
@@ -1105,6 +1221,29 @@ def _parse_inferences(answer: str) -> list[InferredAttribute]:
             )
         )
 
+    # MATRICULA es, de todos los campos de este módulo, el que más
+    # directamente puede identificar a la persona (o al menos su
+    # vehículo) -- confianza más baja todavía que TEXTO_VISIBLE (0.3) por
+    # la misma razón de fondo (Moondream2 no es un OCR dedicado) más el
+    # hecho de que una matrícula mal leída en un solo carácter sigue
+    # aparentando ser una matrícula válida, a diferencia de un cartel mal
+    # leído (que normalmente se nota como texto sin sentido). El aviso de
+    # "lectura automática, puede contener errores" va DENTRO del propio
+    # texto del valor, no solo en un campo de metadatos aparte, para que
+    # sea imposible mostrarlo sin él en ningún punto del pipeline
+    # (frontend, resumen de IA, exportación a JSON...).
+    matricula = _parse_matricula(answer)
+    if matricula is not None:
+        inferences.append(
+            InferredAttribute(
+                category="matricula",
+                value=f"Matrícula de vehículo visible en una foto: {matricula} "
+                      "(lectura automática, puede contener errores -- verifica contra la foto original)",
+                confidence=0.3,
+                evidence=[],
+            )
+        )
+
     return inferences
 
 
@@ -1124,6 +1263,7 @@ def _build_clean_summary(
     aficion_raw: str | None,
     indicio_pareja: bool,
     texto_visible: str | None,
+    matricula: str | None,
 ) -> str | None:
     """Reconstruye el bloque 'qué vio la IA' que se muestra en el
     frontend (vista de detalle de cada foto) a partir de los valores YA
@@ -1163,7 +1303,7 @@ def _build_clean_summary(
     muestra aparte, destacada, justo encima de este bloque.
 
     None si no hay NADA que mostrar (PERSONAS es 'ninguna' o no se pudo
-    parsear, Y las otras tres son negativas) -- caso frecuente ahora que
+    parsear, Y las demás son negativas) -- caso frecuente ahora que
     'ninguna' ya no se muestra por defecto, no solo un caso raro de
     formato inesperado."""
     lines = []
@@ -1175,4 +1315,6 @@ def _build_clean_summary(
         lines.append("Indicio de contexto de pareja: sí")
     if texto_visible:
         lines.append(f"Texto visible: {texto_visible}")
+    if matricula:
+        lines.append(f"Matrícula visible: {matricula} (lectura automática, puede contener errores)")
     return "\n".join(lines) if lines else None

@@ -155,11 +155,15 @@ class VisualDescriptionCodes(BaseModel):
     español de `visual_description` -- `personas` (cerrado: "una"/
     "varias") vía i18n propio del frontend, `aficion` (semi-libre) vía
     `/analyze/translate-descriptions` solo si la UI no está en español, y
-    `texto_visible` NUNCA se traduce (es texto literal leído de la foto)."""
+    `texto_visible`/`matricula` NUNCA se traducen (texto literal leído de
+    la foto -- `matricula` además ya viene validada por formato, ver
+    `_parse_matricula` en scene_analysis.py, así que solo llega aquí si
+    tiene forma de matrícula española real)."""
 
     personas: str | None = None
     aficion: str | None = None
     texto_visible: str | None = None
+    matricula: str | None = None
     indicio_pareja: bool = False
 
 

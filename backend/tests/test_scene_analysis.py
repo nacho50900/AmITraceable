@@ -128,7 +128,6 @@ class TestAnalyzeImageContent:
             monkeypatch,
             "PERSONAS: una\nAFICION: guitarra\nPAREJA: no\nTEXTO_VISIBLE: Bar Manolo",
         )
-
         inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         categories = {inferred.category for inferred in inferences}
@@ -143,6 +142,50 @@ class TestAnalyzeImageContent:
         inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
+
+    def test_parses_matricula_as_inferred_attribute(self, monkeypatch):
+        _install_fake_model(
+            monkeypatch,
+            "PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no\nTEXTO_VISIBLE: ninguno\nMATRICULA: 1234BCD",
+        )
+
+        inferences, _, _, _, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert len(inferences) == 1
+        assert inferences[0].category == "matricula"
+        assert "1234-BCD" in inferences[0].value
+        assert "lectura automática" in inferences[0].value
+        assert inferences[0].confidence == 0.3
+        assert codes.matricula == "1234-BCD"
+
+    def test_no_matricula_inference_when_format_invalid(self, monkeypatch):
+        """Un valor que no supera la validación de formato de
+        _parse_matricula (ver TestParseMatricula) no debe generar ningún
+        InferredAttribute -- se descarta en silencio, igual que 'ninguna'."""
+        _install_fake_model(
+            monkeypatch,
+            "PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no\nTEXTO_VISIBLE: ninguno\nMATRICULA: XZ-1234-BC",
+        )
+
+        inferences, _, _, _, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert inferences == []
+        assert codes.matricula is None
+
+    def test_texto_visible_and_matricula_can_coexist(self, monkeypatch):
+        """Son dos campos separados a propósito (ver comentario junto a
+        MATRICULA en _STRUCTURED_QUERY) -- una foto puede tener un cartel
+        Y una matrícula visibles a la vez, sin que uno eclipse al otro."""
+        _install_fake_model(
+            monkeypatch,
+            "PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no\n"
+            "TEXTO_VISIBLE: Bar Manolo\nMATRICULA: 1234BCD",
+        )
+
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
+
+        categories = {inferred.category for inferred in inferences}
+        assert categories == {"texto_visible", "matricula"}
 
     def test_discards_aficion_when_several_people_are_similarly_prominent(self, monkeypatch):
         """El caso que motivó este campo: con varias personas de
@@ -607,6 +650,66 @@ class TestParseTextoVisible:
         assert scene_analysis._parse_texto_visible("TEXTO_VISIBLE: Calle Mayor 12.") == "Calle Mayor 12"
 
 
+class TestParseMatricula:
+    """_parse_matricula, a diferencia del resto de campos de este módulo,
+    VALIDA por formato antes de aceptar el valor -- ver docstring de la
+    función y el comentario junto a _SPANISH_PLATE_OLD_FORMAT_RE /
+    _SPANISH_PLATE_NEW_FORMAT_RE en scene_analysis.py."""
+
+    def test_valid_new_format_no_separator(self):
+        assert scene_analysis._parse_matricula("MATRICULA: 1234BCD") == "1234-BCD"
+
+    def test_valid_new_format_with_space(self):
+        assert scene_analysis._parse_matricula("MATRICULA: 1234 BCD") == "1234-BCD"
+
+    def test_valid_new_format_with_hyphen(self):
+        assert scene_analysis._parse_matricula("MATRICULA: 1234-BCD") == "1234-BCD"
+
+    def test_valid_old_format_two_letter_province(self):
+        assert scene_analysis._parse_matricula("MATRICULA: AB-1234-CD") == "AB-1234-CD"
+
+    def test_valid_old_format_one_letter_province_no_separator(self):
+        assert scene_analysis._parse_matricula("MATRICULA: M1234AB") == "M-1234-AB"
+
+    def test_old_format_uses_the_historic_alternate_province_codes(self):
+        """GE/OR (códigos antiguos de Girona/Ourense antes del cambio a
+        GI/OU, ver PLATE_PROVINCE_CODE_TO_PROVINCE) deben seguir
+        aceptándose, no solo los códigos vigentes al final del sistema."""
+        assert scene_analysis._parse_matricula("MATRICULA: GE1234AB") == "GE-1234-AB"
+        assert scene_analysis._parse_matricula("MATRICULA: OR1234AB") == "OR-1234-AB"
+
+    def test_missing_line_returns_none(self):
+        assert scene_analysis._parse_matricula("PERSONAS: una\nAFICION: ninguno") is None
+
+    @pytest.mark.parametrize("negative_value", ["ninguna", "Ninguno", "none", "N/A", ""])
+    def test_ninguna_variants_return_none(self, negative_value):
+        assert scene_analysis._parse_matricula(f"MATRICULA: {negative_value}") is None
+
+    def test_invalid_province_code_is_rejected(self):
+        """'XZ' tiene la FORMA de un código de provincia (1-2 letras) pero
+        nunca fue uno real -- debe rechazarse aunque el resto del formato
+        (4 dígitos + 1-2 letras de sufijo) sea correcto."""
+        assert scene_analysis._parse_matricula("MATRICULA: XZ-1234-BC") is None
+
+    def test_forbidden_letter_q_in_new_format_is_rejected(self):
+        assert scene_analysis._parse_matricula("MATRICULA: 1234QAB") is None
+
+    def test_forbidden_vowel_in_new_format_is_rejected(self):
+        assert scene_analysis._parse_matricula("MATRICULA: 1234AAB") is None
+
+    def test_malformed_digit_count_is_rejected(self):
+        assert scene_analysis._parse_matricula("MATRICULA: 123BCD") is None
+
+    def test_free_text_non_plate_answer_is_rejected(self):
+        """Si el modelo 'razona' en vez de responder solo la matrícula
+        (p. ej. explica por qué no puede leerla con claridad), el
+        resultado no tiene forma de matrícula y se descarta -- no se
+        intenta extraer una matrícula de dentro de la frase."""
+        assert scene_analysis._parse_matricula(
+            "MATRICULA: no se distingue con claridad por el ángulo de la foto"
+        ) is None
+
+
 class TestParseAficionRaw:
     """_parse_aficion_raw es la versión SIN la cautela de atribución de
     _parse_inferences (que descarta la señal con varias personas en la
@@ -654,34 +757,44 @@ class TestBuildCleanSummary:
 
     def test_only_personas_when_nothing_else_positive(self):
         summary = scene_analysis._build_clean_summary(
-            personas="varias", aficion_raw=None, indicio_pareja=False, texto_visible=None
+            personas="varias", aficion_raw=None, indicio_pareja=False, texto_visible=None, matricula=None
         )
         assert summary == "Personas en la foto: varias"
 
     def test_includes_aficion_when_positive(self):
         summary = scene_analysis._build_clean_summary(
-            personas="una", aficion_raw="guitarra", indicio_pareja=False, texto_visible=None
+            personas="una", aficion_raw="guitarra", indicio_pareja=False, texto_visible=None, matricula=None
         )
         assert summary == "Personas en la foto: una\nPosible afición o interés: guitarra"
 
     def test_includes_pareja_only_when_true(self):
         summary_true = scene_analysis._build_clean_summary(
-            personas="varias", aficion_raw=None, indicio_pareja=True, texto_visible=None
+            personas="varias", aficion_raw=None, indicio_pareja=True, texto_visible=None, matricula=None
         )
         assert "Indicio de contexto de pareja: sí" in summary_true
 
         summary_false = scene_analysis._build_clean_summary(
-            personas="varias", aficion_raw=None, indicio_pareja=False, texto_visible=None
+            personas="varias", aficion_raw=None, indicio_pareja=False, texto_visible=None, matricula=None
         )
         assert "pareja" not in summary_false.lower()
 
     def test_includes_texto_visible_when_present(self):
         summary = scene_analysis._build_clean_summary(
-            personas="ninguna", aficion_raw=None, indicio_pareja=False, texto_visible="Bar Manolo"
+            personas="ninguna", aficion_raw=None, indicio_pareja=False, texto_visible="Bar Manolo", matricula=None
         )
         # "ninguna" ya no se muestra (ver docstring de _build_clean_summary,
         # tratado igual que el resto de valores negativos por defecto).
         assert summary == "Texto visible: Bar Manolo"
+
+    def test_includes_matricula_when_present(self):
+        """La matrícula SIEMPRE se muestra con el aviso de lectura
+        automática pegado al propio valor, no como nota aparte -- para
+        que sea imposible mostrarla sin ese aviso en ningún punto del
+        pipeline."""
+        summary = scene_analysis._build_clean_summary(
+            personas="ninguna", aficion_raw=None, indicio_pareja=False, texto_visible=None, matricula="M-1234-AB"
+        )
+        assert summary == "Matrícula visible: M-1234-AB (lectura automática, puede contener errores)"
 
     def test_personas_ninguna_is_hidden_like_other_negative_defaults(self):
         """Regresión (Comandante, agosto 2026): 'ninguna' ya no se
@@ -690,29 +803,31 @@ class TestBuildCleanSummary:
         `_STRUCTURED_QUERY` documentado en scene_analysis.py (Moondream2
         copiando el valor de ejemplo del prompt) volviera a aparecer."""
         assert scene_analysis._build_clean_summary(
-            personas="ninguna", aficion_raw=None, indicio_pareja=False, texto_visible=None
+            personas="ninguna", aficion_raw=None, indicio_pareja=False, texto_visible=None, matricula=None
         ) is None
 
     @pytest.mark.parametrize("value", ["una", "varias"])
     def test_personas_una_o_varias_se_siguen_mostrando(self, value):
         summary = scene_analysis._build_clean_summary(
-            personas=value, aficion_raw=None, indicio_pareja=False, texto_visible=None
+            personas=value, aficion_raw=None, indicio_pareja=False, texto_visible=None, matricula=None
         )
         assert summary == f"Personas en la foto: {value}"
 
-    def test_all_four_positive_at_once(self):
+    def test_all_five_positive_at_once(self):
         summary = scene_analysis._build_clean_summary(
-            personas="varias", aficion_raw="baloncesto", indicio_pareja=True, texto_visible="Bar Manolo"
+            personas="varias", aficion_raw="baloncesto", indicio_pareja=True,
+            texto_visible="Bar Manolo", matricula="M-1234-AB",
         )
         assert summary == (
             "Personas en la foto: varias\n"
             "Posible afición o interés: baloncesto\n"
             "Indicio de contexto de pareja: sí\n"
-            "Texto visible: Bar Manolo"
+            "Texto visible: Bar Manolo\n"
+            "Matrícula visible: M-1234-AB (lectura automática, puede contener errores)"
         )
 
     def test_none_when_nothing_at_all(self):
-        assert scene_analysis._build_clean_summary(None, None, False, None) is None
+        assert scene_analysis._build_clean_summary(None, None, False, None, None) is None
 
 
 class TestSceneAnalysisAvailable:

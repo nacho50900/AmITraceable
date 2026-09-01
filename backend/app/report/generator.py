@@ -308,6 +308,7 @@ def _to_visual_description_codes_schema(codes) -> VisualDescriptionCodes | None:
         personas=codes.personas,
         aficion=codes.aficion,
         texto_visible=codes.texto_visible,
+        matricula=codes.matricula,
         indicio_pareja=codes.indicio_pareja,
     )
 
