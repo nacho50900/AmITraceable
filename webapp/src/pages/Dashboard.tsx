@@ -245,9 +245,9 @@ const Dashboard: React.FC = () => {
         manual_attributes: traits,
       });
       setReport(newReport);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || 'Error al recalcular');
+      setError(err instanceof Error ? err.message : t('dashboard.manualTraits.recalculateError'));
     }
   };
 

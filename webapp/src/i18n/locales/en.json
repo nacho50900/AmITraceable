@@ -158,7 +158,10 @@
       "orientacion_sexual": "Sexual orientation: {{value}}",
       "religion": "Religion: {{value}}",
       "signo_zodiacal": "Zodiac sign: {{value}}",
-      "practica_deportiva": "Sport practiced: {{value}}"
+      "practica_deportiva": "Sport practiced: {{value}}",
+      "color_ojos": "Eye color: {{value}}",
+      "color_pelo": "Hair color: {{value}}",
+      "color_piel": "Skin tone: {{value}}"
     },
     "attributeValue": {
       "sexo": {
@@ -310,7 +313,38 @@
         "squash": "Squash",
         "aeronautica": "Aeronautical sports",
         "ajedrez": "Chess"
+      },
+      "color_ojos": {
+        "marron": "Brown",
+        "intermedio": "Intermediate",
+        "azul": "Blue"
+      },
+      "color_pelo": {
+        "castano": "Brown",
+        "negro": "Black",
+        "rubio": "Blond",
+        "pelirrojo": "Red"
+      },
+      "color_piel": {
+        "claro": "Light",
+        "medio": "Medium",
+        "oscuro": "Dark"
       }
+    },
+    "manualTraits": {
+      "openButton": "Add visible physical traits (eyes, hair, skin...)",
+      "panelTitle": "Add visible physical traits",
+      "description": "This data can't be inferred automatically due to legal restrictions (GDPR), but if it's evident in your photos or profile, it will significantly narrow down how many people share your exposure.",
+      "fields": {
+        "eyeColor": "Eye color",
+        "hairColor": "Hair color",
+        "skinColor": "Skin tone"
+      },
+      "placeholder": "Select an option...",
+      "clearButton": "Clear and close",
+      "applyButton": "Apply and recalculate",
+      "closeAriaLabel": "Close",
+      "recalculateError": "Error recalculating"
     }
   },
   "components": {
@@ -351,7 +385,8 @@
         "ia": "AI (text)",
         "ia_nombre": "AI (name)",
         "ia_simbolica": "AI (symbolic)",
-        "ia_estimada": "AI (estimated)"
+        "ia_estimada": "AI (estimated)",
+        "manual": "Manual"
       },
       "sourceTitle": {
         "texto": "Detected in text you wrote yourself",
@@ -359,7 +394,8 @@
         "ia": "Detected by an AI model in text/bio that you wrote yourself",
         "ia_nombre": "Estimated from the cultural convention of your account's public name, not from something you wrote -- lower reliability",
         "ia_simbolica": "Inferred by AI from symbolic or indirect content (emojis, dates, recurring mentions...), not from an explicit self-declaration -- lower reliability",
-        "ia_estimada": "Estimated by AI from indirect clues in the text, not from an explicit self-declaration -- lower reliability"
+        "ia_estimada": "Estimated by AI from indirect clues in the text, not from an explicit self-declaration -- lower reliability",
+        "manual": "Physical trait you added manually (self-declaration, legal basis Art. 9.2.a GDPR), not automatically inferred"
       },
       "combinedSummaryPrefix": "In Spain there are",
       "combinedSummarySuffix": "people who share your traits (all the ones detected, combined at once: sex, age, location, education, occupation, marital status -- whichever could be estimated).",

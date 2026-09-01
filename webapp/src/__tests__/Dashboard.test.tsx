@@ -37,6 +37,7 @@ vi.mock('../api', async () => {
       // no nos interesa su comportamiento, así que se deja "colgado" sin
       // resolver para que no interfiera con las aserciones del Dashboard.
       aiSummary: vi.fn(() => new Promise(() => {})),
+      recalculateReport: vi.fn(),
     },
   };
 });
@@ -84,6 +85,7 @@ describe('Dashboard', () => {
     vi.mocked(api.authStatus).mockReset();
     vi.mocked(api.analyzeStream).mockReset();
     vi.mocked(api.logout).mockReset();
+    vi.mocked(api.recalculateReport).mockReset();
     mockNavigate.mockReset();
   });
 
@@ -518,14 +520,88 @@ describe('Dashboard', () => {
     });
   });
 
-  test('no muestra el resumen de rasgos combinados cuando no hay ningún rasgo estimable', async () => {
-    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
-    mockStream([{ done: true, report: makeExposureReport({ remaining_population_all_traits: null }) }]);
-    renderDashboard();
+  describe('rasgos físicos manuales (ManualTraitsSelector, ver ADR-34)', () => {
+    test('con informe cargado, muestra el botón para añadir rasgos físicos', async () => {
+      vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+      mockStream([{ done: true, report: makeExposureReport() }]);
+      renderDashboard();
 
-    await waitFor(() => {
-      expect(screen.getByText('Qué se puede inferir sobre ti')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: /Añadir rasgos físicos evidentes/ }),
+        ).toBeInTheDocument();
+      });
     });
-    expect(screen.queryByText(/personas que comparten tus rasgos/)).not.toBeInTheDocument();
+
+    test('aplicar rasgos llama a api.recalculateReport con el informe actual y los rasgos elegidos, y refresca el informe mostrado', async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+      const initialReport = makeExposureReport({ remaining_population_all_traits: 24957175 });
+      mockStream([{ done: true, report: initialReport }]);
+      vi.mocked(api.recalculateReport).mockResolvedValue(
+        makeExposureReport({ remaining_population_all_traits: 4128297 }),
+      );
+      renderDashboard();
+
+      await user.click(await screen.findByRole('button', { name: /Añadir rasgos físicos evidentes/ }));
+      await user.selectOptions(screen.getByLabelText('Color de ojos'), 'azul');
+      await user.click(screen.getByRole('button', { name: 'Aplicar y recalcular' }));
+
+      await waitFor(() => {
+        expect(api.recalculateReport).toHaveBeenCalledWith({
+          report: initialReport,
+          manual_attributes: [{ category: 'color_ojos', value: 'azul' }],
+        });
+      });
+      await waitFor(() => {
+        expect(screen.getByText('4.128.297')).toBeInTheDocument();
+      });
+    });
+
+    test('sin rasgos seleccionados, aplicar NO llama a api.recalculateReport (early return en handleApplyTraits)', async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+      mockStream([{ done: true, report: makeExposureReport() }]);
+      renderDashboard();
+
+      await user.click(await screen.findByRole('button', { name: /Añadir rasgos físicos evidentes/ }));
+      await user.click(screen.getByRole('button', { name: 'Aplicar y recalcular' }));
+
+      expect(api.recalculateReport).not.toHaveBeenCalled();
+    });
+
+    test('si api.recalculateReport falla con un mensaje, se muestra ese mensaje de error', async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+      mockStream([{ done: true, report: makeExposureReport() }]);
+      vi.mocked(api.recalculateReport).mockRejectedValue(new Error('Fallo de red simulado'));
+      renderDashboard();
+
+      await user.click(await screen.findByRole('button', { name: /Añadir rasgos físicos evidentes/ }));
+      await user.selectOptions(screen.getByLabelText('Color de ojos'), 'azul');
+      await user.click(screen.getByRole('button', { name: 'Aplicar y recalcular' }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Fallo de red simulado/)).toBeInTheDocument();
+      });
+    });
+
+    test('si api.recalculateReport falla sin mensaje, se usa el texto i18n de error de recalculo (no un literal en español embebido)', async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+      mockStream([{ done: true, report: makeExposureReport() }]);
+      // Error sin `.message` (p.ej. objeto plano lanzado, no un Error real)
+      // -- ejercita el fallback `err.message || t('dashboard.manualTraits.recalculateError')`.
+      vi.mocked(api.recalculateReport).mockRejectedValue({});
+      renderDashboard();
+
+      await user.click(await screen.findByRole('button', { name: /Añadir rasgos físicos evidentes/ }));
+      await user.selectOptions(screen.getByLabelText('Color de ojos'), 'azul');
+      await user.click(screen.getByRole('button', { name: 'Aplicar y recalcular' }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Error al recalcular/)).toBeInTheDocument();
+      });
+    });
   });
 });

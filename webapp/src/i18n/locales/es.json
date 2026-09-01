@@ -158,7 +158,10 @@
       "orientacion_sexual": "Orientación sexual: {{value}}",
       "religion": "Religión: {{value}}",
       "signo_zodiacal": "Signo zodiacal: {{value}}",
-      "practica_deportiva": "Práctica deportiva: {{value}}"
+      "practica_deportiva": "Práctica deportiva: {{value}}",
+      "color_ojos": "Color de ojos: {{value}}",
+      "color_pelo": "Color de pelo: {{value}}",
+      "color_piel": "Color de piel: {{value}}"
     },
     "attributeValue": {
       "sexo": {
@@ -310,7 +313,38 @@
         "squash": "Squash",
         "aeronautica": "Actividades aeronáuticas",
         "ajedrez": "Ajedrez"
+      },
+      "color_ojos": {
+        "marron": "Marrón",
+        "intermedio": "Intermedio",
+        "azul": "Azul"
+      },
+      "color_pelo": {
+        "castano": "Castaño",
+        "negro": "Negro",
+        "rubio": "Rubio",
+        "pelirrojo": "Pelirrojo"
+      },
+      "color_piel": {
+        "claro": "Claro",
+        "medio": "Medio",
+        "oscuro": "Oscuro"
       }
+    },
+    "manualTraits": {
+      "openButton": "Añadir rasgos físicos evidentes (ojos, pelo, piel...)",
+      "panelTitle": "Añadir rasgos físicos evidentes",
+      "description": "Estos datos no pueden inferirse automáticamente por restricciones legales (RGPD), pero si son evidentes en tus fotos o perfil, reducirán significativamente cuántas personas comparten tu exposición.",
+      "fields": {
+        "eyeColor": "Color de ojos",
+        "hairColor": "Color de pelo",
+        "skinColor": "Tono de piel"
+      },
+      "placeholder": "Selecciona una opción...",
+      "clearButton": "Limpiar y cerrar",
+      "applyButton": "Aplicar y recalcular",
+      "closeAriaLabel": "Cerrar",
+      "recalculateError": "Error al recalcular"
     }
   },
   "components": {
@@ -351,7 +385,8 @@
         "ia": "IA (texto)",
         "ia_nombre": "IA (nombre)",
         "ia_simbolica": "IA (simbólico)",
-        "ia_estimada": "IA (estimado)"
+        "ia_estimada": "IA (estimado)",
+        "manual": "Manual"
       },
       "sourceTitle": {
         "texto": "Detectado en texto que escribiste tú mismo/a",
@@ -359,7 +394,8 @@
         "ia": "Detectado por un modelo de IA en texto/biografía que escribiste tú mismo/a",
         "ia_nombre": "Estimado por convención cultural del nombre público de tu cuenta, no por algo que hayas escrito -- fiabilidad menor",
         "ia_simbolica": "Inferido por IA a partir de contenido simbólico o indirecto (emojis, fechas, menciones recurrentes...), no de una autodeclaración explícita -- fiabilidad menor",
-        "ia_estimada": "Estimado por IA a partir de pistas indirectas del texto, no de una autodeclaración explícita -- fiabilidad menor"
+        "ia_estimada": "Estimado por IA a partir de pistas indirectas del texto, no de una autodeclaración explícita -- fiabilidad menor",
+        "manual": "Rasgo físico añadido manualmente por ti (autodeclaración, ver base legal Art. 9.2.a RGPD), no inferido automáticamente"
       },
       "combinedSummaryPrefix": "En España hay",
       "combinedSummarySuffix": "personas que comparten tus rasgos (todos los detectados, combinados a la vez: sexo, edad, ubicación, estudios, ocupación, estado civil -- los que se hayan podido estimar).",

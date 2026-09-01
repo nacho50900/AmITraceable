@@ -1024,6 +1024,139 @@ body {
   padding: 2px 10px;
 }
 
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: rgba(139, 148, 163, 0.1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+
+/* Rasgo físico autodeclarado (ADR-34) -- se distingue visualmente del
+   resto de fuentes (texto/imagen/IA) porque es el único dato que el
+   usuario introduce él mismo directamente, no algo detectado. */
+.source-badge--manual {
+  color: var(--turquoise);
+  background: rgba(45, 212, 191, 0.12);
+  border-color: rgba(45, 212, 191, 0.35);
+}
+
+/* Panel de autodeclaración de rasgos físicos (ManualTraitsSelector.tsx,
+   ver ADR-34) -- usa las mismas variables/tokens que el resto de la app
+   (.card, .btn-primary, .btn-secondary), sin Tailwind. */
+.manual-traits-open-button {
+  width: 100%;
+  margin-bottom: 24px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(91, 108, 240, 0.1);
+  border: 1px solid rgba(91, 108, 240, 0.35);
+  border-radius: 8px;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.manual-traits-open-button:hover {
+  background: rgba(91, 108, 240, 0.18);
+}
+
+.manual-traits-panel {
+  margin-bottom: 24px;
+  padding: 20px 22px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.manual-traits-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.manual-traits-header h3 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  color: var(--text);
+}
+
+.manual-traits-close-button {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+}
+
+.manual-traits-close-button:hover {
+  color: var(--text);
+}
+
+.manual-traits-description {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin: 0 0 20px;
+}
+
+.manual-traits-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.manual-traits-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.manual-traits-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.manual-traits-select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  padding: 10px 12px;
+  outline: none;
+}
+
+.manual-traits-select:focus {
+  border-color: var(--accent);
+}
+
+.manual-traits-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .population-combined-summary {
   margin-top: 20px;
   padding-top: 16px;

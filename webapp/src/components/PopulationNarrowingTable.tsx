@@ -115,10 +115,17 @@ const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({
                     {t(`components.populationNarrowing.risk.${step.risk_level}`)}
                   </span>
                   <span
-                    className={`source-badge ${step.source === 'manual' ? 'bg-purple-900/50 border-purple-500/50 text-purple-200' : ''}`}
-                    title={i18n.exists(`components.populationNarrowing.sourceTitle.${step.source}`) ? t(`components.populationNarrowing.sourceTitle.${step.source}`) : 'Rasgo añadido manualmente'}
+                    className={`source-badge${step.source === 'manual' ? ' source-badge--manual' : ''}`}
+                    title={
+                      i18n.exists(`components.populationNarrowing.sourceTitle.${step.source}`)
+                        ? t(`components.populationNarrowing.sourceTitle.${step.source}`)
+                        : t('components.populationNarrowing.sourceTitle.manual')
+                    }
                   >
-                    {SOURCE_ICONS[step.source]} {i18n.exists(`components.populationNarrowing.source.${step.source}`) ? t(`components.populationNarrowing.source.${step.source}`) : 'Manual'}
+                    {SOURCE_ICONS[step.source]}{' '}
+                    {i18n.exists(`components.populationNarrowing.source.${step.source}`)
+                      ? t(`components.populationNarrowing.source.${step.source}`)
+                      : t('components.populationNarrowing.source.manual')}
                   </span>
                 </div>
               </div>
