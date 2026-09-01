@@ -11,7 +11,7 @@ PROVINCIA, que es la granularidad que ya usa el resto del pipeline
 (scoring/k_anonymity.py). Es una estimación probabilística con nivel de
 confianza, no una respuesta exacta.
 
-Requiere que ya exista el índice generado por scripts/build_faiss_index.py
+Requiere que ya exista el índice generado por scripts/geolocalization/build_faiss_index.py
 (index.faiss + index_meta.csv). Si no existe, `estimate_location_from_image`
 devuelve None en vez de fallar, para que el resto del análisis pueda seguir
 funcionando sin este módulo (es opcional/best-effort, no crítico).
@@ -506,7 +506,7 @@ def _lazy_load():
     if not index_path.exists() or not meta_path.exists():
         raise FileNotFoundError(
             f"No se encontró el índice en {_INDEX_DIR}. Ejecuta antes "
-            "scripts/download_osv5m_spain.py y scripts/build_faiss_index.py."
+            "scripts/geolocalization/download_osv5m_spain.py y scripts/geolocalization/build_faiss_index.py."
         )
 
     _device = _select_dinov2_device()
@@ -961,7 +961,7 @@ async def estimate_locations_for_posts(
     persona, mismo criterio ya aplicado a las fotos de viaje (ver ADR-16).
 
     Se ejecuta en segundo plano de forma best-effort: si el índice no
-    existe (no se ha corrido scripts/build_faiss_index.py) o falla la
+    existe (no se ha corrido scripts/geolocalization/build_faiss_index.py) o falla la
     descarga de una imagen concreta, simplemente se omite esa imagen sin
     interrumpir el resto del análisis. `GeolocationOutcome.index_available`
     permite al llamador distinguir "el índice no está construido" de "se

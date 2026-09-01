@@ -32,7 +32,7 @@ es la señal disponible sin analizar el contenido de cada imagen.
 Uso:
     pip install httpx opencv-python imagehash pandas numpy faiss-cpu \
         pillow tqdm torch transformers huggingface_hub
-    python build_commons_index.py --output ../data/commons_spain --cell-km 10 \
+    python build_commons_index.py --output ../../data/commons_spain --cell-km 10 \
         --cap-per-cell 400
 
 Salida (en --output): igual formato que build_flickr_index.py
@@ -60,7 +60,13 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent))
 from build_faiss_index import MODEL_NAME, embed_image, load_model  # noqa: E402
 from flickr_grid import GridCell, generate_spain_grid  # noqa: E402
-from image_ingest_common import blur_faces, ensure_yunet_model, is_near_duplicate, nearest_province  # noqa: E402
+from image_ingest_common import (  # noqa: E402
+    blur_faces,
+    ensure_yunet_model,
+    is_near_duplicate,
+    nearest_province,
+    sort_cells_by_proximity,
+)
 
 import faiss  # noqa: E402
 import torch  # noqa: E402
@@ -301,12 +307,18 @@ def _persist_state(output_dir: Path, embeddings: list, meta_rows: list, complete
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", default="../data/commons_spain")
+    parser.add_argument("--output", default="../../data/commons_spain")
     parser.add_argument("--cell-km", type=float, default=10.0)
     parser.add_argument("--cap-per-cell", type=int, default=400)
     parser.add_argument("--phash-threshold", type=int, default=8)
     parser.add_argument("--max-pages-per-cell", type=int, default=3)
     parser.add_argument("--flush-every-cells", type=int, default=25)
+    parser.add_argument("--max-cells", type=int, default=None,
+                         help="Limita el numero de celdas a procesar en esta ejecucion (para probar antes de lanzar todo)")
+    parser.add_argument("--near", type=str, default=None,
+                         help='"lat,lon" -- ordena las celdas por cercania a este punto en vez del orden de generacion del grid '
+                              '(las primeras celdas del grid caen en el Atlantico/frontera portuguesa). Combinar con --max-cells '
+                              'para un test rapido en una ciudad conocida, p.ej. --near "40.4168,-3.7038" --max-cells 1 para Madrid.')
     args = parser.parse_args()
 
     output_dir = Path(args.output)
@@ -322,7 +334,14 @@ def main() -> None:
 
     all_cells = generate_spain_grid(cell_km=args.cell_km)
     pending_cells = [c for c in all_cells if c.id not in completed]
-    print(f"{len(all_cells)} celdas en el grid ({len(pending_cells)} pendientes).")
+
+    if args.near:
+        near_lat, near_lon = (float(x) for x in args.near.split(","))
+        pending_cells = sort_cells_by_proximity(pending_cells, near_lat, near_lon)
+    if args.max_cells:
+        pending_cells = pending_cells[:args.max_cells]
+
+    print(f"{len(all_cells)} celdas en el grid ({len(pending_cells)} pendientes en esta ejecucion).")
 
     client = httpx.Client()
     cells_since_flush = 0

@@ -13,8 +13,8 @@ crudos ya obtenidos" de "índice derivado, siempre regenerable".
 
 Uso:
     python merge_faiss_indices.py \
-        --sources ../data/osv5m_spain ../data/flickr_spain \
-        --output ../data/spain_combined
+        --sources ../../data/osv5m_spain ../../data/flickr_spain \
+        --output ../../data/spain_combined
 
 Tras ejecutarlo, apunta _INDEX_DIR en app/vision/geolocation.py a
 --output (o copia/symlink el resultado sobre data/osv5m_spain/ si

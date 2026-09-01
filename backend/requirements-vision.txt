@@ -109,3 +109,21 @@ pyvips>=2.2,<3.0
 #                                 # transitiva de transformers, arriba
 ctranslate2>=4.0,<5.0
 sentencepiece>=0.2,<1.0
+
+# Dependencias EXCLUSIVAS de scripts/geolocalization/build_flickr_index.py
+# y build_commons_index.py (ingestión de fuentes externas para ampliar el
+# índice FAISS) -- no las usa el backend en producción, solo estos scripts
+# offline. Se dejan aquí y no en requirements.txt por el mismo motivo que
+# el resto de este fichero: son específicas del flujo de construcción del
+# índice, no del servicio desplegado.
+#
+# opencv-python-headless (no opencv-python a secas): estos scripts corren
+# en servidores/CI sin entorno gráfico -- la variante "headless" evita
+# arrastrar dependencias de sistema de GUI (libGL, etc.) que no hacen
+# falta para FaceDetectorYN ni para las operaciones de resize/color usadas
+# aquí.
+opencv-python-headless>=4.8,<5.0
+# imagehash: perceptual hashing (phash) para descartar fotos casi
+# duplicadas dentro de una misma celda del grid antes de aceptarlas en el
+# índice -- ver _is_near_duplicate en image_ingest_common.py.
+imagehash>=4.3,<5.0

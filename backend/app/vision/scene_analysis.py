@@ -430,7 +430,7 @@ def _scene_analysis_available() -> bool:
     esta función devolvía True con solo torch/transformers instalados --
     suficiente para `estimate_locations_for_posts` (geolocalización), pero
     NO para Moondream2 -- así que un entorno que solo siguiera las
-    instrucciones de `scripts/build_faiss_index.py` (que no menciona
+    instrucciones de `scripts/geolocalization/build_faiss_index.py` (que no menciona
     timm/einops) tenía la geolocalización funcionando con normalidad
     mientras esta función fallaba en silencio SIEMPRE dentro de
     `_lazy_load()` (capturado por el try/except de
@@ -951,7 +951,7 @@ def analyze_image_content(
     if not _scene_analysis_available():
         # Causa más habitual: no se ha instalado requirements-vision.txt
         # completo. En particular, construir el índice FAISS (ver
-        # scripts/build_faiss_index.py) NO instala timm/einops -- son
+        # scripts/geolocalization/build_faiss_index.py) NO instala timm/einops -- son
         # deps exclusivas de Moondream2, no de DINOv2 -- así que un
         # entorno con la geolocalización funcionando puede seguir sin
         # tener esto instalado.

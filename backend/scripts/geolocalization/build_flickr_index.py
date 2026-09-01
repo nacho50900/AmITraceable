@@ -41,7 +41,7 @@ lectura de contenido público): https://www.flickr.com/services/apps/create/
 Uso:
     pip install httpx opencv-python imagehash pandas numpy faiss-cpu \
         pillow tqdm torch transformers
-    python build_flickr_index.py --output ../data/flickr_spain --cell-km 10 \
+    python build_flickr_index.py --output ../../data/flickr_spain --cell-km 10 \
         --cap-per-cell 400 --min-accuracy 12
 
 Salida (en --output):
@@ -78,7 +78,13 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent))
 from build_faiss_index import MODEL_NAME, embed_image, load_model  # noqa: E402
 from flickr_grid import GridCell, generate_spain_grid  # noqa: E402
-from image_ingest_common import blur_faces, ensure_yunet_model, is_near_duplicate, nearest_province  # noqa: E402
+from image_ingest_common import (  # noqa: E402
+    blur_faces,
+    ensure_yunet_model,
+    is_near_duplicate,
+    nearest_province,
+    sort_cells_by_proximity,
+)
 
 import faiss  # noqa: E402
 import torch  # noqa: E402
@@ -260,13 +266,19 @@ def _persist_state(output_dir: Path, embeddings: list, meta_rows: list, complete
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", default="../data/flickr_spain")
+    parser.add_argument("--output", default="../../data/flickr_spain")
     parser.add_argument("--cell-km", type=float, default=10.0)
     parser.add_argument("--cap-per-cell", type=int, default=400)
     parser.add_argument("--min-accuracy", type=int, default=12, help="Escala Flickr 1-16, 16=nivel calle")
     parser.add_argument("--phash-threshold", type=int, default=8, help="Distancia Hamming máxima para considerar casi-duplicado")
     parser.add_argument("--max-pages-per-cell", type=int, default=3)
     parser.add_argument("--flush-every-cells", type=int, default=25)
+    parser.add_argument("--max-cells", type=int, default=None,
+                         help="Limita el numero de celdas a procesar en esta ejecucion (para probar antes de lanzar todo)")
+    parser.add_argument("--near", type=str, default=None,
+                         help='"lat,lon" -- ordena las celdas por cercania a este punto en vez del orden de generacion del grid '
+                              '(las primeras celdas del grid caen en el Atlantico/frontera portuguesa). Combinar con --max-cells '
+                              'para un test rapido en una ciudad conocida, p.ej. --near "40.4168,-3.7038" --max-cells 1 para Madrid.')
     parser.add_argument("--api-key", default=os.environ.get("FLICKR_API_KEY"))
     args = parser.parse_args()
 
@@ -287,7 +299,14 @@ def main() -> None:
 
     all_cells = generate_spain_grid(cell_km=args.cell_km)
     pending_cells = [c for c in all_cells if c.id not in completed]
-    print(f"{len(all_cells)} celdas en el grid ({len(pending_cells)} pendientes).")
+
+    if args.near:
+        near_lat, near_lon = (float(x) for x in args.near.split(","))
+        pending_cells = sort_cells_by_proximity(pending_cells, near_lat, near_lon)
+    if args.max_cells:
+        pending_cells = pending_cells[:args.max_cells]
+
+    print(f"{len(all_cells)} celdas en el grid ({len(pending_cells)} pendientes en esta ejecucion).")
 
     client = httpx.Client()
     cells_since_flush = 0

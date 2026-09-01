@@ -109,3 +109,13 @@ def blur_faces(image_bgr: np.ndarray, detector) -> np.ndarray:
 
 def is_near_duplicate(new_hash: imagehash.ImageHash, accepted: list[imagehash.ImageHash], threshold: int) -> bool:
     return any((new_hash - h) <= threshold for h in accepted)
+
+
+def sort_cells_by_proximity(cells: list, lat: float, lon: float) -> list:
+    """Ordena celdas por cercanía a un punto (distancia en grados al
+    cuadrado, no geodésica exacta -- suficiente para elegir por dónde
+    empezar). Pensado para --near: probar el pipeline contra una ciudad
+    conocida en vez de contra las primeras celdas del grid por orden de
+    generación, que caen en el Atlántico/frontera portuguesa y casi
+    seguro no devuelven nada útil para verificar que todo funciona."""
+    return sorted(cells, key=lambda c: (c.center_lat - lat) ** 2 + (c.center_lon - lon) ** 2)

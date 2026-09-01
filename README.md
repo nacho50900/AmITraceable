@@ -436,8 +436,8 @@ informe, sin errores. Para activarlo:
 cd backend
 pip install -r requirements-vision.txt huggingface_hub pandas tqdm
 
-python scripts/download_osv5m_spain.py --output data/osv5m_spain --max-disk-gb 35
-python scripts/build_faiss_index.py --images data/osv5m_spain
+python scripts/geolocalization/download_osv5m_spain.py --output data/osv5m_spain --max-disk-gb 35
+python scripts/geolocalization/build_faiss_index.py --images data/osv5m_spain
 ```
 
 (`requirements-vision.txt` ya apunta al índice de PyTorch solo-CPU, más

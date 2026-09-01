@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Geolocalización por imagen (opcional, ver app/vision/geolocation.py):
 # torch/faiss/transformers pesan varios cientos de MB y solo aportan algo
 # si además tienes el índice FAISS ya construido (ver
-# scripts/build_faiss_index.py). Por defecto NO se instalan, para que la
+# scripts/geolocalization/build_faiss_index.py). Por defecto NO se instalan, para que la
 # imagen siga ligera si solo usas Reddit o Instagram sin geolocalización.
 # Para activarlo:
 #   docker compose build --build-arg WITH_GEOLOCATION=true backend

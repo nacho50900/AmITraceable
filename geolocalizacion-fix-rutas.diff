@@ -1,0 +1,354 @@
+diff --git a/README.md b/README.md
+index 3dde4cc..e06699c 100644
+--- a/README.md
++++ b/README.md
+@@ -436,8 +436,8 @@ informe, sin errores. Para activarlo:
+ cd backend
+ pip install -r requirements-vision.txt huggingface_hub pandas tqdm
+ 
+-python scripts/download_osv5m_spain.py --output data/osv5m_spain --max-disk-gb 35
+-python scripts/build_faiss_index.py --images data/osv5m_spain
++python scripts/geolocalization/download_osv5m_spain.py --output data/osv5m_spain --max-disk-gb 35
++python scripts/geolocalization/build_faiss_index.py --images data/osv5m_spain
+ ```
+ 
+ (`requirements-vision.txt` ya apunta al índice de PyTorch solo-CPU, más
+diff --git a/backend/Dockerfile b/backend/Dockerfile
+index f9c4ece..872ac8f 100644
+--- a/backend/Dockerfile
++++ b/backend/Dockerfile
+@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
+ # Geolocalización por imagen (opcional, ver app/vision/geolocation.py):
+ # torch/faiss/transformers pesan varios cientos de MB y solo aportan algo
+ # si además tienes el índice FAISS ya construido (ver
+-# scripts/build_faiss_index.py). Por defecto NO se instalan, para que la
++# scripts/geolocalization/build_faiss_index.py). Por defecto NO se instalan, para que la
+ # imagen siga ligera si solo usas Reddit o Instagram sin geolocalización.
+ # Para activarlo:
+ #   docker compose build --build-arg WITH_GEOLOCATION=true backend
+diff --git a/backend/app/vision/geolocation.py b/backend/app/vision/geolocation.py
+index 7e742b7..b32136f 100644
+--- a/backend/app/vision/geolocation.py
++++ b/backend/app/vision/geolocation.py
+@@ -11,7 +11,7 @@ PROVINCIA, que es la granularidad que ya usa el resto del pipeline
+ (scoring/k_anonymity.py). Es una estimación probabilística con nivel de
+ confianza, no una respuesta exacta.
+ 
+-Requiere que ya exista el índice generado por scripts/build_faiss_index.py
++Requiere que ya exista el índice generado por scripts/geolocalization/build_faiss_index.py
+ (index.faiss + index_meta.csv). Si no existe, `estimate_location_from_image`
+ devuelve None en vez de fallar, para que el resto del análisis pueda seguir
+ funcionando sin este módulo (es opcional/best-effort, no crítico).
+@@ -506,7 +506,7 @@ def _lazy_load():
+     if not index_path.exists() or not meta_path.exists():
+         raise FileNotFoundError(
+             f"No se encontró el índice en {_INDEX_DIR}. Ejecuta antes "
+-            "scripts/download_osv5m_spain.py y scripts/build_faiss_index.py."
++            "scripts/geolocalization/download_osv5m_spain.py y scripts/geolocalization/build_faiss_index.py."
+         )
+ 
+     _device = _select_dinov2_device()
+@@ -961,7 +961,7 @@ async def estimate_locations_for_posts(
+     persona, mismo criterio ya aplicado a las fotos de viaje (ver ADR-16).
+ 
+     Se ejecuta en segundo plano de forma best-effort: si el índice no
+-    existe (no se ha corrido scripts/build_faiss_index.py) o falla la
++    existe (no se ha corrido scripts/geolocalization/build_faiss_index.py) o falla la
+     descarga de una imagen concreta, simplemente se omite esa imagen sin
+     interrumpir el resto del análisis. `GeolocationOutcome.index_available`
+     permite al llamador distinguir "el índice no está construido" de "se
+diff --git a/backend/app/vision/scene_analysis.py b/backend/app/vision/scene_analysis.py
+index d3b0cf6..8710277 100644
+--- a/backend/app/vision/scene_analysis.py
++++ b/backend/app/vision/scene_analysis.py
+@@ -430,7 +430,7 @@ def _scene_analysis_available() -> bool:
+     esta función devolvía True con solo torch/transformers instalados --
+     suficiente para `estimate_locations_for_posts` (geolocalización), pero
+     NO para Moondream2 -- así que un entorno que solo siguiera las
+-    instrucciones de `scripts/build_faiss_index.py` (que no menciona
++    instrucciones de `scripts/geolocalization/build_faiss_index.py` (que no menciona
+     timm/einops) tenía la geolocalización funcionando con normalidad
+     mientras esta función fallaba en silencio SIEMPRE dentro de
+     `_lazy_load()` (capturado por el try/except de
+@@ -951,7 +951,7 @@ def analyze_image_content(
+     if not _scene_analysis_available():
+         # Causa más habitual: no se ha instalado requirements-vision.txt
+         # completo. En particular, construir el índice FAISS (ver
+-        # scripts/build_faiss_index.py) NO instala timm/einops -- son
++        # scripts/geolocalization/build_faiss_index.py) NO instala timm/einops -- son
+         # deps exclusivas de Moondream2, no de DINOv2 -- así que un
+         # entorno con la geolocalización funcionando puede seguir sin
+         # tener esto instalado.
+diff --git a/backend/requirements-vision.txt b/backend/requirements-vision.txt
+index 1aaaec4..9a9d8c9 100644
+--- a/backend/requirements-vision.txt
++++ b/backend/requirements-vision.txt
+@@ -109,3 +109,21 @@ pyvips>=2.2,<3.0
+ #                                 # transitiva de transformers, arriba
+ ctranslate2>=4.0,<5.0
+ sentencepiece>=0.2,<1.0
++
++# Dependencias EXCLUSIVAS de scripts/geolocalization/build_flickr_index.py
++# y build_commons_index.py (ingestión de fuentes externas para ampliar el
++# índice FAISS) -- no las usa el backend en producción, solo estos scripts
++# offline. Se dejan aquí y no en requirements.txt por el mismo motivo que
++# el resto de este fichero: son específicas del flujo de construcción del
++# índice, no del servicio desplegado.
++#
++# opencv-python-headless (no opencv-python a secas): estos scripts corren
++# en servidores/CI sin entorno gráfico -- la variante "headless" evita
++# arrastrar dependencias de sistema de GUI (libGL, etc.) que no hacen
++# falta para FaceDetectorYN ni para las operaciones de resize/color usadas
++# aquí.
++opencv-python-headless>=4.8,<5.0
++# imagehash: perceptual hashing (phash) para descartar fotos casi
++# duplicadas dentro de una misma celda del grid antes de aceptarlas en el
++# índice -- ver _is_near_duplicate en image_ingest_common.py.
++imagehash>=4.3,<5.0
+diff --git a/backend/scripts/geolocalization/build_commons_index.py b/backend/scripts/geolocalization/build_commons_index.py
+index 06ba98a..1251738 100644
+--- a/backend/scripts/geolocalization/build_commons_index.py
++++ b/backend/scripts/geolocalization/build_commons_index.py
+@@ -32,7 +32,7 @@ es la señal disponible sin analizar el contenido de cada imagen.
+ Uso:
+     pip install httpx opencv-python imagehash pandas numpy faiss-cpu \
+         pillow tqdm torch transformers huggingface_hub
+-    python build_commons_index.py --output ../data/commons_spain --cell-km 10 \
++    python build_commons_index.py --output ../../data/commons_spain --cell-km 10 \
+         --cap-per-cell 400
+ 
+ Salida (en --output): igual formato que build_flickr_index.py
+@@ -60,7 +60,13 @@ from tqdm import tqdm
+ sys.path.insert(0, str(Path(__file__).parent))
+ from build_faiss_index import MODEL_NAME, embed_image, load_model  # noqa: E402
+ from flickr_grid import GridCell, generate_spain_grid  # noqa: E402
+-from image_ingest_common import blur_faces, ensure_yunet_model, is_near_duplicate, nearest_province  # noqa: E402
++from image_ingest_common import (  # noqa: E402
++    blur_faces,
++    ensure_yunet_model,
++    is_near_duplicate,
++    nearest_province,
++    sort_cells_by_proximity,
++)
+ 
+ import faiss  # noqa: E402
+ import torch  # noqa: E402
+@@ -301,12 +307,18 @@ def _persist_state(output_dir: Path, embeddings: list, meta_rows: list, complete
+ 
+ def main() -> None:
+     parser = argparse.ArgumentParser()
+-    parser.add_argument("--output", default="../data/commons_spain")
++    parser.add_argument("--output", default="../../data/commons_spain")
+     parser.add_argument("--cell-km", type=float, default=10.0)
+     parser.add_argument("--cap-per-cell", type=int, default=400)
+     parser.add_argument("--phash-threshold", type=int, default=8)
+     parser.add_argument("--max-pages-per-cell", type=int, default=3)
+     parser.add_argument("--flush-every-cells", type=int, default=25)
++    parser.add_argument("--max-cells", type=int, default=None,
++                         help="Limita el numero de celdas a procesar en esta ejecucion (para probar antes de lanzar todo)")
++    parser.add_argument("--near", type=str, default=None,
++                         help='"lat,lon" -- ordena las celdas por cercania a este punto en vez del orden de generacion del grid '
++                              '(las primeras celdas del grid caen en el Atlantico/frontera portuguesa). Combinar con --max-cells '
++                              'para un test rapido en una ciudad conocida, p.ej. --near "40.4168,-3.7038" --max-cells 1 para Madrid.')
+     args = parser.parse_args()
+ 
+     output_dir = Path(args.output)
+@@ -322,7 +334,14 @@ def main() -> None:
+ 
+     all_cells = generate_spain_grid(cell_km=args.cell_km)
+     pending_cells = [c for c in all_cells if c.id not in completed]
+-    print(f"{len(all_cells)} celdas en el grid ({len(pending_cells)} pendientes).")
++
++    if args.near:
++        near_lat, near_lon = (float(x) for x in args.near.split(","))
++        pending_cells = sort_cells_by_proximity(pending_cells, near_lat, near_lon)
++    if args.max_cells:
++        pending_cells = pending_cells[:args.max_cells]
++
++    print(f"{len(all_cells)} celdas en el grid ({len(pending_cells)} pendientes en esta ejecucion).")
+ 
+     client = httpx.Client()
+     cells_since_flush = 0
+diff --git a/backend/scripts/geolocalization/build_faiss_index.py b/backend/scripts/geolocalization/build_faiss_index.py
+index 8fe9ab7..8828524 100644
+--- a/backend/scripts/geolocalization/build_faiss_index.py
++++ b/backend/scripts/geolocalization/build_faiss_index.py
+@@ -5,11 +5,11 @@ vecinos más cercanos (reverse image search geográfico).
+ 
+ Uso:
+     pip install torch transformers faiss-cpu pillow tqdm pandas numpy
+-    python build_faiss_index.py --images ../data/osv5m_spain
++    python build_faiss_index.py --images ../../data/osv5m_spain
+ 
+ Salida:
+-    ../data/osv5m_spain/index.faiss       (índice FAISS)
+-    ../data/osv5m_spain/index_meta.csv    (mismo orden que el índice: id, lat, lon, city, region)
++    ../../data/osv5m_spain/index.faiss       (índice FAISS)
++    ../../data/osv5m_spain/index_meta.csv    (mismo orden que el índice: id, lat, lon, city, region)
+ 
+ Nota: usa ViT-S/14 (la versión más pequeña de DINOv2, ~340MB) para que sea
+ viable en CPU. Si tienes GPU con CUDA, este script la detecta y usa
+@@ -104,7 +104,7 @@ def _normalize_columns(metadata: pd.DataFrame) -> pd.DataFrame:
+ 
+ def main() -> None:
+     parser = argparse.ArgumentParser()
+-    parser.add_argument("--images", default="../data/osv5m_spain")
++    parser.add_argument("--images", default="../../data/osv5m_spain")
+     args = parser.parse_args()
+ 
+     base_dir = Path(args.images)
+diff --git a/backend/scripts/geolocalization/build_flickr_index.py b/backend/scripts/geolocalization/build_flickr_index.py
+index a9b102d..5e087fb 100644
+--- a/backend/scripts/geolocalization/build_flickr_index.py
++++ b/backend/scripts/geolocalization/build_flickr_index.py
+@@ -41,7 +41,7 @@ lectura de contenido público): https://www.flickr.com/services/apps/create/
+ Uso:
+     pip install httpx opencv-python imagehash pandas numpy faiss-cpu \
+         pillow tqdm torch transformers
+-    python build_flickr_index.py --output ../data/flickr_spain --cell-km 10 \
++    python build_flickr_index.py --output ../../data/flickr_spain --cell-km 10 \
+         --cap-per-cell 400 --min-accuracy 12
+ 
+ Salida (en --output):
+@@ -78,7 +78,13 @@ from tqdm import tqdm
+ sys.path.insert(0, str(Path(__file__).parent))
+ from build_faiss_index import MODEL_NAME, embed_image, load_model  # noqa: E402
+ from flickr_grid import GridCell, generate_spain_grid  # noqa: E402
+-from image_ingest_common import blur_faces, ensure_yunet_model, is_near_duplicate, nearest_province  # noqa: E402
++from image_ingest_common import (  # noqa: E402
++    blur_faces,
++    ensure_yunet_model,
++    is_near_duplicate,
++    nearest_province,
++    sort_cells_by_proximity,
++)
+ 
+ import faiss  # noqa: E402
+ import torch  # noqa: E402
+@@ -260,13 +266,19 @@ def _persist_state(output_dir: Path, embeddings: list, meta_rows: list, complete
+ 
+ def main() -> None:
+     parser = argparse.ArgumentParser()
+-    parser.add_argument("--output", default="../data/flickr_spain")
++    parser.add_argument("--output", default="../../data/flickr_spain")
+     parser.add_argument("--cell-km", type=float, default=10.0)
+     parser.add_argument("--cap-per-cell", type=int, default=400)
+     parser.add_argument("--min-accuracy", type=int, default=12, help="Escala Flickr 1-16, 16=nivel calle")
+     parser.add_argument("--phash-threshold", type=int, default=8, help="Distancia Hamming máxima para considerar casi-duplicado")
+     parser.add_argument("--max-pages-per-cell", type=int, default=3)
+     parser.add_argument("--flush-every-cells", type=int, default=25)
++    parser.add_argument("--max-cells", type=int, default=None,
++                         help="Limita el numero de celdas a procesar en esta ejecucion (para probar antes de lanzar todo)")
++    parser.add_argument("--near", type=str, default=None,
++                         help='"lat,lon" -- ordena las celdas por cercania a este punto en vez del orden de generacion del grid '
++                              '(las primeras celdas del grid caen en el Atlantico/frontera portuguesa). Combinar con --max-cells '
++                              'para un test rapido en una ciudad conocida, p.ej. --near "40.4168,-3.7038" --max-cells 1 para Madrid.')
+     parser.add_argument("--api-key", default=os.environ.get("FLICKR_API_KEY"))
+     args = parser.parse_args()
+ 
+@@ -287,7 +299,14 @@ def main() -> None:
+ 
+     all_cells = generate_spain_grid(cell_km=args.cell_km)
+     pending_cells = [c for c in all_cells if c.id not in completed]
+-    print(f"{len(all_cells)} celdas en el grid ({len(pending_cells)} pendientes).")
++
++    if args.near:
++        near_lat, near_lon = (float(x) for x in args.near.split(","))
++        pending_cells = sort_cells_by_proximity(pending_cells, near_lat, near_lon)
++    if args.max_cells:
++        pending_cells = pending_cells[:args.max_cells]
++
++    print(f"{len(all_cells)} celdas en el grid ({len(pending_cells)} pendientes en esta ejecucion).")
+ 
+     client = httpx.Client()
+     cells_since_flush = 0
+diff --git a/backend/scripts/geolocalization/download_osv5m_spain.py b/backend/scripts/geolocalization/download_osv5m_spain.py
+index 83417a8..c44355b 100644
+--- a/backend/scripts/geolocalization/download_osv5m_spain.py
++++ b/backend/scripts/geolocalization/download_osv5m_spain.py
+@@ -47,7 +47,7 @@ guardado -- se persiste el progreso tras cada shard que termina.
+ 
+ Uso:
+     pip install huggingface_hub pandas pillow tqdm
+-    python download_osv5m_spain.py --output ../data/osv5m_spain --max-disk-gb 35 --workers 6
++    python download_osv5m_spain.py --output ../../data/osv5m_spain --max-disk-gb 35 --workers 6
+ """
+ import argparse
+ import os
+@@ -187,7 +187,7 @@ def _download_and_extract_shard(
+ 
+ def main() -> None:
+     parser = argparse.ArgumentParser()
+-    parser.add_argument("--output", default="../data/osv5m_spain")
++    parser.add_argument("--output", default="../../data/osv5m_spain")
+     parser.add_argument("--max-disk-gb", type=float, default=35.0, help="Tope de disco para las imágenes guardadas")
+     parser.add_argument(
+         "--splits", nargs="+", default=["train", "test"], choices=["train", "test"],
+diff --git a/backend/scripts/geolocalization/download_osv5m_world.py b/backend/scripts/geolocalization/download_osv5m_world.py
+index 86ce0ad..cf6bf03 100644
+--- a/backend/scripts/geolocalization/download_osv5m_world.py
++++ b/backend/scripts/geolocalization/download_osv5m_world.py
+@@ -37,7 +37,7 @@ guardado -- se persiste el progreso tras cada shard que termina.
+ 
+ Uso:
+     pip install huggingface_hub pandas pillow tqdm
+-    python download_osv5m_world.py --output ../data/osv5m_world --max-disk-gb 35 --workers 6
++    python download_osv5m_world.py --output ../../data/osv5m_world --max-disk-gb 35 --workers 6
+ """
+ import argparse
+ import os
+@@ -163,7 +163,7 @@ def _download_and_extract_shard(
+ 
+ def main() -> None:
+     parser = argparse.ArgumentParser()
+-    parser.add_argument("--output", default="../data/osv5m_world")
++    parser.add_argument("--output", default="../../data/osv5m_world")
+     parser.add_argument("--max-disk-gb", type=float, default=35.0, help="Tope de disco para las imágenes guardadas")
+     parser.add_argument(
+         "--splits", nargs="+", default=["train", "test"], choices=["train", "test"],
+diff --git a/backend/scripts/geolocalization/image_ingest_common.py b/backend/scripts/geolocalization/image_ingest_common.py
+index 613c047..16f5deb 100644
+--- a/backend/scripts/geolocalization/image_ingest_common.py
++++ b/backend/scripts/geolocalization/image_ingest_common.py
+@@ -109,3 +109,13 @@ def blur_faces(image_bgr: np.ndarray, detector) -> np.ndarray:
+ 
+ def is_near_duplicate(new_hash: imagehash.ImageHash, accepted: list[imagehash.ImageHash], threshold: int) -> bool:
+     return any((new_hash - h) <= threshold for h in accepted)
++
++
++def sort_cells_by_proximity(cells: list, lat: float, lon: float) -> list:
++    """Ordena celdas por cercanía a un punto (distancia en grados al
++    cuadrado, no geodésica exacta -- suficiente para elegir por dónde
++    empezar). Pensado para --near: probar el pipeline contra una ciudad
++    conocida en vez de contra las primeras celdas del grid por orden de
++    generación, que caen en el Atlántico/frontera portuguesa y casi
++    seguro no devuelven nada útil para verificar que todo funciona."""
++    return sorted(cells, key=lambda c: (c.center_lat - lat) ** 2 + (c.center_lon - lon) ** 2)
+diff --git a/backend/scripts/geolocalization/merge_faiss_indices.py b/backend/scripts/geolocalization/merge_faiss_indices.py
+index 981ced7..bf6becd 100644
+--- a/backend/scripts/geolocalization/merge_faiss_indices.py
++++ b/backend/scripts/geolocalization/merge_faiss_indices.py
+@@ -13,8 +13,8 @@ crudos ya obtenidos" de "índice derivado, siempre regenerable".
+ 
+ Uso:
+     python merge_faiss_indices.py \
+-        --sources ../data/osv5m_spain ../data/flickr_spain \
+-        --output ../data/spain_combined
++        --sources ../../data/osv5m_spain ../../data/flickr_spain \
++        --output ../../data/spain_combined
+ 
+ Tras ejecutarlo, apunta _INDEX_DIR en app/vision/geolocation.py a
+ --output (o copia/symlink el resultado sobre data/osv5m_spain/ si
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 21d7e60..8b0e4a0 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -18,7 +18,7 @@ services:
+     volumes:
+       # El índice FAISS de geolocalización (backend/data/osv5m_spain/) no
+       # se copia dentro de la imagen (pesa demasiado y se regenera con
+-      # scripts/build_faiss_index.py, ver .gitignore) -- se monta en vez de
++      # scripts/geolocalization/build_faiss_index.py, ver .gitignore) -- se monta en vez de
+       # eso, para que el contenedor vea el mismo índice que ya tengas
+       # construido en tu disco. Sin este volumen, el backend informará
+       # "índice no construido" aunque exista de verdad en tu máquina.
