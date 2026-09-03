@@ -169,12 +169,12 @@ Genera un grid de celdas de ~10km² sobre España (`flickr_grid.py`,
 11.720 celdas a ese tamaño), y por cada celda: busca fotos con
 `list=geosearch` del API de MediaWiki, filtra por tipo de imagen y
 tamaño, baraja los candidatos (para no llenar el cupo de la celda solo
-con el punto más fotografiado, ver ADR correspondiente si se documenta
-en `docs/`), pixela las caras detectadas (YuNet, vía OpenCV -- **nunca**
-matrículas, ver ADR-42 en `docs/src/09_architecture_decisions.adoc`),
-extrae el embedding con DINOv2 y descarta la imagen -- **nunca se
-persiste ninguna foto a disco**, solo el vector y sus metadatos
-(`id`, `lat`, `lon`, `region`, `license`).
+con el punto más fotografiado), pixela las caras detectadas (YuNet, vía
+OpenCV -- **nunca** matrículas, ver ADR-42 en
+`docs/src/09_architecture_decisions.adoc`), extrae el embedding con
+DINOv2 y descarta la imagen -- **nunca se persiste ninguna foto a
+disco**, solo el vector y sus metadatos (`id`, `lat`, `lon`, `region`,
+`license`).
 
 ### Instalar dependencias
 

@@ -457,6 +457,118 @@ sin una señal que, en la práctica, sí podría acotar algo más la
 población estimada -- aceptado como límite de alcance, igual que la
 correlación entre plataformas en ADR-1.
 
+==== ADR-42: Pixelado de caras (nunca matrículas) antes del embedding, en una sola pasada sin persistir ninguna imagen
+
+
+*Contexto*: al ampliar el índice FAISS de geolocalización (ver ADR-9)
+más allá de OSV-5M con fotos de terceros de Wikimedia Commons --
+personas reales, identificables, que dieron su consentimiento de
+licencia (CC) sobre el USO de la foto, pero nunca sobre que su cara
+concreta acabara representada dentro de un índice de una herramienta de
+análisis de privacidad ajena. A diferencia de OSV-5M (imagery
+sistemática desde vehículo, donde una cara reconocible es una rareza
+incidental), estas son fotos personales/de viaje donde una persona en
+primer plano es habitual.
+
+*Alternativas consideradas*:
+
+- *No aplicar ningún blur, apoyándose en que la licencia CC ya autoriza
+  el uso de la foto*: descartada -- la licencia cubre la reutilización
+  de la OBRA (la foto), no constituye consentimiento de la persona
+  fotografiada para que su cara quede embebida en un sistema pensado
+  para señalar exposición de datos personales de OTRAS personas. Habría
+  sido, además, directamente inconsistente con ADR-18 (rechazo de
+  reconocimiento facial de terceros sin consentimiento): construir la
+  función de geolocalización sobre caras de desconocidos sin blur,
+  mientras el propio proyecto rechaza explícitamente identificar a
+  terceros en las fotos que analiza, es la misma clase de contradicción
+  que ADR-18 ya evita en el otro sentido.
+- *Detectores de cara "de calidad" (MTCNN, RetinaFace)*: descartados por
+  desproporcionados para el volumen (hasta ~1M imágenes) y el
+  presupuesto de cómputo disponible (recursos limitados, sin GPU
+  dedicada para este script offline) -- mucho más lentos en CPU que la
+  ganancia de precisión justifica para esta tarea (blur, no
+  reconocimiento).
+- *Blur también de matrículas*: evaluado y aplazado, no descartado por
+  completo. A diferencia de Mapillary/KartaView (imagery sistemática de
+  calle, donde una matrícula en primer plano es frecuente), estas
+  fuentes son fotos personales/de viaje -- las matrículas aparecen con
+  mucha menor frecuencia, y el único detector disponible sin coste
+  adicional real (`haarcascade_russian_plate_number.xml`) es
+  notablemente menos fiable que YuNet para caras. Dado el presupuesto de
+  cómputo limitado, se priorizó la señal con mayor frecuencia real y
+  mejor detector disponible.
+- *Persistir una versión ya pixelada a disco, como paso intermedio antes
+  de calcular el embedding*: descartada -- ya que el único output que
+  hace falta es el índice (vector + coordenadas), no un dataset de
+  imágenes reutilizable, mantener una copia pixelada en disco solo
+  añadiría una vuelta completa de I/O sin ningún beneficio, y alargaría
+  innecesariamente la ventana en la que existe una copia de la foto de
+  un tercero en el disco de la máquina que construye el índice.
+- *Blur gaussiano en vez de pixelado*: descartado a favor del pixelado --
+  un desenfoque gaussiano suave es, en determinadas condiciones,
+  parcialmente reversible por deconvolución; un pixelado fuerte destruye
+  la información espacial de la región de forma irreversible, y es
+  además más barato de calcular (downscale + upscale de una región
+  pequeña, frente a una convolución sobre toda la ROI).
+
+*Decisión*: cada foto se procesa en una única pasada, siempre en
+memoria, nunca escrita a disco (ni la original ni la pixelada):
+descarga -> detección de caras (YuNet, vía `cv2.FaceDetectorYN`) sobre
+una copia reescalada a 640px de lado largo -> pixelado de cada cara
+detectada, reescalando las cajas de vuelta a la resolución real ->
+extracción del embedding DINOv2 SOBRE LA IMAGEN YA PIXELADA -> descarte
+de la imagen (`blur_faces()`/`ensure_yunet_model()` en
+`scripts/geolocalization/image_ingest_common.py`, compartido entre
+`build_commons_index.py` y `build_flickr_index.py`). El orden
+detección-a-baja-resolución + pixelado-a-resolución-real es
+deliberado: la detección es la parte cara computacionalmente, el
+pixelado de una región ya localizada es casi gratis, así que reescalar
+solo la primera reduce el coste total sin perder precisión de
+localización. Que el pixelado ocurra ANTES del embedding, y no después
+sobre una copia aparte "solo para mostrar", es igualmente deliberado:
+si el embedding se calculara sobre la imagen sin blur, el vector ya
+habría capturado información derivada de la cara, y pixelar la imagen a
+posteriori no deshace eso -- el objetivo es privacidad incluso dentro
+del índice, no solo en lo que pudiera mostrarse.
+
+*Gotcha de implementación*: el modelo YuNet (`opencv/face_detection_yunet`,
+~230KB) se descarga vía `huggingface_hub.hf_hub_download()`, no con una
+petición directa a `raw.githubusercontent.com/opencv/opencv_zoo/...`. El
+primer intento sí usaba esa URL directa, y fallaba en tiempo de
+ejecución: ese fichero está versionado con Git LFS en el repositorio de
+GitHub, así que una descarga HTTP ingenua de la URL "raw" devuelve el
+PUNTERO de texto de Git LFS (~130 bytes: `version
+https://git-lfs.github.com/...`, `oid`, `size`), no el binario real --
+`cv2.FaceDetectorYN.create()` fallaba al intentar parsear ese puntero
+como si fuera el modelo ONNX. `huggingface_hub` resuelve LFS
+correctamente porque habla el protocolo real de descarga del Hub, y ya
+es dependencia del proyecto (usada para el propio DINOv2 y para
+OSV-5M), así que el fix no añadió ninguna dependencia nueva.
+
+*Consecuencias*: (+) coherente con la postura de ADR-18 en vez de
+contradecirla -- ese ADR rechaza EXTRAER información facial de terceros
+sin consentimiento; este ADR hace lo contrario, DESTRUIRLA activamente
+antes de que llegue a formar parte de cualquier representación
+persistente; (+) coste computacional bajo medido en la práctica (con
+detección a resolución reducida, la parte de blur no domina el tiempo
+por imagen frente a la extracción del embedding ni frente a la propia
+descarga de red); (+) ninguna copia de una foto de un tercero, pixelada
+o no, toca nunca el disco de la máquina que construye el índice; (+) la
+privacidad se preserva incluso dentro del propio vector del índice, no
+solo en una capa de presentación; (-) las matrículas no se pixelan en
+estas fuentes -- aceptado como limitación documentada, no como
+descuido, dado el presupuesto de cómputo disponible y la menor
+frecuencia esperada de matrículas en fotos personales/de viaje frente a
+imagery sistemática de calle; revisitable si en el futuro se incorpora
+Mapillary/KartaView (donde sí serían frecuentes) al mismo pipeline;
+(-) YuNet, como cualquier detector, no es infalible -- caras muy
+pequeñas, muy de perfil, u ocluidas pueden no detectarse y quedar sin
+pixelar; riesgo residual no eliminable por completo con ningún detector
+automático, mitigado (no resuelto) por descartar además del blur
+cualquier imagen anormalmente grande o de tipo no fotográfico antes de
+llegar a esta fase.
+
 ==== ADR-35: Atributos que nunca se detectarán automáticamente (origen étnico/racial, salud/discapacidad, opinión política)
 
 
