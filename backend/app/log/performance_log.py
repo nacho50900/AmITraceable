@@ -128,9 +128,9 @@ def log_photo_analysis_run(
     app/log/translation_log.py, esa sí es CPU siempre) pero NO el
     análisis de fotos -- corregido tras confirmarlo directamente contra
     el código de selección de dispositivo (no era una suposición
-    razonable, era un error de hecho)."""
-    global _warned_unwritable
-
+    razonable, era un error de hecho). La escritura en sí (con su
+    fallback de aviso único si el directorio no es escribible) vive en
+    `_append_entry`."""
     if not settings.enable_performance_logging:
         return  # logging de rendimiento desactivado, ver ENABLE_PERFORMANCE_LOGGING
 
@@ -179,44 +179,21 @@ def log_photo_analysis_run(
     # de trabajo hubo en ese dispositivo por cada segundo de reloj", que
     # puede superar el 100% con buen solapamiento (señal de que el
     # pipeline aprovecha bien la concurrencia entre modelos).
-    dinov2_total = sum(per_photo_dinov2_seconds)
-    scene_total = sum(per_photo_scene_seconds)
-
-    cuda_gpu_seconds = 0.0
-    igpu_seconds = 0.0
-    cpu_seconds = 0.0
-
-    if igpu_offload_used:
-        igpu_seconds += dinov2_total
-    elif dinov2_local_device == "cuda":
-        cuda_gpu_seconds += dinov2_total
-    elif dinov2_local_device == "cpu":
-        cpu_seconds += dinov2_total
-    # dinov2_local_device is None (modelo nunca cargado, p. ej. 0 fotos
-    # con geolocalización intentada): dinov2_total ya es 0.0, no aporta.
-
-    if moondream_device == "cuda":
-        cuda_gpu_seconds += scene_total
-    elif moondream_device == "cpu":
-        cpu_seconds += scene_total
-    # moondream_device is None (enable_scene_analysis=False o modelo
-    # nunca cargado): scene_total ya es 0.0, no aporta.
-
-    cuda_gpu_usage_pct = (cuda_gpu_seconds / total_wall_seconds * 100) if total_wall_seconds else 0.0
-    igpu_usage_pct = (igpu_seconds / total_wall_seconds * 100) if total_wall_seconds else 0.0
-    cpu_usage_pct = (cpu_seconds / total_wall_seconds * 100) if total_wall_seconds else 0.0
-
-    avg = sum(per_photo_seconds) / len(per_photo_seconds) if per_photo_seconds else None
-    avg_dinov2 = (
-        sum(per_photo_dinov2_seconds) / len(per_photo_dinov2_seconds)
-        if per_photo_dinov2_seconds
-        else None
+    cuda_gpu_seconds, igpu_seconds, cpu_seconds = _compute_device_seconds(
+        igpu_offload_used=igpu_offload_used,
+        dinov2_local_device=dinov2_local_device,
+        moondream_device=moondream_device,
+        dinov2_total=sum(per_photo_dinov2_seconds),
+        scene_total=sum(per_photo_scene_seconds),
     )
-    avg_scene = (
-        sum(per_photo_scene_seconds) / len(per_photo_scene_seconds)
-        if per_photo_scene_seconds
-        else None
-    )
+
+    cuda_gpu_usage_pct = _pct_of_wall_time(cuda_gpu_seconds, total_wall_seconds)
+    igpu_usage_pct = _pct_of_wall_time(igpu_seconds, total_wall_seconds)
+    cpu_usage_pct = _pct_of_wall_time(cpu_seconds, total_wall_seconds)
+
+    avg = _average(per_photo_seconds)
+    avg_dinov2 = _average(per_photo_dinov2_seconds)
+    avg_scene = _average(per_photo_scene_seconds)
 
     entry = {
         "timestamp": time.time(),
@@ -268,6 +245,56 @@ def log_photo_analysis_run(
         "per_photo_dinov2_seconds": per_photo_dinov2_seconds,
         "per_photo_scene_seconds": per_photo_scene_seconds,
     }
+
+    _append_entry(entry)
+
+
+def _compute_device_seconds(
+    *,
+    igpu_offload_used: bool,
+    dinov2_local_device: str | None,
+    moondream_device: str | None,
+    dinov2_total: float,
+    scene_total: float,
+) -> tuple[float, float, float]:
+    """Reparte `dinov2_total`/`scene_total` (segundos de cómputo de cada
+    modelo) entre las tres categorías de dispositivo -- ver el comentario
+    detallado en `log_photo_analysis_run` sobre por qué son tres y no dos."""
+    cuda_gpu_seconds = 0.0
+    igpu_seconds = 0.0
+    cpu_seconds = 0.0
+
+    if igpu_offload_used:
+        igpu_seconds += dinov2_total
+    elif dinov2_local_device == "cuda":
+        cuda_gpu_seconds += dinov2_total
+    elif dinov2_local_device == "cpu":
+        cpu_seconds += dinov2_total
+    # dinov2_local_device is None (modelo nunca cargado, p. ej. 0 fotos
+    # con geolocalización intentada): dinov2_total ya es 0.0, no aporta.
+
+    if moondream_device == "cuda":
+        cuda_gpu_seconds += scene_total
+    elif moondream_device == "cpu":
+        cpu_seconds += scene_total
+    # moondream_device is None (enable_scene_analysis=False o modelo
+    # nunca cargado): scene_total ya es 0.0, no aporta.
+
+    return cuda_gpu_seconds, igpu_seconds, cpu_seconds
+
+
+def _pct_of_wall_time(device_seconds: float, total_wall_seconds: float) -> float:
+    return (device_seconds / total_wall_seconds * 100) if total_wall_seconds else 0.0
+
+
+def _average(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
+def _append_entry(entry: dict) -> None:
+    """Escribe `entry` como una línea JSON en el log. Nunca lanza: un
+    fallo de escritura no debe tumbar ni degradar el análisis real."""
+    global _warned_unwritable
 
     try:
         _LOG_DIR.mkdir(parents=True, exist_ok=True)

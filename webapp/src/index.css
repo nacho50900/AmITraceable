@@ -468,16 +468,18 @@ body {
   color: var(--text-dim);
   text-decoration: none;
   font-weight: 600;
-  padding: 10px 20px;
+  padding: 8px 16px;
   border: 1px solid var(--border);
   cursor: pointer;
   border-radius: 6px;
   transition: background 0.15s ease, color 0.15s ease;
+  font-size: 13px;
 }
 
 .btn-secondary:hover {
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
+  border-color: var(--text-dim);
 }
 
 .progress-actions {
@@ -700,21 +702,6 @@ body {
   font-family: var(--mono);
   font-size: 14px;
   font-weight: 400;
-}
-
-.btn-secondary {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  padding: 8px 16px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.btn-secondary:hover {
-  border-color: var(--text-dim);
-  color: var(--text);
 }
 
 /* --- Dashboard --- */

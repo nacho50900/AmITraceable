@@ -42,24 +42,27 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-@asynccontextmanager
-async def _lifespan(app: FastAPI):
-    # Reparto de hilos internos de PyTorch entre las inferencias que pueden
-    # correr A LA VEZ, para evitar sobre-suscripción de CPU: por defecto,
-    # PyTorch usa TODOS los núcleos disponibles en CADA llamada (da igual
-    # que la hayas lanzado desde un hilo de Python aparte) -- con
-    # `photo_analysis_concurrency` fotos analizándose a la vez, eso
-    # significa varias inferencias peleándose por los mismos núcleos en
-    # vez de repartírselos, lo que puede hacer que el conjunto vaya MÁS
-    # LENTO que analizar las fotos de una en una. Se fija UNA VEZ aquí,
-    # antes de que ningún modelo haga ninguna inferencia real (es un
-    # ajuste de proceso completo, no por modelo ni por hilo) -- afecta por
-    # igual a DINOv2 y a Moondream2, comparten el mismo runtime de
-    # PyTorch. Dimensionado para el caso sostenido (varias fotos
-    # analizándose a la vez, cada una con su propio Moondream2 en marcha),
-    # que es el que de verdad importa: DINOv2 es rápido y su ventana de
-    # solape con Moondream2 en la misma foto es breve, así que no compensa
-    # complicar esto con un reparto dinámico por modelo.
+def _configure_pytorch_threads_and_log_gpu() -> None:
+    """Reparto de hilos internos de PyTorch entre las inferencias que pueden
+    correr A LA VEZ, para evitar sobre-suscripción de CPU: por defecto,
+    PyTorch usa TODOS los núcleos disponibles en CADA llamada (da igual
+    que la hayas lanzado desde un hilo de Python aparte) -- con
+    `photo_analysis_concurrency` fotos analizándose a la vez, eso
+    significa varias inferencias peleándose por los mismos núcleos en
+    vez de repartírselos, lo que puede hacer que el conjunto vaya MÁS
+    LENTO que analizar las fotos de una en una. Se fija UNA VEZ aquí,
+    antes de que ningún modelo haga ninguna inferencia real (es un
+    ajuste de proceso completo, no por modelo ni por hilo) -- afecta por
+    igual a DINOv2 y a Moondream2, comparten el mismo runtime de
+    PyTorch. Dimensionado para el caso sostenido (varias fotos
+    analizándose a la vez, cada una con su propio Moondream2 en marcha),
+    que es el que de verdad importa: DINOv2 es rápido y su ventana de
+    solape con Moondream2 en la misma foto es breve, así que no compensa
+    complicar esto con un reparto dinámico por modelo.
+
+    También registra si hay GPU disponible -- ver el aviso de la sección
+    de abajo sobre por qué esto es explícito en vez de inferirse por
+    fuera del contenedor."""
     try:
         import os
 
@@ -82,59 +85,85 @@ async def _lifespan(app: FastAPI):
             concurrency,
             threads_per_inference,
         )
-
-        # Log explícito de si hay GPU disponible: sin esto, la única forma
-        # de saber si de verdad se está usando la GPU (en vez de haber
-        # caído a CPU en silencio -- p. ej. porque falta la reserva de GPU
-        # en docker-compose.yml, o el driver NVIDIA no tiene soporte WSL2)
-        # era mirar el uso de VRAM por fuera del contenedor mientras corría
-        # un análisis, indirecto y fácil de malinterpretar. `cuda.is_available()`
-        # es la MISMA comprobación que ya hacen geolocation.py y
-        # scene_analysis.py para decidir dónde cargar cada modelo -- este
-        # log solo hace explícito, en el arranque, lo que esos dos módulos
-        # ya deciden por su cuenta más abajo.
-        if torch.cuda.is_available():
-            logger.info(
-                "GPU detectada: %s (CUDA %s) -- los modelos de vision (DINOv2, y "
-                "Moondream2 si ENABLE_SCENE_ANALYSIS=true) se cargaran en GPU.",
-                torch.cuda.get_device_name(0),
-                torch.version.cuda,
-            )
-            # Aviso de discrepancia: `concurrency` (arriba) se decidió en
-            # `_default_photo_analysis_concurrency()` (config.py) la
-            # PRIMERA VEZ que se importó `app.config` en este proceso --
-            # normalmente antes de llegar aquí. Esa función ya reintenta
-            # `torch.cuda.is_available()` varias veces para blindarse
-            # contra una GPU que tarda en aparecer (passthrough de Docker
-            # Desktop/WSL2), pero si aun así hubiera quedado desincronizada
-            # (p. ej. la GPU tardó más de lo que cubren esos reintentos),
-            # esto lo deja bien visible en el log en vez de descubrirse
-            # solo al analizar tiempos por foto muy por encima de lo
-            # normal. `Settings` es un singleton fijado UNA vez por vida
-            # del proceso (`settings = Settings()` en config.py) -- no hay
-            # forma de corregirlo en caliente, hace falta reiniciar el
-            # backend (`docker compose restart backend`).
-            if concurrency != 1:
-                logger.warning(
-                    "GPU detectada pero photo_analysis_concurrency=%d (valor de "
-                    "heuristica de CPU, se esperaba 1 con GPU) -- probable carrera "
-                    "en el arranque: la GPU no estaba lista cuando se decidio este "
-                    "valor. Los analisis de fotos competiran por la VRAM "
-                    "innecesariamente y pueden superar el timeout configurado. "
-                    "Reinicia el backend (docker compose restart backend) para "
-                    "que se recalcule.",
-                    concurrency,
-                )
-        else:
-            logger.info(
-                "GPU no detectada (torch.cuda.is_available()=False) -- los modelos "
-                "de vision se cargaran en CPU. Si esperabas usar una GPU, revisa la "
-                "reserva de GPU en docker-compose.yml, el driver NVIDIA (soporte "
-                "WSL2 si estas en Windows) y que requirements-vision.txt este "
-                "instalando el build de torch con CUDA, no el SOLO-CPU."
-            )
+        _log_gpu_availability(concurrency)
     except ImportError:
         pass  # torch no instalado (WITH_GEOLOCATION=false) -- nada que ajustar
+
+
+def _log_gpu_availability(concurrency: int) -> None:
+    """Log explícito de si hay GPU disponible: sin esto, la única forma
+    de saber si de verdad se está usando la GPU (en vez de haber
+    caído a CPU en silencio -- p. ej. porque falta la reserva de GPU
+    en docker-compose.yml, o el driver NVIDIA no tiene soporte WSL2)
+    era mirar el uso de VRAM por fuera del contenedor mientras corría
+    un análisis, indirecto y fácil de malinterpretar. `cuda.is_available()`
+    es la MISMA comprobación que ya hacen geolocation.py y
+    scene_analysis.py para decidir dónde cargar cada modelo -- este
+    log solo hace explícito, en el arranque, lo que esos dos módulos
+    ya deciden por su cuenta más abajo."""
+    import torch
+
+    if not torch.cuda.is_available():
+        logger.info(
+            "GPU no detectada (torch.cuda.is_available()=False) -- los modelos "
+            "de vision se cargaran en CPU. Si esperabas usar una GPU, revisa la "
+            "reserva de GPU en docker-compose.yml, el driver NVIDIA (soporte "
+            "WSL2 si estas en Windows) y que requirements-vision.txt este "
+            "instalando el build de torch con CUDA, no el SOLO-CPU."
+        )
+        return
+
+    logger.info(
+        "GPU detectada: %s (CUDA %s) -- los modelos de vision (DINOv2, y "
+        "Moondream2 si ENABLE_SCENE_ANALYSIS=true) se cargaran en GPU.",
+        torch.cuda.get_device_name(0),
+        torch.version.cuda,
+    )
+    # Aviso de discrepancia: `concurrency` se decidió en
+    # `_default_photo_analysis_concurrency()` (config.py) la PRIMERA VEZ
+    # que se importó `app.config` en este proceso -- normalmente antes de
+    # llegar aquí. Esa función ya reintenta `torch.cuda.is_available()`
+    # varias veces para blindarse contra una GPU que tarda en aparecer
+    # (passthrough de Docker Desktop/WSL2), pero si aun así hubiera
+    # quedado desincronizada (p. ej. la GPU tardó más de lo que cubren
+    # esos reintentos), esto lo deja bien visible en el log en vez de
+    # descubrirse solo al analizar tiempos por foto muy por encima de lo
+    # normal. `Settings` es un singleton fijado UNA vez por vida del
+    # proceso (`settings = Settings()` en config.py) -- no hay forma de
+    # corregirlo en caliente, hace falta reiniciar el backend (`docker
+    # compose restart backend`).
+    if concurrency != 1:
+        logger.warning(
+            "GPU detectada pero photo_analysis_concurrency=%d (valor de "
+            "heuristica de CPU, se esperaba 1 con GPU) -- probable carrera "
+            "en el arranque: la GPU no estaba lista cuando se decidio este "
+            "valor. Los analisis de fotos competiran por la VRAM "
+            "innecesariamente y pueden superar el timeout configurado. "
+            "Reinicia el backend (docker compose restart backend) para "
+            "que se recalcule.",
+            concurrency,
+        )
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # Reparto de hilos internos de PyTorch entre las inferencias que pueden
+    # correr A LA VEZ, para evitar sobre-suscripción de CPU: por defecto,
+    # PyTorch usa TODOS los núcleos disponibles en CADA llamada (da igual
+    # que la hayas lanzado desde un hilo de Python aparte) -- con
+    # `photo_analysis_concurrency` fotos analizándose a la vez, eso
+    # significa varias inferencias peleándose por los mismos núcleos en
+    # vez de repartírselos, lo que puede hacer que el conjunto vaya MÁS
+    # LENTO que analizar las fotos de una en una. Se fija UNA VEZ aquí,
+    # antes de que ningún modelo haga ninguna inferencia real (es un
+    # ajuste de proceso completo, no por modelo ni por hilo) -- afecta por
+    # igual a DINOv2 y a Moondream2, comparten el mismo runtime de
+    # PyTorch. Dimensionado para el caso sostenido (varias fotos
+    # analizándose a la vez, cada una con su propio Moondream2 en marcha),
+    # que es el que de verdad importa: DINOv2 es rápido y su ventana de
+    # solape con Moondream2 en la misma foto es breve, así que no compensa
+    # complicar esto con un reparto dinámico por modelo.
+    _configure_pytorch_threads_and_log_gpu()
 
     # Precarga el modelo DINOv2 + el índice FAISS de geolocalización EN EL
     # ARRANQUE del contenedor, en vez de esperar a la primera petición de

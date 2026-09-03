@@ -60,7 +60,6 @@ def reset_mistral_api_key(monkeypatch):
     """Cada test parte de una API key controlada explícitamente, en vez de
     depender del .env real (que en CI puede o no tener MISTRAL_API_KEY)."""
     monkeypatch.setattr(settings, "mistral_api_key", None)
-    yield
 
 
 class TestAnalyzeReportWithAi:

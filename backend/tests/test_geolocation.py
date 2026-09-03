@@ -105,7 +105,6 @@ def reset_module_globals(monkeypatch):
     monkeypatch.setattr(geolocation, "_device", "cpu")
     monkeypatch.setattr(geolocation, "_igpu_worker_device_index", None)
     monkeypatch.setattr(geolocation, "_igpu_worker_failed", False)
-    yield
 
 
 def _install_fake_index(monkeypatch, meta_df: pd.DataFrame, search_indices, search_similarities=None):

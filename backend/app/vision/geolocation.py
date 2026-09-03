@@ -521,6 +521,49 @@ def _lazy_load():
     _index_meta = pd.read_csv(meta_path, dtype={"id": str})
 
 
+def _get_dinov2_embedding(image) -> np.ndarray | None:
+    """Obtiene el embedding DINOv2 (normalizado L2) de `image`, primero
+    intentando el worker de iGPU (si está disponible y no ha fallado
+    antes) y cayendo al modelo local si eso no funciona. Devuelve None si
+    ni el worker ni el modelo local pudieron procesar la imagen."""
+    global _igpu_worker_failed
+
+    embedding = None
+
+    # Si ENABLE_IGPU_OFFLOAD detectó un dispositivo DirectML libre (ver
+    # _select_igpu_worker_device_index en _lazy_load), intenta despachar
+    # esta foto al worker aislado ANTES de tocar el modelo local.
+    if _igpu_worker_device_index is not None and not _igpu_worker_failed:
+        embedding = _embed_via_igpu_worker(image, _igpu_worker_device_index)
+        if embedding is None:
+            # Primer fallo con el worker (caído, timeout, operador de
+            # DINOv2 sin soporte en DirectML todavía...): se asume que no
+            # es fiable y se cae al modelo local de forma PERMANENTE para
+            # el resto del proceso -- NO se reintenta el worker en cada
+            # foto siguiente (evitaría pagar el timeout una y otra vez).
+            logger.warning(
+                "Fallo al despachar DINOv2 al worker de iGPU (%s) -- a "
+                "partir de ahora esta foto y las siguientes se procesaran "
+                "localmente en la GPU dedicada junto a Moondream2.",
+                settings.igpu_worker_url,
+            )
+            _igpu_worker_failed = True
+
+    if embedding is not None:
+        return embedding
+
+    import torch
+
+    try:
+        with torch.no_grad():
+            inputs = _processor(images=image.convert("RGB"), return_tensors="pt").to(_device)
+            outputs = _model(**inputs)
+            embedding = outputs.last_hidden_state[:, 0, :].cpu().numpy()[0]
+            return embedding / (np.linalg.norm(embedding) + 1e-8)
+    except Exception:
+        return None
+
+
 def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | None:
     """
     image: objeto PIL.Image ya cargado (no una ruta ni una URL -- el
@@ -549,38 +592,9 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
     if gps is not None:
         return _estimate_from_exact_coordinates(*gps)
 
-    embedding = None
-
-    # Si ENABLE_IGPU_OFFLOAD detectó un dispositivo DirectML libre (ver
-    # _select_igpu_worker_device_index en _lazy_load), intenta despachar
-    # esta foto al worker aislado ANTES de tocar el modelo local.
-    if _igpu_worker_device_index is not None and not _igpu_worker_failed:
-        embedding = _embed_via_igpu_worker(image, _igpu_worker_device_index)
-        if embedding is None:
-            # Primer fallo con el worker (caído, timeout, operador de
-            # DINOv2 sin soporte en DirectML todavía...): se asume que no
-            # es fiable y se cae al modelo local de forma PERMANENTE para
-            # el resto del proceso -- NO se reintenta el worker en cada
-            # foto siguiente (evitaría pagar el timeout una y otra vez).
-            logger.warning(
-                "Fallo al despachar DINOv2 al worker de iGPU (%s) -- a "
-                "partir de ahora esta foto y las siguientes se procesaran "
-                "localmente en la GPU dedicada junto a Moondream2.",
-                settings.igpu_worker_url,
-            )
-            _igpu_worker_failed = True
-
+    embedding = _get_dinov2_embedding(image)
     if embedding is None:
-        import torch
-
-        try:
-            with torch.no_grad():
-                inputs = _processor(images=image.convert("RGB"), return_tensors="pt").to(_device)
-                outputs = _model(**inputs)
-                embedding = outputs.last_hidden_state[:, 0, :].cpu().numpy()[0]
-                embedding = embedding / (np.linalg.norm(embedding) + 1e-8)
-        except Exception:
-            return None
+        return None
 
     similarities, indices = _index.search(embedding.reshape(1, -1).astype("float32"), k)
     similarities, indices = similarities[0], indices[0]

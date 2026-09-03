@@ -390,8 +390,6 @@ _RELIGION_TEXT_MAP = {
     "islam": "islam",
     "catolico": "catolicismo",
     "catolica": "catolicismo",
-    "catolico": "catolicismo",
-    "catolica": "catolicismo",
     "cristiano": "cristianismo",
     "cristiana": "cristianismo",
     "budista": "budismo",

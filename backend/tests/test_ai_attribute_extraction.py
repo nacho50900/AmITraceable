@@ -46,7 +46,6 @@ def _mock_content(**fields) -> dict:
 @pytest.fixture(autouse=True)
 def reset_mistral_api_key(monkeypatch):
     monkeypatch.setattr(settings, "mistral_api_key", None)
-    yield
 
 
 class TestNoApiKeyOrEmptyInput:

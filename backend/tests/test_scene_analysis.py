@@ -55,7 +55,6 @@ class _RaisingModel:
 def reset_module_globals(monkeypatch):
     """Cada test debe partir de _model limpio, igual que geolocation.py."""
     monkeypatch.setattr(scene_analysis, "_model", None)
-    yield
 
 
 def _install_fake_model(monkeypatch, structured_answer: str, caption_answer: str = "una escena sin detalles relevantes"):
