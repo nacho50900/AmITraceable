@@ -510,47 +510,14 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </li>
 <li><a href="#section-design-decisions">9. Decisiones de arquitectura</a>
 <ul class="sectlevel2">
-<li><a href="#_adr_1_reducir_el_alcance_a_un_mvp_multiplataforma_simple">9.1. ADR-1: Reducir el alcance a un MVP multiplataforma simple</a></li>
-<li><a href="#_adr_2_backend_en_python_fastapi_sobre_el_servicio_node_heredado">9.2. ADR-2: Backend en Python (FastAPI) sobre el servicio Node heredado</a></li>
-<li><a href="#_adr_3_sin_persistencia_procesamiento_100_en_memoria">9.3. ADR-3: Sin persistencia (procesamiento 100% en memoria)</a></li>
-<li><a href="#_adr_4_modelo_de_datos_genérico_tras_detectar_acoplamiento_a_reddit">9.4. ADR-4: Modelo de datos genérico tras detectar acoplamiento a Reddit</a></li>
-<li><a href="#_adr_5_rechazo_de_verificación_de_integridad_del_lado_del_cliente">9.5. ADR-5: Rechazo de verificación de integridad del lado del cliente</a></li>
-<li><a href="#_adr_6_rangos_de_versión_en_vez_de_versiones_exactas">9.6. ADR-6: Rangos de versión en vez de versiones exactas</a></li>
-<li><a href="#_adr_7_reutilización_del_monorepo_de_la_asignatura_asw">9.7. ADR-7: Reutilización del monorepo de la asignatura ASW</a></li>
-<li><a href="#_adr_8_estimación_de_k_anonimato_con_proporciones_agregadas_del_ine_no_una_base_de_datos_sintética">9.8. ADR-8: Estimación de k-anonimato con proporciones agregadas del INE, no una base de datos sintética</a></li>
-<li><a href="#_adr_9_geolocalización_de_fotos_limitada_a_españa_y_a_nivel_de_provincia">9.9. ADR-9: Geolocalización de fotos limitada a España y a nivel de provincia</a></li>
-<li><a href="#_adr_10_mistral_ai_como_proveedor_de_análisis_con_ia_por_jurisdicción">9.10. ADR-10: Mistral AI como proveedor de análisis con IA, por jurisdicción</a></li>
-<li><a href="#_adr_11_progreso_en_vivo_vía_server_sent_events_no_polling_ni_websockets">9.11. ADR-11: Progreso en vivo vía Server-Sent Events, no polling ni WebSockets</a></li>
-<li><a href="#_adr_12_webapp_y_backend_bajo_el_mismo_origen_proxy_de_nginx_en_vez_de_vite_api_url_absoluto">9.12. ADR-12: Webapp y backend bajo el mismo origen (proxy de Nginx), en vez de <code>VITE_API_URL</code> absoluto</a></li>
-<li><a href="#_adr_13_extracción_de_atributos_con_ia_como_complemento_de_las_regex_nunca_sustituto">9.13. ADR-13: Extracción de atributos con IA como complemento de las regex, nunca sustituto</a></li>
-<li><a href="#_adr_14_análisis_del_informe_con_ia_disparado_automáticamente_no_bajo_demanda">9.14. ADR-14: Análisis del informe con IA disparado automáticamente, no bajo demanda</a></li>
-<li><a href="#_adr_15_dependencias_de_geolocalización_activables_por_build_arg_con_precarga_en_el_arranque">9.15. ADR-15: Dependencias de geolocalización activables por build-arg, con precarga en el arranque</a></li>
-<li><a href="#_adr_16_consenso_entre_varias_fotos_y_exclusión_de_fotos_de_viaje_antes_de_asumir_residencia_por_imagen">9.16. ADR-16: Consenso entre varias fotos, y exclusión de fotos de viaje, antes de asumir residencia por imagen</a></li>
-<li><a href="#_adr_17_moondream2_local_para_analizar_el_contenido_de_las_fotos_en_vez_de_mistral_pixtral">9.17. ADR-17: Moondream2 local para analizar el contenido de las fotos, en vez de Mistral Pixtral</a></li>
-<li><a href="#_adr_18_rechazo_de_reconocimiento_facial_y_de_clasificación_de_rasgos_físicosétnicos">9.18. ADR-18: Rechazo de reconocimiento facial y de clasificación de rasgos físicos/étnicos</a></li>
-<li><a href="#_adr_19_bfloat16_inutilizable_en_cpu_sin_aceleración_por_hardwarefloat32_forzado_cuantización_descartada">9.19. ADR-19: bfloat16 inutilizable en CPU sin aceleración por hardware&#8201;&#8212;&#8201;float32 forzado, cuantización descartada</a></li>
-<li><a href="#_adr_20_concurrencia_de_fotos_autocalibrada_por_máquina_con_log_de_rendimiento_propio_en_vez_de_ajuste_manual_a_ciegas">9.20. ADR-20: Concurrencia de fotos autocalibrada por máquina, con log de rendimiento propio en vez de ajuste manual a ciegas</a></li>
-<li><a href="#_adr_21_prompt_de_moondream2_dividido_en_dos_llamadas_caption_en_inglés_estructurado_en_español">9.21. ADR-21: Prompt de Moondream2 dividido en dos llamadas (caption en inglés + estructurado en español)</a></li>
-<li><a href="#_adr_22_redimensionado_dedicado_al_crop_size_de_moondream2_independiente_del_usado_por_dinov2">9.22. ADR-22: Redimensionado dedicado al <code>crop_size</code> de Moondream2, independiente del usado por DINOv2</a></li>
-<li><a href="#_adr_23_campo_texto_visible_enlace_por_foto_en_publicaciones_con_varias_imágenes_y_descripción_visual_reconstruida_solo_con_señales_positivas">9.23. ADR-23: Campo TEXTO_VISIBLE, enlace por foto en publicaciones con varias imágenes, y descripción visual reconstruida solo con señales positivas</a></li>
-<li><a href="#_adr_24_condición_de_carrera_de_pil_entre_dinov2_y_moondream2_sobre_la_misma_imagen">9.24. ADR-24: Condición de carrera de PIL entre DINOv2 y Moondream2 sobre la misma imagen</a></li>
-<li><a href="#_adr_25_concurrencia_de_fotos_consciente_de_gpu_actualiza_adr_20_paralelismo_físico_por_cuda_streams_evaluado_y_descartado">9.25. ADR-25: Concurrencia de fotos consciente de GPU (actualiza ADR-20), paralelismo físico por CUDA streams evaluado y descartado</a></li>
-<li><a href="#_adr_26_backend_internacionalizable_por_códigos_estables_no_por_texto_ya_renderizado_en_español">9.26. ADR-26: Backend internacionalizable por códigos estables, no por texto ya renderizado en español</a></li>
-<li><a href="#_adr_27_estimación_indirecta_de_tramo_de_edad_con_umbral_de_confianza_propio_y_sin_sustituir_nunca_una_edad_exacta">9.27. ADR-27: Estimación indirecta de tramo de edad, con umbral de confianza propio y sin sustituir nunca una edad exacta</a></li>
-<li><a href="#_adr_28_offload_de_dinov2_a_una_igpu_vía_un_proceso_worker_aislado_no_en_el_propio_backend">9.28. ADR-28: Offload de DINOv2 a una iGPU vía un proceso worker aislado (no en el propio backend)</a></li>
-<li><a href="#_adr_29_semáforos_independientes_por_modelo_no_uno_compartido_por_foto_pipeline_real_entre_fotos">9.29. ADR-29: Semáforos independientes por modelo, no uno compartido por foto (pipeline real entre fotos)</a></li>
-<li><a href="#_adr_30_traducción_de_las_descripciones_visuales_de_moondream2_al_idioma_de_la_ui">9.30. ADR-30: Traducción de las descripciones visuales de Moondream2 al idioma de la UI</a></li>
-<li><a href="#_adr_31_traducción_local_con_ctranslate2_en_vez_de_mistral_sustituye_adr_30">9.31. ADR-31: Traducción local con CTranslate2 en vez de Mistral (sustituye ADR-30)</a></li>
-<li><a href="#_adr_32_bucle_de_repetición_sin_fin_con_beam_size1_en_la_traducción_local_corrige_parte_de_adr_31">9.32. ADR-32: Bucle de repetición sin fin con beam_size=1 en la traducción local (corrige parte de ADR-31)</a></li>
-<li><a href="#_adr_33_progreso_por_foto_emitido_dentro_de_cada_etapa_no_en_el_bucle_de_acumulación_de_resultados">9.33. ADR-33: Progreso por foto emitido dentro de cada etapa, no en el bucle de acumulación de resultados</a></li>
-<li><a href="#_adr_34_rasgos_físicos_manuales_ojospelopiel_recalculados_en_el_backend_no_duplicando_las_tablas_del_ine_en_el_frontend">9.34. ADR-34: Rasgos físicos manuales (ojos/pelo/piel) recalculados en el backend, no duplicando las tablas del INE en el frontend</a></li>
-<li><a href="#_adr_35_atributos_que_nunca_se_detectarán_automáticamente_origen_étnicoracial_saluddiscapacidad_opinión_política">9.35. ADR-35: Atributos que nunca se detectarán automáticamente (origen étnico/racial, salud/discapacidad, opinión política)</a></li>
-<li><a href="#_adr_36_age_distribution_1y_pasa_a_datos_reales_del_censo_tabla_01003_en_vez_de_repartir_uniformemente_age_distribution_5y">9.36. ADR-36: AGE_DISTRIBUTION_1Y pasa a datos reales del Censo (tabla 01003), en vez de repartir uniformemente AGE_DISTRIBUTION_5Y</a></li>
-<li><a href="#_adr_37_práctica_deportiva_condicionada_por_sexo_edad_y_nivel_de_estudios_con_prioridad_en_cascada_nunca_combinando_dos_ajustes_a_la_vez">9.37. ADR-37: Práctica deportiva condicionada por sexo, edad y nivel de estudios, con prioridad en cascada (nunca combinando dos ajustes a la vez)</a></li>
-<li><a href="#_adr_38_nuevo_atributo_nivel_estudios_nivel_de_formación_alcanzado_distinto_de_estudios_carrera_concreta">9.38. ADR-38: Nuevo atributo <code>nivel_estudios</code> (nivel de formación alcanzado), distinto de <code>estudios</code> (carrera concreta)</a></li>
-<li><a href="#_adr_39_ngrok_basic_auth_en_vez_de_dominio_propio_cloudflare_para_exponer_la_app_fuera_de_local">9.39. ADR-39: ngrok + Basic Auth en vez de dominio propio + Cloudflare, para exponer la app fuera de local</a></li>
-<li><a href="#_adr_40_nuevo_atributo_rama_estudios_rama_de_conocimiento_sin_paso_propio_cuando_estudios_ya_la_cubre">9.40. ADR-40: Nuevo atributo <code>rama_estudios</code> (rama de conocimiento), sin paso propio cuando <code>estudios</code> ya la cubre</a></li>
-<li><a href="#_adr_41_detección_heurística_de_collages_para_omitir_dinov2_y_moondream2_en_fotos_que_combinan_varias_sub_fotos">9.41. ADR-41: Detección heurística de collages, para omitir DINOv2 y Moondream2 en fotos que combinan varias sub-fotos</a></li>
+<li><a href="#adr-cat-alcance-y-estrategia-general">9.1. Alcance y estrategia general</a></li>
+<li><a href="#adr-cat-stack-tecnologico-e-infraestructura">9.2. Stack tecnológico e infraestructura</a></li>
+<li><a href="#adr-cat-privacidad-etica-y-rgpd">9.3. Privacidad, ética y RGPD</a></li>
+<li><a href="#adr-cat-modelo-de-datos-y-dominio">9.4. Modelo de datos y dominio</a></li>
+<li><a href="#adr-cat-extraccion-e-inferencia-de-atributos">9.5. Extracción e inferencia de atributos</a></li>
+<li><a href="#adr-cat-analisis-visual-vision-por-computador">9.6. Análisis visual (visión por computador)</a></li>
+<li><a href="#adr-cat-internacionalizacion-y-traduccion">9.7. Internacionalización y traducción</a></li>
+<li><a href="#adr-cat-experiencia-en-tiempo-real-y-ux-tecnica">9.8. Experiencia en tiempo real y UX técnica</a></li>
 </ul>
 </li>
 <li><a href="#section-quality-scenarios">10. Requisitos de calidad</a>
@@ -2511,27 +2478,9 @@ pero vacía).</p>
 <p>Flujo OAuth 2.0 completo desde que el usuario elige "Conectar con
 Reddit" en el mazo de cartas hasta que llega autenticado al dashboard.</p>
 </div>
-<div class="listingblock">
+<div class="imageblock">
 <div class="content">
-<pre>Failed to generate image: Could not load PlantUML. Either require 'asciidoctor-diagram-plantuml' or specify the location of the PlantUML JAR(s) using the 'DIAGRAM_PLANTUML_CLASSPATH' environment variable. Alternatively a PlantUML binary can be provided (plantuml-native in $PATH).
-actor Usuario
-participant "webapp\n(Landing)" as FE
-participant "backend\n(reddit_oauth.py)" as BE
-participant "Reddit\n(authorize + token)" as Reddit
-
-Usuario -&gt; FE: Selecciona carta "Reddit" y pulsa "Conectar"
-FE -&gt; BE: GET /auth/reddit/login
-BE -&gt; BE: genera state (CSRF), lo guarda en sesión
-BE --&gt; Usuario: 307 redirect a Reddit (authorize)
-Usuario -&gt; Reddit: Pantalla de consentimiento
-Reddit --&gt; Usuario: aprueba
-Reddit -&gt; BE: GET /auth/reddit/callback?code=...&amp;state=...
-BE -&gt; BE: valida state
-BE -&gt; Reddit: POST /api/v1/access_token (code -&gt; access_token)
-Reddit --&gt; BE: access_token
-BE -&gt; BE: guarda access_token en cookie de sesión firmada
-BE --&gt; Usuario: 307 redirect a /dashboard?platform=reddit
-Usuario -&gt; FE: GET /dashboard?platform=reddit</pre>
+<img src="./images/Secuencia%20OAuth%20Reddit.png" alt="Secuencia OAuth Reddit" width="953" height="598">
 </div>
 </div>
 </div>
@@ -2544,28 +2493,9 @@ usado en ambos pasos se deriva del <code>Host</code> de la petición
 (<code>auth/dynamic_origin.py</code>) cuando no hay un valor fijo en <code>.env</code>&#8201;&#8212;&#8201;debe
 ser idéntico en <code>/login</code> y en <code>/callback</code>, o Instagram rechaza el canje.</p>
 </div>
-<div class="listingblock">
+<div class="imageblock">
 <div class="content">
-<pre>Failed to generate image: Could not load PlantUML. Either require 'asciidoctor-diagram-plantuml' or specify the location of the PlantUML JAR(s) using the 'DIAGRAM_PLANTUML_CLASSPATH' environment variable. Alternatively a PlantUML binary can be provided (plantuml-native in $PATH).
-actor Usuario
-participant "webapp\n(Landing)" as FE
-participant "backend\n(instagram_oauth.py)" as BE
-participant "Instagram\n(authorize + token)" as IG
-
-Usuario -&gt; FE: Selecciona carta "Instagram" y pulsa "Conectar"
-FE -&gt; BE: GET /auth/instagram/login
-BE -&gt; BE: redirect_uri = INSTAGRAM_REDIRECT_URI o Host de la petición
-BE --&gt; Usuario: 307 redirect a Instagram (authorize)
-Usuario -&gt; IG: Pantalla de consentimiento (cuenta Business/Creator)
-IG --&gt; Usuario: aprueba
-IG -&gt; BE: GET /auth/instagram/callback?code=...&amp;state=...
-BE -&gt; BE: mismo redirect_uri que en /login
-BE -&gt; IG: POST /oauth/access_token (code -&gt; token corto)
-IG --&gt; BE: access_token corto + user_id
-BE -&gt; IG: GET /access_token?grant_type=ig_exchange_token
-IG --&gt; BE: access_token largo (60 días)
-BE -&gt; BE: guarda access_token + user_id en cookie de sesión
-BE --&gt; Usuario: 307 redirect a /dashboard?platform=instagram</pre>
+<img src="./images/Secuencia%20OAuth%20Instagram.png" alt="Secuencia OAuth Instagram" width="1073" height="627">
 </div>
 </div>
 </div>
@@ -2577,59 +2507,9 @@ nada a disco en ningún punto. El frontend usa la variante de streaming
 (<code>GET /api/analyze/{platform}/stream</code>, Server-Sent Events) para mostrar
 una pantalla de progreso real en vez de una espera opaca.</p>
 </div>
-<div class="listingblock">
+<div class="imageblock">
 <div class="content">
-<pre>Failed to generate image: Could not load PlantUML. Either require 'asciidoctor-diagram-plantuml' or specify the location of the PlantUML JAR(s) using the 'DIAGRAM_PLANTUML_CLASSPATH' environment variable. Alternatively a PlantUML binary can be provided (plantuml-native in $PATH).
-participant "webapp\n(Dashboard)" as FE
-participant "analysis_router" as Router
-participant "{platform}_client" as Client
-participant "nlp.fingerprint" as FP
-participant "nlp.attribute_inference" as Attr
-participant "scoring.privacy_score" as Score
-participant "report.generator" as Report
-participant "nlp.demographic_extraction\n(regex)" as Regex
-participant "nlp.ai_attribute_extraction\n(Mistral, opcional)" as AiAttr
-participant "scoring.k_anonymity" as KAnon
-participant "vision.geolocation\n(solo Instagram, opcional)" as Geo
-participant "vision.scene_analysis\n(opcional)" as Scene
-
-FE -&gt; Router: GET /api/analyze/{platform}/stream
-Router -&gt; Router: busca factory de la plataforma en el diccionario
-Router -&gt; Client: construye cliente con el token de sesión
-Client -&gt; Client: llama a la API externa (perfil + posts/media)
-Client --&gt; Router: SSE: "Leyendo publicaciones..." (progreso)
-Client --&gt; Router: SocialProfile (posts normalizados)
-Router -&gt; FP: build_fingerprint(posts)
-FP --&gt; Router: WritingFingerprint
-Router -&gt; Attr: infer_attributes(posts)
-Attr --&gt; Router: [InferredAttribute]
-Router -&gt; Score: compute_score(posts, fingerprint, attrs)
-Score --&gt; Router: PrivacyScore
-Router -&gt; Report: generate_report(platform, ..., progress_callback)
-Report -&gt; Regex: extract_demographics(posts + bio)
-Regex --&gt; Report: DemographicFindings (parcial)
-alt MISTRAL_API_KEY configurada
-  Report --&gt; Report: SSE: "Buscando autodeclaraciones con IA..." (progreso)
-  Report -&gt; AiAttr: extract_demographics_with_ai(posts, username, full_name, bio)
-  AiAttr --&gt; Report: DemographicFindings (solo huecos que la regex no encontró)
-  Report -&gt; Report: merge_findings(regex, ia) -- la regex nunca se pisa
-end
-Report -&gt; KAnon: estimate_population_narrowing(findings combinados)
-KAnon --&gt; Report: [PopulationEstimate] (con proportion ya calculada)
-alt platform == "instagram"
-  Report -&gt; Geo: estimate_locations_for_posts(posts, progress_callback)
-  loop por cada foto (incluidas todas las de un carrusel)
-    Geo -&gt; Geo: descarga la foto (en memoria, transitoria)
-    Geo -&gt; Scene: analyze_image_content(image)
-    Scene --&gt; Geo: afición/actividad + señal de pareja (o nada)
-  end
-  Geo --&gt; Report: SSE: "Analizando fotos..." (progreso, N/M)
-  Geo --&gt; Report: GeolocationOutcome(index_available, estimaciones,\nvisual_inferences, partner_signal_permalinks)
-  Report -&gt; Report: solo las de confianza &gt;= umbral alimentan KAnon;\ntodas se guardan en image_location_points
-  Report -&gt; Report: visual_inferences -&gt; inferred_attributes;\npartner_signal -&gt; estado_civil (solo si el texto no dio ya uno)
-end
-Report --&gt; Router: ExposureReport
-Router --&gt; FE: SSE final: {"done": true, "report": {...}}</pre>
+<img src="./images/Secuencia%20de%20análisis%20con%20progreso.png" alt="Secuencia de análisis con progreso" width="2875" height="1256">
 </div>
 </div>
 </div>
@@ -2640,35 +2520,9 @@ Router --&gt; FE: SSE final: {"done": true, "report": {...}}</pre>
 frontend: en cuanto <code>Dashboard.tsx</code> recibe el <code>ExposureReport</code> (evento
 final del streaming del escenario 3), dispara esta llamada por su cuenta&#8201;&#8212;&#8201;sin que el usuario tenga que pulsar nada.</p>
 </div>
-<div class="listingblock">
+<div class="imageblock">
 <div class="content">
-<pre>Failed to generate image: Could not load PlantUML. Either require 'asciidoctor-diagram-plantuml' or specify the location of the PlantUML JAR(s) using the 'DIAGRAM_PLANTUML_CLASSPATH' environment variable. Alternatively a PlantUML binary can be provided (plantuml-native in $PATH).
-participant "webapp\n(Dashboard)" as FE
-participant "webapp\n(AiSummaryCard)" as Card
-participant "analysis_router\n(ai_summary)" as Router
-participant "ai_analysis.py" as AI
-participant "Mistral AI API" as Mistral
-
-FE -&gt; Card: monta con el ExposureReport ya recibido
-Card -&gt; Router: POST /api/analyze/ai-summary (ExposureReport, con recommendations incluidas)
-Router -&gt; AI: analyze_report_with_ai(report)
-AI -&gt; AI: ¿MISTRAL_API_KEY configurada?
-alt sin API key
-  AI --&gt; Router: AiAnalysisUnavailable
-  Router --&gt; Card: 503 (no disponible)
-else con API key
-  AI -&gt; Mistral: POST /v1/chat/completions\n(informe en JSON + system prompt,\nresponse_format=json_object)
-  alt cuota agotada (429)
-    Mistral --&gt; AI: 429
-    AI --&gt; Router: AiAnalysisUnavailable (sin reintentar)
-    Router --&gt; Card: 503 (no disponible ahora mismo)
-  else éxito
-    Mistral --&gt; AI: {"veredicto": "...", "conclusiones": [...]}
-    AI -&gt; AI: parsea JSON, filtra items no-string/vacíos
-    AI --&gt; Router: {verdict, conclusions}
-    Router --&gt; Card: 200 {"verdict": "...", "conclusions": [...]}
-  end
-end</pre>
+<img src="./images/Secuencia%20de%20análisis%20con%20IA.png" alt="Secuencia de análisis con IA" width="1534" height="679">
 </div>
 </div>
 </div>
@@ -2679,45 +2533,17 @@ end</pre>
 carga perezosa (en la primera petición de análisis) para que el primer
 usuario no pague ese coste.</p>
 </div>
-<div class="listingblock">
+<div class="imageblock">
 <div class="content">
-<pre>Failed to generate image: Could not load PlantUML. Either require 'asciidoctor-diagram-plantuml' or specify the location of the PlantUML JAR(s) using the 'DIAGRAM_PLANTUML_CLASSPATH' environment variable. Alternatively a PlantUML binary can be provided (plantuml-native in $PATH).
-participant "docker-compose up" as Docker
-participant "main.py\n(lifespan)" as Main
-participant "vision.geolocation" as Geo
-
-Docker -&gt; Main: arranca el proceso uvicorn
-Main -&gt; Geo: _geolocation_available()?
-alt índice construido y dependencias instaladas
-  Main -&gt; Geo: _lazy_load() (en un hilo aparte, no bloquea el event loop)
-  Geo -&gt; Geo: descarga/carga pesos DINOv2 (caché en volumen persistente)
-  Geo -&gt; Geo: lee el índice FAISS de disco
-  Geo --&gt; Main: modelo e índice en memoria
-else no disponible
-  Main -&gt; Main: no hace nada, sigue el arranque normal
-end
-Main --&gt; Docker: backend listo para aceptar peticiones</pre>
+<img src="./images/Secuencia%20de%20arranque.png" alt="Secuencia de arranque" width="1178" height="441">
 </div>
 </div>
 </div>
 <div class="sect2">
 <h3 id="_escenario_6_integración_continua_push_a_main">6.6. Escenario 6: Integración continua (push a <code>main</code>)</h3>
-<div class="listingblock">
+<div class="imageblock">
 <div class="content">
-<pre>Failed to generate image: Could not load PlantUML. Either require 'asciidoctor-diagram-plantuml' or specify the location of the PlantUML JAR(s) using the 'DIAGRAM_PLANTUML_CLASSPATH' environment variable. Alternatively a PlantUML binary can be provided (plantuml-native in $PATH).
-actor Dev
-participant "GitHub" as GH
-participant "GitHub Actions\n(build.yml)" as CI
-participant "SonarCloud" as Sonar
-
-Dev -&gt; GH: git push (main)
-GH -&gt; CI: dispara workflow build.yml
-CI -&gt; CI: cache npm (webapp) / pip (backend), instala si falta
-CI -&gt; CI: npm run test:coverage (webapp) -&gt; lcov.info
-CI -&gt; CI: pytest --cov=app --cov-report=xml (backend) -&gt; coverage.xml
-CI -&gt; Sonar: sonar-scanner (fuentes + coberturas)
-Sonar --&gt; CI: resultado del Quality Gate
-CI --&gt; Dev: estado del workflow (verde/rojo) en GitHub</pre>
+<img src="./images/Secuencia%20de%20CI.png" alt="Secuencia de CI" width="801" height="453">
 </div>
 </div>
 <div style="page-break-after: always;"></div>
@@ -3666,8 +3492,16 @@ Las decisiones de mayor calado ya se resumieron en
 <a href="#section-solution-strategy">Estrategia de solución</a>; aquí se detallan con sus alternativas
 consideradas.</p>
 </div>
+<div class="paragraph">
+<p>Se documentan como ADR abreviados (contexto / decisión / consecuencias),
+agrupados por tipo. Las decisiones de mayor calado ya se resumieron en
+<a href="#section-solution-strategy">Estrategia de solución</a>; aquí se detallan con sus alternativas
+consideradas.</p>
+</div>
 <div class="sect2">
-<h3 id="_adr_1_reducir_el_alcance_a_un_mvp_multiplataforma_simple">9.1. ADR-1: Reducir el alcance a un MVP multiplataforma simple</h3>
+<h3 id="adr-cat-alcance-y-estrategia-general">9.1. Alcance y estrategia general</h3>
+<div class="sect3">
+<h4 id="_adr_1_reducir_el_alcance_a_un_mvp_multiplataforma_simple">9.1.1. ADR-1: Reducir el alcance a un MVP multiplataforma simple</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: la propuesta original incluía correlación de identidades
 entre Instagram, Twitter/X y Reddit mediante embeddings y clustering.</p>
@@ -3683,8 +3517,11 @@ luego Instagram), sin correlación cruzada.</p>
 futuro, sin implementar.</p>
 </div>
 </div>
+</div>
 <div class="sect2">
-<h3 id="_adr_2_backend_en_python_fastapi_sobre_el_servicio_node_heredado">9.2. ADR-2: Backend en Python (FastAPI) sobre el servicio Node heredado</h3>
+<h3 id="adr-cat-stack-tecnologico-e-infraestructura">9.2. Stack tecnológico e infraestructura</h3>
+<div class="sect3">
+<h4 id="_adr_2_backend_en_python_fastapi_sobre_el_servicio_node_heredado">9.2.1. ADR-2: Backend en Python (FastAPI) sobre el servicio Node heredado</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: la plantilla universitaria (<code>yovi_en1b</code>) traía un servicio
 <code>users</code> en Node/Express.</p>
@@ -3707,73 +3544,8 @@ métricas a un paquete distinto (<code>prometheus-fastapi-instrumentator</code>
 frente a <code>express-prom-bundle</code>).</p>
 </div>
 </div>
-<div class="sect2">
-<h3 id="_adr_3_sin_persistencia_procesamiento_100_en_memoria">9.3. ADR-3: Sin persistencia (procesamiento 100% en memoria)</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: cumplimiento RGPD y minimización de datos.</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: ninguna base de datos; el único estado entre peticiones es
-una cookie de sesión firmada con el <code>access_token</code>.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () cerrar sesión elimina cualquier rastro del
-usuario en el sistema; () simplifica drásticamente el argumentario
-RGPD de la memoria; (-) no hay histórico de análisis previos ni
-posibilidad de comparar la evolución del score en el tiempo (aceptado
-como limitación conocida).</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_4_modelo_de_datos_genérico_tras_detectar_acoplamiento_a_reddit">9.4. ADR-4: Modelo de datos genérico tras detectar acoplamiento a Reddit</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: la primera integración de Instagram normalizaba su media
-directamente al modelo <code>RedditPost</code>, reutilizando el campo <code>subreddit</code>
-para el hashtag y forzando una arquitectura "Reddit como plataforma
-principal, Instagram adaptándose a su modelo".</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: refactor a <code>SocialPost</code>/<code>SocialProfile</code> con campos neutros
-(<code>group</code>, <code>score</code>, <code>platform</code>), y unificación de la ruta de análisis a
-<code>/api/analyze/{platform}</code> con un diccionario de factories.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () añadir una plataforma nueva no requiere adaptar
-modelos ajenos; () cobertura de tests más simétrica entre plataformas
-(pasó de 84% a 93% al parejar los tests de Reddit con los ya existentes
-de Instagram); (-) coste de refactor no trivial una vez el código ya
-estaba en producción de pruebas.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_5_rechazo_de_verificación_de_integridad_del_lado_del_cliente">9.5. ADR-5: Rechazo de verificación de integridad del lado del cliente</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: al ser el código open source, se planteó proteger el flujo
-OAuth con una comprobación de hash del código cliente antes de permitir
-su ejecución.</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: no implementar esa protección.</p>
-</div>
-<div class="paragraph">
-<p><strong>Justificación</strong>: en software open source, cualquier comprobación que
-viva en el mismo código que se distribuye es evadible por quien
-controla el entorno de ejecución (comentar la comprobación, recalcular
-el hash esperado, ejecutar con depurador). El límite de confianza real
-del sistema es el servidor de autorización OAuth de cada plataforma, no
-el código propio: ninguna modificación del cliente permite obtener un
-<code>access_token</code> sin el consentimiento explícito del titular de la cuenta
-en la pantalla de la propia plataforma.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () se evita invertir esfuerzo en una protección
-inefectiva y fácilmente cuestionable ante un tribunal técnico; () la
-memoria puede argumentar correctamente dónde está el verdadero límite
-de confianza del sistema.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_6_rangos_de_versión_en_vez_de_versiones_exactas">9.6. ADR-6: Rangos de versión en vez de versiones exactas</h3>
+<div class="sect3">
+<h4 id="_adr_6_rangos_de_versión_en_vez_de_versiones_exactas">9.2.2. ADR-6: Rangos de versión en vez de versiones exactas</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: varias roturas de entorno (numpy sin wheel para la versión
 de Python del desarrollador, luego <code>pydantic_core</code>/<code>fastapi</code> con Python
@@ -3791,8 +3563,8 @@ menos determinista (dos instalaciones en momentos distintos pueden
 resolver versiones exactas distintas dentro del rango).</p>
 </div>
 </div>
-<div class="sect2">
-<h3 id="_adr_7_reutilización_del_monorepo_de_la_asignatura_asw">9.7. ADR-7: Reutilización del monorepo de la asignatura ASW</h3>
+<div class="sect3">
+<h4 id="_adr_7_reutilización_del_monorepo_de_la_asignatura_asw">9.2.3. ADR-7: Reutilización del monorepo de la asignatura ASW</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: la plantilla <code>yovi_en1b</code> (Uniovi) ya traía Docker Compose,
 Prometheus/Grafana, GitHub Actions y SonarCloud configurados.</p>
@@ -3818,139 +3590,8 @@ literal a la carpeta por nombre, un recordatorio de que ese acoplamiento
 disperso tiene coste real cuando llega el momento de deshacerlo.</p>
 </div>
 </div>
-<div class="sect2">
-<h3 id="_adr_8_estimación_de_k_anonimato_con_proporciones_agregadas_del_ine_no_una_base_de_datos_sintética">9.8. ADR-8: Estimación de k-anonimato con proporciones agregadas del INE, no una base de datos sintética</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: se necesitaba mostrar al usuario "cuánta gente comparte tus
-características autodeclaradas" (edad, sexo, provincia, estudios&#8230;&#8203;),
-al estilo de una tabla de k-anonimato clásica.</p>
-</div>
-<div class="paragraph">
-<p><strong>Alternativas consideradas</strong>: construir una base de datos sintética con
-una fila por cada uno de los ~49 millones de habitantes de España
-(poblada a partir de Censo/Padrón/microdatos del INE) y resolver la
-consulta con un <code>SELECT COUNT(*) &#8230;&#8203; WHERE &#8230;&#8203;</code> real.</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: multiplicar en cadena proporciones agregadas del INE
-(<code>data/ine_reference.py</code>), asumiendo independencia estadística entre
-atributos, en vez de materializar microdatos sintéticos.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () coherente con el principio "sin persistencia" que
-sostiene el resto del argumentario RGPD del proyecto; () trivial de
-auditar (cada número del informe se puede rastrear a una multiplicación
-concreta); (+) no requiere procesar microdatos reales del INE (formato
-de registro fijo, no trivial de tratar); (-) menos preciso que microdatos
-reales en los casos donde hay correlación real entre atributos (p. ej.
-la distribución de edad no es exactamente igual en todas las provincias)
-— limitación documentada explícitamente en el propio informe.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_9_geolocalización_de_fotos_limitada_a_españa_y_a_nivel_de_provincia">9.9. ADR-9: Geolocalización de fotos limitada a España y a nivel de provincia</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: se planteó geolocalizar fotos de Instagram al estilo de
-herramientas comerciales tipo GeoSpy.</p>
-</div>
-<div class="paragraph">
-<p><strong>Alternativas consideradas</strong>: replicar un índice de geolocalización
-mundial (inviable: requiere cientos de millones de imágenes
-georreferenciadas e infraestructura fuera del alcance de un TFG);
-predecir coordenadas GPS exactas (poco realista: incluso el estado del
-arte publicado solo acierta la calle/1km ~26-29% de las veces).</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: DINOv2 (extracción de embeddings) + FAISS (búsqueda de
-vecinos más cercanos) contra un índice construido únicamente con
-imágenes de España (subconjunto filtrado del dataset público OSV-5M), y
-la predicción se agrega a nivel de <strong>provincia</strong> cuando es posible; si
-solo se puede identificar la comunidad autónoma (varias provincias
-posibles, sin forma honesta de elegir una) se usa ese nivel intermedio en
-vez de forzar una provincia concreta o perder el dato por completo&#8201;&#8212;&#8201;ver
-ADR-16 para los requisitos de consenso antes de aceptar cualquiera de los
-dos niveles como residencia habitual.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () índice manejable en recursos de un TFG (varios GB
-en vez de un dataset mundial); () mayor precisión relativa al competir
-en un espacio de búsqueda más pequeño; (+) la granularidad de provincia
-(o comunidad autónoma, cuando aplica) coincide con la que ya usa el
-módulo de k-anonimato, integrándose de forma natural en el resto del
-informe; (-) no compite en precisión con herramientas comerciales que sí
-tienen infraestructura e índices mundiales propietarios — limitación
-reconocida y documentada, no ocultada.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_10_mistral_ai_como_proveedor_de_análisis_con_ia_por_jurisdicción">9.10. ADR-10: Mistral AI como proveedor de análisis con IA, por jurisdicción</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: se quería una función opcional para que un LLM leyera el
-informe ya generado y diera conclusiones en lenguaje natural. Se
-valoraron varios proveedores baratos, incluido DeepSeek.</p>
-</div>
-<div class="paragraph">
-<p><strong>Alternativas consideradas</strong>: DeepSeek (más barato, pero empresa china:
-implica una transferencia internacional de datos personales fuera del
-Espacio Económico Europeo, con las obligaciones adicionales del RGPD
-Capítulo V que eso conlleva); modelo propio entrenado/fine-tuned
-localmente (descartado: coste de entrenamiento y de generación de
-dataset desproporcionado para una tarea de razonamiento en contexto
-sobre datos ya estructurados, que no requiere especialización de
-dominio).</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: Mistral AI (La Plateforme), tier gratuito, empresa con sede
-en Francia.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () evita justificar una transferencia internacional de
-datos personales, al procesarse dentro de la UE; () sin coste (tier
-gratuito, con degradación explícita si se agota la cuota, sin
-reintentos); (-) calidad de respuesta algo menor que la de modelos de
-proveedores más caros según benchmarks públicos, aceptado como
-compromiso razonable para una función complementaria opcional.</p>
-</div>
-<div class="paragraph">
-<p><strong>Nota</strong>: este mismo razonamiento de jurisdicción aplicó también, sin
-volver a discutirlo desde cero, cuando se añadió una segunda integración
-independiente con el mismo proveedor (<code>nlp/ai_attribute_extraction.py</code>,
-ver ADR-13) que envía texto/bio públicos en vez de un informe ya
-agregado.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_11_progreso_en_vivo_vía_server_sent_events_no_polling_ni_websockets">9.11. ADR-11: Progreso en vivo vía Server-Sent Events, no polling ni WebSockets</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: el análisis completo (sobre todo con geolocalización de
-fotos activada) puede tardar varios segundos; se quería sustituir la
-espera opaca por una pantalla de progreso real.</p>
-</div>
-<div class="paragraph">
-<p><strong>Alternativas consideradas</strong>: <strong>polling</strong> periódico desde el frontend
-(añade latencia y carga innecesaria); WebSockets (bidireccional,
-más complejo de lo que este caso de uso necesita, ya que el servidor
-nunca necesita recibir datos del cliente durante el análisis).</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: Server-Sent Events (<code>GET /api/analyze/{platform}/stream</code>),
-unidireccional servidor&#8594;cliente, con eventos JSON (<code>{"done": false,
-"stage": "&#8230;&#8203;", &#8230;&#8203;}</code> en curso, <code>{"done": true, "report": {&#8230;&#8203;}}</code> o
-<code>{"done": true, "error": "&#8230;&#8203;"}</code> al terminar). El endpoint clásico
-(<code>POST /api/analyze/{platform}</code>) se mantiene sin cambios para
-compatibilidad y para los tests existentes.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () hitos de progreso REALES (cada evento corresponde a
-un paso del pipeline que de verdad acaba de terminar, no a un
-temporizador simulado); () más simple de implementar y depurar que
-WebSockets para un flujo unidireccional; (-) dos endpoints distintos
-para la misma lógica de negocio (<code>_build_report</code> compartido entre
-ambos, para no duplicar la orquestación).</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_12_webapp_y_backend_bajo_el_mismo_origen_proxy_de_nginx_en_vez_de_vite_api_url_absoluto">9.12. ADR-12: Webapp y backend bajo el mismo origen (proxy de Nginx), en vez de <code>VITE_API_URL</code> absoluto</h3>
+<div class="sect3">
+<h4 id="_adr_12_webapp_y_backend_bajo_el_mismo_origen_proxy_de_nginx_en_vez_de_vite_api_url_absoluto">9.2.4. ADR-12: Webapp y backend bajo el mismo origen (proxy de Nginx), en vez de <code>VITE_API_URL</code> absoluto</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: en desarrollo local con un túnel rápido de Cloudflare
 (<code>trycloudflare.com</code>, gratuito) para poder probar el login de Instagram
@@ -3991,72 +3632,8 @@ asumir por error que sirve también para desarrollo sin Docker con
 puertos distintos (<code>npm run dev</code> + <code>uvicorn</code> sueltos).</p>
 </div>
 </div>
-<div class="sect2">
-<h3 id="_adr_13_extracción_de_atributos_con_ia_como_complemento_de_las_regex_nunca_sustituto">9.13. ADR-13: Extracción de atributos con IA como complemento de las regex, nunca sustituto</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: las regex de <code>demographic_extraction.py</code> tienen un
-vocabulario fijo ("estudio X", "estudiante de X"&#8230;&#8203;); cualquier
-redacción real que no encaje se pierde en silencio (p. ej. "voy a 2º de
-Enfermería").</p>
-</div>
-<div class="paragraph">
-<p><strong>Alternativas consideradas</strong>: sustituir las regex por extracción vía IA
-por completo (descartado: perdería la garantía de coincidencia exacta y
-determinista que ya funcionaba bien, y encarecería/ralentizaría el
-análisis incluso para los casos que las regex ya resolvían gratis);
-pedir a la IA que decidiera directamente la categoría del INE
-correspondiente (descartado: una alucinación del modelo podría colar una
-categoría inventada como si fuera una estimación de población real).</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: <code>nlp/ai_attribute_extraction.py</code> corre siempre después de
-las regex y solo rellena los campos que estas no encontraron
-(<code>merge_findings</code>, con las regex teniendo prioridad). El LLM solo
-propone texto libre; la normalización final contra las tablas del INE
-la sigue haciendo el propio código, igual que para las regex. Además,
-propone por separado una estimación de sexo por convención cultural del
-nombre público de la cuenta, marcada con una procedencia distinta
-(<code>ia_nombre</code>) y una nota de menor fiabilidad explícita en el informe&#8201;&#8212;&#8201;nunca se mezcla con una autodeclaración real en el mismo nivel de
-confianza.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () capta redacciones libres sin perder la
-trazabilidad ni la resistencia a alucinaciones del enfoque por regex;
-() coherente con el principio de explicabilidad del resto del proyecto
-(ver <a href="#section-concepts">Conceptos transversales</a>); (-) el análisis ahora depende, para esta
-mejora concreta, de una llamada de red adicional a un tercero (Mistral),
-mitigado por ser opcional y degradarse con gracia sin <code>MISTRAL_API_KEY</code>.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_14_análisis_del_informe_con_ia_disparado_automáticamente_no_bajo_demanda">9.14. ADR-14: Análisis del informe con IA disparado automáticamente, no bajo demanda</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: la primera versión exigía que el usuario pulsara
-explícitamente "Analizar con IA" tras ver el informe.</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: se dispara solo, en cuanto el informe principal está
-disponible, sin confirmación adicional del usuario.</p>
-</div>
-<div class="paragraph">
-<p><strong>Justificación</strong>: el consentimiento OAuth inicial ya cubre todo el
-análisis que la herramienta hace sobre la cuenta del usuario; un botón
-adicional para una llamada que solo envía agregados ya generados (nunca
-las publicaciones originales) no añadía ninguna protección de privacidad
-real, solo fricción de interfaz. La función sigue siendo aislada y
-opcional en caso de fallo (sin <code>MISTRAL_API_KEY</code>, o si Mistral no
-responde, el resto del informe no se ve afectado)&#8201;&#8212;&#8201;lo único que
-cambió es cuándo se dispara, no las garantías de degradación.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: (+) el usuario ve el veredicto y las conclusiones sin
-un paso extra; (-) una llamada más a Mistral en cada análisis (incluso
-si el usuario no llega a mirar esa sección), aceptado por ser
-gratuita/de bajo coste y por degradarse sin romper nada si falla.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_15_dependencias_de_geolocalización_activables_por_build_arg_con_precarga_en_el_arranque">9.15. ADR-15: Dependencias de geolocalización activables por build-arg, con precarga en el arranque</h3>
+<div class="sect3">
+<h4 id="_adr_15_dependencias_de_geolocalización_activables_por_build_arg_con_precarga_en_el_arranque">9.2.5. ADR-15: Dependencias de geolocalización activables por build-arg, con precarga en el arranque</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: <code>torch</code>/<code>faiss</code>/<code>transformers</code> no estaban en
 <code>requirements.txt</code> bajo la premisa de que "solo hacen falta para
@@ -4096,107 +3673,212 @@ imagen (descarga de <code>torch</code>), mitigado con timeouts/reintentos más
 generosos en <code>pip</code> para conexiones lentas.</p>
 </div>
 </div>
-<div class="sect2">
-<h3 id="_adr_16_consenso_entre_varias_fotos_y_exclusión_de_fotos_de_viaje_antes_de_asumir_residencia_por_imagen">9.16. ADR-16: Consenso entre varias fotos, y exclusión de fotos de viaje, antes de asumir residencia por imagen</h3>
+<div class="sect3">
+<h4 id="_adr_39_ngrok_basic_auth_en_vez_de_dominio_propio_cloudflare_para_exponer_la_app_fuera_de_local">9.2.6. ADR-39: ngrok + Basic Auth en vez de dominio propio + Cloudflare, para exponer la app fuera de local</h4>
 <div class="paragraph">
-<p><strong>Contexto</strong>: la primera versión aceptaba la conclusión de residencia con
-una sola foto por encima de un umbral de confianza bajo (40%). En la
-práctica esto era demasiado permisivo para un dato tan sensible: (a) una
-sola foto genérica (solo mar, solo cielo, un primer plano sin fondo
-distintivo) puede coincidir por casualidad con un umbral bajo sin que el
-contenido diga nada real sobre dónde vive la persona, y (b) una foto de
-vacaciones/viaje con confianza alta indica dónde ESTUVO la persona en ese
-momento, no dónde VIVE.</p>
+<p><strong>Contexto</strong>: hace falta HTTPS público para poder probar el login de
+Instagram (exige <code>redirect_uri</code> con HTTPS incluso en desarrollo, ver
+README) y para poder enseñar la app fuera de la propia máquina. Ya
+existía la nota en el README que descarta <code>cloudflared tunnel --url</code>
+(Cloudflare Quick Tunnel) por un motivo técnico concreto: su edge
+bufferiza por completo las respuestas <code>text/event-stream</code>, así que el
+streaming SSE de <code>/api/analyze/{platform}/stream</code> deja de verse en
+tiempo real. Esa nota ya dejaba claro que un <strong>named tunnel</strong> de
+Cloudflare (con dominio propio) sí respetaría el streaming&#8201;&#8212;&#8201;pero
+igualmente no se ha montado, por un motivo distinto y más de fondo.</p>
 </div>
 <div class="paragraph">
-<p><strong>Alternativas consideradas</strong>: mantener un único umbral fijo más alto para
-una sola foto (más simple, pero sigue sin distinguir "una foto puntual
-casualmente segura" de "señal real y repetida"); pedir confirmación
-manual al usuario antes de aceptar una ubicación por imagen (más preciso,
-pero rompe el flujo 100% automático del resto del análisis y añade
-fricción de UI fuera del alcance de este TFG).</p>
+<p><strong>Motivo real de no montar dominio propio + Cloudflare</strong>: la app corre
+con capacidad de cómputo para <strong>una persona a la vez</strong> (Moondream2 y
+DINOv2 comparten los recursos disponibles, ver ADR-29 sobre los
+semáforos por modelo). Un dominio propio con Cloudflare por delante
+tiene sentido cuando el objetivo es que cualquiera pueda entrar sin
+pedir permiso&#8201;&#8212;&#8201;exactamente lo contrario de lo que hace falta aquí.
+Montar dominio + tunnel con nombre + WAF para luego tener que limitar
+igualmente quién entra sería resolver un problema (tráfico público sin
+control) que este proyecto no tiene, a costa de más piezas que
+mantener (DNS, certificados renovándose, reglas de WAF) para un caso
+de uso que es, en la práctica, "que yo pueda entrar desde fuera, y
+enseñárselo a alguien puntualmente cuando yo decida".</p>
 </div>
 <div class="paragraph">
-<p><strong>Decisión</strong>: exigir consenso entre varias fotos de la MISMA comunidad
-autónoma antes de aceptar una conclusión de residencia: al menos 2 fotos
-con más del 80% de confianza, o al menos 4 con más del 60%
-(<code>HIGH_CONFIDENCE*</code>/<code>MODERATE_CONFIDENCE*</code> en <code>report/generator.py</code>).
-Antes de contar, se excluyen las fotos marcadas como "de viaje"
-(detectadas por regex en <code>nlp/travel_detection.py</code> y, en el mismo pase,
-por IA vía el campo <code>fotos_de_viaje</code> del prompt de
-<code>ai_attribute_extraction.py</code>&#8201;&#8212;&#8201;las dos fuentes se UNEN, nunca se
-sustituyen) y las marcadas como no representativas por
-<code>vision/geolocation.py</code> (vecinos más parecidos geográficamente
-dispersos, ver ADR-9).</p>
+<p><strong>Alternativas descartadas</strong>:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Dominio propio + Cloudflare Tunnel (named tunnel) + Access</strong>:
+técnicamente resolvería el streaming Y permitiría restringir acceso
+(Cloudflare Access, gratis hasta 50 usuarios). Descartado por lo de
+arriba: es infraestructura pensada para servir a más de una persona
+a la vez, que es precisamente lo que este proyecto no puede hacer
+todavía. Además, el plan gratuito de Cloudflare (a diferencia de
+ngrok) no dio buenos resultados en pruebas propias con las
+actualizaciones de página en tiempo real que necesita el streaming
+SSE de este proyecto&#8201;&#8212;&#8201;sin llegar a diagnosticarse con el mismo
+detalle que el problema, ya documentado, de Quick Tunnel.</p>
+</li>
+<li>
+<p><strong>Dominio gratuito (DigitalPlat FreeDomain u otro) sin Cloudflare
+delante</strong>: no resuelve el streaming (seguiría sirviendo directamente,
+sin problema de buffering) pero tampoco aporta nada que ngrok no dé
+ya (dominio estable, HTTPS)&#8201;&#8212;&#8201;añadiría un proveedor más sin
+necesidad real.</p>
+</li>
+<li>
+<p><strong>Dominio de pago</strong>: mismo razonamiento que el punto anterior más un
+coste recurrente injustificado mientras el cuello de botella siga
+siendo el cómputo, no el nombre de dominio.</p>
+</li>
+</ul>
 </div>
 <div class="paragraph">
-<p><strong>Consecuencias</strong>: () reduce sustancialmente los falsos positivos de
-residencia por imagen, el tipo de error más dañino en una herramienta que
-se presenta como educativa/defensiva; () las fotos de viaje dejan de
-contaminar la conclusión, incluso con confianza de geolocalización
-altísima; (-) los umbrales concretos (2/80%, 4/60%) son una primera
-propuesta razonable, no una cifra derivada de un estudio&#8201;&#8212;&#8201;quedan como
-constantes explícitas y fácilmente ajustables si en la práctica resultan
-demasiado (o poco) exigentes, en vez de un "número mágico" enterrado en
-la lógica; (-) cuentas con pocas fotos de Instagram probablemente nunca
-alcancen el consenso necesario, así que la geolocalización por imagen se
-queda sin usarse en la práctica para esos casos&#8201;&#8212;&#8201;comportamiento
-correcto y esperado (mejor "no estimable" que una conclusión poco
-fiable), no un fallo.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_17_moondream2_local_para_analizar_el_contenido_de_las_fotos_en_vez_de_mistral_pixtral">9.17. ADR-17: Moondream2 local para analizar el contenido de las fotos, en vez de Mistral Pixtral</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: se quería, además de geolocalizar cada foto, extraer señales
-sobre su contenido (aficiones, actividades, señal de pareja). El resto de
-funciones de IA del proyecto usan Mistral AI (ver ADR-10), que sí ofrece
-un modelo multimodal (Pixtral) capaz de analizar imágenes.</p>
+<p><strong>Decisión</strong>: usar <strong>ngrok</strong> (plan gratuito) con <strong>Basic Auth vía Traffic
+Policy</strong> (<code>backend/policy.yaml</code>, ver README) como control de acceso. El
+plan gratuito de ngrok ya incluye un dominio propio estable (no cambia
+entre reinicios) y streaming SSE en tiempo real sin el problema de
+Cloudflare, y Traffic Policy permite Basic Auth sin necesidad de plan
+de pago&#8201;&#8212;&#8201;cubre exactamente las dos necesidades reales (HTTPS estable
++ que solo entre quien yo decida) sin montar infraestructura pensada
+para más carga de la que la app puede atender.</p>
 </div>
 <div class="paragraph">
-<p><strong>Alternativas consideradas</strong>: Mistral Pixtral vía API, igual que el resto
-de integraciones de IA del proyecto (coherente con ADR-10, un único
-proveedor); un modelo de clasificación de imágenes clásico entrenado a
-medida (descartado: requeriría un dataset etiquetado de aficiones/
-actividades que no existe, desproporcionado para el alcance de un TFG).</p>
+<p><strong>Consecuencias</strong>: () cero coste recurrente y cero infraestructura
+nueva que mantener (DNS, certificados, reglas de firewall); () el
+control de acceso vive en un único archivo (<code>policy.yaml</code>, fuera del
+repo) en vez de repartirse entre proveedor de DNS + Cloudflare Access;
+(+) streaming SSE funciona correctamente, a diferencia de Quick
+Tunnel; (-) el plan gratuito de ngrok muestra una página intermedia de
+aviso la primera vez que alguien abre la URL en el navegador (ver nota
+en el README)&#8201;&#8212;&#8201;fricción menor, no un problema de seguridad; (-) si
+en el futuro la capacidad de cómputo deja de ser el factor limitante
+(por ejemplo, si se separa el análisis en una cola con varios
+workers), esta decisión habría que revisarla&#8201;&#8212;&#8201;en ese momento sí
+tendría sentido un dominio propio pensado para más de un usuario
+simultáneo.</p>
 </div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: Moondream2, un modelo de visión-lenguaje (VQA) pequeño
-(~1.8B parámetros) ejecutado localmente vía <code>transformers</code>, con el mismo
-patrón de dependencia opcional que ya usa <code>geolocation.py</code>
-(<code>requirements-vision.txt</code>, <code>--build-arg WITH_GEOLOCATION=true</code>).</p>
-</div>
-<div class="paragraph">
-<p><strong>Justificación</strong>: a diferencia de las otras dos integraciones con Mistral
-(<code>ai_analysis.py</code> sobre el informe ya agregado, <code>ai_attribute_extraction.py</code>
-sobre texto/bio), este análisis necesita una llamada POR FOTO, no una por
-informe&#8201;&#8212;&#8201;una cuenta con varias decenas de fotos analizadas agotaría el
-tier gratuito de Mistral en un único análisis. Un modelo local, en
-cambio, no tiene límite de peticiones por minuto una vez cargado, y
-además mantiene la imagen dentro del propio servidor en vez de enviarla a
-un tercero&#8201;&#8212;&#8201;coherente con el principio de minimización de datos del
-resto del proyecto (aunque las fotos de Instagram sean públicas, seguir
-minimizando dónde viajan sigue siendo la postura por defecto de este
-proyecto).</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () sin límite de tasa por foto, ni coste por llamada;
-() la imagen no sale del servidor; (+) reutiliza el mismo patrón de
-dependencia opcional, build-arg y degradación que ya existía para
-<code>geolocation.py</code>, sin inventar uno nuevo; (-) modelo bastante menos capaz
-que Pixtral en tareas VQA abiertas, mitigado limitando la tarea a una
-pregunta cerrada de formato fijo en vez de una descripción libre; (-)
-Moondream2 se carga con <code>trust_remote_code=True</code> (código Python propio
-del modelo, no solo pesos)&#8201;&#8212;&#8201;superficie de confianza real que merece
-mencionarse explícitamente en la memoria, aunque el modelo y su revisión
-(<code>_MODEL_REVISION</code>, fijada explícitamente en el código) provengan de un
-repositorio público de Hugging Face con uso extendido; (-) no se precarga
-en el arranque del contenedor como el modelo de geolocalización (ver
-ADR-15), así que la primera foto de cada proceso paga el coste de carga.</p>
 </div>
 </div>
 <div class="sect2">
-<h3 id="_adr_18_rechazo_de_reconocimiento_facial_y_de_clasificación_de_rasgos_físicosétnicos">9.18. ADR-18: Rechazo de reconocimiento facial y de clasificación de rasgos físicos/étnicos</h3>
+<h3 id="adr-cat-privacidad-etica-y-rgpd">9.3. Privacidad, ética y RGPD</h3>
+<div class="sect3">
+<h4 id="_adr_3_sin_persistencia_procesamiento_100_en_memoria">9.3.1. ADR-3: Sin persistencia (procesamiento 100% en memoria)</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: cumplimiento RGPD y minimización de datos.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: ninguna base de datos; el único estado entre peticiones es
+una cookie de sesión firmada con el <code>access_token</code>.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () cerrar sesión elimina cualquier rastro del
+usuario en el sistema; () simplifica drásticamente el argumentario
+RGPD de la memoria; (-) no hay histórico de análisis previos ni
+posibilidad de comparar la evolución del score en el tiempo (aceptado
+como limitación conocida).</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_5_rechazo_de_verificación_de_integridad_del_lado_del_cliente">9.3.2. ADR-5: Rechazo de verificación de integridad del lado del cliente</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: al ser el código open source, se planteó proteger el flujo
+OAuth con una comprobación de hash del código cliente antes de permitir
+su ejecución.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: no implementar esa protección.</p>
+</div>
+<div class="paragraph">
+<p><strong>Justificación</strong>: en software open source, cualquier comprobación que
+viva en el mismo código que se distribuye es evadible por quien
+controla el entorno de ejecución (comentar la comprobación, recalcular
+el hash esperado, ejecutar con depurador). El límite de confianza real
+del sistema es el servidor de autorización OAuth de cada plataforma, no
+el código propio: ninguna modificación del cliente permite obtener un
+<code>access_token</code> sin el consentimiento explícito del titular de la cuenta
+en la pantalla de la propia plataforma.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () se evita invertir esfuerzo en una protección
+inefectiva y fácilmente cuestionable ante un tribunal técnico; () la
+memoria puede argumentar correctamente dónde está el verdadero límite
+de confianza del sistema.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_9_geolocalización_de_fotos_limitada_a_españa_y_a_nivel_de_provincia">9.3.3. ADR-9: Geolocalización de fotos limitada a España y a nivel de provincia</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: se planteó geolocalizar fotos de Instagram al estilo de
+herramientas comerciales tipo GeoSpy.</p>
+</div>
+<div class="paragraph">
+<p><strong>Alternativas consideradas</strong>: replicar un índice de geolocalización
+mundial (inviable: requiere cientos de millones de imágenes
+georreferenciadas e infraestructura fuera del alcance de un TFG);
+predecir coordenadas GPS exactas (poco realista: incluso el estado del
+arte publicado solo acierta la calle/1km ~26-29% de las veces).</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: DINOv2 (extracción de embeddings) + FAISS (búsqueda de
+vecinos más cercanos) contra un índice construido únicamente con
+imágenes de España (subconjunto filtrado del dataset público OSV-5M), y
+la predicción se agrega a nivel de <strong>provincia</strong> cuando es posible; si
+solo se puede identificar la comunidad autónoma (varias provincias
+posibles, sin forma honesta de elegir una) se usa ese nivel intermedio en
+vez de forzar una provincia concreta o perder el dato por completo&#8201;&#8212;&#8201;ver
+ADR-16 para los requisitos de consenso antes de aceptar cualquiera de los
+dos niveles como residencia habitual.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () índice manejable en recursos de un TFG (varios GB
+en vez de un dataset mundial); () mayor precisión relativa al competir
+en un espacio de búsqueda más pequeño; (+) la granularidad de provincia
+(o comunidad autónoma, cuando aplica) coincide con la que ya usa el
+módulo de k-anonimato, integrándose de forma natural en el resto del
+informe; (-) no compite en precisión con herramientas comerciales que sí
+tienen infraestructura e índices mundiales propietarios — limitación
+reconocida y documentada, no ocultada.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_10_mistral_ai_como_proveedor_de_análisis_con_ia_por_jurisdicción">9.3.4. ADR-10: Mistral AI como proveedor de análisis con IA, por jurisdicción</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: se quería una función opcional para que un LLM leyera el
+informe ya generado y diera conclusiones en lenguaje natural. Se
+valoraron varios proveedores baratos, incluido DeepSeek.</p>
+</div>
+<div class="paragraph">
+<p><strong>Alternativas consideradas</strong>: DeepSeek (más barato, pero empresa china:
+implica una transferencia internacional de datos personales fuera del
+Espacio Económico Europeo, con las obligaciones adicionales del RGPD
+Capítulo V que eso conlleva); modelo propio entrenado/fine-tuned
+localmente (descartado: coste de entrenamiento y de generación de
+dataset desproporcionado para una tarea de razonamiento en contexto
+sobre datos ya estructurados, que no requiere especialización de
+dominio).</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: Mistral AI (La Plateforme), tier gratuito, empresa con sede
+en Francia.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () evita justificar una transferencia internacional de
+datos personales, al procesarse dentro de la UE; () sin coste (tier
+gratuito, con degradación explícita si se agota la cuota, sin
+reintentos); (-) calidad de respuesta algo menor que la de modelos de
+proveedores más caros según benchmarks públicos, aceptado como
+compromiso razonable para una función complementaria opcional.</p>
+</div>
+<div class="paragraph">
+<p><strong>Nota</strong>: este mismo razonamiento de jurisdicción aplicó también, sin
+volver a discutirlo desde cero, cuando se añadió una segunda integración
+independiente con el mismo proveedor (<code>nlp/ai_attribute_extraction.py</code>,
+ver ADR-13) que envía texto/bio públicos en vez de un informe ya
+agregado.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_18_rechazo_de_reconocimiento_facial_y_de_clasificación_de_rasgos_físicosétnicos">9.3.5. ADR-18: Rechazo de reconocimiento facial y de clasificación de rasgos físicos/étnicos</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: se planteó ampliar <code>vision/scene_analysis.py</code> para que,
 además de escena/objetos/aficiones/indicios de pareja (ver ADR-16 y el
@@ -4277,8 +3959,804 @@ población estimada&#8201;&#8212;&#8201;aceptado como límite de alcance, igual 
 correlación entre plataformas en ADR-1.</p>
 </div>
 </div>
+<div class="sect3">
+<h4 id="_adr_35_atributos_que_nunca_se_detectarán_automáticamente_origen_étnicoracial_saluddiscapacidad_opinión_política">9.3.6. ADR-35: Atributos que nunca se detectarán automáticamente (origen étnico/racial, salud/discapacidad, opinión política)</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: el pipeline automático (<code>vision/scene_analysis.py</code>,
+<code>nlp/ai_attribute_extraction.py</code>) ya infiere de forma autónoma varios
+atributos a partir de fotos y texto (edad, aficiones, estado
+sentimental&#8230;&#8203;) para alimentar el estrechamiento de población y el
+<code>privacy_score</code>. El RGPD (art. 9) define como "categorías especiales"
+un conjunto de datos con riesgo de tratamiento agravado: origen
+étnico/racial, salud, opinión política, creencias religiosas,
+orientación sexual, datos biométricos/genéticos y afiliación sindical.
+ADR-34 ya excluyó la detección automática de rasgos físicos
+(ojos/pelo/piel) como proxy racial/étnico, permitiéndolos solo como
+autodeclaración manual del propio usuario&#8201;&#8212;&#8201;pero esa decisión se
+limita a lo VISUAL y no fija un principio general para el resto de
+categorías especiales ni para otras vías de detección (texto).</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: tres atributos NUNCA se detectarán de forma automática&#8201;&#8212;&#8201;ni por visión (fotos) ni por texto (bios, posts, comentarios), ni
+siquiera como "detección textual explícita" de menciones&#8201;&#8212;&#8201;en ningún
+punto futuro del pipeline:</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p><strong>Origen étnico/racial</strong>: categoría especial de máximo riesgo del
+RGPD. Generaliza y refuerza ADR-34: aquel ADR ya impedía inferirlo
+de fotos (permitiendo solo la autodeclaración manual de
+ojos/pelo/piel); este ADR cierra también la vía textual, que
+ADR-34 no llegaba a mencionar explícitamente.</p>
+</li>
+<li>
+<p><strong>Salud/discapacidad</strong>: también categoría especial (art. 9 RGPD). El
+INE sí publica proporciones de discapacidad a nivel poblacional
+(podrían alimentar una tabla de k-anonimato con el mismo patrón que
+ADR-34), pero es información médica y se descarta incluso como
+autodeclaración manual&#8201;&#8212;&#8201;a diferencia de un rasgo físico visible,
+una condición de salud no es equiparable a "lo que ya se ve en la
+foto de perfil".</p>
+</li>
+<li>
+<p><strong>Opinión política/afiliación</strong>: también categoría especial (art. 9
+RGPD). El INE no la publica (haría falta recurrir al CIS), y más
+allá de la calificación legal, el riesgo de sesgo o desinformación
+de cualquier inferencia sobre postura política se considera
+demasiado alto para justificar la función, incluso como opción
+manual.</p>
+</li>
+</ol>
+</div>
+<div class="paragraph">
+<p><strong>Alternativas descartadas</strong>: replicar para salud y para opinión
+política el mismo patrón que ADR-34 usa para ojos/pelo/piel&#8201;&#8212;&#8201;selector manual (<code>ManualTraitsSelector.tsx</code>) + tabla de proporciones
+(INE para discapacidad, CIS para opinión política) + paso nuevo en
+<code>population_narrowing</code> vía <code>POST /api/analyze/recalculate</code>. Descartada
+para ambos casos: aunque el patrón técnico ya existe y sería trivial
+de replicar, salud y opinión política son cualitativamente distintas
+de un rasgo físico visible&#8201;&#8212;&#8201;la primera es información médica; la
+segunda tiene, además, un problema de fiabilidad/sesgo que no depende
+de la fuente de datos.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () el límite del pipeline automático (y de
+`ManualTraitsSelector.tsx`) queda documentado como decisión
+deliberada, no como omisión -- cualquier ampliación futura que toque
+alguna de estas tres categorías debe justificarse explícitamente
+contra este ADR, no solo añadirse por analogía con ADR-34; () reduce
+el riesgo legal/ético del proyecto al no tocar las categorías de mayor
+riesgo del RGPD bajo ninguna vía (ni automática ni manual, salvo la
+excepción ya acotada de ADR-34 para rasgos físicos); (-) dos fuentes
+de datos potencialmente disponibles (discapacidad en INE, opinión
+política en CIS) quedan sin aprovechar en el cálculo de k-anonimato,
+que en teoría podría ser más completo con ellas.</p>
+</div>
+</div>
+</div>
 <div class="sect2">
-<h3 id="_adr_19_bfloat16_inutilizable_en_cpu_sin_aceleración_por_hardwarefloat32_forzado_cuantización_descartada">9.19. ADR-19: bfloat16 inutilizable en CPU sin aceleración por hardware&#8201;&#8212;&#8201;float32 forzado, cuantización descartada</h3>
+<h3 id="adr-cat-modelo-de-datos-y-dominio">9.4. Modelo de datos y dominio</h3>
+<div class="sect3">
+<h4 id="_adr_4_modelo_de_datos_genérico_tras_detectar_acoplamiento_a_reddit">9.4.1. ADR-4: Modelo de datos genérico tras detectar acoplamiento a Reddit</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: la primera integración de Instagram normalizaba su media
+directamente al modelo <code>RedditPost</code>, reutilizando el campo <code>subreddit</code>
+para el hashtag y forzando una arquitectura "Reddit como plataforma
+principal, Instagram adaptándose a su modelo".</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: refactor a <code>SocialPost</code>/<code>SocialProfile</code> con campos neutros
+(<code>group</code>, <code>score</code>, <code>platform</code>), y unificación de la ruta de análisis a
+<code>/api/analyze/{platform}</code> con un diccionario de factories.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () añadir una plataforma nueva no requiere adaptar
+modelos ajenos; () cobertura de tests más simétrica entre plataformas
+(pasó de 84% a 93% al parejar los tests de Reddit con los ya existentes
+de Instagram); (-) coste de refactor no trivial una vez el código ya
+estaba en producción de pruebas.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_34_rasgos_físicos_manuales_ojospelopiel_recalculados_en_el_backend_no_duplicando_las_tablas_del_ine_en_el_frontend">9.4.2. ADR-34: Rasgos físicos manuales (ojos/pelo/piel) recalculados en el backend, no duplicando las tablas del INE en el frontend</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: hay atributos físicos visibles en cualquier foto de perfil
+(color de ojos, de pelo, tono de piel) que la Ley Orgánica de
+Protección de Datos desaconseja inferir automáticamente por
+categorizar a la persona por características raciales/étnicas (dato
+especialmente protegido, art. 9 RGPD), así que ni <code>vision/scene_analysis.py</code>
+ni <code>nlp/ai_attribute_extraction.py</code> los extraen&#8201;&#8212;&#8201;pero si el propio
+usuario los declara explícitamente sobre su propio perfil, sí pueden
+sumarse al estrechamiento de población igual que cualquier otro rasgo
+autodeclarado. El estrechamiento de población (k-anonimato, ADR
+"Estimación de k-anonimato sin base de datos sintética"&#8201;&#8212;&#8201;ver arriba)
+y el cálculo del <code>privacy_score</code> viven enteramente en el backend
+(<code>scoring/k_anonymity.py</code>, <code>scoring/privacy_score.py</code>, tablas de
+<code>data/ine_reference.py</code>); el frontend nunca ha conocido esa lógica ni
+esas tablas, solo consume proporciones ya calculadas.</p>
+</div>
+<div class="paragraph">
+<p><strong>Alternativas descartadas</strong>: duplicar en el frontend (TypeScript) las
+tres tablas nuevas (<code>EYE_COLOR_DISTRIBUTION</code>, <code>HAIR_COLOR_DISTRIBUTION</code>,
+<code>SKIN_TONE_DISTRIBUTION</code>) y repetir ahí la multiplicación en cadena de
+<code>_apply_proportion</code>, para poder actualizar el pictograma sin ida y
+vuelta al servidor&#8201;&#8212;&#8201;descartado: exactamente el tipo de duplicación de
+lógica de dominio entre frontend y backend que el proyecto ha evitado
+desde el principio (todas las tablas del INE y el cálculo de
+k-anonimato son responsabilidad exclusiva del backend); cualquier
+ajuste futuro a esas tablas (p. ej. si el INE publicase cifras propias
+para estos rasgos, o cambiase el peso de <code>inferable_data_risk</code> en el
+score) obligaría a mantener dos implementaciones sincronizadas a mano.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: nuevo endpoint <code>POST /api/analyze/recalculate</code> (ver
+<a href="#section-building-block-view">Vista de bloques de construcción</a>) que recibe el <code>ExposureReport</code> ya
+generado más una lista de <code>ManualAttribute {category, value}</code>, y
+devuelve el mismo informe con: (1) los rasgos añadidos a
+<code>inferred_attributes</code> con <code>confidence=1.0</code> (autodeclaración directa,
+máxima fiabilidad posible); (2) un paso nuevo por rasgo en
+<code>population_narrowing</code>, encadenado sobre el <code>remaining_population</code> ya
+alcanzado por el resto de atributos (mismo <code>_apply_proportion</code> que usa
+el pipeline automático, <code>source="manual"</code> para que
+<code>PopulationNarrowingTable.tsx</code> lo distinga visualmente&#8201;&#8212;&#8201;insignia de
+color propio en vez del semántico por riesgo); (3)
+<code>inferable_data_risk</code>/<code>overall_score</code> recalculados. El frontend
+(<code>ManualTraitsSelector.tsx</code> + <code>Dashboard.tsx::handleApplyTraits</code>) se
+limita a recoger la selección y sustituir su <code>ExposureReport</code> en
+memoria por la respuesta completa&#8201;&#8212;&#8201;no fusiona campos sueltos.</p>
+</div>
+<div class="paragraph">
+<p>Las tres tablas de proporciones son estimaciones contextuales
+documentadas en el propio código, no cifras oficiales del INE (que no
+publica una distribución poblacional de estos rasgos)&#8201;&#8212;&#8201;a diferencia
+del resto de <code>ine_reference.py</code>, cuyo criterio de "tabla desactualizada"
+(<code>stale_tables()</code>, ver ADR sobre concurrencia/GPU y <code>app/main.py</code>) no
+aplica aquí porque no hay una fuente oficial que pueda quedarse
+desactualizada.</p>
+</div>
+<div class="paragraph">
+<p><strong>Gotcha de implementación</strong>: <code>POST /api/analyze/recalculate</code> debe
+registrarse ANTES que <code>POST /api/analyze/{platform}</code> en
+<code>analysis_router.py</code>. FastAPI/Starlette resuelve las rutas por orden de
+registro, no por especificidad; si la ruta paramétrica fuera antes,
+capturaría el literal <code>"recalculate"</code> como valor de <code>platform</code> y la de
+recalculo nunca se alcanzaría (404 "Plataforma no soportada:
+recalculate", sin ningún error en el arranque que lo delate). Cubierto
+por <code>TestRecalculateEndpoint</code> en <code>test_analysis_router.py</code>, que habría
+detectado la regresión si el orden se rompiera de nuevo.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () cero duplicación de las tablas del INE ni de la
+lógica de k-anonimato/scoring fuera del backend; () cualquier cambio
+futuro a esas tablas o a los pesos del score se aplica en un único
+sitio; (+) el rasgo manual queda visualmente distinguible del resto sin
+introducir un tipo de dato nuevo (reutiliza <code>PopulationNarrowingStep</code>
+con un valor más de <code>source</code>); (-) cada alta de rasgo manual exige un
+viaje de ida y vuelta al servidor con el informe completo en el cuerpo
+de la petición (potencialmente grande si hay muchas fotos analizadas),
+en vez de una actualización instantánea en el cliente&#8201;&#8212;&#8201;aceptable
+dado que es una acción puntual del usuario, no algo que ocurra en un
+bucle o con alta frecuencia; (-) cualquier ruta estática nueva que se
+añada bajo <code>/analyze/</code> en el futuro debe recordar declararse antes que
+<code>/analyze/{platform}</code> por el mismo motivo (ver gotcha arriba).</p>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="adr-cat-extraccion-e-inferencia-de-atributos">9.5. Extracción e inferencia de atributos</h3>
+<div class="sect3">
+<h4 id="_adr_8_estimación_de_k_anonimato_con_proporciones_agregadas_del_ine_no_una_base_de_datos_sintética">9.5.1. ADR-8: Estimación de k-anonimato con proporciones agregadas del INE, no una base de datos sintética</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: se necesitaba mostrar al usuario "cuánta gente comparte tus
+características autodeclaradas" (edad, sexo, provincia, estudios&#8230;&#8203;),
+al estilo de una tabla de k-anonimato clásica.</p>
+</div>
+<div class="paragraph">
+<p><strong>Alternativas consideradas</strong>: construir una base de datos sintética con
+una fila por cada uno de los ~49 millones de habitantes de España
+(poblada a partir de Censo/Padrón/microdatos del INE) y resolver la
+consulta con un <code>SELECT COUNT(*) &#8230;&#8203; WHERE &#8230;&#8203;</code> real.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: multiplicar en cadena proporciones agregadas del INE
+(<code>data/ine_reference.py</code>), asumiendo independencia estadística entre
+atributos, en vez de materializar microdatos sintéticos.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () coherente con el principio "sin persistencia" que
+sostiene el resto del argumentario RGPD del proyecto; () trivial de
+auditar (cada número del informe se puede rastrear a una multiplicación
+concreta); (+) no requiere procesar microdatos reales del INE (formato
+de registro fijo, no trivial de tratar); (-) menos preciso que microdatos
+reales en los casos donde hay correlación real entre atributos (p. ej.
+la distribución de edad no es exactamente igual en todas las provincias)
+— limitación documentada explícitamente en el propio informe.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_13_extracción_de_atributos_con_ia_como_complemento_de_las_regex_nunca_sustituto">9.5.2. ADR-13: Extracción de atributos con IA como complemento de las regex, nunca sustituto</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: las regex de <code>demographic_extraction.py</code> tienen un
+vocabulario fijo ("estudio X", "estudiante de X"&#8230;&#8203;); cualquier
+redacción real que no encaje se pierde en silencio (p. ej. "voy a 2º de
+Enfermería").</p>
+</div>
+<div class="paragraph">
+<p><strong>Alternativas consideradas</strong>: sustituir las regex por extracción vía IA
+por completo (descartado: perdería la garantía de coincidencia exacta y
+determinista que ya funcionaba bien, y encarecería/ralentizaría el
+análisis incluso para los casos que las regex ya resolvían gratis);
+pedir a la IA que decidiera directamente la categoría del INE
+correspondiente (descartado: una alucinación del modelo podría colar una
+categoría inventada como si fuera una estimación de población real).</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: <code>nlp/ai_attribute_extraction.py</code> corre siempre después de
+las regex y solo rellena los campos que estas no encontraron
+(<code>merge_findings</code>, con las regex teniendo prioridad). El LLM solo
+propone texto libre; la normalización final contra las tablas del INE
+la sigue haciendo el propio código, igual que para las regex. Además,
+propone por separado una estimación de sexo por convención cultural del
+nombre público de la cuenta, marcada con una procedencia distinta
+(<code>ia_nombre</code>) y una nota de menor fiabilidad explícita en el informe&#8201;&#8212;&#8201;nunca se mezcla con una autodeclaración real en el mismo nivel de
+confianza.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () capta redacciones libres sin perder la
+trazabilidad ni la resistencia a alucinaciones del enfoque por regex;
+() coherente con el principio de explicabilidad del resto del proyecto
+(ver <a href="#section-concepts">Conceptos transversales</a>); (-) el análisis ahora depende, para esta
+mejora concreta, de una llamada de red adicional a un tercero (Mistral),
+mitigado por ser opcional y degradarse con gracia sin <code>MISTRAL_API_KEY</code>.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_27_estimación_indirecta_de_tramo_de_edad_con_umbral_de_confianza_propio_y_sin_sustituir_nunca_una_edad_exacta">9.5.3. ADR-27: Estimación indirecta de tramo de edad, con umbral de confianza propio y sin sustituir nunca una edad exacta</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: hasta ahora, <code>edad</code> solo se rellenaba con una
+autodeclaración EXPLÍCITA ("tengo 24 años"), detectada por regex o por
+la IA leyendo una frase literal. Si el texto no contenía una frase así,
+el escalón de edad de <code>estimate_population_narrowing</code> simplemente no
+aparecía en el informe, aunque hubiera pistas indirectas razonables
+(año de graduación, curso que la persona menciona estar haciendo,
+jerga o referencias generacionales) de las que un lector humano sí
+podría deducir una franja de edad plausible.</p>
+</div>
+<div class="paragraph">
+<p><strong>Alternativas consideradas</strong>: (1) reutilizar sin más el mecanismo de
+<code>inferencias_blandas</code>/<code>InferredAttribute</code> ya existente&#8201;&#8212;&#8201;descartado
+porque esas inferencias son deliberadamente ajenas al estimador de
+k-anonimato (no narrowean población, ver docstring de
+<code>soft_inferences</code> en <code>DemographicFindings</code>), y aquí el objetivo
+explícito era justo lo contrario: que la estimación SÍ afecte al
+número de población restante que ve el usuario. (2) Pedir a la IA una
+edad EXACTA también para el caso indirecto (mismo campo <code>edad</code> que ya
+existe)&#8201;&#8212;&#8201;descartado: mezclaría en un único campo autodeclaraciones
+literales (alta fiabilidad) con conjeturas basadas en pistas sueltas
+(fiabilidad mucho menor), sin forma de que el informe distinguiera
+ambos casos ni de aplicar un umbral de confianza distinto a cada uno.
+(3) Devolver directamente un tramo de INE como string libre desde el
+prompt (p. ej. que el modelo escriba <code>"25-29"</code>)&#8201;&#8212;&#8201;descartado frente a
+pedir una edad numérica aproximada y convertirla con la función
+<code>age_bin()</code> ya existente: es más robusto (el modelo puede alucinar un
+formato de tramo distinto al de <code>AGE_DISTRIBUTION_5Y</code>, p. ej. "25 a 29"
+o "26-30") y evita introducir una segunda fuente de verdad para los
+límites de los tramos.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: nuevo campo <code>DemographicFindings.edad_rango</code> (tramo
+quinquenal, mismas claves que <code>AGE_DISTRIBUTION_5Y</code>), rellenado
+ÚNICAMENTE por <code>ai_attribute_extraction.py::_set_edad_rango</code>, nunca por
+regex. El prompt de Mistral incorpora un campo aparte,
+<code>"edad_estimada": {"edad_aproximada": &lt;entero&gt;|null, "confianza": &lt;0-1&gt;}</code>,
+con instrucciones explícitas de razonar de forma INDIRECTA/simbólica
+(mismo estilo que <code>estado_civil</code>, ver ADR previo sobre inferencias
+blandas) y de ser conservador con la confianza. Reglas de aceptación,
+en este orden:</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>Si ya existe una edad EXACTA (<code>findings.edad</code>, autodeclarada por
+regex o por IA) para esa misma persona, <code>edad_estimada</code> se ignora
+por completo&#8201;&#8212;&#8201;la edad exacta es siempre más precisa y nunca
+conviven ambos campos a la vez.</p>
+</li>
+<li>
+<p>Si <code>confianza &lt; 0.5</code>, se descarta también&#8201;&#8212;&#8201;no se añade ni edad ni
+tramo. El umbral es deliberadamente más alto que el rango 0.3-0.7
+que se acepta sin filtrar para <code>inferencias_blandas</code> genéricas,
+precisamente porque esto SÍ participa en el cálculo de
+k-anonimato (a diferencia de las inferencias blandas).</p>
+</li>
+<li>
+<p>Si supera el umbral, <code>edad_aproximada</code> se convierte al tramo INE
+correspondiente con <code>age_bin()</code> y se guarda con
+<code>source["edad_rango"] = "ia_estimada"</code> (nunca <code>"ia"</code> a secas) y su
+confianza en el nuevo campo genérico <code>DemographicFindings.confidence</code>
+(dict por campo, pensado para poder reutilizarse en el futuro con
+otros atributos probabilísticos sin volver a cambiar la forma de la
+clase).</p>
+</li>
+</ol>
+</div>
+<div class="paragraph">
+<p><code>scoring/k_anonymity.py::_step_edad</code> prioriza <code>edad</code> sobre <code>edad_rango</code>
+(mismo orden que la regla 1 de arriba) y, cuando usa el tramo, aplica
+la proporción de <code>AGE_DISTRIBUTION_5Y</code> (no la derivada año a año de
+<code>AGE_DISTRIBUTION_1Y</code>, que no tendría sentido sin conocer la edad
+exacta dentro del tramo). La confianza se expone como campo propio
+(<code>PopulationNarrowingStep.confidence</code> / <code>PopulationEstimate.confidence</code>)
+en vez de interpolarse dentro de <code>note</code>&#8201;&#8212;&#8201;ver ADR-26: todas las
+<code>note</code> de <code>k_anonymity.py</code> son deliberadamente texto fijo por
+categoría/fuente para que el frontend las traduzca por <code>note_code</code> sin
+parsear frases, e interpolar un número variable ahí habría roto ese
+contrato.</p>
+</div>
+<div class="paragraph">
+<p><strong>Justificación</strong>: separar <code>edad_rango</code> de <code>edad</code> en vez de mezclarlos
+mantiene la misma garantía de trazabilidad que ya tiene el resto del
+proyecto&#8201;&#8212;&#8201;el informe siempre puede distinguir "esto lo dijiste tú
+literalmente" de "esto lo ha deducido una IA de pistas sueltas", igual
+que ya ocurre con <code>sexo</code>/<code>sexo_por_nombre</code> (ADR-13) y con
+<code>estado_civil</code> (inferencia simbólica). Usar el tramo quinquenal ya
+publicado por el INE en vez de fingir precisión año a año para un dato
+que en realidad es una conjetura es, además, más honesto de cara al
+usuario: la incertidumbre de la estimación queda reflejada en la
+propia granularidad del dato mostrado, no solo en una nota al pie.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () el informe puede mostrar un indicio de edad
+incluso cuando el usuario no lo ha declarado explícitamente, sin
+necesidad de adivinar un año concreto ni de aceptar estimaciones poco
+fundamentadas (el umbral de confianza filtra las conjeturas débiles
+antes de que lleguen al cálculo de k-anonimato); () coherente con el
+patrón ya establecido de "código de fuente + nota" para señalar menor
+fiabilidad (<code>ia_estimada</code>, icono 🤖 reutilizado en el frontend); (+)
+cero cambios de comportamiento cuando ya existe una edad exacta o
+cuando no hay <code>MISTRAL_API_KEY</code> configurada (degradación con gracia,
+mismo principio que el resto de <code>ai_attribute_extraction.py</code>); (-) el
+umbral de confianza de 0.5 es una elección heurística, no calibrada
+contra casos reales etiquetados a mano&#8201;&#8212;&#8201;queda como trabajo futuro
+si se observa en producción que el modelo es sistemáticamente
+demasiado (o poco) conservador con este campo concreto; (-) al ser un
+tramo de 5 años en vez de una edad puntual, reduce algo la población
+respecto a una edad exacta, pero mucho menos que un año concreto&#8201;&#8212;&#8201;efecto esperado y deseado, no un error: es justo la contrapartida de
+tener menos certeza sobre el dato de partida.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_36_age_distribution_1y_pasa_a_datos_reales_del_censo_tabla_01003_en_vez_de_repartir_uniformemente_age_distribution_5y">9.5.4. ADR-36: AGE_DISTRIBUTION_1Y pasa a datos reales del Censo (tabla 01003), en vez de repartir uniformemente AGE_DISTRIBUTION_5Y</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: <code>AGE_DISTRIBUTION_1Y</code> (proporción de población por edad
+exacta, año a año) se derivaba de <code>AGE_DISTRIBUTION_5Y</code> repartiendo
+uniformemente la proporción de cada tramo quinquenal entre las edades
+que lo componen&#8201;&#8212;&#8201;una aproximación explícitamente documentada como tal
+desde el principio, justificada porque la tabla año-a-año real del INE
+(<a href="https://www.ine.es/jaxi/Tabla.htm?path=/t20/e245/p08/l0/&amp;file=01003.px" class="bare">https://www.ine.es/jaxi/Tabla.htm?path=/t20/e245/p08/l0/&amp;file=01003.px</a>)
+es un selector interactivo, no un CSV descargable directamente por URL.</p>
+</div>
+<div class="paragraph">
+<p>Al construir <code>SPORT_PRACTICE_BY_AGE_BAND</code> (ver ADR-37) cruzando esta
+distribución con los tramos de edad de la Encuesta de Hábitos
+Deportivos (15-24, 25-54, 55+), el tramo 15-24&#8201;&#8212;&#8201;el más pequeño y por
+tanto el más sensible a errores de reparto&#8201;&#8212;&#8201;dio una tasa de práctica
+deportiva del 100,85% sobre la población derivada: más practicantes
+que población, matemáticamente imposible. Señal inequívoca de que el
+reparto uniforme dentro de tramo no se ajustaba lo bastante bien a la
+pirámide real en esa franja concreta (las edades no se distribuyen
+uniformemente ni siquiera dentro de un quinquenio, y el efecto se nota
+más cuanto más pequeño es el tramo en términos absolutos).</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: descargar manualmente la tabla 01003 (población por edad,
+año a año, ambos sexos, año 2022&#8201;&#8212;&#8201;la exportación a CSV desde el
+navegador sí es posible aunque la URL directa no lo sea) y usarla como
+fuente PRIMARIA de <code>AGE_DISTRIBUTION_1Y</code>, invirtiendo la relación entre
+las dos tablas: antes <code>AGE_DISTRIBUTION_5Y</code> era la fuente y <code>1Y</code> se
+derivaba de ella; ahora <code>AGE_DISTRIBUTION_1Y</code> es la fuente (datos
+reales, 101 valores exactos que suman 1.0) y <code>AGE_DISTRIBUTION_5Y</code> se
+deriva SUMANDO <code>1Y</code> dentro de cada tramo quinquenal
+(<code>_build_age_distribution_5y_from_1y</code>), garantizando que ambas tablas
+sean consistentes entre sí por construcción.</p>
+</div>
+<div class="paragraph">
+<p><strong>Desfase de año aceptado</strong>: la tabla 01003 es de 2022, mientras que
+<code>TOTAL_POPULATION_ES</code> es de 2025 (~1,65M más de población total). Se
+usa la distribución de 2022 como PROPORCIÓN (no como cifra absoluta)
+aplicada sobre <code>TOTAL_POPULATION_ES</code> actual, asumiendo que la FORMA de
+la pirámide de edad no cambia mucho en 2-3 años aunque el total crezca&#8201;&#8212;&#8201;mismo tipo de aproximación que ya aceptaba la versión anterior
+(reparto uniforme dentro de tramo), pero basada en datos reales de
+población en vez de un reparto artificial.</p>
+</div>
+<div class="paragraph">
+<p><strong>Gotcha de implementación</strong>: un primer intento de generar el diccionario
+de 101 valores se transcribió A MANO a partir de una salida de consola
+truncada, y 88 de los 101 valores no coincidían con el CSV real (el
+error no rompía la sintaxis ni los tests existentes, solo daba
+resultados sutilmente incorrectos&#8201;&#8212;&#8201;se detectó porque la suma no daba
+1.0 exacto). Se corrigió regenerando el bloque completo por script
+directamente desde el CSV y sustituyéndolo con una operación de texto
+programática, no manual, eliminando el riesgo de transcripción por
+completo.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () elimina el problema de tasas por encima del 100%
+en cualquier cálculo que cruce edad con otra variable, no solo
+deportes; () mejora la precisión de CUALQUIER cálculo por edad en la
+app (k-anonimato de cualquier atributo que use <code>age_range_proportion</code>),
+no solo el que motivó el cambio; (+) las dos tablas (<code>1Y</code> y <code>5Y</code>) ya no
+pueden desincronizarse entre sí, al derivarse la segunda de la primera
+por construcción; (-) el desfase de 2-3 años entre la forma de la
+pirámide (2022) y el total poblacional (2025) sigue siendo una
+aproximación, aunque mejor que la anterior; (-) requiere descarga
+manual periódica si se quiere refrescar (marcado con umbral de
+caducidad anual en <code>_STALE_THRESHOLDS</code>, ver <code>stale_tables()</code>).</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_37_práctica_deportiva_condicionada_por_sexo_edad_y_nivel_de_estudios_con_prioridad_en_cascada_nunca_combinando_dos_ajustes_a_la_vez">9.5.5. ADR-37: Práctica deportiva condicionada por sexo, edad y nivel de estudios, con prioridad en cascada (nunca combinando dos ajustes a la vez)</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: <code>SPORT_PRACTICE_DISTRIBUTION</code> empezó como una tabla de 9
+modalidades con cifras sueltas de prensa sobre la edición 2022 de la
+Encuesta de Hábitos Deportivos, y se amplió en varias fases hasta las
+41 modalidades completas de la tabla 1.21 de la edición 2024/25
+(descargada directamente del portal de estadísticas del Ministerio,
+tras confirmar que la prensa nunca cita el desglose completo). Todas
+esas proporciones son MARGINALES: aplican la misma cifra a cualquiera
+que declare esa modalidad, sin distinguir si es hombre o mujer, joven o
+mayor, con estudios superiores o sin ellos&#8201;&#8212;&#8201;desperdiciando la señal
+de otros atributos que la propia persona ya haya declarado.</p>
+</div>
+<div class="paragraph">
+<p>La tabla 1.22 de la misma encuesta ("&#8230;&#8203;por modalidad deportiva, sexo,
+edad y nivel de estudios") sí desglosa cada modalidad por esas tres
+variables&#8201;&#8212;&#8201;pero como TRES CRUCES INDEPENDIENTES (deporte×sexo,
+deporte×edad, deporte×estudios), no como un cruce a cuatro bandas
+simultáneo (deporte×sexo×edad×estudios a la vez). Ese dato conjunto no
+existe en ninguna tabla publicada de la encuesta.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: construir tres tablas nuevas&#8201;&#8212;&#8201;<code>SPORT_PRACTICE_BY_SEX</code>, <code>SPORT_PRACTICE_BY_AGE_BAND</code> y
+<code>SPORT_PRACTICE_BY_EDUCATION_LEVEL</code>&#8201;&#8212;&#8201;cada una P(deporte | variable),
+convertidas de "% de practicantes de ese grupo" a "% de la POBLACIÓN de
+ese grupo" multiplicando por la tasa de práctica deportiva específica
+de cada grupo (mismo patrón que ya usaba ADR sobre
+<code>MARITAL_STATUS_BY_SEX</code>, extendido aquí a tres variables en vez de una).
+<code>_step_practica_deportiva</code> prueba las tres en CASCADA, con prioridad
+sexo &gt; edad &gt; nivel_estudios &gt; marginal: usa la primera que esté
+disponible Y tenga dato para esa combinación concreta, y si ninguna
+sirve, cae a la marginal. NUNCA combina dos ajustes a la vez (p. ej.
+sexo Y edad multiplicados) porque, al no existir el cruce a cuatro
+bandas, hacerlo equivaldría a asumir independencia estadística entre
+sexo y edad DENTRO de cada deporte&#8201;&#8212;&#8201;una suposición no verificable con
+los datos disponibles, y que probablemente sobre-estimaría el
+estrechamiento de población.</p>
+</div>
+<div class="paragraph">
+<p>El orden de prioridad (sexo &gt; edad &gt; estudios) es por limpieza de la
+señal, no por "mejor" en abstracto: sexo es una condición binaria sin
+ambigüedad; edad puede tener tramos sin ambigüedad (edad exacta) o con
+ambigüedad resoluble (un rango declarado que cabe entero dentro de un
+tramo de la encuesta&#8201;&#8212;&#8201;ver <code>_sport_age_band</code>, que devuelve <code>None</code> si
+el rango cruza la frontera entre dos tramos, en vez de adivinar);
+nivel de estudios depende ADEMÁS de una aproximación de población
+adicional (<code>EDUCATION_LEVEL_DISTRIBUTION</code>, basada en población de 25 a
+64 años, ver ADR-38) que ni sexo ni edad necesitan, así que va último.</p>
+</div>
+<div class="paragraph">
+<p><strong>Casos de muestra insuficiente</strong>: cuando la encuesta redondea el % de
+una combinación concreta a 0,0 (p. ej. "squash" y mujeres, o
+"automovilismo"/"triatlón" en el tramo 55+), esa clave se OMITE a
+propósito de la tabla condicionada en vez de guardarse como 0.0 literal&#8201;&#8212;&#8201;un 0,0% redondeado significa "muestra insuficiente para detectarlo",
+no "cero personas lo practican". Al faltar la clave,
+<code>_step_practica_deportiva</code> cae de vuelta al siguiente nivel de
+prioridad (o a la marginal), en vez de mostrar una población de 0 que
+la evidencia real no respalda.</p>
+</div>
+<div class="paragraph">
+<p><strong>Efecto colateral positivo, no buscado</strong>: construir
+<code>SPORT_PRACTICE_BY_AGE_BAND</code> fue precisamente lo que expuso el problema
+de tasas por encima del 100% que llevó a ADR-36 (sustituir
+<code>AGE_DISTRIBUTION_1Y</code> por datos reales del Censo)&#8201;&#8212;&#8201;un ejemplo de cómo
+cruzar una tabla nueva contra infraestructura ya existente puede sacar
+a la luz aproximaciones que llevaban tiempo sin cuestionarse.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () aprovecha la señal de sexo/edad/estudios cuando ya
+se conoce, en vez de desperdiciarla aplicando siempre la marginal; ()
+el efecto es grande para deportes con sesgo fuerte por cualquiera de
+las tres variables (p. ej. "caza" lo practican los hombres ~32 veces
+más que las mujeres, "yoga_pilates" las mujeres ~4 veces más que los
+hombres); (+) cada tabla condicionada documenta explícitamente sus
+casos de muestra insuficiente, en vez de esconderlos como ceros; (-) la
+cascada de prioridad es una simplificación deliberada frente al cruce a
+cuatro bandas real, que no existe como dato público; (-) tres tablas
+más que mantener y actualizar cuando la encuesta publique su siguiente
+edición.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_38_nuevo_atributo_nivel_estudios_nivel_de_formación_alcanzado_distinto_de_estudios_carrera_concreta">9.5.6. ADR-38: Nuevo atributo <code>nivel_estudios</code> (nivel de formación alcanzado), distinto de <code>estudios</code> (carrera concreta)</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: al construir <code>SPORT_PRACTICE_BY_EDUCATION_LEVEL</code> (ver
+ADR-37) para aprovechar la columna de nivel de estudios de la tabla
+1.22, se encontró que el proyecto no tenía NINGÚN atributo que
+capturase el nivel de formación alcanzado en los tramos que usa la
+propia encuesta (1ª etapa de secundaria o inferior / 2ª etapa de
+secundaria / educación superior). El campo <code>estudios</code> ya existente
+(<code>STUDIES_DISTRIBUTION</code>) es una cosa distinta: la CARRERA universitaria
+concreta que alguien nombra ("estudié Medicina"), que solo aplica a
+quien ya cursa o cursó estudios superiores CON una titulación nombrada&#8201;&#8212;&#8201;no cubre a quien solo dice "tengo el bachillerato" o "no tengo
+estudios", y no permite construir la tabla condicionada sin ese dato.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: añadir <code>nivel_estudios</code> como atributo nuevo de punta a
+punta (regex + extracción por IA + paso de k-anonimato propio,
+<code>_step_nivel_estudios</code>), con 3 valores: <code>superior</code>,
+<code>secundaria_superior</code>, <code>secundaria_o_inferior</code>&#8201;&#8212;&#8201;clasificación
+CNED-2014/ISCED que usa el INE/EPA. Requiere una autodeclaración de
+haber COMPLETADO ese nivel (verbos como "tengo&#8230;&#8203;", "terminé&#8230;&#8203;", "soy
+licenciado/a en&#8230;&#8203;"), no de estar cursándolo actualmente ("estoy
+estudiando en la universidad" no cuenta)&#8201;&#8212;&#8201;mismo criterio que
+<code>practica_deportiva</code> exige práctica real, no mención de espectador.</p>
+</div>
+<div class="paragraph">
+<p>Los Ciclos Formativos de Formación Profesional son el caso más
+delicado: un Ciclo Formativo de Grado SUPERIOR cuenta como "superior"
+en la clasificación del INE (nivel 5, igual que la universidad), no
+como "secundaria_superior"&#8201;&#8212;&#8201;solo el Grado MEDIO cae en ese segundo
+tramo. Por eso las frases-ancla exigen "superior"/"medio" explícito en
+vez de un genérico "tengo un ciclo formativo" sin cualificar, que sería
+ambiguo entre los dos niveles.</p>
+</div>
+<div class="paragraph">
+<p>Si <code>estudios</code> ya está detectado (una carrera universitaria concreta),
+<code>nivel_estudios</code> se infiere automáticamente como <code>superior</code> sin
+necesitar una frase-ancla propia&#8201;&#8212;&#8201;nombrar la carrera ya es evidencia
+suficiente del nivel. Los dos campos pueden coexistir como pasos
+separados de <code>population_narrowing</code> (no es doble contabilización: son
+dos preguntas distintas de la encuesta, "¿qué estudiaste?" frente a
+"¿hasta qué nivel llegaste?").</p>
+</div>
+<div class="paragraph">
+<p><strong>Limitación de la tabla poblacional, documentada a propósito</strong>:
+<code>EDUCATION_LEVEL_DISTRIBUTION</code> (el marginal usado cuando no hay sexo ni
+edad disponibles para el ajuste condicionado, ver ADR-37) sale del
+indicador INE/EPA "Nivel de formación de la población adulta", que
+cubre población de 25 a 64 años&#8201;&#8212;&#8201;NO toda la población de 15+ que es
+la referencia habitual del resto de <code>ine_reference.py</code>. Es el rango de
+edad estándar que usan INE/Eurostat precisamente porque medir nivel
+COMPLETADO en gente más joven (aún cursando) o mayor (con un contexto
+de acceso a la educación muy distinto) sesga la comparación en ambos
+sentidos&#8201;&#8212;&#8201;se documenta la limitación en vez de esconderla, mismo
+criterio que otras aproximaciones de este fichero (golf/2022 en una
+versión anterior de <code>SPORT_PRACTICE_DISTRIBUTION</code>, EYE_COLOR/HAIR_COLOR
+en ADR-34).</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () desbloquea `SPORT_PRACTICE_BY_EDUCATION_LEVEL`
+como tercer nivel de la cascada de ADR-37; () es reutilizable por
+cualquier otro atributo futuro que quiera condicionarse por nivel
+educativo, no solo deportes; (-) la aproximación 25-64 sobre población
+15+ probablemente sobre-estima "superior" en el extremo joven (mucha
+gente de 15-24 aún no ha terminado) y lo infra-estima en el extremo
+mayor (65+, generación con menor acceso histórico a estudios
+superiores); (-) atributo nuevo completo (regex + IA + paso propio) es
+más superficie de mantenimiento que reutilizar algo existente, pero no
+había nada reutilizable que cubriera esta pregunta concreta.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_40_nuevo_atributo_rama_estudios_rama_de_conocimiento_sin_paso_propio_cuando_estudios_ya_la_cubre">9.5.7. ADR-40: Nuevo atributo <code>rama_estudios</code> (rama de conocimiento), sin paso propio cuando <code>estudios</code> ya la cubre</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: <code>estudios</code> (<code>STUDIES_DISTRIBUTION</code>) solo cubre 14 carreras
+concretas con proporción propia&#8201;&#8212;&#8201;cualquier otra carrera mencionada en
+el texto ("estudio Sociología", "estudio Filosofía") no aporta ninguna
+señal de estrechamiento, aunque sí sea perfectamente clasificable en
+una de las 5 ramas de conocimiento oficiales del sistema universitario
+español (Real Decreto 1393/2007, modificado por RD 43/2015: Artes y
+Humanidades, Ciencias, Ciencias de la Salud, Ciencias Sociales y
+Jurídicas, Ingeniería y Arquitectura).</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: añadir <code>rama_estudios</code> como atributo nuevo de punta a
+punta (regex + IA + paso de k-anonimato propio), con dos fuentes de
+detección:
+  - <strong>Inferencia automática</strong> desde <code>estudios</code> cuando ya se conoce una
+    de las 14 carreras concretas, vía <code>STUDIES_TO_RAMA</code> (mapeo fijo
+    1:1, sin ambigüedad&#8201;&#8212;&#8201;cada carrera pertenece a exactamente una
+    rama oficial).
+  - <strong>Vocabulario ampliado propio</strong> (~25 carreras adicionales:
+    sociología, filología, física, fisioterapia, ingeniería civil&#8230;&#8203;)
+    con su propia frase-ancla de detección, para cubrir carreras que
+    <code>estudios</code> no tiene registradas individualmente pero sí son
+    clasificables en una rama.</p>
+</div>
+<div class="paragraph">
+<p>Dos casos de la clasificación oficial se verificaron explícitamente por
+no ser evidentes en vez de asumirse: "psicología" está adscrita a
+Ciencias de la Salud como rama PRINCIPAL (BOE-A-2022-12576, código
+RUCT), no a Ciencias Sociales y Jurídicas como podría parecer por su
+objeto de estudio; "veterinaria" está adscrita a Ciencias de la Salud
+(documentación oficial de admisión de la Universidad de Zaragoza y
+catálogo de la USC), no a Ciencias como sugeriría la intuición.</p>
+</div>
+<div class="paragraph">
+<p><strong>Guard de no-duplicación (la decisión central de este ADR)</strong>: a
+diferencia de <code>nivel_estudios</code> (que SÍ genera su propio paso aunque se
+infiera automáticamente de <code>estudios</code>, porque nivel y carrera son
+preguntas distintas de la encuesta de origen&#8201;&#8212;&#8201;ver ADR-38),
+<code>rama_estudios</code> NUNCA genera un paso de estrechamiento cuando
+<code>findings.estudios</code> ya está informado. El motivo es puramente
+estadístico: quien estudia "derecho" ya está, con probabilidad
+exactamente 1, dentro de "Ciencias Sociales y Jurídicas"&#8201;&#8212;&#8201;no es un
+hecho INDEPENDIENTE del ya conocido, es un subconjunto exacto de él.
+<code>_step_estudios</code> ya aplica la proporción de esa carrera concreta
+(3,08% para derecho), que es más precisa que la de toda su rama
+(46,66%); aplicar AMBAS multiplicándolas contaría el mismo hecho dos
+veces y estrecharía la población sin ninguna base&#8201;&#8212;&#8201;el mismo tipo de
+error que motivó la cascada de prioridad de ADR-37 (nunca combinar dos
+ajustes condicionados que no son independientes entre sí).
+<code>_step_rama_estudios</code> solo produce un paso cuando <code>rama_estudios</code> se
+detectó de forma INDEPENDIENTE de <code>estudios</code> (carrera fuera de las 14,
+vía el vocabulario ampliado). El campo se sigue rellenando igualmente
+para mostrarlo de forma informativa en el resto del pipeline, solo se
+omite el paso de <code>population_narrowing</code>.</p>
+</div>
+<div class="paragraph">
+<p><strong>Bug encontrado y corregido de paso, no buscado</strong>: al escribir el test
+de regresión numérica para el guard de arriba
+(<code>test_does_not_double_narrow_the_final_remaining_population</code>, que
+compara <code>final_remaining_population()</code> con y sin <code>rama_estudios</code> cuando
+<code>estudios</code> ya está presente, esperando que sea idéntico), se descubrió
+que <code>nivel_estudios</code> (ADR-38) llevaba desde su introducción sin estar
+incluido en <code>_CHAINED_CATEGORIES</code>&#8201;&#8212;&#8201;el conjunto que
+<code>final_remaining_population()</code> consulta para decidir qué pasos cuentan
+hacia el número combinado final. El paso individual de <code>nivel_estudios</code>
+se calculaba y mostraba correctamente en la lista de
+<code>population_narrowing</code>, pero si era el ÚLTIMO paso encadenable con
+narrowing válido, el número final ("en España hay X personas que
+comparten tus rasgos") lo ignoraba y usaba el del paso anterior en su
+lugar. Ningún test existente lo cubría porque <code>TestFinalRemainingPopulation</code>
+no tenía ningún caso con <code>nivel_estudios</code> como único o último atributo
+encadenable. Corregido añadiendo tanto <code>nivel_estudios</code> como
+<code>rama_estudios</code> a <code>_CHAINED_CATEGORIES</code> en el mismo cambio.</p>
+</div>
+<div class="paragraph">
+<p><strong>Fuente de la tabla, limitación documentada</strong>: <code>RAMA_ESTUDIOS_DISTRIBUTION</code>
+mezcla matriculados de universidades PÚBLICAS del curso 2015/16 con
+PRIVADAS del curso 2019/20 (Ministerio de Universidades, Estadística de
+Estudiantes Universitarios) porque no se encontró una única fuente con
+el desglose completo de las 5 ramas para ambos tipos de universidad en
+el mismo curso académico. Se validó cruzando con una cifra independiente
+de nuevo ingreso del curso 2021/22 (Ciencias Sociales y Jurídicas 46,4%,
+Ciencias 6,3% según esa fuente, frente al 46,66%/6,02% calculados aquí)&#8201;&#8212;&#8201;la coincidencia razonable entre ambas cifras, pese al desfase de
+cursos y al ser métricas distintas (matriculación total frente a nuevo
+ingreso), da confianza en el orden de magnitud sin pretender exactitud
+absoluta.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () aprovecha menciones de carrera que antes no
+aportaban ninguna señal de estrechamiento (cualquier carrera fuera de
+las 14 de `STUDIES_DISTRIBUTION`); () el guard de no-duplicación es
+generalizable como patrón para futuros atributos que refinen uno ya
+existente (cualquier "categoría amplia de X" derivada de un "X
+concreto" ya cableado debería aplicar el mismo criterio); (+) efecto
+colateral positivo: destapó y corrigió un bug real de ADR-38 que
+llevaba una sesión entera sin detectarse; (-) la tabla de origen mezcla
+dos cursos académicos distintos, aproximación explícitamente
+documentada en vez de escondida; (-) atributo nuevo completo (regex<br>
+IA + paso propio) es más superficie de mantenimiento, aunque menor que
+<code>nivel_estudios</code> al reutilizar <code>_STUDY_VERB_RE</code> en vez de un regex de
+detección nuevo.</p>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="adr-cat-analisis-visual-vision-por-computador">9.6. Análisis visual (visión por computador)</h3>
+<div class="sect3">
+<h4 id="_adr_16_consenso_entre_varias_fotos_y_exclusión_de_fotos_de_viaje_antes_de_asumir_residencia_por_imagen">9.6.1. ADR-16: Consenso entre varias fotos, y exclusión de fotos de viaje, antes de asumir residencia por imagen</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: la primera versión aceptaba la conclusión de residencia con
+una sola foto por encima de un umbral de confianza bajo (40%). En la
+práctica esto era demasiado permisivo para un dato tan sensible: (a) una
+sola foto genérica (solo mar, solo cielo, un primer plano sin fondo
+distintivo) puede coincidir por casualidad con un umbral bajo sin que el
+contenido diga nada real sobre dónde vive la persona, y (b) una foto de
+vacaciones/viaje con confianza alta indica dónde ESTUVO la persona en ese
+momento, no dónde VIVE.</p>
+</div>
+<div class="paragraph">
+<p><strong>Alternativas consideradas</strong>: mantener un único umbral fijo más alto para
+una sola foto (más simple, pero sigue sin distinguir "una foto puntual
+casualmente segura" de "señal real y repetida"); pedir confirmación
+manual al usuario antes de aceptar una ubicación por imagen (más preciso,
+pero rompe el flujo 100% automático del resto del análisis y añade
+fricción de UI fuera del alcance de este TFG).</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: exigir consenso entre varias fotos de la MISMA comunidad
+autónoma antes de aceptar una conclusión de residencia: al menos 2 fotos
+con más del 80% de confianza, o al menos 4 con más del 60%
+(<code>HIGH_CONFIDENCE*</code>/<code>MODERATE_CONFIDENCE*</code> en <code>report/generator.py</code>).
+Antes de contar, se excluyen las fotos marcadas como "de viaje"
+(detectadas por regex en <code>nlp/travel_detection.py</code> y, en el mismo pase,
+por IA vía el campo <code>fotos_de_viaje</code> del prompt de
+<code>ai_attribute_extraction.py</code>&#8201;&#8212;&#8201;las dos fuentes se UNEN, nunca se
+sustituyen) y las marcadas como no representativas por
+<code>vision/geolocation.py</code> (vecinos más parecidos geográficamente
+dispersos, ver ADR-9).</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () reduce sustancialmente los falsos positivos de
+residencia por imagen, el tipo de error más dañino en una herramienta que
+se presenta como educativa/defensiva; () las fotos de viaje dejan de
+contaminar la conclusión, incluso con confianza de geolocalización
+altísima; (-) los umbrales concretos (2/80%, 4/60%) son una primera
+propuesta razonable, no una cifra derivada de un estudio&#8201;&#8212;&#8201;quedan como
+constantes explícitas y fácilmente ajustables si en la práctica resultan
+demasiado (o poco) exigentes, en vez de un "número mágico" enterrado en
+la lógica; (-) cuentas con pocas fotos de Instagram probablemente nunca
+alcancen el consenso necesario, así que la geolocalización por imagen se
+queda sin usarse en la práctica para esos casos&#8201;&#8212;&#8201;comportamiento
+correcto y esperado (mejor "no estimable" que una conclusión poco
+fiable), no un fallo.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_17_moondream2_local_para_analizar_el_contenido_de_las_fotos_en_vez_de_mistral_pixtral">9.6.2. ADR-17: Moondream2 local para analizar el contenido de las fotos, en vez de Mistral Pixtral</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: se quería, además de geolocalizar cada foto, extraer señales
+sobre su contenido (aficiones, actividades, señal de pareja). El resto de
+funciones de IA del proyecto usan Mistral AI (ver ADR-10), que sí ofrece
+un modelo multimodal (Pixtral) capaz de analizar imágenes.</p>
+</div>
+<div class="paragraph">
+<p><strong>Alternativas consideradas</strong>: Mistral Pixtral vía API, igual que el resto
+de integraciones de IA del proyecto (coherente con ADR-10, un único
+proveedor); un modelo de clasificación de imágenes clásico entrenado a
+medida (descartado: requeriría un dataset etiquetado de aficiones/
+actividades que no existe, desproporcionado para el alcance de un TFG).</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: Moondream2, un modelo de visión-lenguaje (VQA) pequeño
+(~1.8B parámetros) ejecutado localmente vía <code>transformers</code>, con el mismo
+patrón de dependencia opcional que ya usa <code>geolocation.py</code>
+(<code>requirements-vision.txt</code>, <code>--build-arg WITH_GEOLOCATION=true</code>).</p>
+</div>
+<div class="paragraph">
+<p><strong>Justificación</strong>: a diferencia de las otras dos integraciones con Mistral
+(<code>ai_analysis.py</code> sobre el informe ya agregado, <code>ai_attribute_extraction.py</code>
+sobre texto/bio), este análisis necesita una llamada POR FOTO, no una por
+informe&#8201;&#8212;&#8201;una cuenta con varias decenas de fotos analizadas agotaría el
+tier gratuito de Mistral en un único análisis. Un modelo local, en
+cambio, no tiene límite de peticiones por minuto una vez cargado, y
+además mantiene la imagen dentro del propio servidor en vez de enviarla a
+un tercero&#8201;&#8212;&#8201;coherente con el principio de minimización de datos del
+resto del proyecto (aunque las fotos de Instagram sean públicas, seguir
+minimizando dónde viajan sigue siendo la postura por defecto de este
+proyecto).</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () sin límite de tasa por foto, ni coste por llamada;
+() la imagen no sale del servidor; (+) reutiliza el mismo patrón de
+dependencia opcional, build-arg y degradación que ya existía para
+<code>geolocation.py</code>, sin inventar uno nuevo; (-) modelo bastante menos capaz
+que Pixtral en tareas VQA abiertas, mitigado limitando la tarea a una
+pregunta cerrada de formato fijo en vez de una descripción libre; (-)
+Moondream2 se carga con <code>trust_remote_code=True</code> (código Python propio
+del modelo, no solo pesos)&#8201;&#8212;&#8201;superficie de confianza real que merece
+mencionarse explícitamente en la memoria, aunque el modelo y su revisión
+(<code>_MODEL_REVISION</code>, fijada explícitamente en el código) provengan de un
+repositorio público de Hugging Face con uso extendido; (-) no se precarga
+en el arranque del contenedor como el modelo de geolocalización (ver
+ADR-15), así que la primera foto de cada proceso paga el coste de carga.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_19_bfloat16_inutilizable_en_cpu_sin_aceleración_por_hardwarefloat32_forzado_cuantización_descartada">9.6.3. ADR-19: bfloat16 inutilizable en CPU sin aceleración por hardware&#8201;&#8212;&#8201;float32 forzado, cuantización descartada</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: Moondream2 (ADR-16) se descarga con el dtype con el que
 Hugging Face publica sus pesos, <code>bfloat16</code>, sin que el código de este
@@ -4385,8 +4863,8 @@ end-to-end en una máquina con RAM suficiente antes de dar esto por
 completamente cerrado.</p>
 </div>
 </div>
-<div class="sect2">
-<h3 id="_adr_20_concurrencia_de_fotos_autocalibrada_por_máquina_con_log_de_rendimiento_propio_en_vez_de_ajuste_manual_a_ciegas">9.20. ADR-20: Concurrencia de fotos autocalibrada por máquina, con log de rendimiento propio en vez de ajuste manual a ciegas</h3>
+<div class="sect3">
+<h4 id="_adr_20_concurrencia_de_fotos_autocalibrada_por_máquina_con_log_de_rendimiento_propio_en_vez_de_ajuste_manual_a_ciegas">9.6.4. ADR-20: Concurrencia de fotos autocalibrada por máquina, con log de rendimiento propio en vez de ajuste manual a ciegas</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: <code>Settings.photo_analysis_concurrency</code> (nº de fotos analizadas
 en paralelo con DINOv2/Moondream2, ver ADR-15) era un entero fijo (<code>2</code>)
@@ -4510,8 +4988,8 @@ para el volumen de análisis de un TFG pero a revisar si esto se
 convirtiera en un despliegue de uso continuado.</p>
 </div>
 </div>
-<div class="sect2">
-<h3 id="_adr_21_prompt_de_moondream2_dividido_en_dos_llamadas_caption_en_inglés_estructurado_en_español">9.21. ADR-21: Prompt de Moondream2 dividido en dos llamadas (caption en inglés + estructurado en español)</h3>
+<div class="sect3">
+<h4 id="_adr_21_prompt_de_moondream2_dividido_en_dos_llamadas_caption_en_inglés_estructurado_en_español">9.6.5. ADR-21: Prompt de Moondream2 dividido en dos llamadas (caption en inglés + estructurado en español)</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: el prompt original de <code>scene_analysis.py</code> combinaba un campo
 de descripción general (DESCRIPCION) y tres campos de opciones fijas
@@ -4606,8 +5084,8 @@ en vez de una, mitigado reutilizando la misma imagen ya codificada (no se
 paga el coste de codificarla dos veces).</p>
 </div>
 </div>
-<div class="sect2">
-<h3 id="_adr_22_redimensionado_dedicado_al_crop_size_de_moondream2_independiente_del_usado_por_dinov2">9.22. ADR-22: Redimensionado dedicado al <code>crop_size</code> de Moondream2, independiente del usado por DINOv2</h3>
+<div class="sect3">
+<h4 id="_adr_22_redimensionado_dedicado_al_crop_size_de_moondream2_independiente_del_usado_por_dinov2">9.6.6. ADR-22: Redimensionado dedicado al <code>crop_size</code> de Moondream2, independiente del usado por DINOv2</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: <code>encode_image()</code> de Moondream2 no hace una sola pasada por el
 encoder de visión&#8201;&#8212;&#8201;trocea la imagen en un crop global (reescalado
@@ -4672,8 +5150,8 @@ valor 378 es específico de la revisión pinneada del modelo&#8201;&#8212;&#8201
 el <code>config.py</code> real de la nueva revisión, no asumir que se mantiene.</p>
 </div>
 </div>
-<div class="sect2">
-<h3 id="_adr_23_campo_texto_visible_enlace_por_foto_en_publicaciones_con_varias_imágenes_y_descripción_visual_reconstruida_solo_con_señales_positivas">9.23. ADR-23: Campo TEXTO_VISIBLE, enlace por foto en publicaciones con varias imágenes, y descripción visual reconstruida solo con señales positivas</h3>
+<div class="sect3">
+<h4 id="_adr_23_campo_texto_visible_enlace_por_foto_en_publicaciones_con_varias_imágenes_y_descripción_visual_reconstruida_solo_con_señales_positivas">9.6.7. ADR-23: Campo TEXTO_VISIBLE, enlace por foto en publicaciones con varias imágenes, y descripción visual reconstruida solo con señales positivas</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: tres necesidades detectadas en uso real de la aplicación, con
 soluciones relacionadas entre sí (todas tocan <code>scene_analysis.py</code> y/o
@@ -4780,8 +5258,8 @@ en <code>report/generator.py</code> es necesario solo para tests que construyen
 real siempre se rellena.</p>
 </div>
 </div>
-<div class="sect2">
-<h3 id="_adr_24_condición_de_carrera_de_pil_entre_dinov2_y_moondream2_sobre_la_misma_imagen">9.24. ADR-24: Condición de carrera de PIL entre DINOv2 y Moondream2 sobre la misma imagen</h3>
+<div class="sect3">
+<h4 id="_adr_24_condición_de_carrera_de_pil_entre_dinov2_y_moondream2_sobre_la_misma_imagen">9.6.8. ADR-24: Condición de carrera de PIL entre DINOv2 y Moondream2 sobre la misma imagen</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: tras resolver ADR-21/ADR-22 (Moondream2 funcionando de forma
 fiable y rápida), apareció un patrón nuevo en producción: analizando
@@ -4839,8 +5317,8 @@ como recordatorio de que arreglar un cuello de botella puede destapar
 bugs que ya estaban ahí, no solo mejorar el rendimiento.</p>
 </div>
 </div>
-<div class="sect2">
-<h3 id="_adr_25_concurrencia_de_fotos_consciente_de_gpu_actualiza_adr_20_paralelismo_físico_por_cuda_streams_evaluado_y_descartado">9.25. ADR-25: Concurrencia de fotos consciente de GPU (actualiza ADR-20), paralelismo físico por CUDA streams evaluado y descartado</h3>
+<div class="sect3">
+<h4 id="_adr_25_concurrencia_de_fotos_consciente_de_gpu_actualiza_adr_20_paralelismo_físico_por_cuda_streams_evaluado_y_descartado">9.6.9. ADR-25: Concurrencia de fotos consciente de GPU (actualiza ADR-20), paralelismo físico por CUDA streams evaluado y descartado</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: <code>_default_photo_analysis_concurrency()</code> (ver ADR-20) calcula
 <code>photo_analysis_concurrency</code> a partir de <code>os.cpu_count() // 2</code>&#8201;&#8212;&#8201;heurística pensada para cuando Moondream2 corría en CPU (ver ADR-19),
@@ -4920,244 +5398,8 @@ hardware objetivo, igual que CUDA streams queda como opción válida a
 reconsiderar en ese escenario, no descartada para siempre.</p>
 </div>
 </div>
-<div class="sect2">
-<h3 id="_adr_26_backend_internacionalizable_por_códigos_estables_no_por_texto_ya_renderizado_en_español">9.26. ADR-26: Backend internacionalizable por códigos estables, no por texto ya renderizado en español</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: al añadir selección de idioma (español/inglés) en la webapp
-(<code>react-i18next</code>, ver <code>webapp/src/i18n</code>), quedó fuera del alcance inicial
-todo el texto que el backend generaba ya renderizado en español:
-1) los nombres de fase del stream de progreso SSE (<code>"Leyendo
-publicaciones&#8230;&#8203;"</code>, <code>"Analizando tu forma de escribir&#8230;&#8203;"</code>, ver
-<code>app/progress.py</code>); 2) las notas explicativas de cada escalón de
-<code>estimate_population_narrowing</code> (<code>PopulationNarrowingStep.note</code>, ver
-<code>app/scoring/k_anonymity.py</code>); 3) <code>attribute_label</code>, que mezclaba en un
-único string una plantilla y un valor (<code>f"Sexo: {findings.sexo}"</code>,
-<code>f"Universidad: {findings.universidad.title()}"</code>); y 4) el veredicto y
-las conclusiones que genera Mistral AI (<code>app/ai_analysis.py</code>), el único
-caso de texto realmente libre de los cuatro.</p>
-</div>
-<div class="paragraph">
-<p><strong>Alternativas consideradas</strong>: traducir en el frontend el texto en español
-tal y como llega, con una tabla de búsqueda (<code>{"Leyendo publicaciones&#8230;&#8203;":
-"Reading posts&#8230;&#8203;"}</code>) o parseando con regex los casos con un valor
-interpolado (<code>"Sexo: (.+)"</code>)&#8201;&#8212;&#8201;descartado para (1)-(3): funciona
-mientras el backend no cambie ni una coma de redacción, pero se rompe en
-silencio (sin error, solo deja de traducir) en cuanto alguien retoque el
-texto en español sin saber que el frontend depende literalmente de esa
-cadena; y para <code>attribute_label</code> en concreto, además, algunos valores son
-nombres propios (universidad, empresa, topónimos) que NO deben
-traducirse, y una regex no puede distinguir eso de forma fiable. Para (4)
-(veredicto/conclusiones de la IA), traducir con una segunda llamada
-(a Mistral otra vez, o a un servicio de traducción como DeepL)&#8201;&#8212;&#8201;descartado: añade latencia, un segundo punto de fallo, y consume cuota
-extra del tier gratuito de Mistral en cada informe, para un texto que ya
-sale bien calibrado en español (ver ADR-10) sin ninguna ganancia de
-fiabilidad frente a pedirle directamente al modelo que responda en otro
-idioma en la misma llamada.</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: dos patrones distintos según el tipo de contenido, ambos
-aditivos (nunca se elimina el campo en español existente, para no romper
-nada que ya dependa de él&#8201;&#8212;&#8201;logs, la descarga JSON del informe, un
-frontend desplegado con una versión anterior sin estos campos):</p>
-</div>
-<div class="olist arabic">
-<ol class="arabic">
-<li>
-<p><strong>Conjuntos cerrados de texto fijo</strong> (fases del SSE, notas de
-<code>k_anonymity.py</code>, y la plantilla de <code>attribute_label</code> separada de su
-valor)&#8201;&#8212;&#8201;el backend emite un CÓDIGO estable e independiente de idioma
-junto al texto en español ya existente, mismo patrón ya usado para
-<code>risk_level</code>/<code>source</code>. Concretamente: <code>app/stages.py</code> (7 códigos para
-<code>stage</code>), <code>app/note_codes.py</code> (14 códigos para <code>note_code</code>), y en
-<code>PopulationNarrowingStep</code>/<code>PopulationEstimate</code> dos campos nuevos,
-<code>value_raw</code> (el valor sin la plantilla de <code>attribute_label</code> ya montada)
-y <code>location_level</code> (<code>"municipio"|"provincia"|"comunidad_autonoma"</code>,
-necesario porque los tres comparten <code>category="ubicacion"</code> pero cada uno
-usa una plantilla distinta). El frontend traduce con
-<code>t('dashboard.attribute.' + template, { value })</code>, traduciendo también
-<code>value</code> solo cuando pertenece a un conjunto cerrado con entrada en el
-diccionario (sexo, estado civil, estudios&#8230;&#8203;); nombres propios y números
-se interpolan tal cual. Si un campo nuevo no viene (backend antiguo) o la
-clave de traducción no existe todavía, se usa el texto en español
-existente (<code>attribute_label</code>/<code>note</code>/el propio código) como fallback, sin
-romper&#8201;&#8212;&#8201;ver <code>buildAttributeLabel</code>/<code>buildNote</code> en
-<code>PopulationNarrowingTable.tsx</code> y el <code>defaultValue</code> en <code>Dashboard.tsx</code>.</p>
-</li>
-<li>
-<p><strong>Texto libre generado por IA</strong> (veredicto/conclusiones)&#8201;&#8212;&#8201;se genera
-DIRECTAMENTE en el idioma pedido, en la misma llamada. El endpoint
-<code>POST /analyze/ai-summary</code> acepta un query param <code>lang</code> (webapp manda su
-idioma de UI actual); <code>analyze_report_with_ai</code> añade una instrucción de
-idioma al prompt de sistema ya calibrado
-(<code>_LANGUAGE_INSTRUCTIONS</code>) cuando <code>lang != "es"</code>. Un valor de <code>lang</code> no
-soportado (<code>SUPPORTED_LANGUAGES</code>) se ignora silenciosamente y se sirve en
-español&#8201;&#8212;&#8201;es una preferencia, no un contrato.</p>
-</li>
-</ol>
-</div>
-<div class="paragraph">
-<p><strong>Justificación</strong>: los códigos son la solución correcta para conjuntos
-cerrados y pequeños porque el frontend ya tenía la infraestructura de
-traducción montada (mismo patrón que <code>risk_level</code>/<code>source</code>) y el coste es
-puramente mecánico&#8201;&#8212;&#8201;ningún prompt ni cálculo cambia, solo se etiqueta
-mejor lo que ya existía. Generar directo en el idioma pedido es la
-solución correcta para la IA porque los modelos instruction-tuned
-actuales siguen instrucciones de idioma de forma fiable sin necesitar
-recalibrar el prompt semántico, y evita el coste/riesgo de una segunda
-llamada.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () el frontend queda con todo el contenido generado por
-el backend traducible, cerrando el hueco que dejó explícitamente
-pendiente la introducción de i18n en la webapp; () diseño aditivo y con
-fallback en cada punto&#8201;&#8212;&#8201;un backend desplegado con una versión anterior
-(sin <code>note_code</code>/<code>value_raw</code>/<code>location_level</code>, o sin soporte de <code>lang</code> en
-el endpoint de IA) sigue funcionando, solo sin traducir esas partes
-concretas, nunca rompe; (+) tests de backend y frontend en verde sin
-modificar ningún test existente salvo por los mocks que usaban
-literalmente el texto en español antiguo del stream SSE (que ahora usan
-el código correspondiente); (-) cualquier fase, nota o categoría de
-atributo NUEVA que se añada en el backend en el futuro necesita también
-su entrada correspondiente en <code>webapp/src/i18n/locales/{es,en}.json</code>, o
-se mostrará en español por el mecanismo de fallback&#8201;&#8212;&#8201;no es un error,
-pero si se olvida, esa pieza concreta queda sin traducir hasta que
-alguien lo note; (-) el prompt de Mistral no está EXPLÍCITAMENTE
-calibrado ni evaluado en inglés (ver ADR-10 sobre la calibración en
-español), así que la calidad del veredicto/conclusiones en inglés
-depende de la capacidad multilingüe general del modelo, no de un ajuste
-propio&#8201;&#8212;&#8201;validar eso con casos reales queda como trabajo futuro si se
-decide dar más peso al público angloparlante.</p>
-</div>
-<div class="paragraph">
-<p><strong>Nota de proceso</strong>: esta decisión se implementó y documentó originalmente
-como "ADR-21", pero se perdió de este fichero al fusionarse con otra
-tanda de cambios (ADR-21 a ADR-25 actuales, sobre Moondream2) preparada
-en paralelo en otra sesión, sin que ninguna de las dos partes lo
-detectara hasta una revisión posterior del estado del repo. Se
-recupera aquí con el número que le corresponde en la secuencia actual
-(ADR-26). Motivo documentado en el registro de trabajo (sección 49) como
-lección para evitar que se repita: re-clonar el repo antes de tocar
-ficheros que otra sesión pueda haber tocado en paralelo, en vez de
-asumir que la copia local sigue siendo la última.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_27_estimación_indirecta_de_tramo_de_edad_con_umbral_de_confianza_propio_y_sin_sustituir_nunca_una_edad_exacta">9.27. ADR-27: Estimación indirecta de tramo de edad, con umbral de confianza propio y sin sustituir nunca una edad exacta</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: hasta ahora, <code>edad</code> solo se rellenaba con una
-autodeclaración EXPLÍCITA ("tengo 24 años"), detectada por regex o por
-la IA leyendo una frase literal. Si el texto no contenía una frase así,
-el escalón de edad de <code>estimate_population_narrowing</code> simplemente no
-aparecía en el informe, aunque hubiera pistas indirectas razonables
-(año de graduación, curso que la persona menciona estar haciendo,
-jerga o referencias generacionales) de las que un lector humano sí
-podría deducir una franja de edad plausible.</p>
-</div>
-<div class="paragraph">
-<p><strong>Alternativas consideradas</strong>: (1) reutilizar sin más el mecanismo de
-<code>inferencias_blandas</code>/<code>InferredAttribute</code> ya existente&#8201;&#8212;&#8201;descartado
-porque esas inferencias son deliberadamente ajenas al estimador de
-k-anonimato (no narrowean población, ver docstring de
-<code>soft_inferences</code> en <code>DemographicFindings</code>), y aquí el objetivo
-explícito era justo lo contrario: que la estimación SÍ afecte al
-número de población restante que ve el usuario. (2) Pedir a la IA una
-edad EXACTA también para el caso indirecto (mismo campo <code>edad</code> que ya
-existe)&#8201;&#8212;&#8201;descartado: mezclaría en un único campo autodeclaraciones
-literales (alta fiabilidad) con conjeturas basadas en pistas sueltas
-(fiabilidad mucho menor), sin forma de que el informe distinguiera
-ambos casos ni de aplicar un umbral de confianza distinto a cada uno.
-(3) Devolver directamente un tramo de INE como string libre desde el
-prompt (p. ej. que el modelo escriba <code>"25-29"</code>)&#8201;&#8212;&#8201;descartado frente a
-pedir una edad numérica aproximada y convertirla con la función
-<code>age_bin()</code> ya existente: es más robusto (el modelo puede alucinar un
-formato de tramo distinto al de <code>AGE_DISTRIBUTION_5Y</code>, p. ej. "25 a 29"
-o "26-30") y evita introducir una segunda fuente de verdad para los
-límites de los tramos.</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: nuevo campo <code>DemographicFindings.edad_rango</code> (tramo
-quinquenal, mismas claves que <code>AGE_DISTRIBUTION_5Y</code>), rellenado
-ÚNICAMENTE por <code>ai_attribute_extraction.py::_set_edad_rango</code>, nunca por
-regex. El prompt de Mistral incorpora un campo aparte,
-<code>"edad_estimada": {"edad_aproximada": &lt;entero&gt;|null, "confianza": &lt;0-1&gt;}</code>,
-con instrucciones explícitas de razonar de forma INDIRECTA/simbólica
-(mismo estilo que <code>estado_civil</code>, ver ADR previo sobre inferencias
-blandas) y de ser conservador con la confianza. Reglas de aceptación,
-en este orden:</p>
-</div>
-<div class="olist arabic">
-<ol class="arabic">
-<li>
-<p>Si ya existe una edad EXACTA (<code>findings.edad</code>, autodeclarada por
-regex o por IA) para esa misma persona, <code>edad_estimada</code> se ignora
-por completo&#8201;&#8212;&#8201;la edad exacta es siempre más precisa y nunca
-conviven ambos campos a la vez.</p>
-</li>
-<li>
-<p>Si <code>confianza &lt; 0.5</code>, se descarta también&#8201;&#8212;&#8201;no se añade ni edad ni
-tramo. El umbral es deliberadamente más alto que el rango 0.3-0.7
-que se acepta sin filtrar para <code>inferencias_blandas</code> genéricas,
-precisamente porque esto SÍ participa en el cálculo de
-k-anonimato (a diferencia de las inferencias blandas).</p>
-</li>
-<li>
-<p>Si supera el umbral, <code>edad_aproximada</code> se convierte al tramo INE
-correspondiente con <code>age_bin()</code> y se guarda con
-<code>source["edad_rango"] = "ia_estimada"</code> (nunca <code>"ia"</code> a secas) y su
-confianza en el nuevo campo genérico <code>DemographicFindings.confidence</code>
-(dict por campo, pensado para poder reutilizarse en el futuro con
-otros atributos probabilísticos sin volver a cambiar la forma de la
-clase).</p>
-</li>
-</ol>
-</div>
-<div class="paragraph">
-<p><code>scoring/k_anonymity.py::_step_edad</code> prioriza <code>edad</code> sobre <code>edad_rango</code>
-(mismo orden que la regla 1 de arriba) y, cuando usa el tramo, aplica
-la proporción de <code>AGE_DISTRIBUTION_5Y</code> (no la derivada año a año de
-<code>AGE_DISTRIBUTION_1Y</code>, que no tendría sentido sin conocer la edad
-exacta dentro del tramo). La confianza se expone como campo propio
-(<code>PopulationNarrowingStep.confidence</code> / <code>PopulationEstimate.confidence</code>)
-en vez de interpolarse dentro de <code>note</code>&#8201;&#8212;&#8201;ver ADR-26: todas las
-<code>note</code> de <code>k_anonymity.py</code> son deliberadamente texto fijo por
-categoría/fuente para que el frontend las traduzca por <code>note_code</code> sin
-parsear frases, e interpolar un número variable ahí habría roto ese
-contrato.</p>
-</div>
-<div class="paragraph">
-<p><strong>Justificación</strong>: separar <code>edad_rango</code> de <code>edad</code> en vez de mezclarlos
-mantiene la misma garantía de trazabilidad que ya tiene el resto del
-proyecto&#8201;&#8212;&#8201;el informe siempre puede distinguir "esto lo dijiste tú
-literalmente" de "esto lo ha deducido una IA de pistas sueltas", igual
-que ya ocurre con <code>sexo</code>/<code>sexo_por_nombre</code> (ADR-13) y con
-<code>estado_civil</code> (inferencia simbólica). Usar el tramo quinquenal ya
-publicado por el INE en vez de fingir precisión año a año para un dato
-que en realidad es una conjetura es, además, más honesto de cara al
-usuario: la incertidumbre de la estimación queda reflejada en la
-propia granularidad del dato mostrado, no solo en una nota al pie.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () el informe puede mostrar un indicio de edad
-incluso cuando el usuario no lo ha declarado explícitamente, sin
-necesidad de adivinar un año concreto ni de aceptar estimaciones poco
-fundamentadas (el umbral de confianza filtra las conjeturas débiles
-antes de que lleguen al cálculo de k-anonimato); () coherente con el
-patrón ya establecido de "código de fuente + nota" para señalar menor
-fiabilidad (<code>ia_estimada</code>, icono 🤖 reutilizado en el frontend); (+)
-cero cambios de comportamiento cuando ya existe una edad exacta o
-cuando no hay <code>MISTRAL_API_KEY</code> configurada (degradación con gracia,
-mismo principio que el resto de <code>ai_attribute_extraction.py</code>); (-) el
-umbral de confianza de 0.5 es una elección heurística, no calibrada
-contra casos reales etiquetados a mano&#8201;&#8212;&#8201;queda como trabajo futuro
-si se observa en producción que el modelo es sistemáticamente
-demasiado (o poco) conservador con este campo concreto; (-) al ser un
-tramo de 5 años en vez de una edad puntual, reduce algo la población
-respecto a una edad exacta, pero mucho menos que un año concreto&#8201;&#8212;&#8201;efecto esperado y deseado, no un error: es justo la contrapartida de
-tener menos certeza sobre el dato de partida.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_28_offload_de_dinov2_a_una_igpu_vía_un_proceso_worker_aislado_no_en_el_propio_backend">9.28. ADR-28: Offload de DINOv2 a una iGPU vía un proceso worker aislado (no en el propio backend)</h3>
+<div class="sect3">
+<h4 id="_adr_28_offload_de_dinov2_a_una_igpu_vía_un_proceso_worker_aislado_no_en_el_propio_backend">9.6.10. ADR-28: Offload de DINOv2 a una iGPU vía un proceso worker aislado (no en el propio backend)</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: ADR-25 fija la concurrencia de fotos a 1 cuando hay CUDA
 disponible, precisamente porque DINOv2 y Moondream2 comparten la MISMA
@@ -5279,8 +5521,8 @@ configuración&#8201;&#8212;&#8201;pendiente de confirmar antes de dar la funcio
 por completa, no solo por diseñada.</p>
 </div>
 </div>
-<div class="sect2">
-<h3 id="_adr_29_semáforos_independientes_por_modelo_no_uno_compartido_por_foto_pipeline_real_entre_fotos">9.29. ADR-29: Semáforos independientes por modelo, no uno compartido por foto (pipeline real entre fotos)</h3>
+<div class="sect3">
+<h4 id="_adr_29_semáforos_independientes_por_modelo_no_uno_compartido_por_foto_pipeline_real_entre_fotos">9.6.11. ADR-29: Semáforos independientes por modelo, no uno compartido por foto (pipeline real entre fotos)</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: tras ADR-28 (offload de DINOv2 a un worker de iGPU), surgió
 la pregunta de si DINOv2 y Moondream2 corrían de verdad en pipeline
@@ -5366,8 +5608,231 @@ que subir la concurrencia ahí sin confirmarlo antes arriesgaría
 degradar el caso ya incierto en vez de mejorarlo.</p>
 </div>
 </div>
+<div class="sect3">
+<h4 id="_adr_41_detección_heurística_de_collages_para_omitir_dinov2_y_moondream2_en_fotos_que_combinan_varias_sub_fotos">9.6.12. ADR-41: Detección heurística de collages, para omitir DINOv2 y Moondream2 en fotos que combinan varias sub-fotos</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: tanto la geolocalización por similitud (DINOv2 + FAISS,
+<code>app/vision/geolocation.py</code>) como el análisis de contenido visual
+(Moondream2, <code>app/vision/scene_analysis.py</code>) asumen que cada foto
+analizada muestra UNA escena coherente. Un collage (varias sub-fotos
+combinadas en una sola imagen, típicamente con apps como Instagram
+Layout, PicCollage o Instasize) rompe ese supuesto en los dos módulos,
+por motivos distintos:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>DINOv2/FAISS</strong>: el índice se construyó con imágenes de calle de
+UN solo lugar cada una (OSV-5M). El embedding de un collage de
+varias sub-fotos de sitios distintos no se parece de forma
+coherente a ningún vecino del índice&#8201;&#8212;&#8201;el resultado más probable
+no es "sin match" (que sería lo honesto), sino un match de baja
+confianza pero sintácticamente válido: un falso positivo
+silencioso, peor que no analizar la foto en absoluto.</p>
+</li>
+<li>
+<p><strong>Moondream2</strong>: el prompt (ver docstring de cabecera de
+<code>scene_analysis.py</code>) ya identifica como ambigüedad real el caso de
+varias personas de protagonismo similar en una misma foto&#8201;&#8212;&#8201;un
+collage con sub-fotos de personas DISTINTAS es exactamente ese
+problema, pero peor: ni siquiera son necesariamente la misma
+escena ni el mismo momento.</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Además, con la GPU de 4GB VRAM de este proyecto (ver ADR-28/29), cada
+inferencia de Moondream2/DINOv2 sobre una foto que de entrada no va a
+dar una señal fiable es cómputo de GPU que no vuelve a recuperarse.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: heurístico barato en CPU (<code>app/vision/collage_detection.py</code>,
+función <code>detect_collage</code>), NO otro modelo de ML&#8201;&#8212;&#8201;coherente con la
+preferencia ya establecida de modelos locales/ligeros ajustados a las
+restricciones de hardware del proyecto. Se ejecuta en <code>_process_photo</code>
+(<code>geolocation.py</code>) justo después de descargar la foto y ANTES de
+despachar nada a ninguno de los dos modelos: una foto detectada como
+collage se omite de los dos por completo, con el mismo patrón de
+degradación best-effort que ya usaba la rama <code>image is None</code> (las dos
+pistas de progreso avanzan igual, para que la barra de carga siga
+llegando al 100%, pero sin ningún resultado que aportar para esa foto).</p>
+</div>
+<div class="paragraph">
+<p>Qué detecta: bandas de color casi uniforme (blanco o negro, los colores
+de margen que usan las apps de collage habituales) que dividen la
+imagen en una cuadrícula, en el INTERIOR de la imagen&#8201;&#8212;&#8201;una franja
+pegada al borde EXTERIOR se descarta a propósito (letterboxing/padding
+normal, no dice nada sobre si hay varias sub-fotos combinadas).</p>
+</div>
+<div class="paragraph">
+<p><strong>Alternativa considerada y descartada</strong>: leer el tag EXIF <code>Software</code>
+(algunas apps de collage lo dejan escrito, p. ej. "Instagram Layout").
+Se descarta porque Instagram/Reddit re-codifican las imágenes al
+servirlas desde su CDN y normalmente eliminan los metadatos EXIF no
+esenciales en el proceso&#8201;&#8212;&#8201;para las fotos que este proyecto analiza
+(descargadas de esas CDN, no del carrete original del usuario), ese tag
+casi nunca sobrevive. Habría sido código muerto la mayoría de las
+veces, sin aportar nada que el heurístico de píxeles no cubra ya mejor.</p>
+</div>
+<div class="paragraph">
+<p><strong>Sesgo deliberado hacia falsos negativos</strong>: los umbrales (franja fina,
+posición interior, color puro blanco/negro) están calibrados para
+evitar marcar como collage una foto normal que tiene una franja ancha
+de color uniforme por motivos legítimos (cielo despejado, pared lisa,
+horizonte del mar)&#8201;&#8212;&#8201;ese tipo de foto ya se trata aparte por un
+mecanismo existente y distinto (<code>representative=False</code> en
+<code>geolocation.py</code>, ver <code>_MAX_NEIGHBOR_SPREAD_KM</code>). Perder una foto que
+SÍ era collage (se analiza igual, sin detectarla) es un coste menor que
+descartar sin motivo una foto normal que sí tenía señal real que
+aportar&#8201;&#8212;&#8201;mismo criterio de "más vale no afirmar nada que afirmar algo
+sin base" que ya aplica el resto del pipeline (ver p. ej. la propia
+<code>representative</code>, o el guard de <code>rama_estudios</code> en ADR-40). Limitación
+conocida y documentada: collages sin margen visible entre sub-fotos, o
+con margen de un color distinto de blanco/negro, no se detectan&#8201;&#8212;&#8201;se
+comportan como una foto normal.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () evita falsos positivos de geolocalización sobre
+fotos que estructuralmente no pueden dar una ubicación fiable; ()
+evita que Moondream2 mezcle personas/contextos de sub-fotos distintas
+como si fueran la misma escena; () ahorra cómputo de GPU en fotos que
+de entrada no iban a aportar señal útil; () heurístico puro en
+CPU/numpy, sin dependencias nuevas (<code>numpy</code>/<code>Pillow</code> ya son
+dependencias base del proyecto, no del extra opcional de visión) y sin
+coste de carga de modelo; (-) no detecta todos los collages posibles
+(sin margen, o con margen de otro color)&#8201;&#8212;&#8201;falso negativo documentado
+a propósito; (-) una foto real con una franja de margen blanco/negro
+fina y bien posicionada por casualidad (poco frecuente, pero no
+imposible) se descartaría sin necesidad&#8201;&#8212;&#8201;falso positivo aceptado
+como coste residual del diseño.</p>
+</div>
+</div>
+</div>
 <div class="sect2">
-<h3 id="_adr_30_traducción_de_las_descripciones_visuales_de_moondream2_al_idioma_de_la_ui">9.30. ADR-30: Traducción de las descripciones visuales de Moondream2 al idioma de la UI</h3>
+<h3 id="adr-cat-internacionalizacion-y-traduccion">9.7. Internacionalización y traducción</h3>
+<div class="sect3">
+<h4 id="_adr_26_backend_internacionalizable_por_códigos_estables_no_por_texto_ya_renderizado_en_español">9.7.1. ADR-26: Backend internacionalizable por códigos estables, no por texto ya renderizado en español</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: al añadir selección de idioma (español/inglés) en la webapp
+(<code>react-i18next</code>, ver <code>webapp/src/i18n</code>), quedó fuera del alcance inicial
+todo el texto que el backend generaba ya renderizado en español:
+1) los nombres de fase del stream de progreso SSE (<code>"Leyendo
+publicaciones&#8230;&#8203;"</code>, <code>"Analizando tu forma de escribir&#8230;&#8203;"</code>, ver
+<code>app/progress.py</code>); 2) las notas explicativas de cada escalón de
+<code>estimate_population_narrowing</code> (<code>PopulationNarrowingStep.note</code>, ver
+<code>app/scoring/k_anonymity.py</code>); 3) <code>attribute_label</code>, que mezclaba en un
+único string una plantilla y un valor (<code>f"Sexo: {findings.sexo}"</code>,
+<code>f"Universidad: {findings.universidad.title()}"</code>); y 4) el veredicto y
+las conclusiones que genera Mistral AI (<code>app/ai_analysis.py</code>), el único
+caso de texto realmente libre de los cuatro.</p>
+</div>
+<div class="paragraph">
+<p><strong>Alternativas consideradas</strong>: traducir en el frontend el texto en español
+tal y como llega, con una tabla de búsqueda (<code>{"Leyendo publicaciones&#8230;&#8203;":
+"Reading posts&#8230;&#8203;"}</code>) o parseando con regex los casos con un valor
+interpolado (<code>"Sexo: (.+)"</code>)&#8201;&#8212;&#8201;descartado para (1)-(3): funciona
+mientras el backend no cambie ni una coma de redacción, pero se rompe en
+silencio (sin error, solo deja de traducir) en cuanto alguien retoque el
+texto en español sin saber que el frontend depende literalmente de esa
+cadena; y para <code>attribute_label</code> en concreto, además, algunos valores son
+nombres propios (universidad, empresa, topónimos) que NO deben
+traducirse, y una regex no puede distinguir eso de forma fiable. Para (4)
+(veredicto/conclusiones de la IA), traducir con una segunda llamada
+(a Mistral otra vez, o a un servicio de traducción como DeepL)&#8201;&#8212;&#8201;descartado: añade latencia, un segundo punto de fallo, y consume cuota
+extra del tier gratuito de Mistral en cada informe, para un texto que ya
+sale bien calibrado en español (ver ADR-10) sin ninguna ganancia de
+fiabilidad frente a pedirle directamente al modelo que responda en otro
+idioma en la misma llamada.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: dos patrones distintos según el tipo de contenido, ambos
+aditivos (nunca se elimina el campo en español existente, para no romper
+nada que ya dependa de él&#8201;&#8212;&#8201;logs, la descarga JSON del informe, un
+frontend desplegado con una versión anterior sin estos campos):</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p><strong>Conjuntos cerrados de texto fijo</strong> (fases del SSE, notas de
+<code>k_anonymity.py</code>, y la plantilla de <code>attribute_label</code> separada de su
+valor)&#8201;&#8212;&#8201;el backend emite un CÓDIGO estable e independiente de idioma
+junto al texto en español ya existente, mismo patrón ya usado para
+<code>risk_level</code>/<code>source</code>. Concretamente: <code>app/stages.py</code> (7 códigos para
+<code>stage</code>), <code>app/note_codes.py</code> (14 códigos para <code>note_code</code>), y en
+<code>PopulationNarrowingStep</code>/<code>PopulationEstimate</code> dos campos nuevos,
+<code>value_raw</code> (el valor sin la plantilla de <code>attribute_label</code> ya montada)
+y <code>location_level</code> (<code>"municipio"|"provincia"|"comunidad_autonoma"</code>,
+necesario porque los tres comparten <code>category="ubicacion"</code> pero cada uno
+usa una plantilla distinta). El frontend traduce con
+<code>t('dashboard.attribute.' + template, { value })</code>, traduciendo también
+<code>value</code> solo cuando pertenece a un conjunto cerrado con entrada en el
+diccionario (sexo, estado civil, estudios&#8230;&#8203;); nombres propios y números
+se interpolan tal cual. Si un campo nuevo no viene (backend antiguo) o la
+clave de traducción no existe todavía, se usa el texto en español
+existente (<code>attribute_label</code>/<code>note</code>/el propio código) como fallback, sin
+romper&#8201;&#8212;&#8201;ver <code>buildAttributeLabel</code>/<code>buildNote</code> en
+<code>PopulationNarrowingTable.tsx</code> y el <code>defaultValue</code> en <code>Dashboard.tsx</code>.</p>
+</li>
+<li>
+<p><strong>Texto libre generado por IA</strong> (veredicto/conclusiones)&#8201;&#8212;&#8201;se genera
+DIRECTAMENTE en el idioma pedido, en la misma llamada. El endpoint
+<code>POST /analyze/ai-summary</code> acepta un query param <code>lang</code> (webapp manda su
+idioma de UI actual); <code>analyze_report_with_ai</code> añade una instrucción de
+idioma al prompt de sistema ya calibrado
+(<code>_LANGUAGE_INSTRUCTIONS</code>) cuando <code>lang != "es"</code>. Un valor de <code>lang</code> no
+soportado (<code>SUPPORTED_LANGUAGES</code>) se ignora silenciosamente y se sirve en
+español&#8201;&#8212;&#8201;es una preferencia, no un contrato.</p>
+</li>
+</ol>
+</div>
+<div class="paragraph">
+<p><strong>Justificación</strong>: los códigos son la solución correcta para conjuntos
+cerrados y pequeños porque el frontend ya tenía la infraestructura de
+traducción montada (mismo patrón que <code>risk_level</code>/<code>source</code>) y el coste es
+puramente mecánico&#8201;&#8212;&#8201;ningún prompt ni cálculo cambia, solo se etiqueta
+mejor lo que ya existía. Generar directo en el idioma pedido es la
+solución correcta para la IA porque los modelos instruction-tuned
+actuales siguen instrucciones de idioma de forma fiable sin necesitar
+recalibrar el prompt semántico, y evita el coste/riesgo de una segunda
+llamada.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () el frontend queda con todo el contenido generado por
+el backend traducible, cerrando el hueco que dejó explícitamente
+pendiente la introducción de i18n en la webapp; () diseño aditivo y con
+fallback en cada punto&#8201;&#8212;&#8201;un backend desplegado con una versión anterior
+(sin <code>note_code</code>/<code>value_raw</code>/<code>location_level</code>, o sin soporte de <code>lang</code> en
+el endpoint de IA) sigue funcionando, solo sin traducir esas partes
+concretas, nunca rompe; (+) tests de backend y frontend en verde sin
+modificar ningún test existente salvo por los mocks que usaban
+literalmente el texto en español antiguo del stream SSE (que ahora usan
+el código correspondiente); (-) cualquier fase, nota o categoría de
+atributo NUEVA que se añada en el backend en el futuro necesita también
+su entrada correspondiente en <code>webapp/src/i18n/locales/{es,en}.json</code>, o
+se mostrará en español por el mecanismo de fallback&#8201;&#8212;&#8201;no es un error,
+pero si se olvida, esa pieza concreta queda sin traducir hasta que
+alguien lo note; (-) el prompt de Mistral no está EXPLÍCITAMENTE
+calibrado ni evaluado en inglés (ver ADR-10 sobre la calibración en
+español), así que la calidad del veredicto/conclusiones en inglés
+depende de la capacidad multilingüe general del modelo, no de un ajuste
+propio&#8201;&#8212;&#8201;validar eso con casos reales queda como trabajo futuro si se
+decide dar más peso al público angloparlante.</p>
+</div>
+<div class="paragraph">
+<p><strong>Nota de proceso</strong>: esta decisión se implementó y documentó originalmente
+como "ADR-21", pero se perdió de este fichero al fusionarse con otra
+tanda de cambios (ADR-21 a ADR-25 actuales, sobre Moondream2) preparada
+en paralelo en otra sesión, sin que ninguna de las dos partes lo
+detectara hasta una revisión posterior del estado del repo. Se
+recupera aquí con el número que le corresponde en la secuencia actual
+(ADR-26). Motivo documentado en el registro de trabajo (sección 49) como
+lección para evitar que se repita: re-clonar el repo antes de tocar
+ficheros que otra sesión pueda haber tocado en paralelo, en vez de
+asumir que la copia local sigue siendo la última.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_30_traducción_de_las_descripciones_visuales_de_moondream2_al_idioma_de_la_ui">9.7.2. ADR-30: Traducción de las descripciones visuales de Moondream2 al idioma de la UI</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: el análisis de contenido visual (<code>app/vision/scene_analysis.py</code>,
 Moondream2) genera dos textos por foto, cada uno en un idioma FIJO y
@@ -5505,8 +5970,8 @@ habiendo texto de respaldo útil, pero queda como posible mejora futura
 si se observa que hace falta en la práctica.</p>
 </div>
 </div>
-<div class="sect2">
-<h3 id="_adr_31_traducción_local_con_ctranslate2_en_vez_de_mistral_sustituye_adr_30">9.31. ADR-31: Traducción local con CTranslate2 en vez de Mistral (sustituye ADR-30)</h3>
+<div class="sect3">
+<h4 id="_adr_31_traducción_local_con_ctranslate2_en_vez_de_mistral_sustituye_adr_30">9.7.3. ADR-31: Traducción local con CTranslate2 en vez de Mistral (sustituye ADR-30)</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: ADR-30 implementó la traducción de descripciones de fotos
 (afición/caption de Moondream2) con Mistral, reutilizando el mismo
@@ -5633,8 +6098,8 @@ tercer idioma exige convertir dos modelos más por cada nuevo idioma
 solo hay dos idiomas posibles (ver su docstring).</p>
 </div>
 </div>
-<div class="sect2">
-<h3 id="_adr_32_bucle_de_repetición_sin_fin_con_beam_size1_en_la_traducción_local_corrige_parte_de_adr_31">9.32. ADR-32: Bucle de repetición sin fin con beam_size=1 en la traducción local (corrige parte de ADR-31)</h3>
+<div class="sect3">
+<h4 id="_adr_32_bucle_de_repetición_sin_fin_con_beam_size1_en_la_traducción_local_corrige_parte_de_adr_31">9.7.4. ADR-32: Bucle de repetición sin fin con beam_size=1 en la traducción local (corrige parte de ADR-31)</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: la primera versión de <code>translate_texts_local()</code> (ADR-31)
 usaba <code>beam_size=1</code> (decodificación voraz, sin búsqueda en haz) a
@@ -5726,8 +6191,68 @@ válida se descartaría igual que la basura; no se ha observado ese
 caso en la práctica todavía.</p>
 </div>
 </div>
+</div>
 <div class="sect2">
-<h3 id="_adr_33_progreso_por_foto_emitido_dentro_de_cada_etapa_no_en_el_bucle_de_acumulación_de_resultados">9.33. ADR-33: Progreso por foto emitido dentro de cada etapa, no en el bucle de acumulación de resultados</h3>
+<h3 id="adr-cat-experiencia-en-tiempo-real-y-ux-tecnica">9.8. Experiencia en tiempo real y UX técnica</h3>
+<div class="sect3">
+<h4 id="_adr_11_progreso_en_vivo_vía_server_sent_events_no_polling_ni_websockets">9.8.1. ADR-11: Progreso en vivo vía Server-Sent Events, no polling ni WebSockets</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: el análisis completo (sobre todo con geolocalización de
+fotos activada) puede tardar varios segundos; se quería sustituir la
+espera opaca por una pantalla de progreso real.</p>
+</div>
+<div class="paragraph">
+<p><strong>Alternativas consideradas</strong>: <strong>polling</strong> periódico desde el frontend
+(añade latencia y carga innecesaria); WebSockets (bidireccional,
+más complejo de lo que este caso de uso necesita, ya que el servidor
+nunca necesita recibir datos del cliente durante el análisis).</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: Server-Sent Events (<code>GET /api/analyze/{platform}/stream</code>),
+unidireccional servidor&#8594;cliente, con eventos JSON (<code>{"done": false,
+"stage": "&#8230;&#8203;", &#8230;&#8203;}</code> en curso, <code>{"done": true, "report": {&#8230;&#8203;}}</code> o
+<code>{"done": true, "error": "&#8230;&#8203;"}</code> al terminar). El endpoint clásico
+(<code>POST /api/analyze/{platform}</code>) se mantiene sin cambios para
+compatibilidad y para los tests existentes.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () hitos de progreso REALES (cada evento corresponde a
+un paso del pipeline que de verdad acaba de terminar, no a un
+temporizador simulado); () más simple de implementar y depurar que
+WebSockets para un flujo unidireccional; (-) dos endpoints distintos
+para la misma lógica de negocio (<code>_build_report</code> compartido entre
+ambos, para no duplicar la orquestación).</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_14_análisis_del_informe_con_ia_disparado_automáticamente_no_bajo_demanda">9.8.2. ADR-14: Análisis del informe con IA disparado automáticamente, no bajo demanda</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: la primera versión exigía que el usuario pulsara
+explícitamente "Analizar con IA" tras ver el informe.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: se dispara solo, en cuanto el informe principal está
+disponible, sin confirmación adicional del usuario.</p>
+</div>
+<div class="paragraph">
+<p><strong>Justificación</strong>: el consentimiento OAuth inicial ya cubre todo el
+análisis que la herramienta hace sobre la cuenta del usuario; un botón
+adicional para una llamada que solo envía agregados ya generados (nunca
+las publicaciones originales) no añadía ninguna protección de privacidad
+real, solo fricción de interfaz. La función sigue siendo aislada y
+opcional en caso de fallo (sin <code>MISTRAL_API_KEY</code>, o si Mistral no
+responde, el resto del informe no se ve afectado)&#8201;&#8212;&#8201;lo único que
+cambió es cuándo se dispara, no las garantías de degradación.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: (+) el usuario ve el veredicto y las conclusiones sin
+un paso extra; (-) una llamada más a Mistral en cada análisis (incluso
+si el usuario no llega a mirar esa sección), aceptado por ser
+gratuita/de bajo coste y por degradarse sin romper nada si falla.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_33_progreso_por_foto_emitido_dentro_de_cada_etapa_no_en_el_bucle_de_acumulación_de_resultados">9.8.3. ADR-33: Progreso por foto emitido dentro de cada etapa, no en el bucle de acumulación de resultados</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: dos bugs reales observados en la pantalla de carga, ambos
 con la misma causa de fondo. <code>estimate_locations_for_posts()</code> lanza
@@ -5818,677 +6343,8 @@ concurrencia real) pero significa que cualquier futuro consumidor del
 stream de progreso no puede asumir nada sobre ese orden, solo sobre la
 monotonía dentro de cada pista por separado.</p>
 </div>
-</div>
-<div class="sect2">
-<h3 id="_adr_34_rasgos_físicos_manuales_ojospelopiel_recalculados_en_el_backend_no_duplicando_las_tablas_del_ine_en_el_frontend">9.34. ADR-34: Rasgos físicos manuales (ojos/pelo/piel) recalculados en el backend, no duplicando las tablas del INE en el frontend</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: hay atributos físicos visibles en cualquier foto de perfil
-(color de ojos, de pelo, tono de piel) que la Ley Orgánica de
-Protección de Datos desaconseja inferir automáticamente por
-categorizar a la persona por características raciales/étnicas (dato
-especialmente protegido, art. 9 RGPD), así que ni <code>vision/scene_analysis.py</code>
-ni <code>nlp/ai_attribute_extraction.py</code> los extraen&#8201;&#8212;&#8201;pero si el propio
-usuario los declara explícitamente sobre su propio perfil, sí pueden
-sumarse al estrechamiento de población igual que cualquier otro rasgo
-autodeclarado. El estrechamiento de población (k-anonimato, ADR
-"Estimación de k-anonimato sin base de datos sintética"&#8201;&#8212;&#8201;ver arriba)
-y el cálculo del <code>privacy_score</code> viven enteramente en el backend
-(<code>scoring/k_anonymity.py</code>, <code>scoring/privacy_score.py</code>, tablas de
-<code>data/ine_reference.py</code>); el frontend nunca ha conocido esa lógica ni
-esas tablas, solo consume proporciones ya calculadas.</p>
-</div>
-<div class="paragraph">
-<p><strong>Alternativas descartadas</strong>: duplicar en el frontend (TypeScript) las
-tres tablas nuevas (<code>EYE_COLOR_DISTRIBUTION</code>, <code>HAIR_COLOR_DISTRIBUTION</code>,
-<code>SKIN_TONE_DISTRIBUTION</code>) y repetir ahí la multiplicación en cadena de
-<code>_apply_proportion</code>, para poder actualizar el pictograma sin ida y
-vuelta al servidor&#8201;&#8212;&#8201;descartado: exactamente el tipo de duplicación de
-lógica de dominio entre frontend y backend que el proyecto ha evitado
-desde el principio (todas las tablas del INE y el cálculo de
-k-anonimato son responsabilidad exclusiva del backend); cualquier
-ajuste futuro a esas tablas (p. ej. si el INE publicase cifras propias
-para estos rasgos, o cambiase el peso de <code>inferable_data_risk</code> en el
-score) obligaría a mantener dos implementaciones sincronizadas a mano.</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: nuevo endpoint <code>POST /api/analyze/recalculate</code> (ver
-<a href="#section-building-block-view">Vista de bloques de construcción</a>) que recibe el <code>ExposureReport</code> ya
-generado más una lista de <code>ManualAttribute {category, value}</code>, y
-devuelve el mismo informe con: (1) los rasgos añadidos a
-<code>inferred_attributes</code> con <code>confidence=1.0</code> (autodeclaración directa,
-máxima fiabilidad posible); (2) un paso nuevo por rasgo en
-<code>population_narrowing</code>, encadenado sobre el <code>remaining_population</code> ya
-alcanzado por el resto de atributos (mismo <code>_apply_proportion</code> que usa
-el pipeline automático, <code>source="manual"</code> para que
-<code>PopulationNarrowingTable.tsx</code> lo distinga visualmente&#8201;&#8212;&#8201;insignia de
-color propio en vez del semántico por riesgo); (3)
-<code>inferable_data_risk</code>/<code>overall_score</code> recalculados. El frontend
-(<code>ManualTraitsSelector.tsx</code> + <code>Dashboard.tsx::handleApplyTraits</code>) se
-limita a recoger la selección y sustituir su <code>ExposureReport</code> en
-memoria por la respuesta completa&#8201;&#8212;&#8201;no fusiona campos sueltos.</p>
-</div>
-<div class="paragraph">
-<p>Las tres tablas de proporciones son estimaciones contextuales
-documentadas en el propio código, no cifras oficiales del INE (que no
-publica una distribución poblacional de estos rasgos)&#8201;&#8212;&#8201;a diferencia
-del resto de <code>ine_reference.py</code>, cuyo criterio de "tabla desactualizada"
-(<code>stale_tables()</code>, ver ADR sobre concurrencia/GPU y <code>app/main.py</code>) no
-aplica aquí porque no hay una fuente oficial que pueda quedarse
-desactualizada.</p>
-</div>
-<div class="paragraph">
-<p><strong>Gotcha de implementación</strong>: <code>POST /api/analyze/recalculate</code> debe
-registrarse ANTES que <code>POST /api/analyze/{platform}</code> en
-<code>analysis_router.py</code>. FastAPI/Starlette resuelve las rutas por orden de
-registro, no por especificidad; si la ruta paramétrica fuera antes,
-capturaría el literal <code>"recalculate"</code> como valor de <code>platform</code> y la de
-recalculo nunca se alcanzaría (404 "Plataforma no soportada:
-recalculate", sin ningún error en el arranque que lo delate). Cubierto
-por <code>TestRecalculateEndpoint</code> en <code>test_analysis_router.py</code>, que habría
-detectado la regresión si el orden se rompiera de nuevo.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () cero duplicación de las tablas del INE ni de la
-lógica de k-anonimato/scoring fuera del backend; () cualquier cambio
-futuro a esas tablas o a los pesos del score se aplica en un único
-sitio; (+) el rasgo manual queda visualmente distinguible del resto sin
-introducir un tipo de dato nuevo (reutiliza <code>PopulationNarrowingStep</code>
-con un valor más de <code>source</code>); (-) cada alta de rasgo manual exige un
-viaje de ida y vuelta al servidor con el informe completo en el cuerpo
-de la petición (potencialmente grande si hay muchas fotos analizadas),
-en vez de una actualización instantánea en el cliente&#8201;&#8212;&#8201;aceptable
-dado que es una acción puntual del usuario, no algo que ocurra en un
-bucle o con alta frecuencia; (-) cualquier ruta estática nueva que se
-añada bajo <code>/analyze/</code> en el futuro debe recordar declararse antes que
-<code>/analyze/{platform}</code> por el mismo motivo (ver gotcha arriba).</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_35_atributos_que_nunca_se_detectarán_automáticamente_origen_étnicoracial_saluddiscapacidad_opinión_política">9.35. ADR-35: Atributos que nunca se detectarán automáticamente (origen étnico/racial, salud/discapacidad, opinión política)</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: el pipeline automático (<code>vision/scene_analysis.py</code>,
-<code>nlp/ai_attribute_extraction.py</code>) ya infiere de forma autónoma varios
-atributos a partir de fotos y texto (edad, aficiones, estado
-sentimental&#8230;&#8203;) para alimentar el estrechamiento de población y el
-<code>privacy_score</code>. El RGPD (art. 9) define como "categorías especiales"
-un conjunto de datos con riesgo de tratamiento agravado: origen
-étnico/racial, salud, opinión política, creencias religiosas,
-orientación sexual, datos biométricos/genéticos y afiliación sindical.
-ADR-34 ya excluyó la detección automática de rasgos físicos
-(ojos/pelo/piel) como proxy racial/étnico, permitiéndolos solo como
-autodeclaración manual del propio usuario&#8201;&#8212;&#8201;pero esa decisión se
-limita a lo VISUAL y no fija un principio general para el resto de
-categorías especiales ni para otras vías de detección (texto).</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: tres atributos NUNCA se detectarán de forma automática&#8201;&#8212;&#8201;ni por visión (fotos) ni por texto (bios, posts, comentarios), ni
-siquiera como "detección textual explícita" de menciones&#8201;&#8212;&#8201;en ningún
-punto futuro del pipeline:</p>
-</div>
-<div class="olist arabic">
-<ol class="arabic">
-<li>
-<p><strong>Origen étnico/racial</strong>: categoría especial de máximo riesgo del
-RGPD. Generaliza y refuerza ADR-34: aquel ADR ya impedía inferirlo
-de fotos (permitiendo solo la autodeclaración manual de
-ojos/pelo/piel); este ADR cierra también la vía textual, que
-ADR-34 no llegaba a mencionar explícitamente.</p>
-</li>
-<li>
-<p><strong>Salud/discapacidad</strong>: también categoría especial (art. 9 RGPD). El
-INE sí publica proporciones de discapacidad a nivel poblacional
-(podrían alimentar una tabla de k-anonimato con el mismo patrón que
-ADR-34), pero es información médica y se descarta incluso como
-autodeclaración manual&#8201;&#8212;&#8201;a diferencia de un rasgo físico visible,
-una condición de salud no es equiparable a "lo que ya se ve en la
-foto de perfil".</p>
-</li>
-<li>
-<p><strong>Opinión política/afiliación</strong>: también categoría especial (art. 9
-RGPD). El INE no la publica (haría falta recurrir al CIS), y más
-allá de la calificación legal, el riesgo de sesgo o desinformación
-de cualquier inferencia sobre postura política se considera
-demasiado alto para justificar la función, incluso como opción
-manual.</p>
-</li>
-</ol>
-</div>
-<div class="paragraph">
-<p><strong>Alternativas descartadas</strong>: replicar para salud y para opinión
-política el mismo patrón que ADR-34 usa para ojos/pelo/piel&#8201;&#8212;&#8201;selector manual (<code>ManualTraitsSelector.tsx</code>) + tabla de proporciones
-(INE para discapacidad, CIS para opinión política) + paso nuevo en
-<code>population_narrowing</code> vía <code>POST /api/analyze/recalculate</code>. Descartada
-para ambos casos: aunque el patrón técnico ya existe y sería trivial
-de replicar, salud y opinión política son cualitativamente distintas
-de un rasgo físico visible&#8201;&#8212;&#8201;la primera es información médica; la
-segunda tiene, además, un problema de fiabilidad/sesgo que no depende
-de la fuente de datos.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () el límite del pipeline automático (y de
-`ManualTraitsSelector.tsx`) queda documentado como decisión
-deliberada, no como omisión -- cualquier ampliación futura que toque
-alguna de estas tres categorías debe justificarse explícitamente
-contra este ADR, no solo añadirse por analogía con ADR-34; () reduce
-el riesgo legal/ético del proyecto al no tocar las categorías de mayor
-riesgo del RGPD bajo ninguna vía (ni automática ni manual, salvo la
-excepción ya acotada de ADR-34 para rasgos físicos); (-) dos fuentes
-de datos potencialmente disponibles (discapacidad en INE, opinión
-política en CIS) quedan sin aprovechar en el cálculo de k-anonimato,
-que en teoría podría ser más completo con ellas.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_36_age_distribution_1y_pasa_a_datos_reales_del_censo_tabla_01003_en_vez_de_repartir_uniformemente_age_distribution_5y">9.36. ADR-36: AGE_DISTRIBUTION_1Y pasa a datos reales del Censo (tabla 01003), en vez de repartir uniformemente AGE_DISTRIBUTION_5Y</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: <code>AGE_DISTRIBUTION_1Y</code> (proporción de población por edad
-exacta, año a año) se derivaba de <code>AGE_DISTRIBUTION_5Y</code> repartiendo
-uniformemente la proporción de cada tramo quinquenal entre las edades
-que lo componen&#8201;&#8212;&#8201;una aproximación explícitamente documentada como tal
-desde el principio, justificada porque la tabla año-a-año real del INE
-(<a href="https://www.ine.es/jaxi/Tabla.htm?path=/t20/e245/p08/l0/&amp;file=01003.px" class="bare">https://www.ine.es/jaxi/Tabla.htm?path=/t20/e245/p08/l0/&amp;file=01003.px</a>)
-es un selector interactivo, no un CSV descargable directamente por URL.</p>
-</div>
-<div class="paragraph">
-<p>Al construir <code>SPORT_PRACTICE_BY_AGE_BAND</code> (ver ADR-37) cruzando esta
-distribución con los tramos de edad de la Encuesta de Hábitos
-Deportivos (15-24, 25-54, 55+), el tramo 15-24&#8201;&#8212;&#8201;el más pequeño y por
-tanto el más sensible a errores de reparto&#8201;&#8212;&#8201;dio una tasa de práctica
-deportiva del 100,85% sobre la población derivada: más practicantes
-que población, matemáticamente imposible. Señal inequívoca de que el
-reparto uniforme dentro de tramo no se ajustaba lo bastante bien a la
-pirámide real en esa franja concreta (las edades no se distribuyen
-uniformemente ni siquiera dentro de un quinquenio, y el efecto se nota
-más cuanto más pequeño es el tramo en términos absolutos).</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: descargar manualmente la tabla 01003 (población por edad,
-año a año, ambos sexos, año 2022&#8201;&#8212;&#8201;la exportación a CSV desde el
-navegador sí es posible aunque la URL directa no lo sea) y usarla como
-fuente PRIMARIA de <code>AGE_DISTRIBUTION_1Y</code>, invirtiendo la relación entre
-las dos tablas: antes <code>AGE_DISTRIBUTION_5Y</code> era la fuente y <code>1Y</code> se
-derivaba de ella; ahora <code>AGE_DISTRIBUTION_1Y</code> es la fuente (datos
-reales, 101 valores exactos que suman 1.0) y <code>AGE_DISTRIBUTION_5Y</code> se
-deriva SUMANDO <code>1Y</code> dentro de cada tramo quinquenal
-(<code>_build_age_distribution_5y_from_1y</code>), garantizando que ambas tablas
-sean consistentes entre sí por construcción.</p>
-</div>
-<div class="paragraph">
-<p><strong>Desfase de año aceptado</strong>: la tabla 01003 es de 2022, mientras que
-<code>TOTAL_POPULATION_ES</code> es de 2025 (~1,65M más de población total). Se
-usa la distribución de 2022 como PROPORCIÓN (no como cifra absoluta)
-aplicada sobre <code>TOTAL_POPULATION_ES</code> actual, asumiendo que la FORMA de
-la pirámide de edad no cambia mucho en 2-3 años aunque el total crezca&#8201;&#8212;&#8201;mismo tipo de aproximación que ya aceptaba la versión anterior
-(reparto uniforme dentro de tramo), pero basada en datos reales de
-población en vez de un reparto artificial.</p>
-</div>
-<div class="paragraph">
-<p><strong>Gotcha de implementación</strong>: un primer intento de generar el diccionario
-de 101 valores se transcribió A MANO a partir de una salida de consola
-truncada, y 88 de los 101 valores no coincidían con el CSV real (el
-error no rompía la sintaxis ni los tests existentes, solo daba
-resultados sutilmente incorrectos&#8201;&#8212;&#8201;se detectó porque la suma no daba
-1.0 exacto). Se corrigió regenerando el bloque completo por script
-directamente desde el CSV y sustituyéndolo con una operación de texto
-programática, no manual, eliminando el riesgo de transcripción por
-completo.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () elimina el problema de tasas por encima del 100%
-en cualquier cálculo que cruce edad con otra variable, no solo
-deportes; () mejora la precisión de CUALQUIER cálculo por edad en la
-app (k-anonimato de cualquier atributo que use <code>age_range_proportion</code>),
-no solo el que motivó el cambio; (+) las dos tablas (<code>1Y</code> y <code>5Y</code>) ya no
-pueden desincronizarse entre sí, al derivarse la segunda de la primera
-por construcción; (-) el desfase de 2-3 años entre la forma de la
-pirámide (2022) y el total poblacional (2025) sigue siendo una
-aproximación, aunque mejor que la anterior; (-) requiere descarga
-manual periódica si se quiere refrescar (marcado con umbral de
-caducidad anual en <code>_STALE_THRESHOLDS</code>, ver <code>stale_tables()</code>).</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_37_práctica_deportiva_condicionada_por_sexo_edad_y_nivel_de_estudios_con_prioridad_en_cascada_nunca_combinando_dos_ajustes_a_la_vez">9.37. ADR-37: Práctica deportiva condicionada por sexo, edad y nivel de estudios, con prioridad en cascada (nunca combinando dos ajustes a la vez)</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: <code>SPORT_PRACTICE_DISTRIBUTION</code> empezó como una tabla de 9
-modalidades con cifras sueltas de prensa sobre la edición 2022 de la
-Encuesta de Hábitos Deportivos, y se amplió en varias fases hasta las
-41 modalidades completas de la tabla 1.21 de la edición 2024/25
-(descargada directamente del portal de estadísticas del Ministerio,
-tras confirmar que la prensa nunca cita el desglose completo). Todas
-esas proporciones son MARGINALES: aplican la misma cifra a cualquiera
-que declare esa modalidad, sin distinguir si es hombre o mujer, joven o
-mayor, con estudios superiores o sin ellos&#8201;&#8212;&#8201;desperdiciando la señal
-de otros atributos que la propia persona ya haya declarado.</p>
-</div>
-<div class="paragraph">
-<p>La tabla 1.22 de la misma encuesta ("&#8230;&#8203;por modalidad deportiva, sexo,
-edad y nivel de estudios") sí desglosa cada modalidad por esas tres
-variables&#8201;&#8212;&#8201;pero como TRES CRUCES INDEPENDIENTES (deporte×sexo,
-deporte×edad, deporte×estudios), no como un cruce a cuatro bandas
-simultáneo (deporte×sexo×edad×estudios a la vez). Ese dato conjunto no
-existe en ninguna tabla publicada de la encuesta.</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: construir tres tablas nuevas&#8201;&#8212;&#8201;<code>SPORT_PRACTICE_BY_SEX</code>, <code>SPORT_PRACTICE_BY_AGE_BAND</code> y
-<code>SPORT_PRACTICE_BY_EDUCATION_LEVEL</code>&#8201;&#8212;&#8201;cada una P(deporte | variable),
-convertidas de "% de practicantes de ese grupo" a "% de la POBLACIÓN de
-ese grupo" multiplicando por la tasa de práctica deportiva específica
-de cada grupo (mismo patrón que ya usaba ADR sobre
-<code>MARITAL_STATUS_BY_SEX</code>, extendido aquí a tres variables en vez de una).
-<code>_step_practica_deportiva</code> prueba las tres en CASCADA, con prioridad
-sexo &gt; edad &gt; nivel_estudios &gt; marginal: usa la primera que esté
-disponible Y tenga dato para esa combinación concreta, y si ninguna
-sirve, cae a la marginal. NUNCA combina dos ajustes a la vez (p. ej.
-sexo Y edad multiplicados) porque, al no existir el cruce a cuatro
-bandas, hacerlo equivaldría a asumir independencia estadística entre
-sexo y edad DENTRO de cada deporte&#8201;&#8212;&#8201;una suposición no verificable con
-los datos disponibles, y que probablemente sobre-estimaría el
-estrechamiento de población.</p>
-</div>
-<div class="paragraph">
-<p>El orden de prioridad (sexo &gt; edad &gt; estudios) es por limpieza de la
-señal, no por "mejor" en abstracto: sexo es una condición binaria sin
-ambigüedad; edad puede tener tramos sin ambigüedad (edad exacta) o con
-ambigüedad resoluble (un rango declarado que cabe entero dentro de un
-tramo de la encuesta&#8201;&#8212;&#8201;ver <code>_sport_age_band</code>, que devuelve <code>None</code> si
-el rango cruza la frontera entre dos tramos, en vez de adivinar);
-nivel de estudios depende ADEMÁS de una aproximación de población
-adicional (<code>EDUCATION_LEVEL_DISTRIBUTION</code>, basada en población de 25 a
-64 años, ver ADR-38) que ni sexo ni edad necesitan, así que va último.</p>
-</div>
-<div class="paragraph">
-<p><strong>Casos de muestra insuficiente</strong>: cuando la encuesta redondea el % de
-una combinación concreta a 0,0 (p. ej. "squash" y mujeres, o
-"automovilismo"/"triatlón" en el tramo 55+), esa clave se OMITE a
-propósito de la tabla condicionada en vez de guardarse como 0.0 literal&#8201;&#8212;&#8201;un 0,0% redondeado significa "muestra insuficiente para detectarlo",
-no "cero personas lo practican". Al faltar la clave,
-<code>_step_practica_deportiva</code> cae de vuelta al siguiente nivel de
-prioridad (o a la marginal), en vez de mostrar una población de 0 que
-la evidencia real no respalda.</p>
-</div>
-<div class="paragraph">
-<p><strong>Efecto colateral positivo, no buscado</strong>: construir
-<code>SPORT_PRACTICE_BY_AGE_BAND</code> fue precisamente lo que expuso el problema
-de tasas por encima del 100% que llevó a ADR-36 (sustituir
-<code>AGE_DISTRIBUTION_1Y</code> por datos reales del Censo)&#8201;&#8212;&#8201;un ejemplo de cómo
-cruzar una tabla nueva contra infraestructura ya existente puede sacar
-a la luz aproximaciones que llevaban tiempo sin cuestionarse.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () aprovecha la señal de sexo/edad/estudios cuando ya
-se conoce, en vez de desperdiciarla aplicando siempre la marginal; ()
-el efecto es grande para deportes con sesgo fuerte por cualquiera de
-las tres variables (p. ej. "caza" lo practican los hombres ~32 veces
-más que las mujeres, "yoga_pilates" las mujeres ~4 veces más que los
-hombres); (+) cada tabla condicionada documenta explícitamente sus
-casos de muestra insuficiente, en vez de esconderlos como ceros; (-) la
-cascada de prioridad es una simplificación deliberada frente al cruce a
-cuatro bandas real, que no existe como dato público; (-) tres tablas
-más que mantener y actualizar cuando la encuesta publique su siguiente
-edición.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_38_nuevo_atributo_nivel_estudios_nivel_de_formación_alcanzado_distinto_de_estudios_carrera_concreta">9.38. ADR-38: Nuevo atributo <code>nivel_estudios</code> (nivel de formación alcanzado), distinto de <code>estudios</code> (carrera concreta)</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: al construir <code>SPORT_PRACTICE_BY_EDUCATION_LEVEL</code> (ver
-ADR-37) para aprovechar la columna de nivel de estudios de la tabla
-1.22, se encontró que el proyecto no tenía NINGÚN atributo que
-capturase el nivel de formación alcanzado en los tramos que usa la
-propia encuesta (1ª etapa de secundaria o inferior / 2ª etapa de
-secundaria / educación superior). El campo <code>estudios</code> ya existente
-(<code>STUDIES_DISTRIBUTION</code>) es una cosa distinta: la CARRERA universitaria
-concreta que alguien nombra ("estudié Medicina"), que solo aplica a
-quien ya cursa o cursó estudios superiores CON una titulación nombrada&#8201;&#8212;&#8201;no cubre a quien solo dice "tengo el bachillerato" o "no tengo
-estudios", y no permite construir la tabla condicionada sin ese dato.</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: añadir <code>nivel_estudios</code> como atributo nuevo de punta a
-punta (regex + extracción por IA + paso de k-anonimato propio,
-<code>_step_nivel_estudios</code>), con 3 valores: <code>superior</code>,
-<code>secundaria_superior</code>, <code>secundaria_o_inferior</code>&#8201;&#8212;&#8201;clasificación
-CNED-2014/ISCED que usa el INE/EPA. Requiere una autodeclaración de
-haber COMPLETADO ese nivel (verbos como "tengo&#8230;&#8203;", "terminé&#8230;&#8203;", "soy
-licenciado/a en&#8230;&#8203;"), no de estar cursándolo actualmente ("estoy
-estudiando en la universidad" no cuenta)&#8201;&#8212;&#8201;mismo criterio que
-<code>practica_deportiva</code> exige práctica real, no mención de espectador.</p>
-</div>
-<div class="paragraph">
-<p>Los Ciclos Formativos de Formación Profesional son el caso más
-delicado: un Ciclo Formativo de Grado SUPERIOR cuenta como "superior"
-en la clasificación del INE (nivel 5, igual que la universidad), no
-como "secundaria_superior"&#8201;&#8212;&#8201;solo el Grado MEDIO cae en ese segundo
-tramo. Por eso las frases-ancla exigen "superior"/"medio" explícito en
-vez de un genérico "tengo un ciclo formativo" sin cualificar, que sería
-ambiguo entre los dos niveles.</p>
-</div>
-<div class="paragraph">
-<p>Si <code>estudios</code> ya está detectado (una carrera universitaria concreta),
-<code>nivel_estudios</code> se infiere automáticamente como <code>superior</code> sin
-necesitar una frase-ancla propia&#8201;&#8212;&#8201;nombrar la carrera ya es evidencia
-suficiente del nivel. Los dos campos pueden coexistir como pasos
-separados de <code>population_narrowing</code> (no es doble contabilización: son
-dos preguntas distintas de la encuesta, "¿qué estudiaste?" frente a
-"¿hasta qué nivel llegaste?").</p>
-</div>
-<div class="paragraph">
-<p><strong>Limitación de la tabla poblacional, documentada a propósito</strong>:
-<code>EDUCATION_LEVEL_DISTRIBUTION</code> (el marginal usado cuando no hay sexo ni
-edad disponibles para el ajuste condicionado, ver ADR-37) sale del
-indicador INE/EPA "Nivel de formación de la población adulta", que
-cubre población de 25 a 64 años&#8201;&#8212;&#8201;NO toda la población de 15+ que es
-la referencia habitual del resto de <code>ine_reference.py</code>. Es el rango de
-edad estándar que usan INE/Eurostat precisamente porque medir nivel
-COMPLETADO en gente más joven (aún cursando) o mayor (con un contexto
-de acceso a la educación muy distinto) sesga la comparación en ambos
-sentidos&#8201;&#8212;&#8201;se documenta la limitación en vez de esconderla, mismo
-criterio que otras aproximaciones de este fichero (golf/2022 en una
-versión anterior de <code>SPORT_PRACTICE_DISTRIBUTION</code>, EYE_COLOR/HAIR_COLOR
-en ADR-34).</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () desbloquea `SPORT_PRACTICE_BY_EDUCATION_LEVEL`
-como tercer nivel de la cascada de ADR-37; () es reutilizable por
-cualquier otro atributo futuro que quiera condicionarse por nivel
-educativo, no solo deportes; (-) la aproximación 25-64 sobre población
-15+ probablemente sobre-estima "superior" en el extremo joven (mucha
-gente de 15-24 aún no ha terminado) y lo infra-estima en el extremo
-mayor (65+, generación con menor acceso histórico a estudios
-superiores); (-) atributo nuevo completo (regex + IA + paso propio) es
-más superficie de mantenimiento que reutilizar algo existente, pero no
-había nada reutilizable que cubriera esta pregunta concreta.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_39_ngrok_basic_auth_en_vez_de_dominio_propio_cloudflare_para_exponer_la_app_fuera_de_local">9.39. ADR-39: ngrok + Basic Auth en vez de dominio propio + Cloudflare, para exponer la app fuera de local</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: hace falta HTTPS público para poder probar el login de
-Instagram (exige <code>redirect_uri</code> con HTTPS incluso en desarrollo, ver
-README) y para poder enseñar la app fuera de la propia máquina. Ya
-existía la nota en el README que descarta <code>cloudflared tunnel --url</code>
-(Cloudflare Quick Tunnel) por un motivo técnico concreto: su edge
-bufferiza por completo las respuestas <code>text/event-stream</code>, así que el
-streaming SSE de <code>/api/analyze/{platform}/stream</code> deja de verse en
-tiempo real. Esa nota ya dejaba claro que un <strong>named tunnel</strong> de
-Cloudflare (con dominio propio) sí respetaría el streaming&#8201;&#8212;&#8201;pero
-igualmente no se ha montado, por un motivo distinto y más de fondo.</p>
-</div>
-<div class="paragraph">
-<p><strong>Motivo real de no montar dominio propio + Cloudflare</strong>: la app corre
-con capacidad de cómputo para <strong>una persona a la vez</strong> (Moondream2 y
-DINOv2 comparten los recursos disponibles, ver ADR-29 sobre los
-semáforos por modelo). Un dominio propio con Cloudflare por delante
-tiene sentido cuando el objetivo es que cualquiera pueda entrar sin
-pedir permiso&#8201;&#8212;&#8201;exactamente lo contrario de lo que hace falta aquí.
-Montar dominio + tunnel con nombre + WAF para luego tener que limitar
-igualmente quién entra sería resolver un problema (tráfico público sin
-control) que este proyecto no tiene, a costa de más piezas que
-mantener (DNS, certificados renovándose, reglas de WAF) para un caso
-de uso que es, en la práctica, "que yo pueda entrar desde fuera, y
-enseñárselo a alguien puntualmente cuando yo decida".</p>
-</div>
-<div class="paragraph">
-<p><strong>Alternativas descartadas</strong>:</p>
-</div>
-<div class="ulist">
-<ul>
-<li>
-<p><strong>Dominio propio + Cloudflare Tunnel (named tunnel) + Access</strong>:
-técnicamente resolvería el streaming Y permitiría restringir acceso
-(Cloudflare Access, gratis hasta 50 usuarios). Descartado por lo de
-arriba: es infraestructura pensada para servir a más de una persona
-a la vez, que es precisamente lo que este proyecto no puede hacer
-todavía. Además, el plan gratuito de Cloudflare (a diferencia de
-ngrok) no dio buenos resultados en pruebas propias con las
-actualizaciones de página en tiempo real que necesita el streaming
-SSE de este proyecto&#8201;&#8212;&#8201;sin llegar a diagnosticarse con el mismo
-detalle que el problema, ya documentado, de Quick Tunnel.</p>
-</li>
-<li>
-<p><strong>Dominio gratuito (DigitalPlat FreeDomain u otro) sin Cloudflare
-delante</strong>: no resuelve el streaming (seguiría sirviendo directamente,
-sin problema de buffering) pero tampoco aporta nada que ngrok no dé
-ya (dominio estable, HTTPS)&#8201;&#8212;&#8201;añadiría un proveedor más sin
-necesidad real.</p>
-</li>
-<li>
-<p><strong>Dominio de pago</strong>: mismo razonamiento que el punto anterior más un
-coste recurrente injustificado mientras el cuello de botella siga
-siendo el cómputo, no el nombre de dominio.</p>
-</li>
-</ul>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: usar <strong>ngrok</strong> (plan gratuito) con <strong>Basic Auth vía Traffic
-Policy</strong> (<code>backend/policy.yaml</code>, ver README) como control de acceso. El
-plan gratuito de ngrok ya incluye un dominio propio estable (no cambia
-entre reinicios) y streaming SSE en tiempo real sin el problema de
-Cloudflare, y Traffic Policy permite Basic Auth sin necesidad de plan
-de pago&#8201;&#8212;&#8201;cubre exactamente las dos necesidades reales (HTTPS estable
-+ que solo entre quien yo decida) sin montar infraestructura pensada
-para más carga de la que la app puede atender.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () cero coste recurrente y cero infraestructura
-nueva que mantener (DNS, certificados, reglas de firewall); () el
-control de acceso vive en un único archivo (<code>policy.yaml</code>, fuera del
-repo) en vez de repartirse entre proveedor de DNS + Cloudflare Access;
-(+) streaming SSE funciona correctamente, a diferencia de Quick
-Tunnel; (-) el plan gratuito de ngrok muestra una página intermedia de
-aviso la primera vez que alguien abre la URL en el navegador (ver nota
-en el README)&#8201;&#8212;&#8201;fricción menor, no un problema de seguridad; (-) si
-en el futuro la capacidad de cómputo deja de ser el factor limitante
-(por ejemplo, si se separa el análisis en una cola con varios
-workers), esta decisión habría que revisarla&#8201;&#8212;&#8201;en ese momento sí
-tendría sentido un dominio propio pensado para más de un usuario
-simultáneo.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_40_nuevo_atributo_rama_estudios_rama_de_conocimiento_sin_paso_propio_cuando_estudios_ya_la_cubre">9.40. ADR-40: Nuevo atributo <code>rama_estudios</code> (rama de conocimiento), sin paso propio cuando <code>estudios</code> ya la cubre</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: <code>estudios</code> (<code>STUDIES_DISTRIBUTION</code>) solo cubre 14 carreras
-concretas con proporción propia&#8201;&#8212;&#8201;cualquier otra carrera mencionada en
-el texto ("estudio Sociología", "estudio Filosofía") no aporta ninguna
-señal de estrechamiento, aunque sí sea perfectamente clasificable en
-una de las 5 ramas de conocimiento oficiales del sistema universitario
-español (Real Decreto 1393/2007, modificado por RD 43/2015: Artes y
-Humanidades, Ciencias, Ciencias de la Salud, Ciencias Sociales y
-Jurídicas, Ingeniería y Arquitectura).</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: añadir <code>rama_estudios</code> como atributo nuevo de punta a
-punta (regex + IA + paso de k-anonimato propio), con dos fuentes de
-detección:
-  - <strong>Inferencia automática</strong> desde <code>estudios</code> cuando ya se conoce una
-    de las 14 carreras concretas, vía <code>STUDIES_TO_RAMA</code> (mapeo fijo
-    1:1, sin ambigüedad&#8201;&#8212;&#8201;cada carrera pertenece a exactamente una
-    rama oficial).
-  - <strong>Vocabulario ampliado propio</strong> (~25 carreras adicionales:
-    sociología, filología, física, fisioterapia, ingeniería civil&#8230;&#8203;)
-    con su propia frase-ancla de detección, para cubrir carreras que
-    <code>estudios</code> no tiene registradas individualmente pero sí son
-    clasificables en una rama.</p>
-</div>
-<div class="paragraph">
-<p>Dos casos de la clasificación oficial se verificaron explícitamente por
-no ser evidentes en vez de asumirse: "psicología" está adscrita a
-Ciencias de la Salud como rama PRINCIPAL (BOE-A-2022-12576, código
-RUCT), no a Ciencias Sociales y Jurídicas como podría parecer por su
-objeto de estudio; "veterinaria" está adscrita a Ciencias de la Salud
-(documentación oficial de admisión de la Universidad de Zaragoza y
-catálogo de la USC), no a Ciencias como sugeriría la intuición.</p>
-</div>
-<div class="paragraph">
-<p><strong>Guard de no-duplicación (la decisión central de este ADR)</strong>: a
-diferencia de <code>nivel_estudios</code> (que SÍ genera su propio paso aunque se
-infiera automáticamente de <code>estudios</code>, porque nivel y carrera son
-preguntas distintas de la encuesta de origen&#8201;&#8212;&#8201;ver ADR-38),
-<code>rama_estudios</code> NUNCA genera un paso de estrechamiento cuando
-<code>findings.estudios</code> ya está informado. El motivo es puramente
-estadístico: quien estudia "derecho" ya está, con probabilidad
-exactamente 1, dentro de "Ciencias Sociales y Jurídicas"&#8201;&#8212;&#8201;no es un
-hecho INDEPENDIENTE del ya conocido, es un subconjunto exacto de él.
-<code>_step_estudios</code> ya aplica la proporción de esa carrera concreta
-(3,08% para derecho), que es más precisa que la de toda su rama
-(46,66%); aplicar AMBAS multiplicándolas contaría el mismo hecho dos
-veces y estrecharía la población sin ninguna base&#8201;&#8212;&#8201;el mismo tipo de
-error que motivó la cascada de prioridad de ADR-37 (nunca combinar dos
-ajustes condicionados que no son independientes entre sí).
-<code>_step_rama_estudios</code> solo produce un paso cuando <code>rama_estudios</code> se
-detectó de forma INDEPENDIENTE de <code>estudios</code> (carrera fuera de las 14,
-vía el vocabulario ampliado). El campo se sigue rellenando igualmente
-para mostrarlo de forma informativa en el resto del pipeline, solo se
-omite el paso de <code>population_narrowing</code>.</p>
-</div>
-<div class="paragraph">
-<p><strong>Bug encontrado y corregido de paso, no buscado</strong>: al escribir el test
-de regresión numérica para el guard de arriba
-(<code>test_does_not_double_narrow_the_final_remaining_population</code>, que
-compara <code>final_remaining_population()</code> con y sin <code>rama_estudios</code> cuando
-<code>estudios</code> ya está presente, esperando que sea idéntico), se descubrió
-que <code>nivel_estudios</code> (ADR-38) llevaba desde su introducción sin estar
-incluido en <code>_CHAINED_CATEGORIES</code>&#8201;&#8212;&#8201;el conjunto que
-<code>final_remaining_population()</code> consulta para decidir qué pasos cuentan
-hacia el número combinado final. El paso individual de <code>nivel_estudios</code>
-se calculaba y mostraba correctamente en la lista de
-<code>population_narrowing</code>, pero si era el ÚLTIMO paso encadenable con
-narrowing válido, el número final ("en España hay X personas que
-comparten tus rasgos") lo ignoraba y usaba el del paso anterior en su
-lugar. Ningún test existente lo cubría porque <code>TestFinalRemainingPopulation</code>
-no tenía ningún caso con <code>nivel_estudios</code> como único o último atributo
-encadenable. Corregido añadiendo tanto <code>nivel_estudios</code> como
-<code>rama_estudios</code> a <code>_CHAINED_CATEGORIES</code> en el mismo cambio.</p>
-</div>
-<div class="paragraph">
-<p><strong>Fuente de la tabla, limitación documentada</strong>: <code>RAMA_ESTUDIOS_DISTRIBUTION</code>
-mezcla matriculados de universidades PÚBLICAS del curso 2015/16 con
-PRIVADAS del curso 2019/20 (Ministerio de Universidades, Estadística de
-Estudiantes Universitarios) porque no se encontró una única fuente con
-el desglose completo de las 5 ramas para ambos tipos de universidad en
-el mismo curso académico. Se validó cruzando con una cifra independiente
-de nuevo ingreso del curso 2021/22 (Ciencias Sociales y Jurídicas 46,4%,
-Ciencias 6,3% según esa fuente, frente al 46,66%/6,02% calculados aquí)&#8201;&#8212;&#8201;la coincidencia razonable entre ambas cifras, pese al desfase de
-cursos y al ser métricas distintas (matriculación total frente a nuevo
-ingreso), da confianza en el orden de magnitud sin pretender exactitud
-absoluta.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () aprovecha menciones de carrera que antes no
-aportaban ninguna señal de estrechamiento (cualquier carrera fuera de
-las 14 de `STUDIES_DISTRIBUTION`); () el guard de no-duplicación es
-generalizable como patrón para futuros atributos que refinen uno ya
-existente (cualquier "categoría amplia de X" derivada de un "X
-concreto" ya cableado debería aplicar el mismo criterio); (+) efecto
-colateral positivo: destapó y corrigió un bug real de ADR-38 que
-llevaba una sesión entera sin detectarse; (-) la tabla de origen mezcla
-dos cursos académicos distintos, aproximación explícitamente
-documentada en vez de escondida; (-) atributo nuevo completo (regex<br>
-IA + paso propio) es más superficie de mantenimiento, aunque menor que
-<code>nivel_estudios</code> al reutilizar <code>_STUDY_VERB_RE</code> en vez de un regex de
-detección nuevo.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_adr_41_detección_heurística_de_collages_para_omitir_dinov2_y_moondream2_en_fotos_que_combinan_varias_sub_fotos">9.41. ADR-41: Detección heurística de collages, para omitir DINOv2 y Moondream2 en fotos que combinan varias sub-fotos</h3>
-<div class="paragraph">
-<p><strong>Contexto</strong>: tanto la geolocalización por similitud (DINOv2 + FAISS,
-<code>app/vision/geolocation.py</code>) como el análisis de contenido visual
-(Moondream2, <code>app/vision/scene_analysis.py</code>) asumen que cada foto
-analizada muestra UNA escena coherente. Un collage (varias sub-fotos
-combinadas en una sola imagen, típicamente con apps como Instagram
-Layout, PicCollage o Instasize) rompe ese supuesto en los dos módulos,
-por motivos distintos:</p>
-</div>
-<div class="ulist">
-<ul>
-<li>
-<p><strong>DINOv2/FAISS</strong>: el índice se construyó con imágenes de calle de
-UN solo lugar cada una (OSV-5M). El embedding de un collage de
-varias sub-fotos de sitios distintos no se parece de forma
-coherente a ningún vecino del índice&#8201;&#8212;&#8201;el resultado más probable
-no es "sin match" (que sería lo honesto), sino un match de baja
-confianza pero sintácticamente válido: un falso positivo
-silencioso, peor que no analizar la foto en absoluto.</p>
-</li>
-<li>
-<p><strong>Moondream2</strong>: el prompt (ver docstring de cabecera de
-<code>scene_analysis.py</code>) ya identifica como ambigüedad real el caso de
-varias personas de protagonismo similar en una misma foto&#8201;&#8212;&#8201;un
-collage con sub-fotos de personas DISTINTAS es exactamente ese
-problema, pero peor: ni siquiera son necesariamente la misma
-escena ni el mismo momento.</p>
-</li>
-</ul>
-</div>
-<div class="paragraph">
-<p>Además, con la GPU de 4GB VRAM de este proyecto (ver ADR-28/29), cada
-inferencia de Moondream2/DINOv2 sobre una foto que de entrada no va a
-dar una señal fiable es cómputo de GPU que no vuelve a recuperarse.</p>
-</div>
-<div class="paragraph">
-<p><strong>Decisión</strong>: heurístico barato en CPU (<code>app/vision/collage_detection.py</code>,
-función <code>detect_collage</code>), NO otro modelo de ML&#8201;&#8212;&#8201;coherente con la
-preferencia ya establecida de modelos locales/ligeros ajustados a las
-restricciones de hardware del proyecto. Se ejecuta en <code>_process_photo</code>
-(<code>geolocation.py</code>) justo después de descargar la foto y ANTES de
-despachar nada a ninguno de los dos modelos: una foto detectada como
-collage se omite de los dos por completo, con el mismo patrón de
-degradación best-effort que ya usaba la rama <code>image is None</code> (las dos
-pistas de progreso avanzan igual, para que la barra de carga siga
-llegando al 100%, pero sin ningún resultado que aportar para esa foto).</p>
-</div>
-<div class="paragraph">
-<p>Qué detecta: bandas de color casi uniforme (blanco o negro, los colores
-de margen que usan las apps de collage habituales) que dividen la
-imagen en una cuadrícula, en el INTERIOR de la imagen&#8201;&#8212;&#8201;una franja
-pegada al borde EXTERIOR se descarta a propósito (letterboxing/padding
-normal, no dice nada sobre si hay varias sub-fotos combinadas).</p>
-</div>
-<div class="paragraph">
-<p><strong>Alternativa considerada y descartada</strong>: leer el tag EXIF <code>Software</code>
-(algunas apps de collage lo dejan escrito, p. ej. "Instagram Layout").
-Se descarta porque Instagram/Reddit re-codifican las imágenes al
-servirlas desde su CDN y normalmente eliminan los metadatos EXIF no
-esenciales en el proceso&#8201;&#8212;&#8201;para las fotos que este proyecto analiza
-(descargadas de esas CDN, no del carrete original del usuario), ese tag
-casi nunca sobrevive. Habría sido código muerto la mayoría de las
-veces, sin aportar nada que el heurístico de píxeles no cubra ya mejor.</p>
-</div>
-<div class="paragraph">
-<p><strong>Sesgo deliberado hacia falsos negativos</strong>: los umbrales (franja fina,
-posición interior, color puro blanco/negro) están calibrados para
-evitar marcar como collage una foto normal que tiene una franja ancha
-de color uniforme por motivos legítimos (cielo despejado, pared lisa,
-horizonte del mar)&#8201;&#8212;&#8201;ese tipo de foto ya se trata aparte por un
-mecanismo existente y distinto (<code>representative=False</code> en
-<code>geolocation.py</code>, ver <code>_MAX_NEIGHBOR_SPREAD_KM</code>). Perder una foto que
-SÍ era collage (se analiza igual, sin detectarla) es un coste menor que
-descartar sin motivo una foto normal que sí tenía señal real que
-aportar&#8201;&#8212;&#8201;mismo criterio de "más vale no afirmar nada que afirmar algo
-sin base" que ya aplica el resto del pipeline (ver p. ej. la propia
-<code>representative</code>, o el guard de <code>rama_estudios</code> en ADR-40). Limitación
-conocida y documentada: collages sin margen visible entre sub-fotos, o
-con margen de un color distinto de blanco/negro, no se detectan&#8201;&#8212;&#8201;se
-comportan como una foto normal.</p>
-</div>
-<div class="paragraph">
-<p><strong>Consecuencias</strong>: () evita falsos positivos de geolocalización sobre
-fotos que estructuralmente no pueden dar una ubicación fiable; ()
-evita que Moondream2 mezcle personas/contextos de sub-fotos distintas
-como si fueran la misma escena; () ahorra cómputo de GPU en fotos que
-de entrada no iban a aportar señal útil; () heurístico puro en
-CPU/numpy, sin dependencias nuevas (<code>numpy</code>/<code>Pillow</code> ya son
-dependencias base del proyecto, no del extra opcional de visión) y sin
-coste de carga de modelo; (-) no detecta todos los collages posibles
-(sin margen, o con margen de otro color)&#8201;&#8212;&#8201;falso negativo documentado
-a propósito; (-) una foto real con una franja de margen blanco/negro
-fina y bien posicionada por casualidad (poco frecuente, pero no
-imposible) se descartaría sin necesidad&#8201;&#8212;&#8201;falso positivo aceptado
-como coste residual del diseño.</p>
-</div>
 <div style="page-break-after: always;"></div>
+</div>
 </div>
 </div>
 </div>
@@ -7209,7 +7065,7 @@ este proyecto:</p>
 <div id="footer">
 <div id="footer-text">
 Version 1.0<br>
-Last updated 2026-09-01 07:23:58 UTC
+Last updated 2026-09-03 01:01:55 UTC
 </div>
 </div>
 </body>
