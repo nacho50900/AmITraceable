@@ -279,11 +279,19 @@ inefectiva y fácilmente cuestionable ante un tribunal técnico; (+) la
 memoria puede argumentar correctamente dónde está el verdadero límite
 de confianza del sistema.
 
-==== ADR-9: Geolocalización de fotos limitada a España y a nivel de provincia
+==== ADR-9: Geolocalización de fotos limitada a España y a nivel de provincia, con índice ampliado más allá de OSV-5M
 
 
 *Contexto*: se planteó geolocalizar fotos de Instagram al estilo de
-herramientas comerciales tipo GeoSpy.
+herramientas comerciales tipo GeoSpy. Con el índice construido
+únicamente a partir de OSV-5M (~100k imágenes, todas capturadas desde
+vehículo), el rendimiento resultó marginal en la práctica -- 100k fotos
+repartidas por los ~505.000 km² de España son, de media, una cada
+~5 km², con huecos enormes fuera de las principales vías, y con un
+sesgo de dominio adicional: OSV-5M es imagery sistemática de calle
+(altura/ángulo/composición de cámara de vehículo), mientras que las
+fotos de Instagram que analiza esta herramienta son tomadas a pie, por
+personas -- una distribución visual bastante distinta.
 
 *Alternativas consideradas*: replicar un índice de geolocalización
 mundial (inviable: requiere cientos de millones de imágenes
@@ -291,24 +299,62 @@ georreferenciadas e infraestructura fuera del alcance de un TFG);
 predecir coordenadas GPS exactas (poco realista: incluso el estado del
 arte publicado solo acierta la calle/1km ~26-29% de las veces).
 
-*Decisión*: DINOv2 (extracción de embeddings) + FAISS (búsqueda de
-vecinos más cercanos) contra un índice construido únicamente con
-imágenes de España (subconjunto filtrado del dataset público OSV-5M), y
-la predicción se agrega a nivel de **provincia** cuando es posible; si
-solo se puede identificar la comunidad autónoma (varias provincias
-posibles, sin forma honesta de elegir una) se usa ese nivel intermedio en
-vez de forzar una provincia concreta o perder el dato por completo -- ver
-ADR-16 para los requisitos de consenso antes de aceptar cualquiera de los
-dos niveles como residencia habitual.
+Para ampliar la cobertura más allá de OSV-5M, se evaluaron varias
+fuentes adicionales de fotos tomadas a pie: *YFCC100M/YLI-GEO*
+(descartada: el canal oficial de distribución, Yahoo Webscope, no está
+actualmente ofreciendo acceso al dataset; y es además el dataset que
+motivó en su día el escándalo de privacidad "Diversity in Faces" de
+IBM, un origen incómodo para una herramienta centrada en privacidad);
+*KartaView* (descartada para volumen serio: rate limit público de solo
+100 peticiones/hora, sin mecanismo de descarga por lotes, y cobertura
+mucho más densa en el Sudeste Asiático que en España); *Mapillary*
+(viable en teoría, pero bbox limitado a ~1km² por consulta -- cubrir
+España entera exige cientos de miles de peticiones de tesela, un
+proyecto de scraping en sí mismo; aparcada, no descartada); *Flickr*
+(implementada por completo -- `scripts/geolocalization/build_flickr_index.py`
+-- pero sin usar en producción: Flickr pasó a exigir una suscripción
+Flickr Pro de pago para poder crear una API key, algo que no era así
+cuando se diseñó el script; se mantiene el código por si en el futuro
+compensa pagar la suscripción).
 
-*Consecuencias*: (+) índice manejable en recursos de un TFG (varios GB
-en vez de un dataset mundial); (+) mayor precisión relativa al competir
-en un espacio de búsqueda más pequeño; (+) la granularidad de provincia
-(o comunidad autónoma, cuando aplica) coincide con la que ya usa el
-módulo de k-anonimato, integrándose de forma natural en el resto del
-informe; (-) no compite en precisión con herramientas comerciales que sí
-tienen infraestructura e índices mundiales propietarios — limitación
-reconocida y documentada, no ocultada.
+*Decisión*: DINOv2 (extracción de embeddings) + FAISS (búsqueda de
+vecinos más cercanos) contra un índice construido combinando varias
+fuentes, todas dentro de España: OSV-5M (imagery de vehículo, base
+original) y **Wikimedia Commons** (fotos tomadas a pie por personas,
+vía `list=geosearch` del API de MediaWiki -- sin API key ni coste,
+`scripts/geolocalization/build_commons_index.py`), fusionadas con
+`merge_faiss_indices.py`. La ingestión de Commons recorre un grid de
+celdas de ~10km² sobre España con un techo (no un mínimo) de fotos por
+celda, para que la distribución final siga aproximadamente la densidad
+real de fotografía disponible sin que un único punto muy fotografiado
+domine el índice -- ver ADR-42 para el tratamiento de privacidad
+(pixelado de caras) aplicado a esta fuente, al tratarse de fotos de
+terceros identificables. La predicción se sigue agregando a nivel de
+**provincia** cuando es posible; si solo se puede identificar la
+comunidad autónoma (varias provincias posibles, sin forma honesta de
+elegir una) se usa ese nivel intermedio en vez de forzar una provincia
+concreta o perder el dato por completo -- ver ADR-16 para los
+requisitos de consenso antes de aceptar cualquiera de los dos niveles
+como residencia habitual.
+
+*Consecuencias*: (+) índice manejable en recursos de un TFG (unos pocos
+GB incluso por encima del millón de vectores, frente a un dataset
+mundial); (+) mayor precisión relativa al competir en un espacio de
+búsqueda más pequeño; (+) combinar OSV-5M con Commons reduce el sesgo
+de dominio hacia imagery de vehículo, acercando el índice al tipo de
+foto que de verdad se analiza (tomada a pie); (+) la granularidad de
+provincia (o comunidad autónoma, cuando aplica) coincide con la que ya
+usa el módulo de k-anonimato, integrándose de forma natural en el resto
+del informe; (-) no compite en precisión con herramientas comerciales
+que sí tienen infraestructura e índices mundiales propietarios --
+limitación reconocida y documentada, no ocultada; (-) construir la
+parte de Commons del índice a escala nacional es un proceso de varios
+días (no minutos), con su propio manejo de reintentos/rate-limiting
+frente al API de Wikimedia -- complejidad operativa nueva que OSV-5M,
+al ser un dataset ya empaquetado, no tenía; (-) Mapillary queda como
+fuente evaluada y aparcada, no implementada -- ampliable en el futuro
+si la cobertura actual resulta insuficiente tras evaluar el índice
+combinado.
 
 ==== ADR-10: Mistral AI como proveedor de análisis con IA, por jurisdicción
 

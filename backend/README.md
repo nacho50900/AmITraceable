@@ -137,14 +137,116 @@ app/
 scripts/
 ├── update_ine_reference.py       # refresca 6 tablas de app/data/ine_reference.py contra el INE -- ver README arriba
 ├── update_studies_distribution.py # refresca STUDIES_DISTRIBUTION (Ministerio de Universidades, sin API) -- ver README arriba
-├── download_osv5m_spain.py    # descarga filtrada del dataset OSV-5M
-├── download_osv5m_world.py    # variante sin filtro de país
-├── build_faiss_index.py       # construcción del índice FAISS
-└── recover_metadata.py        # reconstruye metadata.csv sin volver a descargar imágenes
+├── convert_translation_models.py # convierte los checkpoints MarianMT a CTranslate2 (traducción local, ver ADR-31)
+├── recover_metadata.py           # reconstruye metadata.csv sin volver a descargar imágenes
+└── geolocalization/               # scripts para construir el índice FAISS de geolocalización -- ver sección propia abajo
+    ├── download_osv5m_spain.py    # descarga filtrada del dataset OSV-5M (imágenes desde vehículo)
+    ├── download_osv5m_world.py    # variante sin filtro de país
+    ├── build_faiss_index.py       # construye el índice FAISS a partir de imágenes ya descargadas (OSV-5M)
+    ├── flickr_grid.py             # genera el grid de celdas sobre España, reutilizado por los scripts de abajo
+    ├── image_ingest_common.py     # utilidades compartidas: blur de caras, dedup por perceptual hash, provincia más cercana
+    ├── build_commons_index.py     # ingestión de Wikimedia Commons (fotos a pie, en uso -- ver sección propia)
+    ├── build_flickr_index.py      # ingestión de Flickr (implementado, sin usar: requiere Flickr Pro de pago)
+    └── merge_faiss_indices.py     # fusiona varios índices (p.ej. OSV-5M + Commons) en uno solo
 
 tests/                         # pytest, ~153 tests, ~95% cobertura
 monitoring/                    # config de Prometheus/Grafana
 ```
+
+## Ampliar el índice de geolocalización con Wikimedia Commons
+
+El índice construido solo con OSV-5M (ver README raíz) son imágenes desde
+vehículo (~100k, solo España) -- buenas para reconocer carreteras y
+paisaje, pero con poco parecido visual a una foto de Instagram tomada a
+pie. `build_commons_index.py` amplía el índice con fotos de [Wikimedia
+Commons](https://commons.wikimedia.org) geolocalizadas dentro de España,
+tomadas por personas, sin necesitar API key ni coste (a diferencia de
+Flickr -- ver más abajo).
+
+### Cómo funciona, en resumen
+
+Genera un grid de celdas de ~10km² sobre España (`flickr_grid.py`,
+11.720 celdas a ese tamaño), y por cada celda: busca fotos con
+`list=geosearch` del API de MediaWiki, filtra por tipo de imagen y
+tamaño, baraja los candidatos (para no llenar el cupo de la celda solo
+con el punto más fotografiado, ver ADR correspondiente si se documenta
+en `docs/`), pixela las caras detectadas (YuNet, vía OpenCV -- **nunca**
+matrículas, ver ADR-42 en `docs/src/09_architecture_decisions.adoc`),
+extrae el embedding con DINOv2 y descarta la imagen -- **nunca se
+persiste ninguna foto a disco**, solo el vector y sus metadatos
+(`id`, `lat`, `lon`, `region`, `license`).
+
+### Instalar dependencias
+
+```bash
+cd backend
+pip install -r requirements-vision.txt huggingface_hub pandas tqdm httpx imagehash
+```
+
+(`opencv-python-headless` e `imagehash` ya están en `requirements-vision.txt`.)
+
+### Calibrar antes de lanzar la ejecución completa
+
+Antes de recorrer las ~11.720 celdas del grid completo (puede tardar
+días), mide primero con una muestra aleatoria representativa de todo el
+país -- **no** una sola ciudad, la densidad de fotos varía muchísimo
+entre zona urbana y rural:
+
+```bash
+cd scripts/geolocalization
+python build_commons_index.py --output ../../data/commons_calibracion --sample-cells 30 --cap-per-cell 400
+```
+
+Al terminar, imprime un desglose de por qué se descarta cada candidato
+(`mime_no_valido`, `demasiado_pequena`, `demasiado_grande`,
+`fallo_descarga`, `casi_duplicada`) y una extrapolación de tiempo/volumen
+total al grid completo -- revísalo antes de lanzar la ejecución real,
+sobre todo el `%` de `fallo_descarga`: si sale alto, es rate limiting de
+`upload.wikimedia.org`, no falta de contenido.
+
+Para probar una celda concreta en vez de una muestra aleatoria (p. ej.
+para verificar que todo funciona antes de calibrar en serio):
+
+```bash
+python build_commons_index.py --output ../../data/commons_test --near "40.4168,-3.7038" --max-cells 1 --cap-per-cell 10
+```
+
+### Lanzar la ingestión completa
+
+```bash
+python build_commons_index.py --output ../../data/commons_spain > commons_ingest.log 2>&1
+```
+
+Sin `--sample-cells`/`--near`/`--max-cells` (esos son solo para
+calibrar). Resumible: se puede interrumpir con Ctrl+C en cualquier
+momento (guarda el progreso al momento, no solo cada `--flush-every-cells`)
+y relanzar exactamente el mismo comando -- sigue por donde se quedó, sin
+duplicar fotos ya presentes en el índice aunque se reabra una celda ya
+completada a mano (quitándola de `_completed_cells.txt`).
+
+No consume apenas disco: las imágenes nunca se guardan, solo
+`embeddings.npy`/`index.faiss`/`index_meta.csv` (unos pocos GB incluso
+para más de 1M de fotos, ya que cada vector son 384 floats).
+
+### Fusionar con el índice de OSV-5M
+
+```bash
+python merge_faiss_indices.py --sources ../../data/osv5m_spain ../../data/commons_spain --output ../../data/spain_combined
+```
+
+Después, apunta `_INDEX_DIR` en `app/vision/geolocation.py` a
+`data/spain_combined` (o copia/renombra el resultado encima de
+`data/osv5m_spain` si prefieres no tocar código).
+
+### Por qué no Flickr
+
+`build_flickr_index.py` existe y funciona (mismo diseño que el de
+Commons), pero **no está en uso**: Flickr exige desde 2025/2026 una
+suscripción Flickr Pro de pago (~75€/año) para poder crear una API key,
+algo que no existía cuando se diseñó el script. Se mantiene en el repo
+por si en el futuro compensa pagar la suscripción -- en ese caso, el
+flujo es idéntico al de Commons, solo con `--api-key`/`FLICKR_API_KEY`
+de más.
 
 ## Endpoints principales
 
