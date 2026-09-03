@@ -6,20 +6,68 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 jobs:
-  tests:
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      webapp: ${{ steps.filter.outputs.webapp }}
+      # "other": cualquier cambio que no sea documentacion pero que TAMPOCO
+      # caiga dentro de backend/** o webapp/** (p.ej. un fichero nuevo en la
+      # raiz que aun no esta contemplado abajo). Es la red de seguridad:
+      # si no sabemos clasificarlo, se corre TODO, nunca se asume que es
+      # seguro saltarlo.
+      other: ${{ steps.filter.outputs.other }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'docker-compose.yml'
+              - 'sonar-project.properties'
+              - 'package-lock.json'
+              - '.github/workflows/build.yml'
+            webapp:
+              - 'webapp/**'
+              - 'docker-compose.yml'
+              - 'sonar-project.properties'
+              - 'package-lock.json'
+              - '.github/workflows/build.yml'
+            other:
+              - '**'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!.claude/**'
+              - '!LICENSE'
+              - '!backend/**'
+              - '!webapp/**'
+              - '!docker-compose.yml'
+              - '!sonar-project.properties'
+              - '!package-lock.json'
+
+  tests:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.webapp == 'true' || needs.changes.outputs.other == 'true'
+    runs-on: ubuntu-latest
+    env:
+      RUN_BACKEND: ${{ needs.changes.outputs.backend == 'true' || needs.changes.outputs.other == 'true' }}
+      RUN_WEBAPP: ${{ needs.changes.outputs.webapp == 'true' || needs.changes.outputs.other == 'true' }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - uses: actions/setup-node@v6
+        if: env.RUN_WEBAPP == 'true'
         with:
-          node-version: 24
+          node-version: 22
           cache: 'npm'
           cache-dependency-path: webapp/package-lock.json
 
       - uses: actions/setup-python@v6
+        if: env.RUN_BACKEND == 'true'
         with:
           python-version: "3.12"
           cache: 'pip'
@@ -27,18 +75,26 @@ jobs:
             backend/requirements.txt
             backend/requirements-dev.txt
 
-      - run: npm --prefix webapp ci
-      - run: npm --prefix webapp run test:coverage
+      - name: Instalar dependencias webapp
+        if: env.RUN_WEBAPP == 'true'
+        run: npm --prefix webapp ci
 
-      - name: Install backend (Python) dependencies
+      - name: Tests webapp con cobertura
+        if: env.RUN_WEBAPP == 'true'
+        run: npm --prefix webapp run test:coverage
+
+      - name: Instalar dependencias backend (Python)
+        if: env.RUN_BACKEND == 'true'
         run: pip install -r backend/requirements-dev.txt
 
-      - name: Install spaCy models
+      - name: Instalar modelos de spaCy
+        if: env.RUN_BACKEND == 'true'
         run: |
           python -m spacy download en_core_web_sm
           python -m spacy download es_core_news_sm
 
-      - name: Run backend tests with coverage
+      - name: Tests backend con cobertura
+        if: env.RUN_BACKEND == 'true'
         env:
           # Los tests de ai_analysis.py usan respx.mock para simular las
           # respuestas de Mistral, así que NO necesitan una key real para
