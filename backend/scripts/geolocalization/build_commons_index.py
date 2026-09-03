@@ -85,6 +85,17 @@ _MAX_GEOSEARCH_RADIUS_M = 10000
 
 _ACCEPTED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 _MIN_DIMENSION_PX = 400  # descarta iconos/miniaturas/escaneos muy pequeños
+# Descarta imágenes anormalmente grandes (escaneos de alta resolución,
+# panorámicas gigantes) ANTES de descargarlas -- ya tenemos width/height
+# en los metadatos de imageinfo, no hace falta bajar el fichero para
+# saberlo. En una calibración real aparecieron imágenes de 136M y 94M
+# píxeles que dispararon el tiempo de esa celda muy por encima de la
+# media (decodificar+reescalar una imagen así es carísimo para un solo
+# elemento del índice que, además, DINOv2 va a reescalar igual que
+# cualquier otra). 50 megapíxeles es generoso para cualquier foto normal
+# (una réflex de 45MP moderna produce ~45M píxeles) y excluye estos casos
+# patológicos.
+_MAX_PIXELS = 50_000_000
 
 
 def _radius_for_cell(cell: GridCell) -> int:
@@ -97,8 +108,21 @@ def _radius_for_cell(cell: GridCell) -> int:
     return min(_MAX_GEOSEARCH_RADIUS_M, int(half_diagonal_km * 1000) + 100)
 
 
-def _commons_request(client: httpx.Client, params: dict, max_retries: int = 3) -> dict:
+def _commons_request(client: httpx.Client, params: dict, max_retries: int = 4) -> dict:
     params = {**params, "format": "json"}
+    # Códigos de error del propio API de Wikimedia que son transitorios
+    # (el backend de búsqueda está saturado momentáneamente) -- merece la
+    # pena reintentar con backoff. Otros códigos de error (parámetro mal
+    # formado, etc.) no se arreglan reintentando, así que se relanzan tal
+    # cual. Antes de este fix, "cirrussearch-too-busy-error" (visto en una
+    # calibración real, 2 veces en 30 celdas) tiraba la celda entera a la
+    # primera sin reintentar -- y, peor aún, esa celda se marcaba como
+    # completada para siempre en _load_existing_state/main() aunque nunca
+    # se hubiera llegado a consultar de verdad. Ver también el flag
+    # `is_transient_error` que main() usa para NO marcar la celda como
+    # completada si el fallo persiste tras agotar los reintentos.
+    _TRANSIENT_ERROR_CODES = {"cirrussearch-too-busy-error", "ratelimited", "maxlag"}
+
     for attempt in range(max_retries):
         try:
             response = client.get(_COMMONS_API_URL, params=params, headers={"User-Agent": _USER_AGENT}, timeout=30)
@@ -108,6 +132,10 @@ def _commons_request(client: httpx.Client, params: dict, max_retries: int = 3) -
             response.raise_for_status()
             data = response.json()
             if "error" in data:
+                error_code = data["error"].get("code", "")
+                if error_code in _TRANSIENT_ERROR_CODES and attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
                 raise RuntimeError(f"Wikimedia API error: {data['error']}")
             return data
         except httpx.HTTPError:
@@ -167,13 +195,44 @@ def _fetch_imageinfo(client: httpx.Client, titles: list[str]) -> dict[str, dict]
     return result
 
 
-def _download_bytes(client: httpx.Client, url: str) -> bytes | None:
-    try:
-        response = client.get(url, headers={"User-Agent": _USER_AGENT}, timeout=20)
-        response.raise_for_status()
-        return response.content
-    except Exception:
-        return None
+def _download_bytes(client: httpx.Client, url: str, max_retries: int = 5) -> tuple[bytes | None, str | None]:
+    """Devuelve (bytes, None) si va bien, o (None, motivo) si falla -- el
+    motivo se usa solo para diagnóstico agregado (ver reject_reasons en
+    _process_cell).
+
+    Con reintentos y backoff, a diferencia de la primera versión: en la
+    calibración real sobre datos reales, el 100% de los fallos de
+    descarga (3260/3260) eran HTTP 429 -- 8 descargas en paralelo sin
+    ningún reintento saturaban el rate limit de upload.wikimedia.org
+    (el CDN de medios, que tiene su propio límite, distinto del de
+    commons.wikimedia.org/w/api.php). Se respeta la cabecera
+    Retry-After si el servidor la manda; si no, backoff exponencial.
+    """
+    for attempt in range(max_retries):
+        try:
+            response = client.get(url, headers={"User-Agent": _USER_AGENT}, timeout=20)
+            if response.status_code == 429:
+                if attempt == max_retries - 1:
+                    return None, "http_429_reintentos_agotados"
+                retry_after = response.headers.get("Retry-After")
+                wait_s = float(retry_after) if retry_after else (2 ** attempt)
+                time.sleep(wait_s)
+                continue
+            response.raise_for_status()
+            return response.content, None
+        except httpx.HTTPStatusError as e:
+            return None, f"http_{e.response.status_code}"
+        except httpx.TimeoutException:
+            if attempt == max_retries - 1:
+                return None, "timeout"
+            time.sleep(2 ** attempt)
+        except httpx.ConnectError as e:
+            if attempt == max_retries - 1:
+                return None, f"connect_error:{e}"
+            time.sleep(2 ** attempt)
+        except Exception as e:
+            return None, f"otro:{type(e).__name__}:{e}"
+    return None, "http_429_reintentos_agotados"
 
 
 def _process_cell(
@@ -186,10 +245,26 @@ def _process_cell(
     cap: int,
     phash_threshold: int,
     max_pages: int,
-) -> tuple[list[np.ndarray], list[dict], int]:
+) -> tuple[list[np.ndarray], list[dict], dict]:
     accepted_hashes: list[imagehash.ImageHash] = []
     embeddings: list[np.ndarray] = []
     meta_rows: list[dict] = []
+    # Diagnóstico: en qué paso se pierde cada candidato, y qué mime types
+    # dominan los rechazos por tipo -- para poder distinguir "Commons no
+    # tiene fotos aquí" (n_vistas bajo) de "hay muchos ficheros geotagged
+    # que no son fotos modernas -- mapas, escaneos, etc." (n_vistas alto,
+    # rechazo alto por mime), que son situaciones muy distintas de cara a
+    # decidir si hay que ajustar el filtro.
+    rejected_mime_counter: dict[str, int] = {}
+    download_error_counter: dict[str, int] = {}
+    reject_reasons = {
+        "sin_imageinfo": 0,
+        "mime_no_valido": 0,
+        "demasiado_pequena": 0,
+        "demasiado_grande": 0,
+        "fallo_descarga": 0,
+        "casi_duplicada": 0,
+    }
 
     # FASE 1: recopilar candidatos (solo metadatos vía imageinfo, sin
     # descargar ninguna imagen todavía) de hasta max_pages páginas.
@@ -210,6 +285,7 @@ def _process_cell(
     gscontinue = None
     page = 0
     candidates_pool: list[tuple[dict, dict]] = []
+    had_unrecovered_error = False
 
     while page < max_pages:
         page += 1
@@ -217,6 +293,7 @@ def _process_cell(
             results, gscontinue = _geosearch_cell(client, cell, per_page, gscontinue)
         except Exception as e:
             print(f"  Aviso: fallo en geosearch celda {cell.id}, página {page}: {e}")
+            had_unrecovered_error = True
             break
 
         if not results:
@@ -232,10 +309,17 @@ def _process_cell(
         for r in results:
             info = infos.get(r["title"])
             if not info or not info["url"]:
+                reject_reasons["sin_imageinfo"] += 1
                 continue
             if info["mime"] not in _ACCEPTED_MIME_TYPES:
+                reject_reasons["mime_no_valido"] += 1
+                rejected_mime_counter[info["mime"]] = rejected_mime_counter.get(info["mime"], 0) + 1
                 continue
             if info["width"] < _MIN_DIMENSION_PX or info["height"] < _MIN_DIMENSION_PX:
+                reject_reasons["demasiado_pequena"] += 1
+                continue
+            if info["width"] * info["height"] > _MAX_PIXELS:
+                reject_reasons["demasiado_grande"] += 1
                 continue
             candidates_pool.append((r, info))
 
@@ -250,27 +334,40 @@ def _process_cell(
 
     # FASE 3: descargar/dedup/blur/embed en lotes, parando en cuanto se
     # llena el cap -- no se descarga todo el pool si el cap se llena antes.
-    _DOWNLOAD_BATCH = 8
+    #
+    # _DOWNLOAD_BATCH bajado de 8 a 3 tras la calibración real: con 8
+    # descargas en paralelo SIN reintentos, el 100% de los fallos eran
+    # HTTP 429 -- saturábamos el rate limit de upload.wikimedia.org de
+    # entrada. Ahora _download_bytes ya reintenta con backoff, pero
+    # mantener menos hilos en paralelo reduce cuántas peticiones chocan
+    # contra el límite A LA VEZ (y por tanto cuántas necesitan reintentar).
+    _DOWNLOAD_BATCH = 3
     i = 0
     while len(meta_rows) < cap and i < len(candidates_pool):
         batch = candidates_pool[i : i + _DOWNLOAD_BATCH]
         i += _DOWNLOAD_BATCH
 
-        with ThreadPoolExecutor(max_workers=8) as pool:
+        with ThreadPoolExecutor(max_workers=3) as pool:
             downloaded = list(pool.map(lambda c: _download_bytes(client, c[1]["url"]), batch))
 
-        for (r, info), image_bytes in zip(batch, downloaded):
+        for (r, info), (image_bytes, error) in zip(batch, downloaded):
             if len(meta_rows) >= cap:
                 break
             if image_bytes is None:
+                reject_reasons["fallo_descarga"] += 1
+                download_error_counter[error] = download_error_counter.get(error, 0) + 1
                 continue
             try:
                 pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-            except Exception:
+            except Exception as e:
+                reject_reasons["fallo_descarga"] += 1
+                key = f"pil_no_decodifica:{type(e).__name__}"
+                download_error_counter[key] = download_error_counter.get(key, 0) + 1
                 continue
 
             phash = imagehash.phash(pil_image)
             if is_near_duplicate(phash, accepted_hashes, phash_threshold):
+                reject_reasons["casi_duplicada"] += 1
                 continue
 
             image_bgr = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
@@ -297,7 +394,15 @@ def _process_cell(
             )
             accepted_hashes.append(phash)
 
-    return embeddings, meta_rows, n_seen
+    diagnostics = {
+        "n_seen": n_seen,
+        "n_pool": len(candidates_pool),
+        **reject_reasons,
+        "rejected_mime_counter": rejected_mime_counter,
+        "download_error_counter": download_error_counter,
+        "had_unrecovered_error": had_unrecovered_error,
+    }
+    return embeddings, meta_rows, diagnostics
 
 
 def _load_existing_state(output_dir: Path):
@@ -348,7 +453,17 @@ def main() -> None:
                          help='"lat,lon" -- ordena las celdas por cercania a este punto en vez del orden de generacion del grid '
                               '(las primeras celdas del grid caen en el Atlantico/frontera portuguesa). Combinar con --max-cells '
                               'para un test rapido en una ciudad conocida, p.ej. --near "40.4168,-3.7038" --max-cells 1 para Madrid.')
+    parser.add_argument("--sample-cells", type=int, default=None,
+                         help="En vez de procesar las celdas en orden (o cerca de --near), toma una muestra ALEATORIA de N celdas "
+                              "repartidas por toda España. Pensado para medir el rendimiento real (tiempo/celda, fotos/celda) antes "
+                              "de lanzar la ejecucion completa sobre las ~11700 celdas -- una muestra cerca de una sola ciudad "
+                              "(--near) no es representativa del pais entero (zonas rurales rinden mucho menos). Incompatible con --near.")
+    parser.add_argument("--seed", type=int, default=42, help="Semilla para --sample-cells, para que la muestra sea reproducible")
     args = parser.parse_args()
+
+    if args.near and args.sample_cells:
+        print("Error: --near y --sample-cells son incompatibles (uno prueba UN sitio concreto, el otro mide el pais entero).")
+        sys.exit(1)
 
     output_dir = Path(args.output)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -360,6 +475,14 @@ def main() -> None:
     )
 
     embeddings, meta_rows, completed, cell_stats = _load_existing_state(output_dir)
+    # ids ya presentes en el índice (formato "commons_<pageid>") -- se usa
+    # para poder REABRIR una celda ya completada más adelante (quitándola
+    # a mano de _completed_cells.txt, p.ej. para subir --cap-per-cell y
+    # sacarle más fotos) sin arriesgarse a duplicados: si el nuevo barajado
+    # de esa celda vuelve a elegir una foto que ya estaba, se descarta en
+    # vez de añadirse por segunda vez. Sin esto, reabrir una celda podía
+    # meter la MISMA foto dos veces en el índice.
+    known_ids: set[str] = {m["id"] for m in meta_rows}
 
     all_cells = generate_spain_grid(cell_km=args.cell_km)
     pending_cells = [c for c in all_cells if c.id not in completed]
@@ -367,6 +490,9 @@ def main() -> None:
     if args.near:
         near_lat, near_lon = (float(x) for x in args.near.split(","))
         pending_cells = sort_cells_by_proximity(pending_cells, near_lat, near_lon)
+    elif args.sample_cells:
+        rng = random.Random(args.seed)
+        pending_cells = rng.sample(pending_cells, min(args.sample_cells, len(pending_cells)))
     if args.max_cells:
         pending_cells = pending_cells[:args.max_cells]
 
@@ -374,19 +500,63 @@ def main() -> None:
 
     client = httpx.Client()
     cells_since_flush = 0
+    cells_run_this_execution = 0
+    run_start = time.monotonic()
+    global_reject_totals = {"sin_imageinfo": 0, "mime_no_valido": 0, "demasiado_pequena": 0, "demasiado_grande": 0, "fallo_descarga": 0, "casi_duplicada": 0}
+    global_rejected_mime: dict[str, int] = {}
+    global_download_errors: dict[str, int] = {}
+    n_duplicates_skipped = 0
 
     try:
         for cell in tqdm(pending_cells, desc="Celdas"):
-            cell_embeddings, cell_meta, n_seen = _process_cell(
+            cell_embeddings, cell_meta, diag = _process_cell(
                 cell, client, detector, processor, model, device,
                 cap=args.cap_per_cell, phash_threshold=args.phash_threshold,
                 max_pages=args.max_pages_per_cell,
             )
-            embeddings.extend(cell_embeddings)
-            meta_rows.extend(cell_meta)
-            completed.add(cell.id)
-            cell_stats.append({"cell_id": cell.id, "n_vistas": n_seen, "n_aceptadas": len(cell_meta)})
+            # Filtra cualquier foto que ya estuviera en el índice (relevante
+            # sobre todo al reabrir una celda ya completada -- en una
+            # ejecución normal sobre celdas nuevas esto no debería quitar
+            # nada, ya que cada celda solo se procesa una vez).
+            new_embeddings, new_meta = [], []
+            for emb, meta in zip(cell_embeddings, cell_meta):
+                if meta["id"] in known_ids:
+                    n_duplicates_skipped += 1
+                    continue
+                known_ids.add(meta["id"])
+                new_embeddings.append(emb)
+                new_meta.append(meta)
+            embeddings.extend(new_embeddings)
+            meta_rows.extend(new_meta)
+            # Solo se marca la celda como completada si no hubo un fallo
+            # sin recuperar (p.ej. "cirrussearch-too-busy-error" agotando
+            # los reintentos) -- si no, esa celda se queda pendiente para
+            # la siguiente ejecución en vez de darse por vacía para
+            # siempre. Antes de este fix, un fallo transitorio de
+            # Wikimedia hacía que la celda se marcara completada con 0
+            # fotos igual que una celda rural genuinamente vacía --
+            # indistinguibles, y la zona quedaba sin representar en el
+            # índice sin que nadie se enterase.
+            if not diag["had_unrecovered_error"]:
+                completed.add(cell.id)
+            else:
+                print(f"  {cell.id} queda pendiente (fallo sin recuperar) -- se reintentará en la próxima ejecución.")
+            cell_stats.append({
+                "cell_id": cell.id, "n_vistas": diag["n_seen"], "n_aceptadas": len(cell_meta),
+                "n_pool": diag["n_pool"], "sin_imageinfo": diag["sin_imageinfo"],
+                "mime_no_valido": diag["mime_no_valido"], "demasiado_pequena": diag["demasiado_pequena"],
+                "demasiado_grande": diag["demasiado_grande"],
+                "fallo_descarga": diag["fallo_descarga"], "casi_duplicada": diag["casi_duplicada"],
+                "fallo_sin_recuperar": diag["had_unrecovered_error"],
+            })
+            for k in global_reject_totals:
+                global_reject_totals[k] += diag[k]
+            for mime, n in diag["rejected_mime_counter"].items():
+                global_rejected_mime[mime] = global_rejected_mime.get(mime, 0) + n
+            for err, n in diag["download_error_counter"].items():
+                global_download_errors[err] = global_download_errors.get(err, 0) + n
             cells_since_flush += 1
+            cells_run_this_execution += 1
 
             if cells_since_flush >= args.flush_every_cells:
                 _persist_state(output_dir, embeddings, meta_rows, completed, cell_stats)
@@ -397,7 +567,38 @@ def main() -> None:
         client.close()
         _persist_state(output_dir, embeddings, meta_rows, completed, cell_stats)
 
-    print(f"\n{len(meta_rows)} fotos en el índice, guardadas en {output_dir}")
+    elapsed_s = time.monotonic() - run_start
+    n_photos_run = sum(r["n_aceptadas"] for r in cell_stats[-cells_run_this_execution:]) if cells_run_this_execution else 0
+
+    print(f"\n{len(meta_rows)} fotos en el índice total, guardadas en {output_dir}")
+    if n_duplicates_skipped:
+        print(f"({n_duplicates_skipped} fotos descartadas por ya estar en el índice -- normal solo si has reabierto alguna celda ya completada.)")
+    if elapsed_s > 0 and cells_run_this_execution > 0:
+        s_per_cell = elapsed_s / cells_run_this_execution
+        photos_per_hour = n_photos_run / (elapsed_s / 3600)
+        remaining_cells = len(all_cells) - len(completed)
+        eta_hours = (remaining_cells * s_per_cell) / 3600
+        photos_per_cell_avg = n_photos_run / cells_run_this_execution
+        print(f"\nEsta ejecución: {cells_run_this_execution} celdas, {n_photos_run} fotos, {elapsed_s/60:.1f} min "
+              f"({s_per_cell:.1f}s/celda, ~{photos_per_hour:.0f} fotos/hora).")
+        print(f"Extrapolado a las {remaining_cells} celdas que faltan del grid completo (estimación gruesa, "
+              f"el rendimiento real varía mucho entre celdas urbanas y rurales -- para eso es --sample-cells): "
+              f"~{eta_hours:.1f}h (~{eta_hours/24:.1f} días) y ~{remaining_cells * photos_per_cell_avg:.0f} fotos más.")
+
+    n_seen_total = sum(r["n_vistas"] for r in cell_stats[-cells_run_this_execution:]) if cells_run_this_execution else 0
+    if n_seen_total:
+        print(f"\nDesglose de por qué se descartan candidatos (de {n_seen_total} vistos en esta ejecución):")
+        for reason, n in global_reject_totals.items():
+            print(f"  {reason}: {n} ({100*n/n_seen_total:.1f}%)")
+        print(f"  aceptadas: {n_photos_run} ({100*n_photos_run/n_seen_total:.1f}%)")
+        if global_rejected_mime:
+            print("  Tipos MIME más comunes entre los rechazados por 'mime_no_valido':")
+            for mime, n in sorted(global_rejected_mime.items(), key=lambda x: -x[1])[:8]:
+                print(f"    {mime}: {n}")
+        if global_download_errors:
+            print("  Motivos de 'fallo_descarga' más comunes:")
+            for err, n in sorted(global_download_errors.items(), key=lambda x: -x[1])[:8]:
+                print(f"    {err}: {n}")
     if cell_stats:
         stats_df = pd.DataFrame(cell_stats)
         empty_cells = (stats_df["n_aceptadas"] == 0).sum()
