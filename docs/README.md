@@ -22,8 +22,10 @@ On Windows, you can use [these instructions](https://www.ruby-lang.org/en/docume
 Once Ruby is working you can install some gems with `asciidoctor` and `asciidoctor-diagram`.
 
 ```shell
-gem install asciidoctor asciidoctor-diagram
+gem install asciidoctor asciidoctor-diagram asciidoctor-diagram-plantuml
 ```
+
+`asciidoctor-diagram-plantuml` bundles the PlantUML JAR itself (asciidoctor-diagram stopped including it by default since v2.3.0) -- without it, the build fails with `Could not load PlantUML` on any chapter with a `[plantuml]` diagram (currently only `06_runtime_view.adoc`). Just installing the gem is enough: asciidoctor-diagram requires it internally on its own the first time it hits a `[plantuml]` block, no extra `-r` flag needed on the `asciidoctor` command.
 
 Now it is turn to install some dependencies in the `package.json` file inside the `docs` directory:
 
