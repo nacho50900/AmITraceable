@@ -3806,10 +3806,18 @@ de confianza del sistema.</p>
 </div>
 </div>
 <div class="sect3">
-<h4 id="_adr_9_geolocalización_de_fotos_limitada_a_españa_y_a_nivel_de_provincia">9.3.3. ADR-9: Geolocalización de fotos limitada a España y a nivel de provincia</h4>
+<h4 id="_adr_9_geolocalización_de_fotos_limitada_a_españa_y_a_nivel_de_provincia_con_índice_ampliado_más_allá_de_osv_5m">9.3.3. ADR-9: Geolocalización de fotos limitada a España y a nivel de provincia, con índice ampliado más allá de OSV-5M</h4>
 <div class="paragraph">
 <p><strong>Contexto</strong>: se planteó geolocalizar fotos de Instagram al estilo de
-herramientas comerciales tipo GeoSpy.</p>
+herramientas comerciales tipo GeoSpy. Con el índice construido
+únicamente a partir de OSV-5M (~100k imágenes, todas capturadas desde
+vehículo), el rendimiento resultó marginal en la práctica&#8201;&#8212;&#8201;100k fotos
+repartidas por los ~505.000 km² de España son, de media, una cada
+~5 km², con huecos enormes fuera de las principales vías, y con un
+sesgo de dominio adicional: OSV-5M es imagery sistemática de calle
+(altura/ángulo/composición de cámara de vehículo), mientras que las
+fotos de Instagram que analiza esta herramienta son tomadas a pie, por
+personas&#8201;&#8212;&#8201;una distribución visual bastante distinta.</p>
 </div>
 <div class="paragraph">
 <p><strong>Alternativas consideradas</strong>: replicar un índice de geolocalización
@@ -3819,25 +3827,62 @@ predecir coordenadas GPS exactas (poco realista: incluso el estado del
 arte publicado solo acierta la calle/1km ~26-29% de las veces).</p>
 </div>
 <div class="paragraph">
-<p><strong>Decisión</strong>: DINOv2 (extracción de embeddings) + FAISS (búsqueda de
-vecinos más cercanos) contra un índice construido únicamente con
-imágenes de España (subconjunto filtrado del dataset público OSV-5M), y
-la predicción se agrega a nivel de <strong>provincia</strong> cuando es posible; si
-solo se puede identificar la comunidad autónoma (varias provincias
-posibles, sin forma honesta de elegir una) se usa ese nivel intermedio en
-vez de forzar una provincia concreta o perder el dato por completo&#8201;&#8212;&#8201;ver
-ADR-16 para los requisitos de consenso antes de aceptar cualquiera de los
-dos niveles como residencia habitual.</p>
+<p>Para ampliar la cobertura más allá de OSV-5M, se evaluaron varias
+fuentes adicionales de fotos tomadas a pie: <strong>YFCC100M/YLI-GEO</strong>
+(descartada: el canal oficial de distribución, Yahoo Webscope, no está
+actualmente ofreciendo acceso al dataset; y es además el dataset que
+motivó en su día el escándalo de privacidad "Diversity in Faces" de
+IBM, un origen incómodo para una herramienta centrada en privacidad);
+<strong>KartaView</strong> (descartada para volumen serio: rate limit público de solo
+100 peticiones/hora, sin mecanismo de descarga por lotes, y cobertura
+mucho más densa en el Sudeste Asiático que en España); <strong>Mapillary</strong>
+(viable en teoría, pero bbox limitado a ~1km² por consulta&#8201;&#8212;&#8201;cubrir
+España entera exige cientos de miles de peticiones de tesela, un
+proyecto de scraping en sí mismo; aparcada, no descartada); <strong>Flickr</strong>
+(implementada por completo&#8201;&#8212;&#8201;<code>scripts/geolocalization/build_flickr_index.py</code>&#8201;&#8212;&#8201;pero sin usar en producción: Flickr pasó a exigir una suscripción
+Flickr Pro de pago para poder crear una API key, algo que no era así
+cuando se diseñó el script; se mantiene el código por si en el futuro
+compensa pagar la suscripción).</p>
 </div>
 <div class="paragraph">
-<p><strong>Consecuencias</strong>: () índice manejable en recursos de un TFG (varios GB
-en vez de un dataset mundial); () mayor precisión relativa al competir
-en un espacio de búsqueda más pequeño; (+) la granularidad de provincia
-(o comunidad autónoma, cuando aplica) coincide con la que ya usa el
-módulo de k-anonimato, integrándose de forma natural en el resto del
-informe; (-) no compite en precisión con herramientas comerciales que sí
-tienen infraestructura e índices mundiales propietarios — limitación
-reconocida y documentada, no ocultada.</p>
+<p><strong>Decisión</strong>: DINOv2 (extracción de embeddings) + FAISS (búsqueda de
+vecinos más cercanos) contra un índice construido combinando varias
+fuentes, todas dentro de España: OSV-5M (imagery de vehículo, base
+original) y <strong>Wikimedia Commons</strong> (fotos tomadas a pie por personas,
+vía <code>list=geosearch</code> del API de MediaWiki&#8201;&#8212;&#8201;sin API key ni coste,
+<code>scripts/geolocalization/build_commons_index.py</code>), fusionadas con
+<code>merge_faiss_indices.py</code>. La ingestión de Commons recorre un grid de
+celdas de ~10km² sobre España con un techo (no un mínimo) de fotos por
+celda, para que la distribución final siga aproximadamente la densidad
+real de fotografía disponible sin que un único punto muy fotografiado
+domine el índice&#8201;&#8212;&#8201;ver ADR-42 para el tratamiento de privacidad
+(pixelado de caras) aplicado a esta fuente, al tratarse de fotos de
+terceros identificables. La predicción se sigue agregando a nivel de
+<strong>provincia</strong> cuando es posible; si solo se puede identificar la
+comunidad autónoma (varias provincias posibles, sin forma honesta de
+elegir una) se usa ese nivel intermedio en vez de forzar una provincia
+concreta o perder el dato por completo&#8201;&#8212;&#8201;ver ADR-16 para los
+requisitos de consenso antes de aceptar cualquiera de los dos niveles
+como residencia habitual.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () índice manejable en recursos de un TFG (unos pocos
+GB incluso por encima del millón de vectores, frente a un dataset
+mundial); () mayor precisión relativa al competir en un espacio de
+búsqueda más pequeño; () combinar OSV-5M con Commons reduce el sesgo
+de dominio hacia imagery de vehículo, acercando el índice al tipo de
+foto que de verdad se analiza (tomada a pie); () la granularidad de
+provincia (o comunidad autónoma, cuando aplica) coincide con la que ya
+usa el módulo de k-anonimato, integrándose de forma natural en el resto
+del informe; (-) no compite en precisión con herramientas comerciales
+que sí tienen infraestructura e índices mundiales propietarios&#8201;&#8212;&#8201;limitación reconocida y documentada, no ocultada; (-) construir la
+parte de Commons del índice a escala nacional es un proceso de varios
+días (no minutos), con su propio manejo de reintentos/rate-limiting
+frente al API de Wikimedia&#8201;&#8212;&#8201;complejidad operativa nueva que OSV-5M,
+al ser un dataset ya empaquetado, no tenía; (-) Mapillary queda como
+fuente evaluada y aparcada, no implementada&#8201;&#8212;&#8201;ampliable en el futuro
+si la cobertura actual resulta insuficiente tras evaluar el índice
+combinado.</p>
 </div>
 </div>
 <div class="sect3">
@@ -7065,7 +7110,7 @@ este proyecto:</p>
 <div id="footer">
 <div id="footer-text">
 Version 1.0<br>
-Last updated 2026-09-03 01:01:55 UTC
+Last updated 2026-09-03 01:21:01 UTC
 </div>
 </div>
 </body>
