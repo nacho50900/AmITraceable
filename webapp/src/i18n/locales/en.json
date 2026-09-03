@@ -163,6 +163,14 @@
       "color_pelo": "Hair color: {{value}}",
       "color_piel": "Skin tone: {{value}}"
     },
+    "inferredCategory": {
+      "ubicacion": "Location",
+      "ocupacion": "Occupation",
+      "rutina": "Routine",
+      "aficion": "Hobby",
+      "texto_visible": "Text visible in photo",
+      "matricula": "Vehicle license plate"
+    },
     "attributeValue": {
       "sexo": {
         "hombre": "male",
@@ -402,6 +410,28 @@
       "footnote": "Approximate estimate based on aggregated INE distributions. When a real cross-tabulation exists (e.g. marital status by sex), that exact proportion is used; the rest of the combinations assume independence between attributes. It is not an exact headcount.",
       "footnoteImage": " Rows marked with 📷 come from a visual analysis of your photos, not from something you wrote — they're less reliable than a text self-declaration.",
       "footnoteNameGuess": " Rows marked with 🤖 (name) are an estimate from your account's public name, not something you declared — reliability is lower."
+    },
+    "inferredAttributes": {
+      "title": "Attributes inferred without statistical correlation",
+      "subtitle": "These don't feed into the population estimate above because they don't map to any official INE table, but that doesn't make them harmless: they can still compromise your privacy or that of other people who appear in your photos.",
+      "evidenceCount": "Detected in {{count}} post(s).",
+      "dgt": {
+        "title": "ℹ️ Official DGT (Spanish traffic authority) lookup",
+        "freeIntro": "With this plate, anyone can request the DGT's free reduced report (Sede Electrónica or the miDGT app), which already includes:",
+        "freeItem1": "Date of first registration in Spain (how old the vehicle is)",
+        "freeItem2": "Make, model, vehicle type and fuel",
+        "freeItem3": "Current administrative status (active, deregistered or temporarily deregistered)",
+        "freeItem4": "Issues that would block transfer or circulation of the vehicle",
+        "freeItem5": "Pending recall notices",
+        "paidIntro": "By paying fee 4.1 (€8.67), the full report additionally adds:",
+        "paidItem1": "Owner identification",
+        "paidItem2": "Municipality where the vehicle is registered",
+        "paidItem3": "Full inspection (ITV) history and mileage",
+        "paidItem4": "Number of previous owners",
+        "paidItem5": "Liens (seizures, impoundments, retention of title...)",
+        "paidItem6": "Full technical data and EuroNCAP score",
+        "closingNote": "In other words: posting a photo where the plate is readable already lets anyone check the vehicle's age and status for free, and for €8.67 also find out who owns it and where they live."
+      }
     },
     "populationPictogram": {
       "compactAriaLabel": "Approximately {{percent}} of the population: 1 in every {{ratio}} people",

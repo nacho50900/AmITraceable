@@ -163,6 +163,14 @@
       "color_pelo": "Color de pelo: {{value}}",
       "color_piel": "Color de piel: {{value}}"
     },
+    "inferredCategory": {
+      "ubicacion": "Ubicación",
+      "ocupacion": "Ocupación",
+      "rutina": "Rutina",
+      "aficion": "Afición",
+      "texto_visible": "Texto visible en foto",
+      "matricula": "Matrícula de vehículo"
+    },
     "attributeValue": {
       "sexo": {
         "hombre": "hombre",
@@ -402,6 +410,28 @@
       "footnote": "Estimación aproximada a partir de distribuciones agregadas del INE. Cuando existe una tabla cruzada real (p. ej. estado civil según sexo), se usa esa proporción exacta; el resto de combinaciones asume independencia entre atributos. No es un recuento exacto de personas.",
       "footnoteImage": " Las filas marcadas con 📷 vienen de un análisis visual de tus fotos, no de algo que hayas escrito — son menos fiables que una autodeclaración de texto.",
       "footnoteNameGuess": " Las filas marcadas con 🤖 (nombre) son una estimación por el nombre público de tu cuenta, no algo que hayas declarado — la fiabilidad es menor."
+    },
+    "inferredAttributes": {
+      "title": "Atributos inferidos sin correlación estadística",
+      "subtitle": "Estos datos no entran en el cálculo de población de arriba porque no encajan en ninguna tabla oficial del INE, pero eso no los hace inofensivos: pueden seguir comprometiendo tu privacidad o la de terceros que aparecen en tus fotos.",
+      "evidenceCount": "Detectado en {{count}} publicación(es).",
+      "dgt": {
+        "title": "ℹ️ Consulta oficial en la DGT",
+        "freeIntro": "Con esta matrícula, cualquiera puede pedir gratis el informe reducido de la DGT (Sede Electrónica o app miDGT), que ya incluye:",
+        "freeItem1": "Fecha de primera matriculación en España (antigüedad del vehículo)",
+        "freeItem2": "Marca, modelo, tipo de vehículo y combustible",
+        "freeItem3": "Situación administrativa actual (alta, baja o baja temporal)",
+        "freeItem4": "Incidencias que impedirían la transferencia o circulación del vehículo",
+        "freeItem5": "Avisos de llamada a revisión pendiente",
+        "paidIntro": "Pagando la tasa 4.1 (8,67 €), el informe completo añade además:",
+        "paidItem1": "Identificación del titular",
+        "paidItem2": "Municipio donde está domiciliado el vehículo",
+        "paidItem3": "Historial completo de ITV y kilometraje",
+        "paidItem4": "Número de titulares anteriores",
+        "paidItem5": "Cargas (embargos, precintos, reservas de dominio...)",
+        "paidItem6": "Datos técnicos completos y puntuación EuroNCAP",
+        "closingNote": "Es decir: publicar una foto donde se lea la matrícula ya permite a cualquiera consultar gratis la antigüedad y el estado del vehículo, y por 8,67 € acceder también a quién es el titular y dónde vive."
+      }
     },
     "populationPictogram": {
       "compactAriaLabel": "Aproximadamente {{percent}} de la población: 1 de cada {{ratio}} personas",

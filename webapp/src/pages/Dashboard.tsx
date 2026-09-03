@@ -8,6 +8,7 @@ import DownloadReportButton from '../components/DownloadReportButton';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import LocationMap from '../components/LocationMap';
 import PopulationNarrowingTable from '../components/PopulationNarrowingTable';
+import InferredAttributesList from '../components/InferredAttributesList';
 import ScoreBar from '../components/ScoreBar';
 import { ManualTraitsSelector } from '../components/ManualTraitsSelector';
 import type { ExposureReport, Platform, ManualAttribute } from '../types';
@@ -416,6 +417,7 @@ const Dashboard: React.FC = () => {
           remainingPopulationAllTraits={report.remaining_population_all_traits}
           remainingPopulationAllTraitsProportion={report.remaining_population_all_traits_proportion}
         />
+        <InferredAttributesList attributes={report.inferred_attributes} />
       </section>
 
       <section className="card">
