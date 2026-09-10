@@ -42,7 +42,7 @@ from datetime import date, timedelta
 # abajo para el porqué en cada caso -- esas no se comprueban.
 _LAST_VERIFIED: dict[str, date | None] = {
     "TOTAL_POPULATION_ES": date(2025, 1, 1),
-    "SEX_DISTRIBUTION": date(2025, 1, 1),
+    "SEX_DISTRIBUTION": date(2026, 9, 11),
     "MARITAL_STATUS_DISTRIBUTION": date(2026, 8, 11),
     "MARITAL_STATUS_BY_SEX": date(2026, 8, 11),
     # Tabla 01003 del INE (Padrón continuo, población año a año), año
@@ -53,6 +53,14 @@ _LAST_VERIFIED: dict[str, date | None] = {
     "AGE_DISTRIBUTION_1Y": date(2022, 1, 1),
     "AGE_DISTRIBUTION_5Y": date(2022, 1, 1),
     "PROVINCE_POPULATION": date(2026, 8, 11),
+    # Mismo Padrón que TOTAL_POPULATION_ES/SEX_DISTRIBUTION (2025) --
+    # ejemplo de ciudades grandes, no la tabla completa de ~8.000
+    # municipios (ver comentario junto a MUNICIPALITY_POPULATION: "amplía
+    # según necesites"). Añadida en esta sesión junto con el candidato de
+    # automatización en update_ine_reference.py (fetch_municipality_population,
+    # tabla 29005) -- antes no tenía entrada aquí, así que stale_tables()
+    # nunca la comprobaba.
+    "MUNICIPALITY_POPULATION": date(2026, 9, 11),
     # Sistema de matriculación provincial: histórico, cerrado desde el 18
     # de septiembre de 2000 -- no hay "fecha de verificación" que pueda
     # caducar, los códigos no van a cambiar retroactivamente.
@@ -69,10 +77,10 @@ _LAST_VERIFIED: dict[str, date | None] = {
     # `scripts/update_studies_distribution.py` (intenta descargar solo,
     # cae a instrucciones manuales si falla) cuando el Ministerio
     # publique una edición más reciente de cualquiera de los ficheros.
-    "STUDIES_DISTRIBUTION": date(2026, 8, 11),  # fecha de esta ejecución -- el histórico llega hasta el curso 2023-2024, el detalle por titulación hasta 2023 (egresados) / 2024 (matriculados)
+    "STUDIES_DISTRIBUTION": date(2026, 9, 11),  # fecha de esta ejecución -- el histórico llega hasta el curso 2023-2024, el detalle por titulación hasta 2023 (egresados) / 2024 (matriculados)
     "NATIONALITY_DISTRIBUTION": date(2026, 8, 11),
-    "SITUACION_LABORAL_DISTRIBUTION": date(2025, 10, 1),  # EPA T4 2025
-    "HOUSEHOLD_TYPE_DISTRIBUTION": date(2024, 1, 1),
+    "SITUACION_LABORAL_DISTRIBUTION": date(2026, 9, 11),  # EPA T4 2025
+    "HOUSEHOLD_TYPE_DISTRIBUTION": date(2026, 9, 11),
     # ECEPOV es una encuesta puntual del INE, sin periodicidad anual fija
     # (la última es de 2021, la anterior de 2018) -- un umbral de "1 año"
     # saltaría permanentemente sin que haya nada nuevo que revisar. Se
@@ -92,7 +100,7 @@ _LAST_VERIFIED: dict[str, date | None] = {
     "SPORT_PRACTICE_BY_SEX": date(2025, 1, 1),
     "SPORT_PRACTICE_BY_AGE_BAND": date(2025, 1, 1),
     # INE/EPA, indicador "Nivel de formación de la población adulta", año 2024.
-    "EDUCATION_LEVEL_DISTRIBUTION": date(2024, 1, 1),
+    "EDUCATION_LEVEL_DISTRIBUTION": date(2026, 9, 11),
     # Ver comentario junto a RAMA_ESTUDIOS_DISTRIBUTION: mezcla 2015/16
     # (público) + 2019/20 (privado) -- se usa la fecha más antigua de las
     # dos como fecha de verificación, no la más reciente, para no
@@ -115,6 +123,7 @@ _STALE_THRESHOLDS: dict[str, timedelta] = {
     "AGE_DISTRIBUTION_1Y": _STALE_THRESHOLD_ANNUAL,
     "AGE_DISTRIBUTION_5Y": _STALE_THRESHOLD_ANNUAL,
     "PROVINCE_POPULATION": _STALE_THRESHOLD_ANNUAL,
+    "MUNICIPALITY_POPULATION": _STALE_THRESHOLD_ANNUAL,
     "NATIONALITY_DISTRIBUTION": _STALE_THRESHOLD_ANNUAL,
     "SITUACION_LABORAL_DISTRIBUTION": _STALE_THRESHOLD_ANNUAL,
     # STUDIES_DISTRIBUTION: el Ministerio publica una edición nueva del
@@ -255,8 +264,8 @@ SEXUAL_ORIENTATION_DISTRIBUTION = {
 # Reparto por sexo. Aproximado (España tiene ligera mayoría femenina por
 # esperanza de vida más alta en edades avanzadas).
 SEX_DISTRIBUTION = {
-    "hombre": 0.492,
-    "mujer": 0.508,
+    "hombre": 0.490,
+    "mujer": 0.510,
 }
 
 # Estado civil (simplificado a 5 categorías, ver DemographicFindings.estado_civil).
@@ -587,30 +596,30 @@ PLATE_PROVINCE_CODE_TO_PROVINCE = {
 # ejemplo; amplía según necesites. Cuando se detecta un municipio, se usa
 # ESTA tabla en lugar de la de provincia (más específica), no ambas a la vez.
 MUNICIPALITY_POPULATION = {
-    "madrid": 3_330_000,
-    "barcelona": 1_660_000,
-    "valencia": 800_000,
-    "sevilla": 690_000,
-    "zaragoza": 680_000,
-    "malaga": 590_000,
-    "murcia": 460_000,
-    "bilbao": 345_000,
-    "leon": 122_000,
-    "salamanca": 143_000,
-    "avila": 57_000,
-    "valladolid": 296_000,
-    "burgos": 174_000,
-    "santander": 172_000,
-    "vitoria": 253_000,
-    "gijon": 267_000,
-    "oviedo": 220_000,
-    "pamplona": 205_000,
-    "santiago de compostela": 98_000,
-    "logrono": 152_000,
-    "caceres": 96_000,
-    "segovia": 51_000,
-    "soria": 39_000,
-    "teruel": 35_000,
+    "madrid": 3_506_730,
+    "barcelona": 1_731_649,
+    "valencia": 840_792,
+    "sevilla": 689_423,
+    "zaragoza": 693_091,
+    "malaga": 599_063,
+    "murcia": 479_405,
+    "bilbao": 351_124,
+    "leon": 123_446,
+    "salamanca": 146_110,
+    "avila": 59_107,
+    "valladolid": 302_614,
+    "burgos": 177_402,
+    "santander": 175_425,
+    "vitoria": 260_699,
+    "gijon": 269_894,
+    "oviedo": 223_968,
+    "pamplona": 209_094,
+    "santiago de compostela": 100_965,
+    "logrono": 152_150,
+    "caceres": 96_651,
+    "segovia": 52_375,
+    "soria": 41_025,
+    "teruel": 36_655,
 }
 
 # Mapeo comunidad autónoma -> provincias del INE que la componen (claves de
@@ -886,27 +895,27 @@ PROVINCE_TO_CCAA: dict[str, str] = {
 # tablas de este fichero (p. ej. golf/2022, ver historial de
 # SPORT_PRACTICE_DISTRIBUTION), documentada en vez de escondida.
 EDUCATION_LEVEL_DISTRIBUTION = {
-    "secundaria_o_inferior": 0.3505,
+    "secundaria_o_inferior": 0.3504,
     "secundaria_superior": 0.229,
-    "superior": 0.4205,
+    "superior": 0.4207,
 }
 
 
 STUDIES_DISTRIBUTION = {
-    "medicina": 0.0128,
-    "enfermeria": 0.0231,
-    "derecho": 0.0308,
-    "ingenieria informatica": 0.0300,
-    "ingenieria industrial": 0.0114,
-    "administracion de empresas": 0.0328,
-    "psicologia": 0.0331,
-    "magisterio": 0.0524,
-    "arquitectura": 0.0127,
-    "farmacia": 0.0048,
-    "biologia": 0.0201,
-    "periodismo": 0.0064,
-    "economia": 0.0101,
-    "veterinaria": 0.0027,
+    "medicina": 0.0108,
+    "enfermeria": 0.0134,
+    "derecho": 0.0274,
+    "ingenieria informatica": 0.0163,
+    "ingenieria industrial": 0.0037,
+    "administracion de empresas": 0.0282,
+    "psicologia": 0.0256,
+    "magisterio": 0.0325,
+    "arquitectura": 0.0066,
+    "farmacia": 0.0046,
+    "biologia": 0.0039,
+    "periodismo": 0.0036,
+    "economia": 0.0078,
+    "veterinaria": 0.0023,
 }
 
 # Rama de conocimiento oficial de cada una de las 14 carreras de
@@ -998,16 +1007,16 @@ RAMA_ESTUDIOS_DISTRIBUTION = {
 # conocidas. Corre `python scripts/update_ine_reference.py` para comparar
 # estos valores contra el INE.
 OCCUPATION_DISTRIBUTION = {
-    "docente": 0.049,
-    "sanitario": 0.055,
-    "desarrollador de software": 0.018,
-    "ingeniero": 0.020,
-    "abogado": 0.008,
-    "comercial": 0.049,
-    "hosteleria": 0.044,
-    "administracion publica": 0.065,
-    "construccion": 0.060,
-    "transporte": 0.030,
+    "docente": 0.058,
+    "sanitario": 0.070,
+    "desarrollador de software": 0.034,
+    "ingeniero": 0.051,
+    "abogado": 0.012,
+    "comercial": 0.090,
+    "hosteleria": 0.053,
+    "administracion publica": 0.082,
+    "construccion": 0.055,
+    "transporte": 0.067,
 }
 
 # Práctica deportiva declarada, por modalidad. Fuente: Encuesta de Hábitos
@@ -1380,10 +1389,10 @@ NATIONALITY_DISTRIBUTION = {
 #     incapacidad permanente, otras situaciones -- ~23%): jubilado 0.234,
 #     estudiante 0.082, otro_inactivo 0.094.
 SITUACION_LABORAL_DISTRIBUTION = {
-    "activo": 0.531,
+    "activo": 0.534,
     "parado": 0.059,
-    "jubilado": 0.234,
-    "estudiante": 0.082,
+    "jubilado": 0.232,
+    "estudiante": 0.081,
     "otro_inactivo": 0.094,
 }
 
@@ -1410,11 +1419,11 @@ SITUACION_LABORAL_DISTRIBUTION = {
 # completo. Corre `python scripts/update_ine_reference.py` para comparar
 # estos valores contra el INE.
 HOUSEHOLD_TYPE_DISTRIBUTION = {
-    "unipersonal": 0.257,
-    "pareja_sin_hijos": 0.232,
-    "pareja_con_hijos": 0.334,
-    "monoparental": 0.100,
-    "otro": 0.077,
+    "unipersonal": 0.261,
+    "pareja_sin_hijos": 0.209,
+    "pareja_con_hijos": 0.331,
+    "monoparental": 0.104,
+    "otro": 0.096,
 }
 
 # Lengua materna/habitual cooficial, CONDICIONADA a la comunidad autónoma
