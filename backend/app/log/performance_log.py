@@ -105,6 +105,12 @@ def log_photo_analysis_run(
     igpu_offload_used: bool,
     dinov2_local_device: str | None,
     moondream_device: str | None,
+    # Ver `app.vision.scene_analysis.get_model_variant()`: separa en el
+    # log qué build de Moondream2 produjo cada entrada (bf16 completo vs.
+    # GGUF/llama.cpp, ver historial en ese módulo) -- sin esto, comparar
+    # rendimiento entre backends en el mismo .jsonl no sería fiable, que
+    # es justamente el motivo por el que se añade este campo.
+    moondream_model_variant: str | None,
     total_wall_seconds: float,
     per_photo_seconds: list[float],
     per_photo_dinov2_seconds: list[float],
@@ -215,6 +221,7 @@ def log_photo_analysis_run(
         # Dispositivo real por modelo -- ver docstring de la función.
         "dinov2_local_device": dinov2_local_device,
         "moondream_device": moondream_device,
+        "moondream_model_variant": moondream_model_variant,
         "total_wall_seconds": round(total_wall_seconds, 3),
         # Métrica principal para COMPARAR configuraciones -- ver el
         # comentario de arriba sobre por qué no vale usar

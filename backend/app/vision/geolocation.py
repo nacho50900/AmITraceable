@@ -1155,6 +1155,7 @@ async def estimate_locations_for_posts(
         igpu_offload_used=_igpu_worker_device_index is not None and not _igpu_worker_failed,
         dinov2_local_device=get_local_device(),
         moondream_device=scene_analysis.get_device(),
+        moondream_model_variant=scene_analysis.get_model_variant(),
         total_wall_seconds=time.monotonic() - run_start,
         per_photo_seconds=timing.per_photo_seconds,
         per_photo_dinov2_seconds=timing.dinov2_seconds,

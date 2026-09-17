@@ -1,10 +1,10 @@
 """
 Análisis del CONTENIDO de cada foto (qué se ve: objetos, actividades,
 aficiones, señales de relación de pareja) vía un modelo de
-visión-lenguaje LOCAL (Moondream2, cargado con `transformers` igual que
-DINOv2 en geolocation.py) -- complementario y arquitectónicamente distinto
-de ese módulo, que solo compara SIMILITUD VISUAL contra un índice para
-estimar dónde se tomó la foto, sin "entender" qué hay en ella.
+visión-lenguaje LOCAL (Moondream2) -- complementario y arquitectónicamente
+distinto de geolocation.py (DINOv2, cargado con `transformers`), que solo
+compara SIMILITUD VISUAL contra un índice para estimar dónde se tomó la
+foto, sin "entender" qué hay en ella.
 
 Por qué local y no una API externa (p. ej. Mistral Pixtral, usado en una
 versión anterior de este módulo): el tier gratuito de la API de Mistral
@@ -17,15 +17,17 @@ del servidor, mejor alineado con el diseño RGPD del resto del proyecto
 (procesamiento en memoria, sin persistencia, sin terceros).
 
 Modelo elegido: Moondream2 (~1.8B parámetros, `vikhyatk/moondream2` en
-HuggingFace), diseñado específicamente para responder preguntas sobre
+Hugging Face), diseñado específicamente para responder preguntas sobre
 imágenes (VQA) de forma eficiente incluso en CPU, sin necesitar GPU
-dedicada -- mismo perfil de despliegue que `facebook/dinov2-small`. Usa
-`trust_remote_code=True` (ejecuta código Python del propio repo del
-modelo, no solo pesos): es la forma estándar de usar Moondream con
-`transformers`, pero es una superficie de confianza distinta a cargar un
-modelo de arquitectura estándar como DINOv2 -- documentado aquí para que
-quede explícito en la memoria, no por ser inseguro en la práctica (repo
-oficial, ampliamente usado).
+dedicada -- mismo perfil de despliegue que `facebook/dinov2-small`.
+
+Backend de carga: `llama-cpp-python` sobre un GGUF
+(`ggml-org/moondream2-20250414-GGUF`, ver `_GGUF_REPO_ID` para el porqué
+y el historial completo de qué se probó antes de llegar aquí) -- NO
+`transformers`. Se abandonó ese camino (y el de `torchao`) por
+incompatibilidades de kernels/versión específicas de la GPU de despliegue
+real de este proyecto (GTX 1650, Turing, sin tensor cores); ver ese mismo
+historial para los detalles.
 
 Trade-off aceptado: Moondream2 reconoce peor OBJETOS muy concretos que un
 modelo grande como Pixtral (p. ej. puede no identificar que un vinilo es
@@ -70,25 +72,108 @@ resolver esta ambigüedad: da igual cuál de las dos personas sea la cuenta
 analizada, el mero hecho de que la cuenta publique una foto con contexto
 romántico ya es la señal, así que esa sí se mantiene con varias personas.
 
-Degradación: si `torch`/`transformers` no están instalados (dependencias
-opcionales, ver WITH_GEOLOCATION en el Dockerfile) o la inferencia falla
+Degradación: si `llama_cpp` no está instalado (dependencia
+opcional, ver WITH_GEOLOCATION en el Dockerfile) o la inferencia falla
 por cualquier motivo, esta foto simplemente no aporta nada -- nunca aborta
 el análisis del resto de fotos ni del resto del pipeline (best-effort, ver
 `analyze_image_content`, que nunca lanza).
 """
+import base64
+import io
 import logging
+import os
 import re
+import threading
 from dataclasses import dataclass
+from pathlib import Path
 
 from PIL import Image
 
+from app.config import settings
 from app.data.ine_reference import PLATE_PROVINCE_CODE_TO_PROVINCE
+from app.log import visual_description_log
 from app.models.schemas import InferredAttribute
 
 logger = logging.getLogger(__name__)
 
-_MODEL_NAME = "vikhyatk/moondream2"
-_MODEL_REVISION = "2025-06-21"  # fijado explícitamente, ver docstring del modelo en HuggingFace
+_GGUF_REPO_ID = "ggml-org/moondream2-20250414-GGUF"
+_GGUF_TEXT_MODEL_FILENAME = "*text-model*"  # match único en el repo: moondream2-text-model-f16_ct-vicuna.gguf
+# Nombre EXACTO (no el glob de arriba): `huggingface_hub.hf_hub_download()`
+# (usado por `_ensure_quantized_model()` para descargar el F16 y
+# cuantizarlo) no admite comodines como sí hace `Llama.from_pretrained()`
+# -- necesita el nombre de fichero literal.
+_GGUF_TEXT_MODEL_FILENAME_EXACT = "moondream2-text-model-f16_ct-vicuna.gguf"
+
+# Tipo de cuantización por defecto para _ensure_quantized_model() --
+# sobreescribible con la variable de entorno MOONDREAM_QUANT_TYPE (ver
+# esa función) sin tocar código ni reconstruir la imagen, p. ej. para
+# probar Q4_K_M en vez de Q8_0. Q8_0 confirmado en producción (17/9):
+# ~1.7x más rápido que F16, en línea con benchmarks públicos de
+# llama.cpp -- buen punto de partida por defecto.
+_DEFAULT_QUANT_TYPE = "Q8_0"
+_GGUF_MMPROJ_FILENAME = "*mmproj*"  # match único en el repo: moondream2-mmproj-f16-20250414.gguf
+# HISTORIAL DE ESTE CAMBIO (11-13/9, ver conversación con Claude -- se deja
+# aquí porque cada intento anterior parecía razonable a priori y solo se
+# descartó con evidencia real, no vale la pena repetirlos sin releer esto):
+#
+# 1. `vikhyatk/moondream2` bf16 vía `transformers` (revisión pinneada
+#    2025-06-21): funcionaba, pero 27s/foto en esta GTX 1650 (Turing, SIN
+#    tensor cores) -- todo el parcheo de dtype que había más abajo en este
+#    fichero (`_upcast_bfloat16_tensors`, `_patch_vision_input_dtype`, ya
+#    ELIMINADOS en este cambio) existía solo para ese modelo/backend.
+# 2. `moondream/moondream-2b-2025-04-14-4bit` (int4 QAT oficial, vía
+#    `torchao`): bloqueado en cadena -- primero `torchao` sin techo de
+#    versión rompía el import (`int4_weight_only` eliminado en 0.16),
+#    luego con el techo puesto cargaba pero SIN kernels CUDA compilados
+#    (`torch 2.14.0+cu130` es más nuevo que cualquier build de torchao,
+#    ni siquiera nightly), y aun así fallaba con
+#    `AttributeError: 'QuantizedLinear' object has no attribute 'weight'`.
+# 3. Runtime propio "Photon" de Moondream (`pip install moondream`):
+#    descartado sin llegar a probarlo -- su documentación exige GPU Ampere
+#    o más nueva, esta GTX 1650 es Turing.
+# 4. Export ONNX comunitario (`Xenova/moondream2` / `onnx-community`):
+#    descartado -- checkpoint de 2024 (más de un año más antiguo que el
+#    que se usaba), etiquetado incluso como arquitectura `moondream1`, Y
+#    la integración de Transformers.js con la que se probó la calidad
+#    fallaba con "Number of tokens and features do not match" en la
+#    versión instalada -- documentación desactualizada.
+#
+# ESTA es la quinta vía: GGUF oficial de `ggml-org` (el propio equipo de
+# `llama.cpp`) del checkpoint `2025-04-14` de `vikhyatk/moondream2` --
+# cercano al `2025-06-21` de antes. Vía `llama-cpp-python`, con un
+# `MoondreamChatHandler` DEDICADO (no el handler MTMD genérico).
+#
+# PROBLEMAS REALES YA ENCONTRADOS Y ARREGLADOS EN PRODUCCIÓN, GTX 1650
+# (no hipotéticos -- si algo de esto reaparece, empezar por aquí):
+# - Wheel PRECOMPILADO con CUDA (índice cu130 de abetlen/llama-cpp-python):
+#   cargaba pero moría con SIGILL (exit 132) en cuanto tocaba GPU --
+#   confirmado que era específico de CUDA (en CPU pura cargaba bien). Se
+#   compila ahora desde fuente en el Dockerfile con
+#   CMAKE_CUDA_ARCHITECTURES=75 (compute capability real de esta tarjeta).
+# - `_model.reset()` ANTES de cada `create_chat_completion()`: sin esto,
+#   la caché KV interna no se limpiaba sola entre las dos llamadas
+#   independientes de esta función -- "the tokens of sequence 0... have
+#   inconsistent sequence positions", y el estado quedaba tan corrupto
+#   que el proceso acababa muriendo con SIGSEGV (exit 139) unas fotos
+#   después, no solo fallando esa foto.
+# - `_model_lock` (threading.Lock, ver más abajo): el pipeline procesa
+#   varias fotos a la vez (`asyncio.Semaphore` en geolocation.py, cada
+#   una en su propio hilo real vía `asyncio.to_thread`) -- varios hilos
+#   llamando a la vez sobre el MISMO objeto `Llama` (incluso con
+#   `reset()`) volvía a corromper el estado y a matar el proceso con
+#   SIGSEGV. `transformers` toleraba esto sin problema visible;
+#   `llama.cpp` no.
+# - `n_ctx=2048` (no 4096): el modelo se entrenó con contexto 2048,
+#   pedir más generaba "possible training context overflow" en el log.
+#
+# SIGUE SIN VERIFICAR: si con todo lo anterior arreglado el tiempo real
+# por foto mejora frente a los 27s de bf16 -- la primera medición en
+# producción tras arreglar los crashes dio ~25.7s, es decir, SIN mejora
+# clara todavía. Y el GGUF de `ggml-org` avisa en el log de carga
+# ("GENERATION QUALITY WILL BE DEGRADED! CONSIDER REGENERATING THE
+# MODEL", pre-tokenizador sin declarar) -- impacto real en la calidad de
+# las respuestas (incluido el parseo de PERSONAS/AFICION/PAREJA/
+# TEXTO_VISIBLE/MATRICULA) todavía sin confirmar contra el baseline bf16.
 
 
 @dataclass(frozen=True)
@@ -133,16 +218,35 @@ class VisualDescriptionCodes:
 
 
 _model = None
-# Dispositivo REAL en el que quedó cargado Moondream2 tras `_lazy_load()`
-# ("cuda:0" o "cpu", ver el `_actual_device = next(_model.parameters()).device`
-# dentro de `_lazy_load()`) -- expuesto vía `get_device()` para que el
-# logging de rendimiento (app/log/performance_log.py) pueda saber de
-# verdad dónde corrió, en vez de asumir "GPU si CUDA está disponible" sin
-# más: `torch.cuda.is_available()` puede dar False por motivos que no
-# lanzan ninguna excepción (ver comentario dentro de `_lazy_load()`), así
-# que se guarda el valor observado en la carga, no se volvería a acertar
-# solo con ese booleano.
+
+# Lock REAL de threading (no asyncio.Lock) que serializa TODO acceso a
+# `_model`. Bug real confirmado en producción (13/9, GTX 1650): el
+# pipeline de geolocation.py procesa varias fotos a la vez
+# (`asyncio.Semaphore(actual_concurrency)`, puede ser > 1 -- ver
+# `Settings.photo_analysis_concurrency`), cada una en su propio hilo real
+# vía `asyncio.to_thread(analyze_image_content, image)`. Sin este lock,
+# varios hilos podían llamar a `_model.reset()` / `_model.create_chat_completion()`
+# A LA VEZ sobre el MISMO objeto `Llama` -- que no está pensado para eso
+# (a diferencia de cómo se comportaba el modelo de `transformers` de
+# antes, que toleraba esto sin problema visible). El resultado no era un
+# error limpio: era corrupción de estado que acababa tirando abajo el
+# proceso ENTERO con SIGSEGV (exit 139) tras varias fotos, no solo
+# fallando la foto en cuestión.
+_model_lock = threading.Lock()
+
+# Dispositivo en el que se pidió offload de capas a `_lazy_load()`
+# ("cuda" o "cpu") -- a diferencia de la versión `transformers` de antes,
+# `llama.cpp` no expone un `next(_model.parameters()).device` equivalente
+# (el modelo no es un `nn.Module` de PyTorch), así que esto ya NO es un
+# valor "confirmado" leído tras la carga, es el valor SOLICITADO vía
+# `n_gpu_layers` -- ver `get_device()` para el matiz importante de que
+# esto puede no reflejar si el offload a GPU realmente funcionó.
 _actual_device: str | None = None
+
+# Nombre del modelo TAL CUAL quedó cargado (copia de `_GGUF_REPO_ID` en el
+# momento de `_lazy_load()`, no el valor actual del módulo) -- ver
+# `get_model_variant()` sobre por qué es una copia y no una relectura.
+_loaded_model_name: str | None = None
 
 _CAPTION_QUERY = (
     # NOTA (ver registro de trabajo): la primera versión de este campo
@@ -310,19 +414,19 @@ _STRUCTURED_QUERY = (
 # puede val..." tras responder bien, visto en producción) se descarta
 # automáticamente sin importar en qué punto exacto se corte.
 #
-# "variant": None es obligatorio en AMBAS, no opcional -- descubierto en
-# ejecución real (GTX 1650, revisión pinneada del modelo, ver
-# _MODEL_REVISION): `encode_image()` en el código remoto de esta revisión
-# hace `settings["variant"]` a pelo, SIN `.get()`, en cuanto `settings`
-# no es None. Como no necesitamos usar variantes de encoder, cualquier
-# `settings` que pasemos tiene que incluir esta clave con valor None o
-# revienta con KeyError antes de generar nada -- no es un parámetro que
-# hayamos elegido usar, es un requisito de esta versión concreta del
-# modelo para poder usar settings en absoluto.
+# La clave "variant" YA NO SE USA (era un requisito de `encode_image()`
+# en el código remoto de la versión `transformers` de antes, ver
+# historial junto a `_GGUF_REPO_ID` -- ese backend revenaba con KeyError
+# sin ella). Se deja en el dict por si algún día vuelve a hacer falta
+# algo parecido, pero `analyze_image_content()` (que ahora llama a
+# `_model.create_chat_completion()`) solo lee "max_tokens" y
+# "temperature" de aquí.
 #
 # temperature: 0.2 en el caption (algo de margen para que la frase suene
 # natural, ya que es texto libre) y 0.1 en la estructurada (ya probado
-# fiable para mantener el formato de opciones fijas).
+# fiable para mantener el formato de opciones fijas). max_tokens=55 en la
+# estructurada (más que el caption): tiene CINCO líneas que generar
+# (incluida MATRICULA), no cuatro.
 _CAPTION_SETTINGS = {"max_tokens": 45, "temperature": 0.2, "variant": None}
 _STRUCTURED_SETTINGS = {"max_tokens": 55, "temperature": 0.1, "variant": None}
 
@@ -406,474 +510,257 @@ _SPANISH_PLATE_OLD_FORMAT_RE = re.compile(
 
 
 def get_device() -> str | None:
-    """Dispositivo REAL ("cuda" o "cpu") en el que quedó cargado
-    Moondream2 en este proceso, o `None` si `_lazy_load()` no se ha
-    llamado todavía (modelo no cargado -- p. ej. `enable_scene_analysis`
-    desactivado, o análisis sin ninguna foto procesada aún). Pensado para
-    el logging de rendimiento (ver app/log/performance_log.py), que
-    necesita saber de verdad dónde corrió cada modelo, no asumirlo -- ver
-    el comentario de `_actual_device` más arriba sobre por qué
-    `torch.cuda.is_available()` por sí solo no basta."""
+    """Dispositivo en el que se PIDIÓ offload de capas a `_lazy_load()`
+    ("cuda" o "cpu"), o `None` si `_lazy_load()` no se ha llamado todavía
+    (modelo no cargado -- p. ej. `enable_scene_analysis` desactivado, o
+    análisis sin ninguna foto procesada aún). Pensado para el logging de
+    rendimiento (ver app/log/performance_log.py).
+
+    IMPORTANTE, distinto a como funcionaba con `transformers` (ver
+    docstring de `_actual_device` más arriba): esto es lo que se PIDIÓ vía
+    `n_gpu_layers`, no una confirmación leída del modelo ya cargado --
+    `llama.cpp` no lanza excepción si el offload a GPU falla parcialmente,
+    solo lo indica en su log nativo, que con `verbose=False` (el valor por
+    defecto ahora, ver `_lazy_load()`) no se ve. Ya se confirmó una vez en
+    producción (12/9: "offloaded 25/25 layers to GPU") con `verbose=True`
+    temporalmente -- si alguna vez hay que volver a confirmarlo (p. ej.
+    tras cambiar de GPU), poner `verbose=True` otra vez ahí antes de
+    fiarse solo de este campo."""
     return _actual_device
+
+
+def get_model_variant() -> str | None:
+    """`_GGUF_REPO_ID` tal cual, o `None` si el modelo no se ha cargado
+    todavía en este proceso (mismo criterio que `get_device()`).
+
+    Existe para el log de rendimiento (ver app/log/performance_log.py):
+    sin este campo, entradas de distintos backends/modelos probados (bf16
+    `transformers`, 4-bit `torchao`, ahora GGUF `llama.cpp`, ver
+    historial junto a `_GGUF_REPO_ID`) quedarían mezcladas en el mismo
+    `.jsonl` sin forma de separarlas para comparar.
+
+    Devuelve el nombre TAL CUAL quedó cargado en `_lazy_load()`, no el
+    valor actual del módulo `_GGUF_REPO_ID` -- mismo motivo que
+    `get_device()` usa `_actual_device` y no una relectura en caliente: si
+    el proceso lleva tiempo vivo y se cambia el código sin reiniciar (no
+    debería pasar en producción, pero sí durante desarrollo local), el
+    modelo ya cargado en memoria sigue siendo el de antes."""
+    return _loaded_model_name
 
 
 def _scene_analysis_available() -> bool:
     """Comprobación barata (sin cargar el modelo) de si este módulo puede
-    funcionar: dependencias opcionales instaladas. No hay ningún índice ni
+    funcionar: dependencia opcional instalada. No hay ningún índice ni
     fichero que comprobar (a diferencia de geolocation.py), el modelo se
-    descarga solo la primera vez vía el caché de HuggingFace.
+    descarga solo la primera vez vía el caché de Hugging Face (a través de
+    `Llama.from_pretrained()`, que usa `huggingface_hub` por debajo igual
+    que `transformers`).
 
-    Comprueba también `timm` y `einops`: a diferencia de DINOv2
-    (geolocation.py), que solo necesita torch/transformers/faiss, el
-    código remoto de Moondream2 (`trust_remote_code=True`, ver
-    requirements-vision.txt) los importa también. Antes de este chequeo,
-    esta función devolvía True con solo torch/transformers instalados --
-    suficiente para `estimate_locations_for_posts` (geolocalización), pero
-    NO para Moondream2 -- así que un entorno que solo siguiera las
-    instrucciones de `scripts/geolocalization/build_faiss_index.py` (que no menciona
-    timm/einops) tenía la geolocalización funcionando con normalidad
-    mientras esta función fallaba en silencio SIEMPRE dentro de
-    `_lazy_load()` (capturado por el try/except de
-    `analyze_image_content`, ver más abajo): la geolocalización parecía
-    funcionar bien y el contenido visual nunca daba descripción para
-    NINGUNA foto, sin ningún error visible más allá de un warning en el
-    log del backend. `accelerate` y `pyvips` no se comprueban aquí a
-    propósito: son igual de importables/baratos que timm/einops, pero
-    `from_pretrained()` los necesita en combinaciones distintas según la
-    revisión del modelo fijada en `_MODEL_REVISION` (a diferencia de
-    timm/einops, que hacen falta siempre); comprobarlos aquí acoplaría
-    este chequeo a la revisión concreta. Su ausencia sigue cayendo en el
-    try/except de `analyze_image_content`, con el nombre de la excepción
-    en el log para poder diagnosticarla."""
+    Desde el cambio a `llama-cpp-python` (ver la nota junto a
+    `_GGUF_REPO_ID`), la única dependencia propia de este módulo es
+    `llama_cpp` -- ya NO se necesitan `timm`/`einops` (eran del código
+    remoto `trust_remote_code=True` de la versión `transformers`,
+    eliminada en este cambio) ni `torchao` (de la versión 4-bit intentada
+    antes, también descartada). `torch`/`transformers` los sigue
+    necesitando este proceso igualmente, pero solo para DINOv2
+    (geolocation.py) -- este módulo ya no los importa para nada."""
     try:
-        import torch  # noqa: F401
-        import transformers  # noqa: F401
-        import timm  # noqa: F401
-        import einops  # noqa: F401
+        import llama_cpp  # noqa: F401
     except ImportError:
         return False
     return True
 
 
+def _ensure_quantized_model() -> tuple[str, str] | None:
+    """Devuelve `(ruta_local, tipo)` de una versión cuantizada del modelo de
+    TEXTO de Moondream2 (no del `mmproj`/vision encoder -- ese se queda
+    en F16 siempre, este repo no tiene una variante cuantizada de esa
+    parte, ver historial junto a `_GGUF_REPO_ID` sobre por qué el ahorro
+    esperado NO es simplemente "la mitad de tiempo"), cuantizando una
+    única vez POR TIPO y cacheando el resultado en disco -- o `None` si
+    no se pudo (sin `llama-quantize` disponible, o cualquier fallo
+    durante el proceso), en cuyo caso `_lazy_load()` cae a descargar/usar
+    el F16 de siempre vía `Llama.from_pretrained()`. Nunca lanza --
+    best-effort, igual que el resto de este módulo (ver
+    `analyze_image_content`): que esta optimización falle no debe impedir
+    que Moondream2 cargue en absoluto, solo que cargue sin cuantizar.
+
+    Tipo configurable con la variable de entorno `MOONDREAM_QUANT_TYPE`
+    (por defecto Q8_0, ver `_DEFAULT_QUANT_TYPE`) -- cualquier tipo que
+    acepte `llama-quantize` vale (Q4_K_M, Q5_K_M, etc., ver su propio
+    `--help`; Q4_K_M recomendado sobre Q4_0 a pelo si se prueba 4 bits,
+    mejor calidad para un tamaño similar según la propia tabla de
+    `--help`). El nombre del fichero cacheado incluye el tipo, así que
+    cambiar de `MOONDREAM_QUANT_TYPE` entre reinicios no pisa ni obliga a
+    borrar la cuantización anterior -- conviven varias a la vez en disco,
+    cada una cuantizada solo una vez.
+
+    SIN VERIFICAR TODAVÍA (mismo motivo que el resto de cambios de hoy:
+    sin GPU en el entorno donde se escribió esto) -- en particular, que
+    `llama-quantize` exista de verdad en el PATH depende de que la etapa
+    `cuda-builder` del Dockerfile lo haya conseguido compilar, lo cual es
+    en sí mismo best-effort ahí (ver ese fichero) por la misma razón: dos
+    supuestos sin confirmar sobre el layout del código fuente vendorizado
+    de `llama-cpp-python`."""
+    import shutil
+    import subprocess
+
+    quantize_bin = shutil.which("llama-quantize")
+    if quantize_bin is None:
+        logger.info(
+            "llama-quantize no está en el PATH -- Moondream2 cargará en F16 sin cuantizar "
+            "(ver Dockerfile, etapa cuda-builder, sobre por qué esto puede faltar)"
+        )
+        return None
+
+    quant_type = os.environ.get("MOONDREAM_QUANT_TYPE", _DEFAULT_QUANT_TYPE).strip().upper()
+
+    # Bajo el mismo volumen persistente que ya montáis para la caché de
+    # Hugging Face (ver docker-compose.yml, `./backend/data/hf_cache:/root/.cache/huggingface`)
+    # -- así el resultado sobrevive a un reinicio del contenedor y esto
+    # solo se paga una vez de verdad por tipo, no en cada arranque.
+    quantized_dir = Path("/root/.cache/huggingface/moondream2-quantized")
+    quantized_path = quantized_dir / f"moondream2-text-model-{quant_type.lower()}.gguf"
+    if quantized_path.exists():
+        return str(quantized_path), quant_type
+
+    try:
+        from huggingface_hub import hf_hub_download
+
+        logger.info("Cuantizando Moondream2 a %s por primera vez (puede tardar varios minutos)...", quant_type)
+        f16_path = hf_hub_download(repo_id=_GGUF_REPO_ID, filename=_GGUF_TEXT_MODEL_FILENAME_EXACT)
+
+        quantized_dir.mkdir(parents=True, exist_ok=True)
+        # Escribir a un fichero .tmp y renombrar al final SOLO si
+        # `llama-quantize` termina bien: evita que una ejecución anterior
+        # interrumpida a medias (p. ej. el contenedor parado sin querer
+        # durante la cuantización) deje un .gguf incompleto que
+        # `quantized_path.exists()` diera por bueno en el siguiente
+        # arranque sin serlo.
+        tmp_output = quantized_dir / f"moondream2-text-model-{quant_type.lower()}.gguf.tmp"
+        result = subprocess.run(
+            [quantize_bin, f16_path, str(tmp_output), quant_type],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "llama-quantize terminó con código %s -- Moondream2 cargará en F16 sin cuantizar. stderr: %s",
+                result.returncode,
+                result.stderr[-2000:],
+            )
+            return None
+        tmp_output.rename(quantized_path)
+        logger.info("Moondream2 cuantizado a %s correctamente: %s", quant_type, quantized_path)
+        return str(quantized_path), quant_type
+    except Exception as exc:
+        logger.warning(
+            "Fallo cuantizando Moondream2 a %s (%s): %s -- cargará en F16 sin cuantizar",
+            quant_type,
+            type(exc).__name__,
+            exc,
+        )
+        return None
+
+
 def _lazy_load():
-    """Carga Moondream2 en memoria (una vez por proceso).
+    """Carga perezosa de Moondream2 vía `llama-cpp-python` (GGUF, ver
+    `_GGUF_REPO_ID` y su historial de por qué se llegó aquí) -- no hace
+    nada si ya está cargado (`_model is not None`).
 
-    Historial de bugs reales encontrados en producción con este modelo (no
-    precauciones teóricas -- los cuatro, en orden, fueron intentos
-    fallidos de solucionar el mismo síntoma: "Sin descripción visual
-    disponible" en TODAS las fotos):
+    A diferencia de la versión `transformers` anterior, aquí NO hay
+    parcheo de dtype que hacer -- los pesos GGUF ya vienen en el formato
+    final (F16 en este repo) y `llama.cpp` no tiene el problema de
+    "el kwarg no llega a los pesos reales" que sí tenía el código remoto
+    de `transformers` (ver el historial junto a `_GGUF_REPO_ID`, intento
+    1). Por eso esta función es mucho más corta que antes -- no es que se
+    haya simplificado de más, es que la mayoría de la complejidad de antes
+    era específica de problemas de ESE backend concreto.
 
-    1. `device_map` como STRING suelto ("cpu"/"cuda") a `from_pretrained()`
-       -> `NotImplementedError: Cannot copy out of meta tensor; no data!`
-    2. Quitar `device_map` pero añadir `torch_dtype` -> `RuntimeError:
-       Tensor on device cpu is not on the expected device meta!`
-    3. Forzar `low_cpu_mem_usage=False` junto con `torch_dtype` -> NO
-       arregla nada, el error nº2 persiste igual.
-    4. Quitar `torch_dtype` de `from_pretrained()` y hacer
-       `.to(dtype=torch.bfloat16)` DESPUÉS, sobre el modelo ya cargado ->
-       vuelve el error nº2 ("Tensor on device cpu is not on the expected
-       device meta!"), esta vez disparado por el propio `.to()` posterior,
-       no por `from_pretrained()`.
-
-    Los cuatro intentos tocaban ALGO relacionado con dispositivo/dtype en
-    algún punto de la carga. Investigando el código fuente real de este
-    modelo (huggingface.co/vikhyatk/moondream2/blob/main/moondream.py) se
-    confirma que el modelo NO usa meta device en su propio código (es un
-    nn.Module normal, con pesos reales desde su propio __init__) -- así
-    que el meta device tiene que estar viniendo de fuera, de cómo
-    `transformers`/`accelerate` inicializan clases con
-    `trust_remote_code=True` en general. Esto coincide con un patrón ya
-    documentado por los propios mantenedores de Moondream2 (commit "Call
-    post_init() en HfMoondream for Transformers 5 compatibility" en su
-    sucesor Moondream 3) y con un issue público de compatibilidad
-    (huggingface/transformers#31782, "Moondream breaks on transformers
-    4.42+") -- el patrón de fondo es: la clase wrapper de HuggingFace de
-    este modelo (`HfMoondream`) se escribió y probó contra una versión de
-    `transformers` de la época de cada revisión, y versiones bastante más
-    nuevas cambian cómo `PreTrainedModel` inicializa/coloca los parámetros
-    internamente, rompiendo la compatibilidad con independencia de qué
-    kwargs se le pasen desde nuestro lado.
-
-    Por eso el intento nº5 (el actual) no toca NINGÚN kwarg de dispositivo/
-    dtype -- es el ejemplo oficial exacto de la ficha del modelo para esta
-    revisión, literal, con CERO añadidos nuestros -- y en su lugar ataca
-    la causa por el otro lado: fijar `transformers` bastante por debajo de
-    donde empiezan a aparecer estos problemas (ver requirements-vision.txt).
-    Si esto tampoco funciona, el siguiente paso ya no es un kwarg distinto
-    -- es probar una revisión distinta del modelo (`_MODEL_REVISION` más
-    abajo), no seguir iterando aquí.
-
-    Intento nº6, AÑADIDO DESPUÉS de que el nº5 cargase correctamente pero
-    dejase el modelo inutilizable en la práctica en CPU: sin dtype/device
-    explícitos, `from_pretrained()` carga los pesos con el dtype con el
-    que están guardados en HuggingFace, que para este modelo es
-    `bfloat16`. En GPU eso es lo correcto (los tensor cores modernos lo
-    aceleran de forma nativa). En CPU de consumo -- sin instrucciones
-    AVX-512 BF16, que solo traen CPUs de servidor recientes -- PyTorch
-    EMULA bfloat16 por software: no "algo más lento", sino uno o dos
-    órdenes de magnitud más lento (medido en producción: >3 horas para
-    UNA sola foto, frente a segundos en float32 sobre la misma CPU).
-
-    Se investigaron y descartaron dos alternativas antes de esta, con
-    evidencia real, no solo teoría:
-    - Cuantización dinámica int8 de PyTorch (`quantize_dynamic`):
-      Moondream2 no usa `nn.Linear` para casi ninguna capa interna (qkv,
-      proj, fc1, fc2 son una clase propia `LinearWeights`, con una función
-      `linear()` que llama a `F.linear()` a mano) -- `quantize_dynamic`
-      solo puede tocar `patch_emb`, que sí es un `nn.Linear` real. El
-      resto de la red queda intacta: sin beneficio real.
-    - Cuantización int4 nativa del propio modelo (`torchao`,
-      `QuantizedLinear.unpack()` en el código remoto del modelo): termina
-      en `torch.cuda.empty_cache()` -- pensada para GPU/CUDA, no aporta
-      nada en CPU.
-
-    La solución que sí funciona: dejar que `from_pretrained()` cargue en
-    bfloat16 como siempre (intento nº5, sin tocar), y DESPUÉS convertir
-    cada parámetro y buffer a float32 uno a uno (`param.data = param.data
-    .float()`), nunca con `.to()` sobre el módulo completo -- eso es
-    precisamente lo que disparaba el error nº2/nº4 de más arriba. La
-    diferencia importa: `.to()` pasa por hooks internos de `accelerate`
-    que asumen un modelo potencialmente repartido en meta device;
-    reasignar `.data` en cada tensor por separado es una operación de más
-    bajo nivel que nunca los toca. Solo se hace en CPU.
-
-    Intento nº7, AÑADIDO cuando se pasó de correr esto en CPU a una GPU
-    dedicada (NVIDIA GTX 1650, 4GB VRAM, arquitectura Turing/compute
-    capability 7.5): en GPU no hace falta el parche de arriba tal cual
-    (upcast A FLOAT32) -- ese parche existe solo por lo lenta que es la
-    emulación software de bfloat16 en CPU de consumo. Pero tampoco vale
-    con dejar bfloat16 tal cual (que sería lo ideal en una GPU con tensor
-    cores bfloat16 nativos): esos tensor cores bfloat16 solo llegaron con
-    Ampere (compute capability >= 8.0) -- Turing es 7.5, así que bfloat16
-    en esta GPU también se emula por software (2-4x más lento que con
-    tensor cores reales -- no tan grave como en CPU, pero tampoco la
-    opción correcta aquí). float16 sí tiene aceleración nativa completa
-    desde Volta (compute capability >= 7.0), así que es lo que se
-    persigue en GPU.
-
-    Para el `device_map`, se pasa la FORMA DE DICCIONARIO exacta del
-    ejemplo oficial del modelo para GPU (comentada en el ejemplo oficial
-    con "Uncomment to run on GPU"), NO la forma de STRING SUELTO
-    (`device_map="cuda"`) que fue el intento nº1 fallido de más arriba
-    (`NotImplementedError: Cannot copy out of meta tensor`) -- son dos
-    invocaciones distintas de `accelerate` con comportamiento distinto: la
-    de string dispara su lógica de reparto automático entre dispositivos
-    (pensada para repartir un modelo grande entre varias GPUs), que es la
-    que entra en conflicto con este wrapper concreto; la de diccionario
-    con un solo destino ("" = todo el modelo) es una instrucción más
-    simple ("todo aquí") que no necesita esa lógica de reparto. ESTA PARTE
-    SÍ VERIFICADA EN PRODUCCIÓN: el modelo carga correctamente en
-    `cuda:0` con esta forma.
-
-    VERIFICADO EN PRODUCCIÓN, Y RESULTÓ SER FALSO: la idea original de
-    este intento era que pasar `torch_dtype=torch.float16` junto al
-    `device_map` bastaba para que el modelo quedara en float16. El log
-    real mostró `dtype=torch.bfloat16` pese a ese kwarg -- ver "Intento
-    nº8" (docstring de `_upcast_bfloat16_tensors`) para el porqué exacto
-    y el arreglo real: `torch_dtype` de `from_pretrained()` no llega a la
-    mayoría de los pesos de este modelo, así que forzar el dtype hace
-    falta hacerlo después de cargar, con la misma máquina ya usada para
-    el caso CPU.
-
-    ACTUALIZACIÓN tras la primera ejecución real en esta GPU: la carga
-    SÍ funciona (`device_map` en forma de diccionario, sin el error del
-    intento nº1), y con el arreglo del intento nº8 el modelo queda de
-    verdad en float16. Lo que SIGUE sin resolverse: el análisis de una
-    foto individual sigue superando el timeout de 30s (el valor de
-    entonces; ver Settings.scene_analysis_timeout_seconds en config.py,
-    subido después a 60s por defecto y hecho configurable por variable de
-    entorno tras confirmarse este mismo problema en producción) incluso en
-    GPU -- no se sabe todavía si es porque bfloat16-a-float16 no basta para
-    bajar de 30s en
-    una GTX 1650, o si hay algo más de fondo (p. ej. la primera pasada de
-    CUDA/cuDNN "calentando" kernels, que solo afecta a la primera foto,
-    frente a un problema que afecte a todas). Si sigue pasando tras este
-    arreglo, el siguiente paso es medir cuánto tarda realmente una foto
-    sola (sin el timeout de por medio) para saber si hace falta subir el
-    timeout, bajar `max_new_tokens`, o si hay otro cuello de botella.
-
-    PRESUPUESTO DE VRAM (para tener a mano si esto peta por
-    `torch.cuda.OutOfMemoryError` en vez de por un error de carga): los
-    1.8B parámetros de Moondream2 en float16 son ~3.6GB SOLO en pesos --
-    en una GPU de 4GB, eso deja muy poco margen para el contexto de
-    CUDA/cuDNN (~300-500MB) y la caché KV de la generación. Concurrencia
-    forzada a 1 en GPU (ver `_default_photo_analysis_concurrency` en
-    config.py) para no multiplicar ese uso con varias fotos en vuelo a la
-    vez. Cuantización (bitsandbytes/8-bit) NO se ha intentado a propósito:
-    Moondream2 no usa `nn.Linear` para casi ninguna capa interna (ver la
-    investigación de cuantización dinámica más arriba, mismo motivo) --
-    `load_in_8bit` de `transformers` sustituye capas por CLASE
-    (`nn.Linear` -> `bnb.nn.Linear8bitLt`), así que es muy probable que
-    tampoco toque la mayoría de la red, igual que le pasó a
-    `quantize_dynamic`. Si el presupuesto de VRAM de arriba no llega,
-    antes que cuantización probar: bajar `max_new_tokens` de la
-    generación (menos caché KV), o mantener `enable_scene_analysis` en
-    CPU (`enable_scene_analysis=True` pero sin GPU visible para este
-    proceso) mientras la geolocalización (DINOv2, mucho más ligera) sí usa
-    la GPU -- DINOv2 ya selecciona GPU automáticamente si está disponible,
-    con independencia de esto (ver geolocation.py)."""
-    global _model, _actual_device
+    `n_gpu_layers=-1` pide que TODAS las capas se offloadeen a GPU. Si no
+    hay GPU disponible (`ENABLE_IGPU_OFFLOAD`/GPU no detectada, ver
+    app/main.py), `llama.cpp` debería caer solo a CPU sin excepción -- si
+    en la práctica no es así, ver la nota de `get_device()` sobre por qué
+    este código no puede confirmarlo con certeza desde aquí."""
+    global _model, _actual_device, _loaded_model_name
     if _model is not None:
         return
 
-    from transformers import AutoModelForCausalLM
+    from llama_cpp import Llama
+    from llama_cpp.llama_chat_format import MoondreamChatHandler
+
+    # Detección de GPU: MISMO criterio que ya usaba la versión anterior
+    # (ver `app.main`, "GPU detectada" en el log de arranque) -- ese log
+    # ya viene de comprobar `torch.cuda.is_available()` antes de llegar
+    # aquí, así que no hace falta duplicar la comprobación con otra
+    # librería; simplemente se pide offload total y se confía en que
+    # `llama.cpp` decida bien si no hay GPU.
     import torch
 
-    # Deliberadamente SIN device_map, SIN torch_dtype, SIN low_cpu_mem_usage,
-    # SIN .to() posterior -- exactamente el ejemplo oficial para CPU de
-    # huggingface.co/vikhyatk/moondream2 en la revisión _MODEL_REVISION
-    # (ahí el device_map={"": "cuda"} aparece comentado con "# Uncomment
-    # to run on GPU", es decir: para CPU, no se pasa nada de esto). Con
-    # CUDA disponible, SÍ se pasa `device_map` -- ver "Intento nº7" en el
-    # docstring de esta función para el porqué exacto de la forma concreta
-    # que se usa (diccionario, no string).
-    #
-    # `torch_dtype=torch.float16` se deja puesto por si acaso (no hace
-    # daño, y sí afecta a lo poco que `from_pretrained()` SÍ inicializa
-    # como parámetro/buffer registrado -- p. ej. `patch_emb`), pero NO es
-    # lo que deja el modelo en float16: eso lo hace
-    # `_upcast_bfloat16_tensors()` más abajo. Ver "Intento nº8" en su
-    # docstring -- este kwarg por sí solo no llega a la mayoría de los
-    # pesos reales del modelo (viven en dataclasses propias del código
-    # remoto, no en `nn.Parameter`), así que confiar solo en él dejaba el
-    # modelo cargado en bfloat16 pese a pedir float16 explícitamente
-    # (visto en producción: log "Moondream2 cargado: ... dtype=torch.bfloat16").
-    #
-    # local_files_only=True primero: aunque `revision` esté fijada a un
-    # commit concreto (no "main"), `from_pretrained()` sigue haciendo por
-    # defecto una petición HEAD a huggingface.co para verificar la caché
-    # local -- innecesaria si ya está descargado y la revisión es fija, y
-    # un punto de fallo real si la conexión es lenta/inestable (visto en
-    # producción: `ReadTimeoutError` de 10s reintentando 5 veces,
-    # bloqueando esta foto -- y por tanto, indirectamente, también DINOv2
-    # para esa misma foto, ver `_maybe_analyze_content` en geolocation.py
-    # -- durante minuto y medio o más antes de rendirse). Si ya está en
-    # caché (backend/data/hf_cache/, ver docker-compose.yml), esto la usa
-    # directamente sin ningún acceso a red. Si NO está en caché todavía
-    # (primera vez), `local_files_only=True` falla rápido y limpio, y se
-    # reintenta sin él para permitir la descarga inicial.
-    _gpu_kwargs = {"torch_dtype": torch.float16, "device_map": {"": "cuda"}} if torch.cuda.is_available() else {}
-    try:
-        _model = AutoModelForCausalLM.from_pretrained(
-            _MODEL_NAME, revision=_MODEL_REVISION, trust_remote_code=True, local_files_only=True, **_gpu_kwargs
+    _requested_device = "cuda" if torch.cuda.is_available() else "cpu"
+    _n_gpu_layers = -1 if _requested_device == "cuda" else 0
+
+    chat_handler = MoondreamChatHandler.from_pretrained(
+        repo_id=_GGUF_REPO_ID,
+        filename=_GGUF_MMPROJ_FILENAME,
+    )
+
+    # Cuantizar (tipo configurable con MOONDREAM_QUANT_TYPE, por defecto
+    # Q8_0 -- ver _ensure_quantized_model() para el porqué y las
+    # condiciones -- nunca lanza, best-effort). SOLO afecta al modelo de
+    # TEXTO: el `mmproj` de arriba se carga igual en los dos casos, sigue
+    # en F16 siempre.
+    _quantized = _ensure_quantized_model()
+    _common_kwargs = dict(
+        chat_handler=chat_handler,
+        n_gpu_layers=_n_gpu_layers,
+        # 2048, no 4096: confirmado en producción (12/9) que `n_ctx_train`
+        # de este modelo es 2048 -- pedir más (probado con 4096) generaba
+        # el aviso "possible training context overflow" en el log. Con
+        # los dos prompts de este módulo (image embedding, ~729 tokens,
+        # + _CAPTION_QUERY/_STRUCTURED_QUERY) cabe de sobra dentro de
+        # 2048, así que no hay motivo real para salirse del contexto de
+        # entrenamiento solo por margen -- eso solo compraría degradar la
+        # calidad sin necesitarlo.
+        n_ctx=2048,
+        # verbose=False: antes en True a propósito, para confirmar en el
+        # log si el offload a GPU funcionaba de verdad (ver get_device())
+        # -- ya confirmado en producción (12/9: "offloaded 25/25 layers
+        # to GPU"), así que ya no compensa el ruido que mete por foto
+        # (líneas de "create_tensor", "clip_model_loader", "CUDA Graph id
+        # N reused" -- decenas por imagen). SIN VERIFICAR: `verbose=False`
+        # no parece silenciar el logging nativo del componente
+        # clip/multimodal (encoding image slice, clip_encode, add_media
+        # -- confirmado que estas líneas siguen saliendo en producción,
+        # 13/9), parece tener su propio control de verbosidad no atado a
+        # este flag -- pendiente de investigar si molesta.
+        verbose=False,
+    )
+    if _quantized is not None:
+        _quantized_path, _quant_type = _quantized
+        _model = Llama(model_path=_quantized_path, **_common_kwargs)
+        _variant_suffix = f" ({_quant_type}, texto cuantizado)"
+    else:
+        _model = Llama.from_pretrained(
+            repo_id=_GGUF_REPO_ID,
+            filename=_GGUF_TEXT_MODEL_FILENAME,
+            **_common_kwargs,
         )
-    except Exception:
-        _model = AutoModelForCausalLM.from_pretrained(
-            _MODEL_NAME, revision=_MODEL_REVISION, trust_remote_code=True, **_gpu_kwargs
-        )
+        _variant_suffix = " (F16)"
+    _actual_device = _requested_device
+    # El sufijo (Q8_0 vs F16) queda en el propio nombre guardado -- así
+    # `get_model_variant()` (y por tanto el log de rendimiento, ver
+    # app/log/performance_log.py) separa las dos variantes sin tener que
+    # añadir otro campo nuevo solo para esto.
+    _loaded_model_name = _GGUF_REPO_ID + _variant_suffix
+    logger.info(
+        "Moondream2 cargado: model=%s n_gpu_layers=%s (dispositivo solicitado=%s; revisar el log nativo de llama.cpp arriba para confirmar si el offload a GPU funcionó de verdad, ver get_device())",
+        _loaded_model_name,
+        _n_gpu_layers,
+        _requested_device,
+    )
 
-    # BUG ENCONTRADO en la sesión del "Intento nº7" (GPU): si el post-
-    # procesado de abajo (upcast/parche de dtype) falla a medias, `_model`
-    # ya está asignado (no None) -- la comprobación `if _model is not
-    # None: return` del principio de esta función haría que un reintento
-    # posterior (la siguiente foto) se quedara con este modelo roto en vez
-    # de volver a intentar la carga completa. Se envuelve el post-
-    # procesado y, si falla, se deja `_model = None` para que el próximo
-    # intento arranque de cero.
-    try:
-        _upcast_bfloat16_tensors()
-        _patch_vision_input_dtype()
-
-        # Log explícito de dónde y en qué dtype ha quedado el modelo: sin
-        # esto, no hay ninguna forma de confirmar desde los logs si cargó
-        # de verdad en GPU o cayó en silencio a CPU --
-        # `torch.cuda.is_available()` puede dar False por motivos que no
-        # lanzan ninguna excepción (falta la reserva de GPU en
-        # docker-compose.yml, el driver de Windows no tiene soporte WSL2,
-        # "GPU support" desactivado en Docker Desktop...), y en ese caso
-        # `_gpu_kwargs` queda vacío y todo el código de arriba sigue
-        # funcionando igual, solo que en CPU -- sin ningún error, solo más
-        # lento. Un timeout de 30s superado no distingue por sí solo entre
-        # "la GPU no está siendo usada" y "la GPU sí se usa pero esta foto
-        # en concreto ha tardado más de la cuenta" -- este log sí lo
-        # distingue.
-        _loaded_device = next(_model.parameters()).device
-        # Guardado a nivel de módulo como "cuda"/"cpu" (sin el índice de
-        # tarjeta, p. ej. "cuda:0" -> "cuda") -- ver `get_device()` más
-        # abajo, es lo que consulta el logging de rendimiento para saber
-        # de verdad dónde corrió Moondream2 en este proceso, sin tener
-        # que volver a preguntarle a `torch.cuda.is_available()`.
-        _actual_device = "cuda" if str(_loaded_device).startswith("cuda") else "cpu"
-        _actual_dtype = next(_model.parameters()).dtype
-        logger.info(
-            "Moondream2 cargado: device=%s dtype=%s (torch.cuda.is_available()=%s)",
-            _loaded_device,
-            _actual_dtype,
-            torch.cuda.is_available(),
-        )
-    except Exception:
-        _model = None
-        raise
-
-
-def _patch_vision_input_dtype():
-    """La imagen de entrada llega en bfloat16 pase lo que pase: la
-    función `prepare_crops()` del código remoto de Moondream2
-    (`vision.py`) fija `dtype=torch.bfloat16` a fuego, sin mirar en qué
-    dtype está el modelo -- así que si el modelo se ha quedado en otro
-    dtype (float32 tras `_upcast_bfloat16_tensors()` en CPU, o float16
-    en GPU -- ver "Intento nº8" en `_lazy_load()`), la primera capa
-    (`patch_emb`) recibiría una entrada en bfloat16 y fallaría con un
-    `RuntimeError: expected scalar type X but found BFloat16` (X = Float
-    en CPU, Half en GPU).
-
-    Verificado en pruebas manuales que parchear `prepare_crops()` por
-    nombre de módulo NO tiene efecto (no está claro por qué -- posible
-    referencia ya vinculada de otra forma en el código remoto que no se
-    ha investigado más a fondo); lo que sí funciona, comprobado, es
-    interceptar directamente el `forward` del propio submódulo
-    `patch_emb` -- ahí no importa cómo le haya llegado el dato, se fuerza
-    el cast justo antes de usarlo. Localizado por búsqueda en
-    `named_modules()` en vez de por ruta de atributo fija (p. ej.
-    `_model.model.vision.patch_emb`): la clase wrapper de nivel superior
-    (`HfMoondream`) no expone esa ruta como atributo estable, y esta
-    forma es además más robusta ante cambios de revisión del modelo.
-
-    CORREGIDO al añadir el "Intento nº7" (GPU): esta función comprobaba
-    `torch.cuda.is_available()` para decidir si hacía falta el parche,
-    asumiendo que "hay GPU" implicaba "el modelo se ha quedado en
-    bfloat16" (que coincide con el dtype fijo que usa `prepare_crops()`,
-    así que no habría descuadre). Eso dejó de ser cierto en cuanto
-    `_lazy_load()` empezó a pedir `torch_dtype=torch.float16` en GPU
-    (Turing no acelera bfloat16 por hardware, ver ahí) -- con el modelo en
-    float16 y la entrada en bfloat16 fijo, el descuadre de dtype vuelve a
-    aparecer, solo que ahora también en GPU. La condición correcta es
-    comprobar el dtype REAL del modelo, no el dispositivo."""
-    import torch
-
-    if next(_model.parameters()).dtype == torch.bfloat16:
-        return  # el modelo se ha quedado en bfloat16 (mismo dtype que la entrada fija de prepare_crops()) -- no hay descuadre que parchear
-
-    patch_emb = None
-    for name, module in _model.named_modules():
-        if name.endswith("patch_emb"):
-            patch_emb = module
-            break
-
-    if patch_emb is None:
-        logger.warning(
-            "No se encontro el submodulo patch_emb de Moondream2 -- no se puede "
-            "aplicar el parche de dtype de entrada, el analisis de contenido "
-            "probablemente fallara para todas las fotos."
-        )
-        return
-
-    original_forward = patch_emb.forward
-    target_dtype = next(_model.parameters()).dtype  # float32 en CPU (tras el upcast), float16 en GPU (ver "Intento nº7")
-
-    def _forward_matching_dtype(x):
-        if x.dtype != target_dtype:
-            x = x.to(target_dtype)
-        return original_forward(x)
-
-    patch_emb.forward = _forward_matching_dtype
-
-
-def _upcast_registered_tensors(model, target_dtype) -> None:
-    """Reasigna a `target_dtype` los parámetros y buffers que PyTorch SÍ
-    registra formalmente (`nn.Parameter`, buffers vía `register_buffer`) y
-    que estén en bfloat16. Ver el docstring de `_upcast_bfloat16_tensors`
-    para el porqué de hacerlo así (reasignar `.data`) en vez de
-    `.to(dtype=...)`."""
-    import torch
-
-    for param in model.parameters():
-        if param.dtype == torch.bfloat16:
-            param.data = param.data.to(target_dtype)
-    for buf in model.buffers():
-        if buf.dtype == torch.bfloat16:
-            buf.data = buf.data.to(target_dtype)
-
-
-def _upcast_dataclass_attr(attr_val, seen_ids: set, target_dtype) -> None:
-    """Si `attr_val` es una dataclass no vista todavía (p.ej.
-    `LinearWeights`/`LayerNormWeights`, ver docstring de
-    `_upcast_bfloat16_tensors`), reasigna a `target_dtype` cualquiera de
-    sus campos que sea un tensor en bfloat16."""
-    import dataclasses
-    import torch
-
-    if not dataclasses.is_dataclass(attr_val) or id(attr_val) in seen_ids:
-        return
-    seen_ids.add(id(attr_val))
-    for field in dataclasses.fields(attr_val):
-        value = getattr(attr_val, field.name)
-        if isinstance(value, torch.Tensor) and value.dtype == torch.bfloat16:
-            setattr(attr_val, field.name, value.to(target_dtype))
-
-
-def _upcast_unregistered_dataclass_tensors(model, target_dtype) -> None:
-    """Recorre a mano los atributos de cada submódulo buscando dataclasses
-    colgadas como atributo normal -- no registradas por PyTorch, ver
-    docstring de `_upcast_bfloat16_tensors` -- y sube sus tensores en
-    bfloat16 a `target_dtype`."""
-    seen_ids: set = set()
-    for module in model.modules():
-        for attr_name, attr_val in vars(module).items():
-            if attr_name.startswith("_"):
-                continue  # _parameters, _buffers, _modules, etc. -- ya cubiertos en _upcast_registered_tensors
-            _upcast_dataclass_attr(attr_val, seen_ids, target_dtype)
-
-
-def _upcast_bfloat16_tensors():
-    """Convierte el modelo de bfloat16 (dtype con el que se descarga) a
-    float32 en CPU, o a float16 en GPU. Ver el bloque "Intento nº6" en el
-    docstring de `_lazy_load()` para el porqué del caso CPU -- en resumen:
-    bfloat16 en CPU de consumo se emula por software y es órdenes de
-    magnitud más lento que float32 nativo. Para el caso GPU, ver "Intento
-    nº8" ahí -- en Turing (compute capability 7.5), bfloat16 tampoco tiene
-    tensor cores nativos (solo desde Ampere), así que conviene float16 en
-    su lugar (nativo desde Volta).
-
-    BUG ENCONTRADO en la sesión del "Intento nº8" (renombrada esta
-    función, antes `_upcast_to_float32_if_cpu`): esta función se saltaba
-    ENTERA en GPU (`if torch.cuda.is_available(): return`), asumiendo que
-    pasar `torch_dtype=torch.float16` a `from_pretrained()` en
-    `_lazy_load()` (el "Intento nº7") ya dejaba el modelo en float16. En
-    la práctica, el modelo cargó en GPU con
-    `dtype=torch.bfloat16` (confirmado por el log de "Moondream2 cargado:
-    ... dtype=torch.bfloat16" pese al `torch_dtype=torch.float16` pasado)
-    -- `torch_dtype` de `from_pretrained()` solo afecta a lo que PyTorch
-    registra formalmente como parámetro/buffer, y la mayoría de los pesos
-    de este modelo NO lo son (ver el párrafo de más abajo sobre
-    `LinearWeights`/`LayerNormWeights`) -- exactamente el mismo motivo por
-    el que ya hacía falta `_upcast_unregistered_dataclass_tensors` para
-    el caso CPU. Ahora esta función se ejecuta SIEMPRE (CPU o GPU), con
-    el dtype destino según el dispositivo, reutilizando la misma
-    maquinaria ya probada para CPU en vez de depender de un kwarg que no
-    llega a la mayoría de los tensores.
-
-    Deliberadamente NO usa `_model.to(dtype=...)`: esa llamada es la que
-    causó el error "Tensor on device cpu is not on the expected device
-    meta!" documentado como intento nº4. En su lugar, reasigna `.data` de
-    cada parámetro y buffer por separado (ver `_upcast_registered_tensors`)
-    -- una operación de más bajo nivel que no pasa por los hooks de
-    `accelerate` que asumen un modelo potencialmente repartido en meta
-    device.
-
-    IMPORTANTE, descubierto investigando por qué la cuantización int8 de
-    PyTorch fallaba a medias (ver commit que añade este bloque): la
-    mayoría de las capas internas de Moondream2 (atención, MLP) NO son
-    `nn.Linear`/`nn.LayerNorm` reales -- son una `@dataclass` propia del
-    modelo (`LinearWeights`/`LayerNormWeights` en el código remoto) con
-    tensores sueltos como atributos, colgada como atributo normal de un
-    `nn.Module`. `model.parameters()`/`model.buffers()` SOLO recorren lo
-    que PyTorch registra formalmente -- una dataclass colgada como
-    atributo corriente NO aparece ahí. Por eso, además de
-    `_upcast_registered_tensors`, hace falta
-    `_upcast_unregistered_dataclass_tensors`: recorre a mano,
-    recursivamente, los atributos de cada submódulo buscando cualquier
-    objeto con campos de tipo `torch.Tensor` en bfloat16 (duck typing
-    sobre `dataclass`, sin importar la clase concreta del código remoto
-    -- más robusto ante cambios de revisión del modelo que importar
-    `LinearWeights` directamente)."""
-    import torch
-
-    target_dtype = torch.float32 if not torch.cuda.is_available() else torch.float16
-
-    with torch.no_grad():
-        _upcast_registered_tensors(_model, target_dtype)
-        _upcast_unregistered_dataclass_tensors(_model, target_dtype)
 
 
 def analyze_image_content(
@@ -894,16 +781,17 @@ def analyze_image_content(
     paralelo sobre el MISMO objeto para DINOv2, que sí necesita la
     resolución mayor (`_MAX_QUEUED_IMAGE_DIMENSION` en geolocation.py).
 
-    Internamente hace DOS llamadas a `_model.query()` -- una con
-    `_CAPTION_QUERY` (texto libre, sin plantilla que copiar) y otra con
-    `_STRUCTURED_QUERY` (PERSONAS/AFICION/PAREJA/TEXTO_VISIBLE, formato
-    fijo) -- en vez de una sola combinada, porque mezclar un campo de
-    texto libre con campos de opciones fijas en el mismo prompt hacía que
-    Moondream2 copiara literalmente el ejemplo de texto libre en vez de
-    describir la imagen real (ver nota en `_CAPTION_QUERY`). Ambas
-    llamadas reutilizan el mismo `_model.encode_image()` (sobre la copia
-    ya redimensionada) para no pagar el coste de codificar la foto dos
-    veces.
+    Internamente hace DOS llamadas a `_model.create_chat_completion()` --
+    una con `_CAPTION_QUERY` (texto libre, sin plantilla que copiar) y
+    otra con `_STRUCTURED_QUERY` (PERSONAS/AFICION/PAREJA/TEXTO_VISIBLE/
+    MATRICULA, formato fijo) -- en vez de una sola combinada, porque
+    mezclar un campo de texto libre con campos de opciones fijas en el
+    mismo prompt hacía que Moondream2 copiara literalmente el ejemplo de
+    texto libre en vez de describir la imagen real (ver nota en
+    `_CAPTION_QUERY`). Desde el cambio a `llama-cpp-python` (ver
+    historial junto a `_GGUF_REPO_ID`) ya NO hay un equivalente directo a
+    "codificar la imagen una vez y reutilizarla" -- cada llamada manda la
+    imagen (como data URI base64) otra vez.
 
     `descripcion_cruda` (ver `_build_clean_summary`) se RECONSTRUYE a
     partir de los valores YA PARSEADOS de `structured` -- ya NO es el
@@ -949,21 +837,13 @@ def analyze_image_content(
     foto no aportó nada" y devuelve ([], False, None, None), sin abortar
     el análisis de las demás fotos."""
     if not _scene_analysis_available():
-        # Causa más habitual: no se ha instalado requirements-vision.txt
-        # completo. En particular, construir el índice FAISS (ver
-        # scripts/geolocalization/build_faiss_index.py) NO instala timm/einops -- son
-        # deps exclusivas de Moondream2, no de DINOv2 -- así que un
-        # entorno con la geolocalización funcionando puede seguir sin
-        # tener esto instalado.
         logger.warning(
-            "Análisis de contenido visual no disponible: falta torch, transformers, "
-            "timm o einops (ver requirements-vision.txt; 'pip install timm einops' "
-            "si ya tienes torch/transformers instalados para la geolocalización)"
+            "Análisis de contenido visual no disponible: falta llama-cpp-python "
+            "(ver requirements-vision.txt)"
         )
         return [], False, None, None, None
 
     try:
-        _lazy_load()
         # Redimensionar una COPIA de la imagen antes de codificarla (ver
         # _CAPTION_MAX_DIMENSION más arriba para el porqué del valor 378
         # y la medición real que lo respalda). Nunca se llama .thumbnail()
@@ -975,40 +855,119 @@ def analyze_image_content(
         # de 1024px (_MAX_QUEUED_IMAGE_DIMENSION) para DINOv2.
         resized = image.copy()
         resized.thumbnail((_CAPTION_MAX_DIMENSION, _CAPTION_MAX_DIMENSION), Image.LANCZOS)
-        # Codificar la imagen (ya redimensionada) UNA vez y reutilizarla
-        # para las dos preguntas (ver docs.moondream.ai/advanced/transformers,
-        # "If you're planning to run multiple inferences on the same
-        # image, you can pre-encode it once and reuse the encoding") --
-        # evita que el encoder de visión procese la misma foto dos veces,
-        # coste que antes se pagaba por CADA llamada a .query() si
-        # hiciéramos dos llamadas ingenuas con la imagen sin codificar.
-        encoded = _model.encode_image(resized)
-        caption = _model.query(encoded, _CAPTION_QUERY, settings=_CAPTION_SETTINGS)["answer"].strip().rstrip(".")
-        structured = _model.query(encoded, _STRUCTURED_QUERY, settings=_STRUCTURED_SETTINGS)["answer"].strip()
+        # SIN VERIFICAR (ver historial junto a _GGUF_REPO_ID): el valor
+        # 378 de _CAPTION_MAX_DIMENSION estaba medido contra el
+        # tiling/crops del código remoto de `transformers`
+        # (`VisionConfig.crop_size`, ver el comentario original de esa
+        # constante más arriba) -- el vision encoder empaquetado en este
+        # GGUF (`ggml-org`) puede preprocesar de otra forma. Se mantiene
+        # el mismo redimensionado por ahora (como mínimo, reduce lo que
+        # hay que codificar en base64 más abajo), pero si la calidad de
+        # las descripciones cambia respecto a lo que dabas antes, este es
+        # un sitio a revisar -- puede que ya no haga falta, o que el
+        # tamaño óptimo sea distinto.
+        buffer = io.BytesIO()
+        resized.convert("RGB").save(buffer, format="JPEG", quality=90)
+        data_uri = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+        image_content = {"type": "image_url", "image_url": {"url": data_uri}}
+
+        # `with _model_lock:` (ver comentario junto a la declaración del
+        # lock más arriba): SOLO cubre lo que de verdad toca `_model` --
+        # el redimensionado/codificación de la imagen de arriba se queda
+        # FUERA a propósito, es CPU/PIL puro y no comparte estado con
+        # `llama.cpp`, así que no hay motivo para serializarlo también y
+        # hacer la cola más larga de lo necesario.
+        #
+        # OJO, trade-off real y consciente: con `actual_concurrency` > 1
+        # (varias fotos a la vez, ver geolocation.py), esto convierte el
+        # análisis de CONTENIDO en efectivamente secuencial -- una foto
+        # espera a que la anterior termine sus dos llamadas antes de
+        # empezar las suyas, aunque el semáforo dejara varias "en vuelo"
+        # a la vez. La geolocalización (DINOv2) NO se ve afectada, sigue
+        # concurrente igual que antes -- este lock es solo para
+        # Moondream2. Se acepta esto porque la alternativa confirmada en
+        # producción (13/9) era un SIGSEGV que tiraba el proceso entero
+        # cada pocas fotos -- coherente con la filosofía "nunca lanza,
+        # best-effort" de esta función (ver docstring), pero para la
+        # función SIGUIENTE, no para el backend ENTERO seguir vivo.
+        with _model_lock:
+            _lazy_load()  # no-op tras la primera carga (ver docstring) -- barato meterlo dentro del lock también, cierra el hueco teórico de doble carga concurrente
+            # Dos llamadas independientes a create_chat_completion (no
+            # hay equivalente directo al encode_image()+query()
+            # reutilizable de `transformers`, ver historial junto a
+            # _GGUF_REPO_ID).
+            #
+            # `_model.reset()` ANTES de cada una: bug real confirmado en
+            # producción (12/9) -- sin esto, la caché KV interna del
+            # objeto `Llama` no se limpia sola entre dos
+            # `create_chat_completion()` independientes con imagen nueva.
+            # La primera llamada deja la caché en una posición > 0; la
+            # segunda intenta empezar de cero sin resetear, y
+            # `llama.cpp` lo rechaza ("the tokens of sequence 0... have
+            # inconsistent sequence positions") -- capturado por el
+            # try/except de aquí abajo la primera vez que pasó, pero el
+            # estado quedaba tan corrupto que el proceso entero acababa
+            # muriendo con SIGSEGV (exit 139) unas pocas fotos después,
+            # no solo fallando esa foto. `reset()` es el método propio de
+            # `llama-cpp-python` para esto -- confirma que NO reaprovecha
+            # el embedding de imagen entre las dos llamadas: cada
+            # `create_chat_completion()` vuelve a calcularlo de cero, así
+            # que el objetivo original de "codificar una vez, reutilizar
+            # para las dos preguntas" (como sí hacía `transformers`) no
+            # se ha conseguido con este backend -- es el coste de tener
+            # esto funcionando sin crashear, no una optimización
+            # pendiente de aprovechar.
+            _model.reset()
+            caption_response = _model.create_chat_completion(
+                messages=[{"role": "user", "content": [image_content, {"type": "text", "text": _CAPTION_QUERY}]}],
+                max_tokens=_CAPTION_SETTINGS["max_tokens"],
+                temperature=_CAPTION_SETTINGS["temperature"],
+            )
+            _model.reset()
+            structured_response = _model.create_chat_completion(
+                messages=[{"role": "user", "content": [image_content, {"type": "text", "text": _STRUCTURED_QUERY}]}],
+                max_tokens=_STRUCTURED_SETTINGS["max_tokens"],
+                temperature=_STRUCTURED_SETTINGS["temperature"],
+            )
+        caption = caption_response["choices"][0]["message"]["content"].strip().rstrip(".")
+        structured = structured_response["choices"][0]["message"]["content"].strip()
+
+        # Log OPCIONAL de comparación entre variantes (ver
+        # app/log/visual_description_log.py sobre el diseño y por qué
+        # está desactivado por defecto) -- la comprobación de la flag va
+        # PRIMERO a propósito, para no pagar el coste de hashear la
+        # imagen (`image.tobytes()`) cuando está desactivado, que es el
+        # caso normal.
+        if settings.log_visual_descriptions:
+            visual_description_log.log_visual_description(
+                image_id=visual_description_log.image_content_id(image),
+                model_variant=get_model_variant(),
+                caption=caption,
+                structured=structured,
+            )
     except Exception as exc:
-        # Motivo típico si torch/transformers/timm/einops SÍ están
-        # instalados (ver _scene_analysis_available arriba): falta
-        # accelerate o pyvips (a diferencia de timm/einops, no se
-        # comprueban en el chequeo barato de arriba porque from_pretrained
-        # los necesita en combinaciones distintas según la revisión del
-        # modelo -- ver requirements-vision.txt) o un fallo de red al
-        # descargar el modelo la primera vez. Se loguea para poder
-        # diagnosticarlo sin tener que quitar el try/except (este módulo
-        # es best-effort y no debe abortar el análisis de las demás
-        # fotos).
+        # Motivo típico si `llama_cpp` SÍ está instalado (ver
+        # _scene_analysis_available arriba): fallo de red al descargar el
+        # modelo la primera vez, o el problema de offload a GPU descrito
+        # en la nota SIN VERIFICAR junto a `_GGUF_REPO_ID`
+        # (`libcudart.so` ausente con el wheel precompilado -- ya
+        # resuelto compilando desde fuente, ver ese historial). Se
+        # loguea para poder diagnosticarlo sin tener que quitar el
+        # try/except (este módulo es best-effort y no debe abortar el
+        # análisis de las demás fotos).
         logger.warning(
             "Análisis de contenido visual falló para una foto (%s): %s",
             type(exc).__name__,
             exc,
         )
-        # NOTA histórica: un `NotImplementedError` con el mensaje "Cannot
-        # copy out of meta tensor" aquí fue en su momento un bug real de
-        # este módulo (device_map pasado como string a from_pretrained,
-        # ver `_lazy_load`), no un problema de entorno -- se afectaba al
-        # 100% de las fotos, en cualquier máquina, con las dependencias
-        # bien instaladas. Ya está corregido; si reaparece tras cambiar
-        # `_MODEL_REVISION` o la versión de `transformers`/`accelerate`,
-        # revisar primero cómo se está pasando `device_map`.
+        # NOTA histórica (ya no aplica al backend actual, `llama.cpp` vía
+        # `llama-cpp-python` -- se deja por si ayuda a alguien buscando en
+        # el historial de git): con el backend `transformers` de antes, un
+        # `NotImplementedError` con el mensaje "Cannot copy out of meta
+        # tensor" aquí fue en su momento un bug real de este módulo
+        # (`device_map` pasado como string a `from_pretrained`), no un
+        # problema de entorno -- afectaba al 100% de las fotos, en
+        # cualquier máquina, con las dependencias bien instaladas.
         return [], False, None, None, None
 
     # `structured` (no un texto combinado con DESCRIPCION) es la única

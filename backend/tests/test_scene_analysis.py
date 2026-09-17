@@ -19,35 +19,45 @@ def _fake_image():
     return Image.new("RGB", (10, 10))
 
 
+def _chat_completion_response(text: str) -> dict:
+    """Sobre mínimo con la forma real de lo que devuelve
+    `Llama.create_chat_completion()` -- solo lo que `analyze_image_content`
+    de verdad lee (`response["choices"][0]["message"]["content"]`)."""
+    return {"choices": [{"message": {"content": text}}]}
+
+
 class _FakeModel:
-    """Sustituye a Moondream2 lo justo para analyze_image_content: debe
-    soportar `.encode_image(image)` (reutilizada por las DOS llamadas a
-    `.query()`, ver docstring de analyze_image_content) y `.query(image,
-    pregunta, settings=...)` -> {"answer": str}, distinguiendo la
-    respuesta según cuál de las dos preguntas (_CAPTION_QUERY vs
-    _STRUCTURED_QUERY) se le haga -- igual que hace el modelo real, que
-    responde cosas distintas a cada una."""
+    """Sustituye a Moondream2 (vía `llama-cpp-python`) lo justo para
+    `analyze_image_content`: debe soportar
+    `.create_chat_completion(messages=..., max_tokens=..., temperature=...)`,
+    distinguiendo la respuesta según cuál de las dos preguntas
+    (_CAPTION_QUERY vs _STRUCTURED_QUERY) venga en `messages` -- igual que
+    hace el modelo real, que responde cosas distintas a cada una. No
+    valida el formato exacto del `content` de tipo `image_url` -- eso lo
+    cubre `test_image_is_resized_before_encoding` por separado, mirando el
+    tamaño de la imagen decodificada del data URI."""
 
     def __init__(self, structured_answer: str, caption_answer: str = "una escena sin detalles relevantes"):
         self._structured_answer = structured_answer
         self._caption_answer = caption_answer
 
-    def encode_image(self, image):
-        return image  # no hace falta simular una codificación real para estos tests
+    def reset(self):
+        pass  # no-op: los tests no dependen de que la caché KV se limpie de verdad
 
-    def query(self, image, question, settings=None):
+    def create_chat_completion(self, messages, max_tokens=None, temperature=None):
+        question = messages[0]["content"][1]["text"]
         if question == scene_analysis._CAPTION_QUERY:
-            return {"answer": self._caption_answer}
+            return _chat_completion_response(self._caption_answer)
         if question == scene_analysis._STRUCTURED_QUERY:
-            return {"answer": self._structured_answer}
+            return _chat_completion_response(self._structured_answer)
         raise AssertionError(f"Pregunta inesperada (no es _CAPTION_QUERY ni _STRUCTURED_QUERY): {question!r}")
 
 
 class _RaisingModel:
-    def encode_image(self, image):
-        raise RuntimeError("fallo simulado del modelo")
+    def reset(self):
+        pass
 
-    def query(self, image, question, settings=None):
+    def create_chat_completion(self, messages, max_tokens=None, temperature=None):
         raise RuntimeError("fallo simulado del modelo")
 
 
@@ -430,56 +440,99 @@ class TestAnalyzeImageContent:
 
         assert descripcion_general is None
 
-    def test_encode_image_is_called_once_and_reused_for_both_queries(self, monkeypatch):
-        """Optimización real: sin esto, cada .query() re-codificaría la
-        imagen desde cero -- con dos llamadas (caption + estructurada) por
-        foto, eso duplicaría el coste del encoder de visión. Se comprueba
-        contando las llamadas a encode_image en vez de solo confiar en que
-        "debería" reutilizarse."""
-        encode_calls: list[object] = []
-        query_calls: list[str] = []
+    def test_two_chat_completion_calls_with_the_two_expected_questions(self, monkeypatch):
+        """A diferencia del backend `transformers` de antes (ver
+        historial en scene_analysis.py), `llama-cpp-python` no expone un
+        equivalente directo a "codificar la imagen una vez y reutilizarla
+        para dos preguntas" -- cada `create_chat_completion()` manda la
+        imagen otra vez. Este test YA NO comprueba esa optimización (ya no
+        existe tal cual); comprueba lo que sí debe seguir siendo cierto:
+        exactamente dos llamadas, una por cada pregunta esperada, cada una
+        con una imagen adjunta."""
+        calls: list[str] = []
 
         class _CountingModel:
-            def encode_image(self, image):
-                encode_calls.append(image)
-                return "encoded-sentinel"
+            def reset(self):
+                pass
 
-            def query(self, image, question, settings=None):
-                query_calls.append(question)
-                assert image == "encoded-sentinel"  # debe usar la imagen YA codificada, no la original
+            def create_chat_completion(self, messages, max_tokens=None, temperature=None):
+                content = messages[0]["content"]
+                assert content[0]["type"] == "image_url"  # la imagen va SIEMPRE, en las dos llamadas
+                question = content[1]["text"]
+                calls.append(question)
                 if question == scene_analysis._CAPTION_QUERY:
-                    return {"answer": "una escena cualquiera"}
-                return {"answer": "PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no"}
+                    return _chat_completion_response("una escena cualquiera")
+                return _chat_completion_response("PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no")
 
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
         monkeypatch.setattr(scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _CountingModel()))
 
         scene_analysis.analyze_image_content(_fake_image())
 
-        assert len(encode_calls) == 1
-        assert len(query_calls) == 2
-        assert set(query_calls) == {scene_analysis._CAPTION_QUERY, scene_analysis._STRUCTURED_QUERY}
+        assert len(calls) == 2
+        assert set(calls) == {scene_analysis._CAPTION_QUERY, scene_analysis._STRUCTURED_QUERY}
+
+    def test_reset_called_before_each_chat_completion(self, monkeypatch):
+        """Regresión directa de un crash real en producción (12/9, GTX
+        1650): sin `_model.reset()` antes de cada `create_chat_completion()`
+        independiente, la caché KV interna de `llama.cpp` no se limpiaba
+        sola entre las dos llamadas de esta función, lo que acababa
+        corrompiendo el estado hasta tirar abajo el proceso entero con
+        SIGSEGV (exit 139) -- no un fallo limpio de una sola foto. Se
+        comprueba contando reset() y create_chat_completion() en el orden
+        exacto: reset, llamada, reset, llamada."""
+        events: list[str] = []
+
+        class _OrderCheckingModel:
+            def reset(self):
+                events.append("reset")
+
+            def create_chat_completion(self, messages, max_tokens=None, temperature=None):
+                events.append("call")
+                question = messages[0]["content"][1]["text"]
+                if question == scene_analysis._CAPTION_QUERY:
+                    return _chat_completion_response("una escena cualquiera")
+                return _chat_completion_response("PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no")
+
+        monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
+        monkeypatch.setattr(
+            scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _OrderCheckingModel())
+        )
+
+        scene_analysis.analyze_image_content(_fake_image())
+
+        assert events == ["reset", "call", "reset", "call"]
 
     def test_image_is_resized_before_encoding(self, monkeypatch):
-        """Optimización real (medida en producción, GTX 1650): sin
-        redimensionar antes de encode_image(), Moondream2 troceaba la
-        imagen en 8 crops locales + 1 global = 9 pasadas por el encoder de
-        visión (~33s); redimensionando a que el lado mayor mida
-        _CAPTION_MAX_DIMENSION (378, el crop_size real de esta revisión
-        del modelo, ver esa constante), pasa a 2 pasadas. Se comprueba
-        contando el tamaño de la imagen que de verdad llega a
-        encode_image(), no solo confiando en que 'debería' redimensionarse."""
+        """Optimización real (medida en producción, GTX 1650, con el
+        backend `transformers` de antes -- ver _CAPTION_MAX_DIMENSION
+        sobre por qué SIN VERIFICAR si sigue siendo el tamaño óptimo con
+        el backend `llama.cpp` actual): se comprueba aquí que el
+        redimensionado en sí se sigue aplicando -- decodificando la
+        imagen real del data URI base64 que le llega a
+        `create_chat_completion()`, no solo confiando en que 'debería'
+        redimensionarse."""
+        import base64
+        import io
+
+        from PIL import Image as PILImage
+
         received_sizes: list[tuple[int, int]] = []
 
         class _SizeCheckingModel:
-            def encode_image(self, image):
-                received_sizes.append(image.size)
-                return "encoded-sentinel"
+            def reset(self):
+                pass
 
-            def query(self, image, question, settings=None):
+            def create_chat_completion(self, messages, max_tokens=None, temperature=None):
+                content = messages[0]["content"]
+                data_uri = content[0]["image_url"]["url"]
+                _, b64_data = data_uri.split(",", 1)
+                decoded = PILImage.open(io.BytesIO(base64.b64decode(b64_data)))
+                received_sizes.append(decoded.size)
+                question = content[1]["text"]
                 if question == scene_analysis._CAPTION_QUERY:
-                    return {"answer": "una escena cualquiera"}
-                return {"answer": "PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no"}
+                    return _chat_completion_response("una escena cualquiera")
+                return _chat_completion_response("PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no")
 
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
         monkeypatch.setattr(
@@ -494,9 +547,9 @@ class TestAnalyzeImageContent:
 
         scene_analysis.analyze_image_content(imagen_grande)
 
-        assert len(received_sizes) == 1
-        width, height = received_sizes[0]
-        assert max(width, height) <= scene_analysis._CAPTION_MAX_DIMENSION
+        assert len(received_sizes) == 2  # una por cada create_chat_completion() (ver test de arriba)
+        for width, height in received_sizes:
+            assert max(width, height) <= scene_analysis._CAPTION_MAX_DIMENSION
         # La imagen original (compartida con DINOv2 en geolocation.py, ver
         # docstring de analyze_image_content) NUNCA debe mutarse in-place:
         # solo se redimensiona una copia.
@@ -504,24 +557,24 @@ class TestAnalyzeImageContent:
 
     def test_query_settings_cap_generation_length(self):
         """Red de seguridad frente al bug real que motivó separar los
-        settings por llamada: sin límite, .query() usa max_tokens=768 por
-        defecto (ver docs.moondream.ai/transformers), suficiente para que
-        una respuesta confusa supere el timeout de 30s del pipeline real
+        settings por llamada: sin límite, la generación por defecto de
+        `llama.cpp` puede ser larga, suficiente para que una respuesta
+        confusa supere el timeout de 30s del pipeline real
         (_SCENE_ANALYSIS_TIMEOUT_SECONDS en geolocation.py). Se comprueba
         aquí que los límites siguen existiendo y siguen siendo bajos, para
         que un cambio futuro no los elimine sin darse cuenta."""
         assert scene_analysis._CAPTION_SETTINGS["max_tokens"] < 200
         assert scene_analysis._STRUCTURED_SETTINGS["max_tokens"] < 200
 
-    def test_query_settings_include_variant_key(self):
-        """Bug real descubierto en ejecución (GTX 1650, revisión pinneada
-        del modelo): `encode_image()` en esta revisión hace
-        settings["variant"] SIN .get(), así que cualquier `settings` que
-        pasemos revienta con KeyError si no incluye esta clave. Se
-        comprueba en AMBOS dicts de settings para que un cambio futuro no
-        la elimine de uno de los dos sin darse cuenta."""
-        assert "variant" in scene_analysis._CAPTION_SETTINGS
-        assert "variant" in scene_analysis._STRUCTURED_SETTINGS
+    # test_query_settings_include_variant_key ELIMINADO -- comprobaba un
+    # bug real pero específico de `encode_image()` en el backend
+    # `transformers` de antes (settings["variant"] sin .get(), ver
+    # historial en scene_analysis.py), que ya no se usa en absoluto: el
+    # backend actual (`llama-cpp-python`) recibe `max_tokens`/
+    # `temperature` como kwargs directos, nunca un dict `settings`. La
+    # clave "variant" se queda en _CAPTION_SETTINGS/_STRUCTURED_SETTINGS
+    # por si acaso (ver comentario ahí), pero ya no hay ningún
+    # comportamiento real que este test protegiera.
 
 
 class TestVisualDescriptionCodes:
@@ -836,7 +889,7 @@ class TestSceneAnalysisAvailable:
         real_import = builtins.__import__
 
         def _fake_import(name, *args, **kwargs):
-            if name in ("torch", "transformers"):
+            if name == "llama_cpp":
                 raise ImportError(f"{name} no instalado")
             return real_import(name, *args, **kwargs)
 

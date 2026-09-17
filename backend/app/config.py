@@ -206,6 +206,19 @@ class Settings(BaseSettings):
     # vea afectado.
     enable_performance_logging: bool = True
 
+    # Log OPCIONAL de las descripciones que genera Moondream2 (ver
+    # app/log/visual_description_log.py para el diseño completo) --
+    # DESACTIVADO por defecto, a diferencia de `enable_performance_logging`
+    # de arriba: ese log es puramente técnico (tiempos, sin contenido de
+    # ninguna foto); este SÍ guarda contenido real extraído de fotos
+    # (personas, indicios de pareja, matrícula, texto visible) -- para un
+    # proyecto sobre exposición de privacidad, no tiene sentido que esto
+    # vaya activado por defecto. Actívalo solo para sesiones de
+    # comparación deliberadas entre variantes del modelo (F16 vs Q8_0 vs
+    # Q4_K_M, mismas fotos de prueba) -- ver el propio docstring del
+    # módulo sobre por qué y cómo tratarlo con cuidado.
+    log_visual_descriptions: bool = False
+
     # Offload de DINOv2 a una GPU "compartida" (integrada en el procesador,
     # vía DirectML) cuando la máquina tiene, ADEMÁS de la GPU dedicada que
     # ya usa Moondream2, una segunda GPU distinta -- ver docstring completo

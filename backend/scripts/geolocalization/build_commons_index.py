@@ -44,6 +44,7 @@ Resumible con Ctrl+C igual que build_flickr_index.py.
 """
 import argparse
 import io
+import os
 import random
 import sys
 import time
@@ -416,6 +417,24 @@ def _load_existing_state(output_dir: Path):
     completed = set(completed_path.read_text().splitlines()) if completed_path.exists() else set()
     cell_stats = pd.read_csv(stats_path).to_dict("records") if stats_path.exists() else []
 
+    # Comprobación de consistencia: embeddings.npy e index_meta.csv deben
+    # tener el mismo número de filas (van alineados fila a fila). Con las
+    # escrituras agrupadas de _persist_state esto no debería poder pasar,
+    # pero si alguna vez ocurre (p.ej. datos mezclados de antes del fix,
+    # o un fallo a mitad de los renombrados agrupados) es mejor parar en
+    # seco con un error claro que seguir con un índice desalineado sin
+    # que nadie se entere -- un vector en la fila N que en realidad no
+    # corresponde al id/lat/lon de la fila N de index_meta.csv es peor
+    # que no tener datos, porque no se nota hasta que el índice ya está
+    # dando resultados incorrectos.
+    if len(embeddings) != len(meta_rows):
+        print(f"Error: embeddings.npy tiene {len(embeddings)} vectores pero index_meta.csv tiene "
+              f"{len(meta_rows)} filas -- no coinciden.")
+        print("Seguir así arriesga desalinear qué vector corresponde a qué foto en el índice final.")
+        print(f"Revisa manualmente {output_dir} antes de continuar (lo más seguro, si no hay forma de saber "
+              f"cuál de los dos ficheros es el bueno, es borrar la carpeta entera y volver a empezar).")
+        sys.exit(1)
+
     if completed:
         print(f"Reanudando: {len(completed)} celdas y {len(meta_rows)} fotos ya procesadas.")
 
@@ -423,20 +442,105 @@ def _load_existing_state(output_dir: Path):
 
 
 def _persist_state(output_dir: Path, embeddings: list, meta_rows: list, completed: set, cell_stats: list) -> None:
+    """Escribe todo el estado de forma ATÓMICA: cada fichero se escribe
+    primero a una ruta temporal en el mismo directorio, y todos los
+    renombrados sobre el destino final (`os.replace`, atómico por
+    fichero en el mismo volumen tanto en Windows como en POSIX) se hacen
+    SEGUIDOS al final, una vez que los 5 temporales ya están completos en
+    disco -- no intercalados con el trabajo de construir cada fichero.
+    Esto no hace la operación atómica como GRUPO (no hay forma portable
+    de renombrar 5 ficheros a la vez en una única operación), pero
+    reduce al mínimo posible la ventana en la que una interrupción podría
+    dejar unos ficheros con la versión nueva y otros con la vieja --
+    ahora esa ventana son los 5 `os.replace()` seguidos (milisegundos),
+    no todo el tiempo de construir los DataFrames/el índice FAISS.
+
+    Motivo del cambio: la primera versión escribía con `to_csv()`
+    directamente sobre el fichero final, que lo trunca antes de escribir
+    el contenido nuevo. En un caso real, una interrupción justo en ese
+    instante dejó `index_meta.csv` completamente vacío -- perdiendo la
+    referencia a cientos de miles de filas que solo seguían existiendo
+    en `embeddings.npy` (vectores sin coordenadas ya es un dato inútil),
+    sin ninguna copia de seguridad del contenido bueno anterior. Ver
+    también la comprobación de consistencia en `_load_existing_state`,
+    que ahora para en seco si estos ficheros alguna vez quedan
+    desalineados entre sí, en vez de seguir en silencio.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
+    pid_suffix = f".tmp{os.getpid()}"
+    pending_renames: list[tuple[Path, Path]] = []
 
     if embeddings:
         embeddings_matrix = np.vstack(embeddings).astype("float32")
-        np.save(output_dir / "embeddings.npy", embeddings_matrix)
+
+        # np.save() añade ".npy" automáticamente si la ruta no termina ya
+        # en eso -- pasar un fichero ya abierto (en vez de una ruta con
+        # sufijo .tmpNNN) evita ese comportamiento, que rompería el
+        # renombrado posterior.
+        emb_tmp = output_dir / f"embeddings.npy{pid_suffix}"
+        with open(emb_tmp, "wb") as f:
+            np.save(f, embeddings_matrix)
+        pending_renames.append((emb_tmp, output_dir / "embeddings.npy"))
 
         dimension = embeddings_matrix.shape[1]
         index = faiss.IndexFlatIP(dimension)
         index.add(embeddings_matrix)
-        faiss.write_index(index, str(output_dir / "index.faiss"))
+        index_tmp = output_dir / f"index.faiss{pid_suffix}"
+        faiss.write_index(index, str(index_tmp))
+        pending_renames.append((index_tmp, output_dir / "index.faiss"))
 
-    pd.DataFrame(meta_rows).to_csv(output_dir / "index_meta.csv", index=False)
-    (output_dir / "_completed_cells.txt").write_text("\n".join(sorted(completed)))
-    pd.DataFrame(cell_stats).to_csv(output_dir / "_cell_stats.csv", index=False)
+    meta_tmp = output_dir / f"index_meta.csv{pid_suffix}"
+    pd.DataFrame(meta_rows).to_csv(meta_tmp, index=False)
+    pending_renames.append((meta_tmp, output_dir / "index_meta.csv"))
+
+    completed_tmp = output_dir / f"_completed_cells.txt{pid_suffix}"
+    completed_tmp.write_text("\n".join(sorted(completed)))
+    pending_renames.append((completed_tmp, output_dir / "_completed_cells.txt"))
+
+    stats_tmp = output_dir / f"_cell_stats.csv{pid_suffix}"
+    pd.DataFrame(cell_stats).to_csv(stats_tmp, index=False)
+    pending_renames.append((stats_tmp, output_dir / "_cell_stats.csv"))
+
+    # Todos los temporales están completos en disco -- ahora sí, los 5
+    # renombrados seguidos, sin nada más de por medio.
+    for tmp_path, final_path in pending_renames:
+        os.replace(tmp_path, final_path)
+
+
+def _acquire_lock(output_dir: Path) -> Path:
+    """Evita que dos instancias del script corran a la vez sobre el mismo
+    --output. Sin esto, dos procesos escribiendo index_meta.csv/
+    embeddings.npy al mismo tiempo pueden pisarse -- visto en un caso
+    real: una segunda ejecución lanzada por accidente sobre la misma
+    carpeta leyó index_meta.csv justo cuando la primera lo tenía truncado
+    a medio escribir, y crasheó con `pandas.errors.EmptyDataError`.
+
+    No detecta automáticamente si el proceso dueño del lock sigue vivo
+    (complicaría el script para un caso de uso de TFG en un único
+    equipo) -- si el lock queda huérfano tras un corte de luz o un kill
+    -9, hay que borrar el fichero .lock a mano. El mensaje de error dice
+    esto explícitamente para que no haga falta adivinarlo.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = output_dir / ".lock"
+    if lock_path.exists():
+        owner = lock_path.read_text().strip()
+        print(f"Error: ya existe {lock_path} (creado por el proceso PID {owner}).")
+        print(f"Esto significa que ya hay OTRA ejecución de este script usando --output {output_dir}.")
+        print("Lanzar dos instancias a la vez sobre la misma carpeta corrompe index_meta.csv/embeddings.npy")
+        print("(dos escrituras simultáneas se pisan entre sí).")
+        print(f"Si estás seguro de que NO hay ninguna otra instancia corriendo (p.ej. el lock quedó huérfano")
+        print(f"tras un cierre inesperado), borra {lock_path} a mano y vuelve a intentarlo.")
+        sys.exit(1)
+    lock_path.write_text(str(os.getpid()))
+    return lock_path
+
+
+def _release_lock(lock_path: Path) -> None:
+    try:
+        lock_path.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def main() -> None:
@@ -466,6 +570,14 @@ def main() -> None:
         sys.exit(1)
 
     output_dir = Path(args.output)
+    lock_path = _acquire_lock(output_dir)
+    try:
+        _run(args, output_dir)
+    finally:
+        _release_lock(lock_path)
+
+
+def _run(args: argparse.Namespace, output_dir: Path) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Usando dispositivo: {device} (modelo {MODEL_NAME})")
 
@@ -605,6 +717,7 @@ def main() -> None:
         print(f"Celdas sin ninguna foto aceptada: {empty_cells}/{len(stats_df)} "
               f"({100 * empty_cells / len(stats_df):.1f}%) -- ver _cell_stats.csv.")
     print("\nPara fusionar con otras fuentes, usa scripts/merge_faiss_indices.py.")
+
 
 
 if __name__ == "__main__":
