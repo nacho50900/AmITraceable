@@ -1296,6 +1296,16 @@ ADR-15), así que la primera foto de cada proceso paga el coste de carga.
 
 ==== ADR-19: bfloat16 inutilizable en CPU sin aceleración por hardware -- float32 forzado, cuantización descartada
 
+NOTE: *Superada por ADR-43* (17/9): Moondream2 dejó de cargarse vía
+`transformers`/`bfloat16` en favor de `llama-cpp-python` sobre un GGUF
+-- el problema de fondo que motivó esta ADR (bfloat16 sin aceleración en
+CPU) ya no aplica al backend actual, que gestiona la precisión de otra
+forma (F16/cuantizado nativo de `llama.cpp`, sin la emulación por
+software de PyTorch). Se conserva íntegra por su valor histórico: la
+investigación real sobre por qué `torchao`/cuantización nativa no eran
+viables en su momento sigue siendo relevante para entender por qué se
+llegó después a la decisión de ADR-43, no solo el resultado final.
+
 
 *Contexto*: Moondream2 (ADR-16) se descarga con el dtype con el que
 Hugging Face publica sus pesos, `bfloat16`, sin que el código de este
@@ -2673,3 +2683,132 @@ propósito, ver el test actualizado-- lo cual es correcto (refleja la
 concurrencia real) pero significa que cualquier futuro consumidor del
 stream de progreso no puede asumir nada sobre ese orden, solo sobre la
 monotonía dentro de cada pista por separado.
+
+==== ADR-43: Migración de Moondream2 de `transformers` a `llama-cpp-python`/GGUF, con cuantización opcional -- sustituye ADR-19
+
+
+*Contexto*: con GPU dedicada (ADR-19 documenta el caso sin GPU), Moondream2
+vía `transformers` (bfloat16, revisión pinneada del modelo) funcionaba de
+forma estable pero lenta: ~24-27s por foto en la GPU de referencia de este
+proyecto (GTX 1650, arquitectura Turing, 4GB VRAM, *sin* tensor cores).
+Turing sin tensor cores es el dato relevante para todo lo que sigue: gran
+parte del ecosistema de aceleración/cuantización moderno para modelos de
+visión-lenguaje asume su presencia.
+
+*Alternativas consideradas*, todas probadas con evidencia real contra la
+GPU de referencia, no solo en teoría:
+
+- *`torchao` int4 nativo* (`moondream/moondream-2b-2025-04-14-4bit`,
+  cuantización oficial del propio equipo de Moondream, quantization-aware
+  training): bloqueada en cadena. Sin fijar versión de `torchao`, el
+  import fallaba (`int4_weight_only` eliminado en la 0.16, el código
+  remoto del modelo usa la API antigua). Fijando una versión compatible,
+  cargaba pero sin kernels CUDA compilados -- `torch` en la máquina de
+  desarrollo (`2.14.0+cu130`) es más reciente que cualquier build de
+  `torchao`, ni siquiera nightly, así que caía a una ruta sin aceleración
+  real. Y aun así, fallaba en cada foto con
+  `AttributeError: 'QuantizedLinear' object has no attribute 'weight'`
+  -- incompatibilidad estructural entre cómo el código remoto de Moondream
+  accede a los pesos y cómo `torchao` los representa cuantizados en esta
+  combinación de versiones. Descartada.
+- *Runtime propio "Photon" de Moondream* (`pip install moondream`):
+  descartada sin llegar a probarla -- su documentación exige GPU Ampere o
+  más reciente; Turing queda fuera explícitamente.
+- *Export ONNX comunitario* (`Xenova/moondream2` / `onnx-community`, vía
+  Transformers.js): descartada por dos motivos independientes. Primero,
+  de calidad: el único export disponible era de un checkpoint de 2024,
+  más de un año más antiguo que la revisión en producción, etiquetado
+  incluso como arquitectura `moondream1`. Segundo, de compatibilidad: la
+  integración documentada en el README de ese export
+  (`Moondream1ForConditionalGeneration`) fallaba con
+  `Number of tokens and features do not match` contra la versión
+  instalada de la librería -- documentación desactualizada respecto al
+  estado real del código.
+- *GGUF oficial de `ggml-org`* (`ggml-org/moondream2-20250414-GGUF`, el
+  propio equipo de `llama.cpp`, checkpoint de abril de 2025 -- más cercano
+  a la revisión en producción que el export ONNX descartado) vía
+  `llama-cpp-python`, con su `MoondreamChatHandler` dedicado: *aceptada*,
+  con reservas -- ver Consecuencias.
+
+*Decisión*: cargar Moondream2 vía `llama-cpp-python` sobre el GGUF de
+`ggml-org`, compilado con soporte CUDA desde código fuente en el
+`Dockerfile` (imagen base cambiada de `python:3.12-slim` a
+`nvidia/cuda:13.0.0-runtime-ubuntu22.04`, con una etapa de compilación
+`cuda-builder` aparte basada en la imagen `devel`), pidiendo
+explícitamente `CMAKE_CUDA_ARCHITECTURES=75` (compute capability real de
+la GTX 1650) en vez de confiar en un wheel precompilado -- el wheel
+precompilado del índice `cu130` de `abetlen/llama-cpp-python` cargaba el
+modelo pero moría con `SIGILL` (código de salida 132) en cuanto tocaba
+GPU, aislado mediante una prueba en CPU pura que sí funcionó, así que era
+específico de ese wheel, no de la GPU ni de la CPU del host.
+
+Dos bugs de estabilidad reales, encontrados y corregidos en producción
+antes de dar esto por estable:
+
+- *Corrupción de caché KV entre las dos llamadas por foto*
+  (`_CAPTION_QUERY`/`_STRUCTURED_QUERY`, ver ADR-21 sobre por qué son dos
+  llamadas separadas): sin `_model.reset()` antes de cada
+  `create_chat_completion()`, la caché interna del objeto `Llama` no se
+  limpiaba sola entre dos llamadas independientes con imagen nueva --
+  `llama.cpp` lo rechazaba ("the tokens of sequence 0... have
+  inconsistent sequence positions"), y el estado quedaba tan corrupto que
+  el proceso entero acababa muriendo con `SIGSEGV` (código 139) unas
+  pocas fotos después, no solo fallando esa foto.
+- *Corrupción por concurrencia real*: con `reset()` ya puesto, el mismo
+  `SIGSEGV` volvía a aparecer bajo carga real -- el pipeline de
+  `geolocation.py` procesa varias fotos a la vez
+  (`asyncio.Semaphore(actual_concurrency)`, cada una en su propio hilo
+  real vía `asyncio.to_thread`), y varios hilos podían llamar a la vez
+  sobre el MISMO objeto `Llama`, que no está pensado para eso (a
+  diferencia del modelo `transformers` de antes, que sí toleraba esto sin
+  problema visible). Se añadió un `threading.Lock` (`_model_lock`) que
+  serializa TODO acceso a `_model` -- efecto secundario aceptado
+  conscientemente: el análisis de CONTENIDO pasa a ser efectivamente
+  secuencial entre fotos aunque el semáforo permita varias en vuelo a la
+  vez; la geolocalización (DINOv2) no se ve afectada.
+
+*Justificación*: de las cuatro alternativas investigadas, GGUF vía
+`llama.cpp` fue la única que no quedó bloqueada por un requisito de
+hardware que este proyecto no puede asumir (Ampere, tensor cores) ni por
+una regresión de calidad (checkpoint desactualizado). El coste fue mucho
+mayor esfuerzo de infraestructura (compilar desde fuente, dos bugs de
+estabilidad nativos) del que se anticipaba al empezar.
+
+*Consecuencias*: (+) backend estable bajo concurrencia real, verificado
+en producción, sin depender de `transformers`/`trust_remote_code` para
+Moondream2 -- ya no aplica el problema de fondo de ADR-19 (bfloat16 sin
+aceleración en CPU), aunque tampoco se ha vuelto a medir el caso
+"sin GPU" con este backend; (-) **la migración, por sí sola, NO dio la
+mejora de rendimiento que la motivó**: medido en producción, F16 vía
+`llama.cpp` dio ~42-46s/foto, más lento que los ~24-27s/foto de la
+baseline `transformers` -- se perdió la optimización de "codificar la
+imagen una vez, reutilizar para las dos preguntas" (`llama-cpp-python` no
+expone un equivalente directo, cada llamada recalcula el embedding de
+imagen desde cero), y los kernels CUDA de `llama.cpp` en una GPU sin
+tensor cores no compensaron esa pérdida; (+) cuantizando el modelo de
+TEXTO a Q8_0 (`llama-quantize`, compilado en la misma etapa
+`cuda-builder`, tipo configurable vía `MOONDREAM_QUANT_TYPE`, ver
+`_ensure_quantized_model()` en `scene_analysis.py`) se recuperó paridad
+con la baseline: ~25s/foto, una mejora de ~1.7x sobre el F16 de
+`llama.cpp`, en línea con benchmarks públicos, pero solo paridad (no
+mejora neta) frente a `transformers`. El `mmproj` (vision encoder) se
+queda en F16 siempre -- este GGUF no tiene variante cuantizada de esa
+parte, así que la cuantización del modelo de texto no toca el coste de
+codificar la imagen en sí, que sigue siendo el componente más caro por
+foto; (-) el GGUF de `ggml-org` avisa en su propio log de carga
+("GENERATION QUALITY WILL BE DEGRADED! CONSIDER REGENERATING THE MODEL",
+pre-tokenizador sin declarar en los metadatos del fichero) -- impacto real
+en la calidad de las respuestas (incluido el parseo de
+PERSONAS/AFICION/PAREJA/TEXTO_VISIBLE/MATRICULA) sin confirmar contra el
+baseline `transformers`, pendiente de una comparación deliberada (ver
+`app/log/visual_description_log.py`, log opcional creado precisamente
+para esto).
+
+Conclusión honesta para la memoria: se cambió de backend por motivos de
+estabilidad/mantenibilidad de la arquitectura (dejar de depender de
+`trust_remote_code`), no porque el resultado fuera un objetivo de
+rendimiento cumplido -- la mejora de velocidad que motivó la investigación
+completa no se materializó de forma neta en la GPU de referencia de este
+proyecto (Turing, sin tensor cores), y ese es en sí mismo un resultado
+válido y documentable: no todo intento de optimización tiene que dar
+mejora medible para ser una decisión de arquitectura correcta.
