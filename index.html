@@ -2234,9 +2234,49 @@ y no de algo que la persona haya escrito.</p>
 </div>
 </div>
 <div class="sect3">
-<h4 id="_main_py">5.2.16. <code>main.py</code></h4>
+<h4 id="_osint_router_py_y_osintusername_correlation_py">5.2.16. <code>osint_router.py</code> y <code>osint/username_correlation.py</code></h4>
 <div class="dlist">
 <dl>
+<dt class="hdlist1">Propósito/Responsabilidad</dt>
+<dd>
+<p>Frente de correlación de cuentas por nombre de usuario (ver ADR-44).
+Deliberadamente independiente del pipeline de <code>analysis_router.py</code>: no
+depende de sesión OAuth ni de un <code>ExposureReport</code> ya generado, solo del
+username que se quiere comprobar.</p>
+<div class="ulist">
+<ul>
+<li>
+<p><code>POST /api/username-correlation</code>&#8201;&#8212;&#8201;único endpoint. Recibe
+<code>{"username": str}</code>, delega en
+<code>username_correlation.check_username_across_sites()</code> y devuelve
+<code>UsernameCorrelationReport</code> (lista de <code>UsernameSiteMatch</code>: sitio, URL,
+<code>exists</code>&#8201;&#8212;&#8201;<code>true</code>/<code>false</code>/<code>null</code>, este último cuando no se pudo
+determinar). 422 si el username está vacío tras <code>strip()</code>.</p>
+</li>
+<li>
+<p><code>username_correlation.py</code> es una capa fina sobre la librería <code>maigret</code>
+(dependencia real, <code>requirements.txt</code>): carga su base de datos de
+sitios ya empaquetada (<code>MaigretDatabase</code>, ~5000 sitios activos tras
+excluir tor/i2p/dns) y llama a su función de comprobación de bajo
+nivel con <code>is_parsing_enabled=False</code> e <code>is_enrich_enabled=False</code>&#8201;&#8212;&#8201;nunca se extrae contenido del perfil (bio/avatar/otros IDs) ni se
+activa su modo "enrich"; la recursión de su CLI no aplica porque se
+invoca la función de librería directamente, una sola vez (ver ADR-44
+para el porqué completo). Traduce su enum
+(<code>CLAIMED</code>/<code>AVAILABLE</code>/<code>UNKNOWN</code>/<code>ILLEGAL</code>) a <code>True</code>/<code>False</code>/<code>None</code>/
+excluido respectivamente.</p>
+</li>
+</ul>
+</div>
+</dd>
+<dt class="hdlist1">Interfaces</dt>
+<dd>
+<p>Ver arriba. Documentado con su código de respuesta 422 en <code>/docs</code>
+(OpenAPI).</p>
+</dd>
+<dt class="hdlist1">Ubicación</dt>
+<dd>
+<p><code>backend/app/osint_router.py</code>, <code>backend/app/osint/username_correlation.py</code>.</p>
+</dd>
 <dt class="hdlist1">Propósito/Responsabilidad</dt>
 <dd>
 <p>Ensambla la app FastAPI (middlewares de sesión y CORS, routers,
@@ -3514,7 +3554,10 @@ luego Instagram), sin correlación cruzada.</p>
 <p><strong>Consecuencias</strong>: () alcance viable para un TFG; () evita la tensión
 ética de comparar contra cuentas de terceros sin consentimiento;
 (-) el módulo de correlación entre plataformas queda como trabajo
-futuro, sin implementar.</p>
+futuro, sin implementar. Retomado parcialmente en ADR-44: no
+correlación de <strong>identidad</strong> (comparar contenido/estilo entre cuentas),
+sino de <strong>existencia</strong> (¿hay una cuenta con este mismo username en otro
+sitio?) sobre el propio username del usuario que se analiza a sí mismo.</p>
 </div>
 </div>
 </div>
@@ -4204,6 +4247,97 @@ excepción ya acotada de ADR-34 para rasgos físicos); (-) dos fuentes
 de datos potencialmente disponibles (discapacidad en INE, opinión
 política en CIS) quedan sin aprovechar en el cálculo de k-anonimato,
 que en teoría podría ser más completo con ellas.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_44_correlación_de_cuentas_por_username_sin_dossierse_usa_maigret_como_librería_con_is_parsing_enabledis_enrich_enabled_desactivados">9.3.8. ADR-44: Correlación de cuentas por username sin "dossier"&#8201;&#8212;&#8201;se usa Maigret como librería, con <code>is_parsing_enabled</code>/<code>is_enrich_enabled</code> desactivados</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: retomando el trabajo futuro dejado en ADR-1, se planteó
+añadir un frente inspirado directamente en Lermen, Paleka, Swanson,
+Aerni, Carlini, Tramér (2026, ETH Zurich / Anthropic), "Large-scale
+online deanonymization with LLMs" (arXiv:2602.16800): ese estudio
+muestra que cruzar cuentas de una misma persona entre plataformas es
+uno de los vectores más fuertes de deanonimización asistida por IA.
+Herramientas de referencia en este espacio (Sherlock, WhatsMyName,
+Maigret) comprueban existencia de un username en miles de sitios;
+Maigret en concreto va más allá y, según su propia descripción,
+"collect[s] a dossier on a person by username"&#8201;&#8212;&#8201;además de comprobar
+existencia, parsea la página de perfil (bio, avatar, otros IDs
+enlazados) y sigue de forma recursiva cualquier username nuevo que
+encuentra ahí.</p>
+</div>
+<div class="paragraph">
+<p><strong>Alternativas consideradas</strong>:</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p><strong>Lista propia de sitios, escrita a mano</strong> (primera versión
+implementada): ~14 sitios con reglas de detección simples
+(status_code / texto). Descartada por alcance insuficiente&#8201;&#8212;&#8201;demasiado lejos de los miles de sitios que cubren las herramientas de
+referencia del sector, y cada regla de detección requiere
+mantenimiento manual propio sin ninguna comunidad detrás.</p>
+</li>
+<li>
+<p><strong>Vendorizar el fichero de datos de Maigret y reimplementar su motor
+de resolución</strong> (segunda versión implementada): copiar
+<code>data.json</code> (MIT License) y escribir código propio para resolver sus
+plantillas de "engine" compartidas, <code>regexCheck</code>, <code>ignore403</code>,
+páginas de error conocidas, etc. Funcionaba (5185 sitios resueltos,
+tests en verde) pero reimplementaba, con peor cobertura, lógica que
+la propia comunidad de Maigret ya mantiene&#8201;&#8212;&#8201;deuda técnica
+innecesaria.</p>
+</li>
+<li>
+<p><strong>Usar <code>maigret</code> como dependencia real, llamando a su función de
+librería de bajo nivel con la extracción de contenido desactivada</strong>
+(elegida): <code>maigret.checking.maigret()</code> acepta
+<code>is_parsing_enabled=False</code> (nunca extrae bio/avatar/otros IDs de la
+página de perfil&#8201;&#8212;&#8201;confirmado empíricamente: con esta flag, el
+resultado ni siquiera incluye la clave <code>response_text</code>) e
+<code>is_enrich_enabled=False</code> (nunca hace las peticiones adicionales de
+su modo "enrich"). La recursión de su CLI (<code>--no-recursion</code>) no hace
+falta desactivarla aparte: vive en la orquestación de <code>maigret.py</code>
+(su <code>main()</code> interactivo), no en la función de librería que se llama
+aquí directamente&#8201;&#8212;&#8201;al invocarla una sola vez y no relanzarla
+nosotros mismos con nada "descubierto", ese bucle sencillamente no
+existe en este camino de código.</p>
+</li>
+</ol>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: opción 3. <code>app/osint/username_correlation.py</code> es una capa
+fina sobre <code>maigret</code> (<code>requirements.txt</code>, rango de versión, ver
+ADR-6): carga su base de datos empaquetada (<code>MaigretDatabase</code>, ~5000
+sitios activos tras excluir tor/i2p/dns) y traduce su enum
+(<code>CLAIMED</code>/<code>AVAILABLE</code>/<code>UNKNOWN</code>/<code>ILLEGAL</code>) a <code>True</code>/<code>False</code>/<code>None</code>/
+excluido. Nunca se lee ni se devuelve contenido del perfil, solo
+existencia. Endpoint aislado (<code>osint_router.py</code>, ver
+<code>05_building_block_view.adoc</code>), pensado para uso sobre el propio
+username del usuario que se analiza a sí mismo (autoauditoría)&#8201;&#8212;&#8201;igual
+que el resto del proyecto (ver ADR-5), el endpoint no impone esto
+técnicamente, pero el diseño (sin dossier, sin recursión) minimiza el
+daño si se usa contra un tercero sin su consentimiento, en vez de
+maximizar la cobertura de un ataque.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () cobertura real de miles de sitios sin mantener
+reglas de detección propias -- se beneficia de las mejoras que la
+comunidad de Maigret siga aportando a esa base de datos; () el
+argumentario RGPD del proyecto (ver ADR-18, ADR-35) se mantiene
+consistente: se consume una librería de terceros con el alcance más
+estrecho posible, no se copia ni se amplía su parte de "dossier";
+(-) un barrido completo son varios miles de peticiones HTTP a sitios de
+terceros y tarda del orden de minutos incluso con concurrencia alta&#8201;&#8212;&#8201;aceptado por ahora (el endpoint es síncrono/bloqueante), con streaming
+de progreso (mismo patrón que ADR-11) como trabajo futuro si se integra
+en el frontend; (-) sin <code>cloudflare_bypass</code> activado (decisión
+deliberada, no se monta un servicio de bypass), los sitios protegidos
+por Cloudflare devuelven <code>UNKNOWN</code> en vez de un resultado concluyente;
+(-) la precisión de la detección depende por completo del mantenimiento
+de <code>maigret</code> aguas arriba&#8201;&#8212;&#8201;si esa base de datos queda desactualizada
+o un sitio cambia su HTML sin que el proyecto lo corrija, este módulo
+hereda ese desfase sin poder solucionarlo por sí solo (ver fila
+correspondiente en <code>11_technical_risks.adoc</code>).</p>
 </div>
 </div>
 </div>
@@ -7076,6 +7210,23 @@ este proyecto:</p>
   de la universidad, instancia cloud puntual) para la demo/evaluación
   del TFG.</p></td>
 </tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Correlación de cuentas por username (<code>osint/username_correlation.py</code>,
+  ver ADR-44) depende por completo de la librería <code>maigret</code> de
+  terceros: coste/latencia de un barrido completo (~5000 sitios, del
+  orden de minutos) y precisión sujeta a que su base de datos de sitios
+  siga mantenida al día</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Media</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Bajo (endpoint aislado, no bloquea el resto del pipeline de análisis;
+  resultados <code>UNKNOWN</code> en vez de falsos positivos/negativos cuando un
+  sitio cambia o bloquea la petición)</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Endpoint síncrono aceptado por ahora, con streaming de progreso (ver
+  ADR-11) como trabajo futuro si se integra en el frontend. Actualizar
+  la versión de <code>maigret</code> en <code>requirements.txt</code> es la vía de
+  mantenimiento&#8201;&#8212;&#8201;no se vendoriza una copia propia de su base de datos
+  (ver ADR-44), así que actualizar la dependencia ya trae los sitios y
+  reglas de detección más recientes de esa comunidad.</p></td>
+</tr>
 </tbody>
 </table>
 <div style="page-break-after: always;"></div>
@@ -7408,7 +7559,7 @@ este proyecto:</p>
 <div id="footer">
 <div id="footer-text">
 Version 1.0<br>
-Last updated 2026-09-17 22:01:48 UTC
+Last updated 2026-09-18 23:25:28 UTC
 </div>
 </div>
 </body>
