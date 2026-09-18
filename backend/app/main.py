@@ -18,6 +18,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.analysis_router import router as analysis_router
 from app.auth.instagram_oauth import router as instagram_auth_router
 from app.auth.reddit_oauth import router as reddit_auth_router
+from app.osint_router import router as osint_router
 from app.config import settings
 
 # BUG ENCONTRADO en la sesión de logs de GPU/Moondream2: sin esto, el
@@ -296,6 +297,7 @@ app.add_middleware(
 app.include_router(reddit_auth_router)
 app.include_router(instagram_auth_router)
 app.include_router(analysis_router)
+app.include_router(osint_router)
 
 
 @app.get("/")

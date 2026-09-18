@@ -170,4 +170,20 @@ Ordenados de mayor a menor impacto sobre el calendario/alcance del TFG.
   operativa; evaluar como alternativa una máquina con GPU (laboratorio
   de la universidad, instancia cloud puntual) para la demo/evaluación
   del TFG.
+
+| Correlación de cuentas por username (`osint/username_correlation.py`,
+  ver ADR-44) depende por completo de la librería `maigret` de
+  terceros: coste/latencia de un barrido completo (~5000 sitios, del
+  orden de minutos) y precisión sujeta a que su base de datos de sitios
+  siga mantenida al día
+| Media
+| Bajo (endpoint aislado, no bloquea el resto del pipeline de análisis;
+  resultados `UNKNOWN` en vez de falsos positivos/negativos cuando un
+  sitio cambia o bloquea la petición)
+| Endpoint síncrono aceptado por ahora, con streaming de progreso (ver
+  ADR-11) como trabajo futuro si se integra en el frontend. Actualizar
+  la versión de `maigret` en `requirements.txt` es la vía de
+  mantenimiento -- no se vendoriza una copia propia de su base de datos
+  (ver ADR-44), así que actualizar la dependencia ya trae los sitios y
+  reglas de detección más recientes de esa comunidad.
 |===

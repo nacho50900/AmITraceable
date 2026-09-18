@@ -292,3 +292,33 @@ class ManualAttribute(BaseModel):
 class RecalculateRequest(BaseModel):
     report: ExposureReport
     manual_attributes: list[ManualAttribute]
+
+
+class UsernameCorrelationRequest(BaseModel):
+    """Cuerpo de `POST /api/username-correlation` (ver app/osint_router.py)."""
+
+    username: str
+
+
+class UsernameSiteMatch(BaseModel):
+    """Resultado de comprobar `username` en UN sitio (ver
+    app/osint/username_correlation.py::UsernameSiteResult -- mismos campos,
+    version Pydantic para poder devolverse en la respuesta HTTP)."""
+
+    site: str
+    url: str
+    # None = no se pudo determinar (timeout, bloqueo anti-bot, codigo de
+    # estado inesperado) -- distinto de False ("se comprobo y no existe").
+    exists: bool | None
+
+
+class UsernameCorrelationReport(BaseModel):
+    """Respuesta de `POST /api/username-correlation`. `matches` solo
+    contiene existencia de cuenta por sitio -- nunca contenido de esas
+    cuentas (bio, avatar, publicaciones), ver docstring de
+    app/osint/username_correlation.py sobre el alcance deliberadamente
+    acotado."""
+
+    username: str
+    matches: list[UsernameSiteMatch]
+    checked_at: datetime

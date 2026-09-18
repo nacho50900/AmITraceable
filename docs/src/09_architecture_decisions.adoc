@@ -28,7 +28,10 @@ luego Instagram), sin correlación cruzada.
 *Consecuencias*: (+) alcance viable para un TFG; (+) evita la tensión
 ética de comparar contra cuentas de terceros sin consentimiento;
 (-) el módulo de correlación entre plataformas queda como trabajo
-futuro, sin implementar.
+futuro, sin implementar. Retomado parcialmente en ADR-44: no
+correlación de *identidad* (comparar contenido/estilo entre cuentas),
+sino de *existencia* (¿hay una cuenta con este mismo username en otro
+sitio?) sobre el propio username del usuario que se analiza a sí mismo.
 
 [[adr-cat-stack-tecnologico-e-infraestructura]]
 === Stack tecnológico e infraestructura
@@ -632,6 +635,85 @@ excepción ya acotada de ADR-34 para rasgos físicos); (-) dos fuentes
 de datos potencialmente disponibles (discapacidad en INE, opinión
 política en CIS) quedan sin aprovechar en el cálculo de k-anonimato,
 que en teoría podría ser más completo con ellas.
+
+==== ADR-44: Correlación de cuentas por username sin "dossier" -- se usa Maigret como librería, con `is_parsing_enabled`/`is_enrich_enabled` desactivados
+
+*Contexto*: retomando el trabajo futuro dejado en ADR-1, se planteó
+añadir un frente inspirado directamente en Lermen, Paleka, Swanson,
+Aerni, Carlini, Tramér (2026, ETH Zurich / Anthropic), "Large-scale
+online deanonymization with LLMs" (arXiv:2602.16800): ese estudio
+muestra que cruzar cuentas de una misma persona entre plataformas es
+uno de los vectores más fuertes de deanonimización asistida por IA.
+Herramientas de referencia en este espacio (Sherlock, WhatsMyName,
+Maigret) comprueban existencia de un username en miles de sitios;
+Maigret en concreto va más allá y, según su propia descripción,
+"collect[s] a dossier on a person by username" -- además de comprobar
+existencia, parsea la página de perfil (bio, avatar, otros IDs
+enlazados) y sigue de forma recursiva cualquier username nuevo que
+encuentra ahí.
+
+*Alternativas consideradas*:
+
+. *Lista propia de sitios, escrita a mano* (primera versión
+  implementada): ~14 sitios con reglas de detección simples
+  (status_code / texto). Descartada por alcance insuficiente --
+  demasiado lejos de los miles de sitios que cubren las herramientas de
+  referencia del sector, y cada regla de detección requiere
+  mantenimiento manual propio sin ninguna comunidad detrás.
+. *Vendorizar el fichero de datos de Maigret y reimplementar su motor
+  de resolución* (segunda versión implementada): copiar
+  `data.json` (MIT License) y escribir código propio para resolver sus
+  plantillas de "engine" compartidas, `regexCheck`, `ignore403`,
+  páginas de error conocidas, etc. Funcionaba (5185 sitios resueltos,
+  tests en verde) pero reimplementaba, con peor cobertura, lógica que
+  la propia comunidad de Maigret ya mantiene -- deuda técnica
+  innecesaria.
+. *Usar `maigret` como dependencia real, llamando a su función de
+  librería de bajo nivel con la extracción de contenido desactivada*
+  (elegida): `maigret.checking.maigret()` acepta
+  `is_parsing_enabled=False` (nunca extrae bio/avatar/otros IDs de la
+  página de perfil -- confirmado empíricamente: con esta flag, el
+  resultado ni siquiera incluye la clave `response_text`) e
+  `is_enrich_enabled=False` (nunca hace las peticiones adicionales de
+  su modo "enrich"). La recursión de su CLI (`--no-recursion`) no hace
+  falta desactivarla aparte: vive en la orquestación de `maigret.py`
+  (su `main()` interactivo), no en la función de librería que se llama
+  aquí directamente -- al invocarla una sola vez y no relanzarla
+  nosotros mismos con nada "descubierto", ese bucle sencillamente no
+  existe en este camino de código.
+
+*Decisión*: opción 3. `app/osint/username_correlation.py` es una capa
+fina sobre `maigret` (`requirements.txt`, rango de versión, ver
+ADR-6): carga su base de datos empaquetada (`MaigretDatabase`, ~5000
+sitios activos tras excluir tor/i2p/dns) y traduce su enum
+(`CLAIMED`/`AVAILABLE`/`UNKNOWN`/`ILLEGAL`) a `True`/`False`/`None`/
+excluido. Nunca se lee ni se devuelve contenido del perfil, solo
+existencia. Endpoint aislado (`osint_router.py`, ver
+`05_building_block_view.adoc`), pensado para uso sobre el propio
+username del usuario que se analiza a sí mismo (autoauditoría) -- igual
+que el resto del proyecto (ver ADR-5), el endpoint no impone esto
+técnicamente, pero el diseño (sin dossier, sin recursión) minimiza el
+daño si se usa contra un tercero sin su consentimiento, en vez de
+maximizar la cobertura de un ataque.
+
+*Consecuencias*: (+) cobertura real de miles de sitios sin mantener
+reglas de detección propias -- se beneficia de las mejoras que la
+comunidad de Maigret siga aportando a esa base de datos; (+) el
+argumentario RGPD del proyecto (ver ADR-18, ADR-35) se mantiene
+consistente: se consume una librería de terceros con el alcance más
+estrecho posible, no se copia ni se amplía su parte de "dossier";
+(-) un barrido completo son varios miles de peticiones HTTP a sitios de
+terceros y tarda del orden de minutos incluso con concurrencia alta --
+aceptado por ahora (el endpoint es síncrono/bloqueante), con streaming
+de progreso (mismo patrón que ADR-11) como trabajo futuro si se integra
+en el frontend; (-) sin `cloudflare_bypass` activado (decisión
+deliberada, no se monta un servicio de bypass), los sitios protegidos
+por Cloudflare devuelven `UNKNOWN` en vez de un resultado concluyente;
+(-) la precisión de la detección depende por completo del mantenimiento
+de `maigret` aguas arriba -- si esa base de datos queda desactualizada
+o un sitio cambia su HTML sin que el proyecto lo corrija, este módulo
+hereda ese desfase sin poder solucionarlo por sí solo (ver fila
+correspondiente en `11_technical_risks.adoc`).
 
 [[adr-cat-modelo-de-datos-y-dominio]]
 === Modelo de datos y dominio
