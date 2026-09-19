@@ -28,7 +28,10 @@ luego Instagram), sin correlación cruzada.
 *Consecuencias*: (+) alcance viable para un TFG; (+) evita la tensión
 ética de comparar contra cuentas de terceros sin consentimiento;
 (-) el módulo de correlación entre plataformas queda como trabajo
-futuro, sin implementar.
+futuro, sin implementar. Retomado parcialmente en ADR-44: no
+correlación de *identidad* (comparar contenido/estilo entre cuentas),
+sino de *existencia* (¿hay una cuenta con este mismo username en otro
+sitio?) sobre el propio username del usuario que se analiza a sí mismo.
 
 [[adr-cat-stack-tecnologico-e-infraestructura]]
 === Stack tecnológico e infraestructura
@@ -238,6 +241,39 @@ en el futuro la capacidad de cómputo deja de ser el factor limitante
 workers), esta decisión habría que revisarla -- en ese momento sí
 tendría sentido un dominio propio pensado para más de un usuario
 simultáneo.
+
+==== ADR-45: Cliente Mistral compartido con throttle de ráfaga y reintento único en 429
+
+
+*Contexto*: cada módulo que llama a Mistral (`ai_attribute_extraction.py`
+para autodeclaraciones, `ai_analysis.py` para el veredicto/conclusiones)
+hacía su propia petición HTTP directa, sin ningún control de cadencia
+entre ellas. El plan gratuito de Mistral limita a 1 petición/segundo de
+ráfaga, además de 30/minuto -- con `ai_analysis.py` disparándose
+automáticamente en cuanto el informe está listo (ADR-14) justo detrás de
+la extracción de autodeclaraciones, sin ningún botón intermedio, el hueco
+real entre ambas llamadas podía ser inferior a 1s. Confirmado en
+producción (Docker, primer análisis del día, sin repetir ninguna
+llamada): el 429 observado no era cuota mensual agotada, era el límite de
+ráfaga.
+
+*Decisión*: nuevo módulo `app/nlp/mistral_client.py`, con una única
+función `call_mistral_json()` que centraliza toda llamada a la API de
+Mistral desde el backend. Aplica un throttle (`asyncio.Lock` + timestamp
+de la última llamada, margen de 1.1s) antes de cada petición, y si aun
+así llega un 429, reintenta UNA vez tras 1.5s adicionales antes de
+rendirse. `ai_attribute_extraction.py` y `ai_analysis.py` se migran a
+delegar en este cliente en vez de construir su propia petición `httpx`
+directamente -- las nuevas llamadas de ADR-46 y ADR-47 lo usan desde el
+principio.
+
+*Justificación*: el reintento es deliberadamente único y solo ante 429
+-- nunca ante 401/5xx/fallo de red -- para no arriesgar gasto de cuota
+real si el 429 resultara ser la cuota MENSUAL agotada, no la ráfaga: en
+ese caso, reintentar a ciegas varias veces solo tendría coste, nunca
+beneficio. El cuerpo completo de la respuesta de error se loguea ahora
+(antes solo se logueaba el status code), para poder distinguir a mano
+ambos motivos si vuelve a pasar en producción.
 
 [[adr-cat-privacidad-etica-y-rgpd]]
 === Privacidad, ética y RGPD
@@ -632,6 +668,85 @@ excepción ya acotada de ADR-34 para rasgos físicos); (-) dos fuentes
 de datos potencialmente disponibles (discapacidad en INE, opinión
 política en CIS) quedan sin aprovechar en el cálculo de k-anonimato,
 que en teoría podría ser más completo con ellas.
+
+==== ADR-44: Correlación de cuentas por username sin "dossier" -- se usa Maigret como librería, con `is_parsing_enabled`/`is_enrich_enabled` desactivados
+
+*Contexto*: retomando el trabajo futuro dejado en ADR-1, se planteó
+añadir un frente inspirado directamente en Lermen, Paleka, Swanson,
+Aerni, Carlini, Tramér (2026, ETH Zurich / Anthropic), "Large-scale
+online deanonymization with LLMs" (arXiv:2602.16800): ese estudio
+muestra que cruzar cuentas de una misma persona entre plataformas es
+uno de los vectores más fuertes de deanonimización asistida por IA.
+Herramientas de referencia en este espacio (Sherlock, WhatsMyName,
+Maigret) comprueban existencia de un username en miles de sitios;
+Maigret en concreto va más allá y, según su propia descripción,
+"collect[s] a dossier on a person by username" -- además de comprobar
+existencia, parsea la página de perfil (bio, avatar, otros IDs
+enlazados) y sigue de forma recursiva cualquier username nuevo que
+encuentra ahí.
+
+*Alternativas consideradas*:
+
+. *Lista propia de sitios, escrita a mano* (primera versión
+  implementada): ~14 sitios con reglas de detección simples
+  (status_code / texto). Descartada por alcance insuficiente --
+  demasiado lejos de los miles de sitios que cubren las herramientas de
+  referencia del sector, y cada regla de detección requiere
+  mantenimiento manual propio sin ninguna comunidad detrás.
+. *Vendorizar el fichero de datos de Maigret y reimplementar su motor
+  de resolución* (segunda versión implementada): copiar
+  `data.json` (MIT License) y escribir código propio para resolver sus
+  plantillas de "engine" compartidas, `regexCheck`, `ignore403`,
+  páginas de error conocidas, etc. Funcionaba (5185 sitios resueltos,
+  tests en verde) pero reimplementaba, con peor cobertura, lógica que
+  la propia comunidad de Maigret ya mantiene -- deuda técnica
+  innecesaria.
+. *Usar `maigret` como dependencia real, llamando a su función de
+  librería de bajo nivel con la extracción de contenido desactivada*
+  (elegida): `maigret.checking.maigret()` acepta
+  `is_parsing_enabled=False` (nunca extrae bio/avatar/otros IDs de la
+  página de perfil -- confirmado empíricamente: con esta flag, el
+  resultado ni siquiera incluye la clave `response_text`) e
+  `is_enrich_enabled=False` (nunca hace las peticiones adicionales de
+  su modo "enrich"). La recursión de su CLI (`--no-recursion`) no hace
+  falta desactivarla aparte: vive en la orquestación de `maigret.py`
+  (su `main()` interactivo), no en la función de librería que se llama
+  aquí directamente -- al invocarla una sola vez y no relanzarla
+  nosotros mismos con nada "descubierto", ese bucle sencillamente no
+  existe en este camino de código.
+
+*Decisión*: opción 3. `app/osint/username_correlation.py` es una capa
+fina sobre `maigret` (`requirements.txt`, rango de versión, ver
+ADR-6): carga su base de datos empaquetada (`MaigretDatabase`, ~5000
+sitios activos tras excluir tor/i2p/dns) y traduce su enum
+(`CLAIMED`/`AVAILABLE`/`UNKNOWN`/`ILLEGAL`) a `True`/`False`/`None`/
+excluido. Nunca se lee ni se devuelve contenido del perfil, solo
+existencia. Endpoint aislado (`osint_router.py`, ver
+`05_building_block_view.adoc`), pensado para uso sobre el propio
+username del usuario que se analiza a sí mismo (autoauditoría) -- igual
+que el resto del proyecto (ver ADR-5), el endpoint no impone esto
+técnicamente, pero el diseño (sin dossier, sin recursión) minimiza el
+daño si se usa contra un tercero sin su consentimiento, en vez de
+maximizar la cobertura de un ataque.
+
+*Consecuencias*: (+) cobertura real de miles de sitios sin mantener
+reglas de detección propias -- se beneficia de las mejoras que la
+comunidad de Maigret siga aportando a esa base de datos; (+) el
+argumentario RGPD del proyecto (ver ADR-18, ADR-35) se mantiene
+consistente: se consume una librería de terceros con el alcance más
+estrecho posible, no se copia ni se amplía su parte de "dossier";
+(-) un barrido completo son varios miles de peticiones HTTP a sitios de
+terceros y tarda del orden de minutos incluso con concurrencia alta --
+aceptado por ahora (el endpoint es síncrono/bloqueante), con streaming
+de progreso (mismo patrón que ADR-11) como trabajo futuro si se integra
+en el frontend; (-) sin `cloudflare_bypass` activado (decisión
+deliberada, no se monta un servicio de bypass), los sitios protegidos
+por Cloudflare devuelven `UNKNOWN` en vez de un resultado concluyente;
+(-) la precisión de la detección depende por completo del mantenimiento
+de `maigret` aguas arriba -- si esa base de datos queda desactualizada
+o un sitio cambia su HTML sin que el proyecto lo corrija, este módulo
+hereda ese desfase sin poder solucionarlo por sí solo (ver fila
+correspondiente en `11_technical_risks.adoc`).
 
 [[adr-cat-modelo-de-datos-y-dominio]]
 === Modelo de datos y dominio
@@ -1200,6 +1315,34 @@ documentada en vez de escondida; (-) atributo nuevo completo (regex +
 IA + paso propio) es más superficie de mantenimiento, aunque menor que
 `nivel_estudios` al reutilizar `_STUDY_VERB_RE` en vez de un regex de
 detección nuevo.
+
+==== ADR-46: Inferencia de atributos a partir de las descripciones de fotos de Moondream2, llamada aparte de las autodeclaraciones de texto
+
+
+*Contexto*: `extract_demographics_with_ai()` (ADR-13) ya analiza el texto
+de los posts/bio buscando autodeclaraciones explícitas, pero nunca las
+descripciones visuales que Moondream2 ya genera para cada foto
+(`descripcion_general`, ver `app/vision/scene_analysis.py`) -- esa señal
+se perdía por completo pese a estar ya calculada por el pipeline de
+fotos.
+
+*Decisión*: nueva función `extract_soft_inferences_from_photos()` en
+`ai_attribute_extraction.py`, con su propio prompt de sistema
+(`_PHOTO_SYSTEM_PROMPT`), llamada aparte de `extract_demographics_with_ai()`
+y disparada desde `report/generator.py::_apply_image_geolocation()` una
+vez que las fotos ya están analizadas -- no se pudo fusionar con la
+llamada de texto porque esa corre ANTES, en paralelo con el análisis de
+fotos (lo más lento del pipeline), precisamente para no bloquearlo.
+
+*Justificación*: se usa un prompt distinto, no una reutilización de
+`_SYSTEM_PROMPT`, porque ese prompt está calibrado para buscar
+autodeclaraciones EXPLÍCITAS en primera persona -- una descripción
+generada por un modelo de visión sobre lo que VE en una foto nunca es
+eso. Todo lo que sale de esta llamada se trata como razonamiento
+indirecto (mismo nivel que las `inferencias_blandas` simbólicas ya
+existentes para texto, nunca como un campo "duro" de
+`DemographicFindings`), reutilizando la misma clave/forma de JSON para
+parsear con `_parse_soft_inferences` sin duplicar lógica de validación.
 
 [[adr-cat-analisis-visual-vision-por-computador]]
 === Análisis visual (visión por computador)
@@ -2130,6 +2273,38 @@ a propósito; (-) una foto real con una franja de margen blanco/negro
 fina y bien posicionada por casualidad (poco frecuente, pero no
 imposible) se descartaría sin necesidad -- falso positivo aceptado
 como coste residual del diseño.
+
+==== ADR-47: Resolución de edificios emblemáticos vía Mistral, para sobreescribir la geolocalización por imagen de esa foto en concreto
+
+
+*Contexto*: la geolocalización por imagen (`app/vision/geolocation.py`)
+estima la ubicación de una foto por SIMILITUD VISUAL contra un índice
+(DINOv2) -- una aproximación estadística ("esta foto se parece a otras
+fotos de esta zona"), nunca una identificación real de un lugar concreto.
+
+*Decisión*: sexto campo `EDIFICIO_EMBLEMATICO` añadido al prompt
+estructurado de Moondream2 (`_STRUCTURED_QUERY`, junto a
+PERSONAS/AFICION/PAREJA/TEXTO_VISIBLE/MATRICULA), y nuevo módulo
+`app/vision/landmark_resolution.py`: si Moondream2 propone un nombre de
+edificio/monumento para una foto, se le pasa ESE NOMBRE (nunca la
+imagen) a Mistral, que sí tiene conocimiento general del mundo, para que
+intente resolver coordenadas reales. Si Mistral lo reconoce con
+`confianza >= 0.75` (`MIN_CONFIDENCE_FOR_LANDMARK_OVERRIDE`),
+`report/generator.py::_apply_image_geolocation()` sobreescribe la
+estimación de DINOv2 para esa foto concreta con esas coordenadas,
+marcándola como representativa.
+
+*Justificación*: Moondream2 (VQA local pequeño, sin especialización en
+reconocimiento de monumentos) solo PROPONE un nombre, nunca coordenadas
+-- pedírselas directamente habría inventado precisión inexistente. El
+umbral de confianza alto es deliberado: un edificio mal resuelto sería
+PEOR que no resolverlo (afirmaría una ubicación exacta incorrecta con la
+misma confianza visual que un acierto real). Sin validar aún con fotos
+reales en producción -- a diferencia de MATRICULA, aquí no hay
+validación posible por FORMATO de si el nombre que propone Moondream2 es
+correcto, así que conviene revisar en la práctica cuántas veces dispara
+este campo y con qué precisión antes de confiar en él más allá de un
+intento best-effort.
 
 [[adr-cat-internacionalizacion-y-traduccion]]
 === Internacionalización y traducción

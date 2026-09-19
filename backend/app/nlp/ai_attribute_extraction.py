@@ -22,9 +22,13 @@ hoy con las regex cuando no hay coincidencia), en vez de colar un número de
 población falso.
 
 Cuándo se ejecuta: automáticamente dentro del pipeline principal
-(`report/generator.py`), en cada análisis -- a diferencia de
-`ai_analysis.py` (conclusiones priorizadas en lenguaje natural), que sigue
-siendo un botón aparte que el usuario pulsa bajo demanda.
+(`report/generator.py`), en cada análisis -- igual que `ai_analysis.py`
+(conclusiones priorizadas en lenguaje natural), que TAMBIÉN se dispara
+solo en cuanto el informe está listo (ver su propio docstring): ya no hay
+ningún botón "Analizar con IA" en el frontend, así que ambos módulos
+llaman a Mistral automáticamente, uno detrás de otro, en el mismo
+análisis -- ver app/nlp/mistral_client.py para el throttle que evita que
+eso choque con el límite de ráfaga del free tier.
 
 Nota RGPD (para la memoria): esto envía el TEXTO CRUDO de las
 publicaciones a un proveedor externo (Mistral AI, UE) en cada análisis, no
@@ -81,10 +85,7 @@ coincidencia de palabras clave. Se pide en la MISMA llamada a Mistral que
 el resto de este módulo (un único mensaje, no una segunda petición aparte)
 para no duplicar coste ni latencia.
 """
-import json
 import logging
-
-import httpx
 
 from app.config import settings
 from app.data.ine_reference import (
@@ -101,10 +102,9 @@ from app.data.ine_reference import (
 )
 from app.models.schemas import InferredAttribute, SocialPost
 from app.nlp.demographic_extraction import DemographicFindings, _strip_accents, _ZODIAC_TEXT_MAP
+from app.nlp.mistral_client import MistralHTTPError, MistralRequestError, call_mistral_json
 
 logger = logging.getLogger(__name__)
-
-MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
 
 # Campos "simples" (valor libre, sin normalizar contra una tabla del INE).
 _FREE_TEXT_FIELDS = ("universidad", "empresa")
@@ -460,35 +460,128 @@ async def extract_demographics_with_ai(
     return _to_findings(parsed)
 
 
-async def _call_mistral(prompt_text: str) -> dict:
-    payload = {
-        "model": settings.mistral_model,
-        "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": prompt_text},
-        ],
-        "temperature": 0.0,
-        "response_format": {"type": "json_object"},
-        # Subido de 800 a 1000: los nuevos campos orientacion_sexual,
-        # signo_zodiacal y religion añaden más espacio en la respuesta JSON.
-        "max_tokens": 1000,
-    }
-    headers = {"Authorization": f"Bearer {settings.mistral_api_key}"}
+# Prompt DISTINTO de _SYSTEM_PROMPT a propósito, no una reutilización: ese
+# prompt está calibrado para buscar AUTODECLARACIONES EXPLÍCITAS en texto
+# escrito por la propia persona ("busca... en primera persona"). Una
+# descripción de foto generada por Moondream2 nunca es eso -- es un
+# tercero (un modelo de visión) describiendo lo que VE, no la persona
+# hablando de sí misma. Reutilizar _SYSTEM_PROMPT tal cual habría
+# confundido al modelo (¿de qué "declaración explícita" habla si el texto
+# de entrada es "a person in scrubs in a hospital hallway"?) y, peor,
+# habría arriesgado que Mistral tratara una foto como si fuera tan fiable
+# como un "vivo en Sevilla" escrito por la persona. Aquí se trata TODO
+# como razonamiento indirecto -- mismo criterio que 'inferencias_blandas'
+# en _SYSTEM_PROMPT -- y se reutiliza esa misma clave/forma de JSON
+# (`inferencias_blandas`) para poder parsear con _parse_soft_inferences
+# sin duplicar lógica de validación.
+_PHOTO_SYSTEM_PROMPT = (
+    "Eres un asistente que razona, como lo haría una persona observadora, sobre lo que "
+    "sugieren las descripciones automáticas de unas fotos sobre la vida de quien las "
+    "publicó. Las descripciones NO las escribió la persona -- las generó un modelo de "
+    "visión artificial (Moondream2) a partir de cada foto, así que NUNCA son una "
+    "autodeclaración: son, como mucho, indicio visual indirecto, exactamente con el mismo "
+    "nivel de certeza que el razonamiento simbólico sobre emojis o fechas sueltas, nunca "
+    "un hecho confirmado.\n\n"
+    "Se te da el nombre público de la cuenta y una lista de descripciones, cada una "
+    "precedida por el enlace a la foto entre corchetes. Responde EXCLUSIVAMENTE con un "
+    "JSON con esta forma exacta, sin texto adicional ni backticks:\n"
+    '{"inferencias_blandas": [{"categoria": <string>, "valor": <string>, "confianza": <0-1>, '
+    '"evidencia": <enlace_entre_corchetes>}, ...]}\n\n'
+    "Cada 'valor' es una frase breve explicando la inferencia y en qué se basa -- p. ej. "
+    "'Posible profesión sanitaria: aparece en varias fotos con ropa de quirófano en un "
+    "entorno hospitalario'. 'confianza' entre 0 y 1, casi nunca por encima de 0.6 (es una "
+    "inferencia visual indirecta sobre descripciones de un modelo de visión, no una "
+    "declaración de la persona). Incluye como máximo 5 elementos, solo los que tengan un "
+    "anclaje real en el contenido descrito -- ante la duda, no los incluyas. Nunca "
+    "menciones ni infieras raza, etnia, tono de piel, aspecto físico, estado de salud ni "
+    "orientación sexual de nadie, aunque la descripción lo sugiera. Devuelve una lista "
+    "vacía si no hay ninguna señal real con la que trabajar."
+)
+
+
+def _photos_prompt(photo_captions: dict[str, str]) -> str:
+    lines = []
+    for photo_link, caption in photo_captions.items():
+        text = (caption or "").strip()
+        if not text:
+            continue
+        lines.append(f"[{photo_link}] {text[:600]}")
+    return "\n".join(lines)
+
+
+async def extract_soft_inferences_from_photos(
+    photo_captions: dict[str, str],
+    username: str,
+    full_name: str | None = None,
+) -> list[InferredAttribute]:
+    """Segunda llamada a Mistral, INDEPENDIENTE de extract_demographics_with_ai:
+    razona sobre las descripciones visuales que Moondream2 ya generó para
+    cada foto (ver app/vision/scene_analysis.py -- se usa la descripción
+    GENERAL en inglés, `general_descriptions`/`descripcion_general`, no
+    las líneas estructuradas de formato fijo, que ya alimentan sus propias
+    InferredAttribute de forma determinista en scene_analysis.py) para
+    intentar inferir algo más sobre la persona -- cosas que ni el texto de
+    sus posts ni las señales estructuradas fijas (PERSONAS/AFICION/PAREJA/
+    TEXTO_VISIBLE/MATRICULA/EDIFICIO_EMBLEMATICO) capturan por sí solas
+    (p. ej. estilo de vida, entorno, nivel adquisitivo aproximado a partir
+    del conjunto de varias fotos).
+
+    Se llama DESPUÉS de que las fotos ya se hayan analizado (ver
+    report/generator.py::_apply_image_geolocation) -- necesita esas
+    descripciones como entrada, así que no puede ir en la misma llamada
+    que extract_demographics_with_ai (que corre ANTES, en paralelo con el
+    análisis de fotos -- lo más lento del pipeline -- para no bloquearlo).
+
+    Devuelve SOLO InferredAttribute (razonamiento blando), nunca
+    DemographicFindings -- ver el comentario sobre _PHOTO_SYSTEM_PROMPT
+    justo arriba de por qué una foto nunca se trata como autodeclaración
+    "dura".
+
+    Nunca lanza excepciones, mismo criterio que extract_demographics_with_ai:
+    sin API key, sin fotos con descripción, o si la llamada falla, se
+    devuelve una lista vacía y el resto del informe sigue igual."""
+    if not settings.mistral_api_key or not photo_captions:
+        return []
+
+    photos_text = _photos_prompt(photo_captions)
+    if not photos_text:
+        return []
+
+    header = (
+        f"Nombre público mostrado por la cuenta: {full_name}" if full_name else f"Cuenta: {username}"
+    )
+    prompt = f"{header}\n\nDescripciones automáticas de fotos publicadas por la cuenta:\n{photos_text}"
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.post(MISTRAL_API_URL, json=payload, headers=headers)
-    except httpx.RequestError as exc:
+        parsed = await _call_mistral(prompt, system_prompt=_PHOTO_SYSTEM_PROMPT, max_tokens=500)
+    except AiExtractionUnavailable as exc:
+        logger.warning("Inferencia de atributos por fotos con IA no disponible: %s", exc)
+        return []
+
+    return _parse_soft_inferences(parsed)
+
+
+async def _call_mistral(
+    prompt_text: str,
+    system_prompt: str = _SYSTEM_PROMPT,
+    # Subido de 800 a 1000: los nuevos campos orientacion_sexual,
+    # signo_zodiacal y religion añaden más espacio en la respuesta JSON.
+    max_tokens: int = 1000,
+) -> dict:
+    """Delegación fina sobre app.nlp.mistral_client.call_mistral_json (ver
+    ese módulo para el throttle de ráfaga y el reintento en 429) --
+    conserva la firma/excepción de siempre para no tocar los dos
+    llamadores existentes (extract_demographics_with_ai, y ahora también
+    extract_soft_inferences_from_photos, que pasa su propio
+    system_prompt/max_tokens)."""
+    try:
+        return await call_mistral_json(
+            system_prompt, prompt_text, max_tokens=max_tokens, temperature=0.0
+        )
+    except MistralHTTPError as exc:
+        raise AiExtractionUnavailable(f"HTTP {exc.status_code}") from exc
+    except MistralRequestError as exc:
         raise AiExtractionUnavailable(f"error de red: {exc}") from exc
-
-    if response.status_code != 200:
-        raise AiExtractionUnavailable(f"HTTP {response.status_code}")
-
-    try:
-        content = response.json()["choices"][0]["message"]["content"]
-        return json.loads(content)
-    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-        raise AiExtractionUnavailable(f"respuesta con forma inesperada: {exc}") from exc
 
 
 def _set_evidence(findings: DemographicFindings, field: str, evidence_map: dict) -> None:

@@ -33,3 +33,11 @@ itsdangerous>=2.2,<3.0
 emoji>=2.13,<3.0
 python-jose[cryptography]>=3.3,<4.0
 prometheus-fastapi-instrumentator>=7.0,<9.0
+# maigret: motor real de comprobacion de existencia de username en miles
+# de sitios (app/osint/username_correlation.py). Se llama a su funcion de
+# libreria de bajo nivel con is_parsing_enabled=False e
+# is_enrich_enabled=False -- nunca se activa su modo "dossier" (extraccion
+# de bio/avatar/ids, ni sus peticiones de "enrich"), y no se usa su bucle
+# de recursion (vive en su CLI, no en la funcion que llamamos). Ver el
+# docstring de ese modulo para el detalle completo de esta decision.
+maigret>=0.6,<0.7

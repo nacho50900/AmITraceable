@@ -158,13 +158,21 @@ class VisualDescriptionCodes(BaseModel):
     `texto_visible`/`matricula` NUNCA se traducen (texto literal leído de
     la foto -- `matricula` además ya viene validada por formato, ver
     `_parse_matricula` en scene_analysis.py, así que solo llega aquí si
-    tiene forma de matrícula española real)."""
+    tiene forma de matrícula española real). `edificio_emblematico`
+    (añadido después) TAMPOCO se traduce nunca -- es un nombre propio,
+    no vocabulario cerrado ni frase semi-libre -- y, a diferencia de
+    `matricula`, no tiene validación de formato posible: solo llega
+    hasta aquí filtrado por `_EDIFICIO_EMBLEMATICO_INVALID_VALUES`
+    (ruido genérico obvio), no confirmado como un lugar real -- esa
+    confirmación (vía Mistral) vive en app/vision/landmark_resolution.py,
+    fuera de este módulo."""
 
     personas: str | None = None
     aficion: str | None = None
     texto_visible: str | None = None
     matricula: str | None = None
     indicio_pareja: bool = False
+    edificio_emblematico: str | None = None
 
 
 class ImageLocationPoint(BaseModel):
@@ -292,3 +300,33 @@ class ManualAttribute(BaseModel):
 class RecalculateRequest(BaseModel):
     report: ExposureReport
     manual_attributes: list[ManualAttribute]
+
+
+class UsernameCorrelationRequest(BaseModel):
+    """Cuerpo de `POST /api/username-correlation` (ver app/osint_router.py)."""
+
+    username: str
+
+
+class UsernameSiteMatch(BaseModel):
+    """Resultado de comprobar `username` en UN sitio (ver
+    app/osint/username_correlation.py::UsernameSiteResult -- mismos campos,
+    version Pydantic para poder devolverse en la respuesta HTTP)."""
+
+    site: str
+    url: str
+    # None = no se pudo determinar (timeout, bloqueo anti-bot, codigo de
+    # estado inesperado) -- distinto de False ("se comprobo y no existe").
+    exists: bool | None
+
+
+class UsernameCorrelationReport(BaseModel):
+    """Respuesta de `POST /api/username-correlation`. `matches` solo
+    contiene existencia de cuenta por sitio -- nunca contenido de esas
+    cuentas (bio, avatar, publicaciones), ver docstring de
+    app/osint/username_correlation.py sobre el alcance deliberadamente
+    acotado."""
+
+    username: str
+    matches: list[UsernameSiteMatch]
+    checked_at: datetime
