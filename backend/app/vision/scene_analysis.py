@@ -202,6 +202,19 @@ class VisualDescriptionCodes:
     no tiene forma de matrícula real, se descarta como probable error de
     lectura en vez de mostrarse.
 
+    `edificio_emblematico` (añadido después, ver comentario junto al
+    campo EDIFICIO_EMBLEMATICO en `_STRUCTURED_QUERY`): nombre de un
+    edificio o monumento CONCRETO que Moondream2 dice reconocer, o None.
+    A diferencia de `matricula`, aquí NO hay validación de formato
+    posible (un nombre de edificio no tiene una forma fija que
+    comprobar) -- solo un filtro de valores genéricos obvios (ver
+    `_EDIFICIO_EMBLEMATICO_INVALID_VALUES`). Por eso `report/generator.py`
+    nunca confía en este campo por sí solo para sobreescribir
+    coordenadas: se lo pasa a Mistral (app/vision/landmark_resolution.py),
+    que sí tiene conocimiento general del mundo, y solo si Mistral
+    también lo reconoce con confianza alta se usa para nada -- Moondream2
+    aquí solo propone un candidato de nombre, nunca coordenadas.
+
     `indicio_pareja` es un booleano (vocabulario cerrado, como `personas`)
     -- se repite aquí aunque `analyze_image_content()` ya lo devuelve por
     separado como su propio valor de retorno (2º de la tupla, usado para
@@ -215,6 +228,7 @@ class VisualDescriptionCodes:
     texto_visible: str | None
     matricula: str | None
     indicio_pareja: bool
+    edificio_emblematico: str | None
 
 
 _model = None
@@ -333,7 +347,24 @@ _STRUCTURED_QUERY = (
     # ninguna. El aviso de "lectura automática, puede contener errores" se
     # añade explícitamente al mostrarla (ver _parse_inferences), nunca se
     # presenta como un dato cierto.
-    "Analiza esta imagen y responde EXACTAMENTE en este formato de cinco líneas, sin nada más, "
+    #
+    # Campo EDIFICIO_EMBLEMATICO añadido después (sexto campo, sin
+    # validar aún con fotos reales en producción -- a diferencia de
+    # MATRICULA, aquí no hay forma de validar por FORMATO si el nombre es
+    # correcto, así que conviene revisar en la práctica cuántas veces
+    # dispara de verdad y con qué precisión antes de confiar en él más
+    # allá de un intento best-effort). Igual que con TEXTO_VISIBLE/
+    # MATRICULA, Moondream2 solo PROPONE un nombre -- nunca coordenadas,
+    # que no tiene forma fiable de conocer: es app/vision/landmark_resolution.py
+    # (vía Mistral, con conocimiento general del mundo) quien decide si
+    # ese nombre es real y, si lo es, dónde está. Moondream2 es un VQA
+    # pequeño de propósito general, NO un modelo especializado en
+    # reconocimiento de monumentos -- es plausible que en la práctica
+    # acierte pocas veces con nombres concretos, incluso pidiéndole
+    # explícitamente 'ninguno' ante cualquier duda (mismo patrón de
+    # sesgo hacia copiar valores "válidos" del ejemplo documentado más
+    # arriba para PERSONAS/AFICION).
+    "Analiza esta imagen y responde EXACTAMENTE en este formato de seis líneas, sin nada más, "
     "como en este ejemplo (sustituyendo los valores por los reales de ESTA imagen):\n"
     # HISTORIAL DEL SESGO EN PERSONAS (ver test de regresión más abajo en
     # este módulo -- test_scene_analysis.py::TestParsePersonas -- y el
@@ -368,7 +399,8 @@ _STRUCTURED_QUERY = (
     "AFICION: ninguno\n"
     "PAREJA: no\n"
     "TEXTO_VISIBLE: ninguno\n"
-    "MATRICULA: ninguna\n\n"
+    "MATRICULA: ninguna\n"
+    "EDIFICIO_EMBLEMATICO: ninguno\n\n"
     "PERSONAS solo puede valer: 'ninguna' (no aparece ninguna persona), 'una' (aparece "
     "exactamente una persona protagonista), o 'varias' (dos o más personas de protagonismo "
     "similar, p. ej. una pareja o un grupo).\n"
@@ -391,11 +423,18 @@ _STRUCTURED_QUERY = (
     "Las matrículas españolas actuales tienen 4 números seguidos de 3 letras (p. ej. 1234BCD); "
     "las antiguas (antes de 2000) tienen 1-2 letras, 4 números y 1-2 letras (p. ej. M1234AB). Si "
     "hay una matrícula pero no puedes leerla con claridad, responde 'ninguna' -- NUNCA inventes "
-    "o completes caracteres que no puedas distinguir.\n\n"
+    "o completes caracteres que no puedas distinguir.\n"
+    "EDIFICIO_EMBLEMATICO solo puede valer: el nombre del edificio, monumento o lugar CONCRETO "
+    "Y RECONOCIBLE que aparece en la imagen (p. ej. 'Sagrada Familia', 'Puerta de Alcalá', "
+    "'Torre Eiffel', 'Coliseo de Roma'), SOLO si es un edificio o monumento emblemático real que "
+    "reconozcas con certeza -- NUNCA un tipo genérico de edificio (una casa, un bloque de pisos, "
+    "una iglesia sin más, un ayuntamiento sin más, una playa sin más) ni una suposición "
+    "aproximada. Si no reconoces ningún edificio o monumento emblemático concreto, o tienes "
+    "cualquier duda, responde 'ninguno'.\n\n"
     "No describas ni identifiques físicamente a ninguna persona que aparezca en la imagen -- "
     "ni su aspecto, ni su sexo, ni su edad, ni su raza o etnia -- más allá de contarlas y de si "
     "hay o no un contexto romántico entre ellas.\n\n"
-    "Responde ahora solo las cinco líneas, con los valores reales para esta imagen concreta."
+    "Responde ahora solo las seis líneas, con los valores reales para esta imagen concreta."
 )
 
 # Settings por separado para cada llamada -- cada una necesita un límite
@@ -427,8 +466,11 @@ _STRUCTURED_QUERY = (
 # fiable para mantener el formato de opciones fijas). max_tokens=55 en la
 # estructurada (más que el caption): tiene CINCO líneas que generar
 # (incluida MATRICULA), no cuatro.
+# _STRUCTURED_SETTINGS con más margen (65, antes 55 con cinco líneas):
+# EDIFICIO_EMBLEMATICO puede llevar nombres algo más largos que el resto
+# de campos (p. ej. "Basílica de la Sagrada Familia").
 _CAPTION_SETTINGS = {"max_tokens": 45, "temperature": 0.2, "variant": None}
-_STRUCTURED_SETTINGS = {"max_tokens": 55, "temperature": 0.1, "variant": None}
+_STRUCTURED_SETTINGS = {"max_tokens": 65, "temperature": 0.1, "variant": None}
 
 # Redimensionado específico para Moondream2, aparte del que ya aplica
 # geolocation.py para DINOv2 (_MAX_QUEUED_IMAGE_DIMENSION=1024, que ese
@@ -476,6 +518,7 @@ _AFICION_RE = re.compile(r"AFICION:[ \t]*(.+)", re.IGNORECASE)
 _PAREJA_RE = re.compile(r"PAREJA:[ \t]*(\S+)", re.IGNORECASE)
 _TEXTO_VISIBLE_RE = re.compile(r"TEXTO_VISIBLE:[ \t]*(.+)", re.IGNORECASE)
 _MATRICULA_RE = re.compile(r"MATRICULA:[ \t]*(.+)", re.IGNORECASE)
+_EDIFICIO_EMBLEMATICO_RE = re.compile(r"EDIFICIO_EMBLEMATICO:[ \t]*(.+)", re.IGNORECASE)
 
 # Validación de FORMATO de matrícula española, aplicada al texto que
 # devuelve Moondream2 antes de mostrarlo -- un VQA pequeño leyendo texto
@@ -985,9 +1028,12 @@ def analyze_image_content(
     indicio_pareja = _parse_pareja(structured)
     texto_visible = _parse_texto_visible(structured)
     matricula = _parse_matricula(structured)
+    edificio_emblematico = _parse_edificio_emblematico(structured)
 
     inferencias = _parse_inferences(structured)
-    descripcion_cruda = _build_clean_summary(personas, aficion_raw, indicio_pareja, texto_visible, matricula)
+    descripcion_cruda = _build_clean_summary(
+        personas, aficion_raw, indicio_pareja, texto_visible, matricula, edificio_emblematico
+    )
     # Mismo filtro que _build_clean_summary aplica a `personas` para el
     # texto en español (solo "una"/"varias" son señal, no "ninguna") --
     # se repite aquí para que los códigos estructurados y el texto ya
@@ -998,6 +1044,7 @@ def analyze_image_content(
         texto_visible=texto_visible,
         matricula=matricula,
         indicio_pareja=indicio_pareja,
+        edificio_emblematico=edificio_emblematico,
     )
 
     return inferencias, indicio_pareja, descripcion_cruda, descripcion_general, codes
@@ -1139,6 +1186,40 @@ def _parse_matricula(answer: str) -> str | None:
     return None
 
 
+# Valores que casi con toda seguridad son eco de un tipo GENÉRICO de
+# edificio, no un nombre propio concreto reconocido -- filtro mínimo
+# (a diferencia de MATRICULA, no hay validación de FORMATO posible aquí,
+# ver docstring de _parse_edificio_emblematico).
+_EDIFICIO_EMBLEMATICO_INVALID_VALUES = frozenset({
+    "edificio", "monumento", "casa", "iglesia", "ayuntamiento", "playa", "castillo", "catedral",
+})
+
+
+def _parse_edificio_emblematico(answer: str) -> str | None:
+    """Extrae el valor de la línea EDIFICIO_EMBLEMATICO (nombre de un
+    edificio/monumento CONCRETO y reconocible -- ver _STRUCTURED_QUERY).
+    None si no se pudo parsear, si el modelo respondió 'ninguno', o si el
+    valor es uno de los genéricos de `_EDIFICIO_EMBLEMATICO_INVALID_VALUES`
+    (probable eco de un tipo de edificio, no un nombre propio real).
+
+    A diferencia de `_parse_matricula`, NO hay validación de formato
+    posible -- un nombre de edificio no tiene una forma fija que
+    comprobar por regex. La validación real de si el nombre corresponde a
+    un lugar de verdad ocurre después, en
+    app/vision/landmark_resolution.py, vía Mistral (que sí tiene
+    conocimiento general del mundo) -- este parser solo hace un filtro
+    mínimo de ruido obvio antes de gastar esa llamada."""
+    match = _EDIFICIO_EMBLEMATICO_RE.search(answer)
+    if match is None:
+        return None
+    valor = match.group(1).strip().rstrip(".")
+    if not valor or valor.lower() in ("ninguno", "ninguna", "none", "n/a"):
+        return None
+    if valor.lower() in _EDIFICIO_EMBLEMATICO_INVALID_VALUES:
+        return None
+    return valor
+
+
 def _parse_inferences(answer: str) -> list[InferredAttribute]:
     inferences: list[InferredAttribute] = []
 
@@ -1203,6 +1284,28 @@ def _parse_inferences(answer: str) -> list[InferredAttribute]:
             )
         )
 
+    # EDIFICIO_EMBLEMATICO: confianza deliberadamente baja (0.3, igual que
+    # MATRICULA) -- Moondream2 es un VQA general sin especialización en
+    # reconocimiento de monumentos (ver nota en _STRUCTURED_QUERY), así
+    # que esto es solo el candidato que propone, no una confirmación. La
+    # resolución de verdad (si el lugar es real y dónde está) la hace
+    # Mistral en app/vision/landmark_resolution.py -- esta InferredAttribute
+    # se añade de todos modos, independientemente de si Mistral llega a
+    # confirmarlo o no, para que quede constancia en el informe de que
+    # Moondream2 propuso algo, aunque no se use para sobreescribir
+    # ninguna coordenada.
+    edificio_emblematico = _parse_edificio_emblematico(answer)
+    if edificio_emblematico is not None:
+        inferences.append(
+            InferredAttribute(
+                category="edificio_emblematico",
+                value=f"Posible edificio o monumento reconocido en una foto: {edificio_emblematico} "
+                      "(propuesto por IA, sin confirmar)",
+                confidence=0.3,
+                evidence=[],
+            )
+        )
+
     return inferences
 
 
@@ -1223,6 +1326,7 @@ def _build_clean_summary(
     indicio_pareja: bool,
     texto_visible: str | None,
     matricula: str | None,
+    edificio_emblematico: str | None = None,
 ) -> str | None:
     """Reconstruye el bloque 'qué vio la IA' que se muestra en el
     frontend (vista de detalle de cada foto) a partir de los valores YA
@@ -1276,4 +1380,6 @@ def _build_clean_summary(
         lines.append(f"Texto visible: {texto_visible}")
     if matricula:
         lines.append(f"Matrícula visible: {matricula} (lectura automática, puede contener errores)")
+    if edificio_emblematico:
+        lines.append(f"Edificio/monumento reconocido: {edificio_emblematico} (propuesto por IA, sin confirmar)")
     return "\n".join(lines) if lines else None

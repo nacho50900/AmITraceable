@@ -25,13 +25,18 @@ from app.data.ine_reference import (
     TOTAL_POPULATION_ES,
     resolve_autonomous_community,
 )
-from app.nlp.ai_attribute_extraction import extract_demographics_with_ai, merge_findings
+from app.nlp.ai_attribute_extraction import (
+    extract_demographics_with_ai,
+    extract_soft_inferences_from_photos,
+    merge_findings,
+)
 from app.nlp.demographic_extraction import DemographicFindings, extract_demographics
 from app.nlp.travel_detection import detect_travel_permalinks
 from app.progress import ProgressCallback, emit_progress
 from app.analysis_timing import timed_stage
 from app import stages
 from app.scoring.k_anonymity import estimate_population_narrowing, final_remaining_population
+from app.vision.landmark_resolution import resolve_landmark_coordinates
 
 # Umbrales para aceptar una estimación de RESIDENCIA HABITUAL a partir de
 # geolocalización de imágenes (ver `_infer_home_region`). Antes de este
@@ -310,6 +315,7 @@ def _to_visual_description_codes_schema(codes) -> VisualDescriptionCodes | None:
         texto_visible=codes.texto_visible,
         matricula=codes.matricula,
         indicio_pareja=codes.indicio_pareja,
+        edificio_emblematico=codes.edificio_emblematico,
     )
 
 
@@ -321,6 +327,8 @@ async def _apply_image_geolocation(
     geolocation_task: "asyncio.Task | None",
     progress_callback: ProgressCallback | None,
     avatar_url: str | None,
+    username: str,
+    full_name: str | None,
 ) -> tuple[list[ImageLocationPoint], bool, list[InferredAttribute]]:
     """Geolocalización por imagen: solo se usa como ubicación PARA EL
     CÁLCULO DE POBLACIÓN si el texto no dio ya una provincia/municipio/
@@ -340,7 +348,19 @@ async def _apply_image_geolocation(
 
     También devuelve las inferencias de contenido visual (aficiones,
     actividades) para que generate_report las añada a
-    `inferred_attributes`, igual que las inferencias blandas de texto.
+    `inferred_attributes`, igual que las inferencias blandas de texto --
+    incluidas ahora las inferencias por IA sobre el CONJUNTO de
+    descripciones de fotos (ver extract_soft_inferences_from_photos en
+    app/nlp/ai_attribute_extraction.py), añadidas al final de esta
+    función una vez que ya se conocen todas las descripciones.
+
+    También intenta, foto a foto, resolver coordenadas reales cuando
+    Moondream2 propuso un edificio/monumento emblemático concreto (campo
+    EDIFICIO_EMBLEMATICO -- ver app/vision/landmark_resolution.py): si
+    Mistral lo reconoce con confianza suficiente, esa foto en concreto
+    usa esas coordenadas en vez de la estimación por similitud visual de
+    DINOv2 -- más precisa, porque ya no depende de "esta foto se parece a
+    otras fotos de esta zona" sino de un lugar identificado por nombre.
 
     Módulo opcional/best-effort: si el índice FAISS no está construido (ver
     app/vision/geolocation.py), el segundo valor devuelto (disponibilidad)
@@ -404,6 +424,34 @@ async def _apply_image_geolocation(
         for permalink, estimate in geo_outcome.results
     ]
 
+    # Resolución de edificios emblemáticos (nuevo): para cada foto donde
+    # Moondream2 propuso un nombre en EDIFICIO_EMBLEMATICO, se le pregunta
+    # a Mistral (nunca a Moondream2, que no tiene conocimiento geográfico
+    # fiable -- ver landmark_resolution.py) si lo reconoce con certeza. Si
+    # sí, esa foto en concreto pasa a usar esas coordenadas en vez de la
+    # estimación por similitud visual de DINOv2 -- se sobreescribe el
+    # punto correspondiente de `image_location_points` in place, marcado
+    # como representativo y con confianza 1.0 (mismo criterio que un EXIF
+    # GPS real en geolocation.py: no es una estimación, es un lugar
+    # identificado por nombre). Solo se llama a Mistral por foto con un
+    # candidato -- no por cada foto analizada -- para no disparar
+    # llamadas de más contra el límite de ráfaga (ver mistral_client.py).
+    if settings.mistral_api_key:
+        for point in image_location_points:
+            codes = point.visual_description_codes
+            if codes is None or not codes.edificio_emblematico:
+                continue
+            resolution = await resolve_landmark_coordinates(
+                codes.edificio_emblematico, context_hint=point.visual_description_general
+            )
+            if resolution is None:
+                continue
+            point.province = resolution.canonical_name
+            point.lat = resolution.lat
+            point.lon = resolution.lon
+            point.confidence = resolution.confidence
+            point.representative = True
+
     has_location = (
         demographic_findings.provincia is not None
         or demographic_findings.municipio is not None
@@ -425,6 +473,22 @@ async def _apply_image_geolocation(
         demographic_findings.evidence["estado_civil"] = list(geo_outcome.partner_signal_permalinks)
 
     visual_inferences = [inferred for _, inferred in geo_outcome.visual_inferences]
+
+    # Inferencia de atributos a partir de las descripciones de fotos
+    # (nuevo, ver extract_soft_inferences_from_photos): se llama AQUÍ, no
+    # dentro de _apply_ai_findings, porque necesita las descripciones que
+    # solo existen una vez analizadas las fotos -- _apply_ai_findings
+    # corre ANTES, en paralelo con el análisis de fotos (lo más lento del
+    # pipeline), precisamente para no esperar a esto. Usa la descripción
+    # GENERAL (caption en inglés de Moondream2), no las cuatro/seis líneas
+    # estructuradas -- esas ya generan sus propias InferredAttribute de
+    # forma determinista en scene_analysis.py, esto es un segundo pase
+    # razonando sobre el CONJUNTO de captions con un LLM.
+    visual_inferences.extend(
+        await extract_soft_inferences_from_photos(
+            geo_outcome.general_descriptions, username=username, full_name=full_name
+        )
+    )
 
     return image_location_points, geo_outcome.index_available, visual_inferences
 
@@ -478,7 +542,15 @@ async def generate_report(
     # de que el paralelismo está funcionando.
     async with timed_stage("espera_geolocalizacion_fotos"):
         image_location_points, geolocation_available, visual_inferences = await _apply_image_geolocation(
-            platform, posts, demographic_findings, travel_permalinks, geolocation_task, progress_callback, avatar_url
+            platform,
+            posts,
+            demographic_findings,
+            travel_permalinks,
+            geolocation_task,
+            progress_callback,
+            avatar_url,
+            username,
+            full_name,
         )
     # Igual que las inferencias blandas de texto: se AÑADEN a lo que ya
     # había (regex + texto por IA), nunca lo sustituyen. Ver
