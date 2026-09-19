@@ -407,91 +407,146 @@ def _process_cell(
 
 
 def _load_existing_state(output_dir: Path):
+    """Carga solo lo que hace falta mantener en memoria durante TODA la
+    ejecución: known_ids (para el dedup al reabrir celdas), cuántas fotos
+    hay ya en total (para los informes), qué celdas están completadas, y
+    las estadísticas por celda (una fila por celda -- acotado por el
+    tamaño del grid, no por el número de fotos).
+
+    A propósito, NO devuelve los embeddings ni las filas de metadata
+    completas para que el llamador las guarde en memoria durante toda la
+    ejecución -- eso es justo lo que causó un
+    `numpy._core._exceptions._ArrayMemoryError` real tras varias horas
+    seguidas de ejecución: la lista de embeddings en memoria no paraba de
+    crecer durante toda la vida del proceso (varios días), hasta que no
+    quedó hueco ni para una imagen de 68MB. Los embeddings/metadata en
+    disco se releen solo brevemente dentro de cada `_persist_state()`
+    para fusionarlos con el lote nuevo, y se sueltan justo después -- ver
+    ese docstring.
+    """
     embeddings_path = output_dir / "embeddings.npy"
     meta_path = output_dir / "index_meta.csv"
     completed_path = output_dir / "_completed_cells.txt"
     stats_path = output_dir / "_cell_stats.csv"
 
-    embeddings = list(np.load(embeddings_path)) if embeddings_path.exists() else []
-    meta_rows = pd.read_csv(meta_path).to_dict("records") if meta_path.exists() else []
-    completed = set(completed_path.read_text().splitlines()) if completed_path.exists() else set()
-    cell_stats = pd.read_csv(stats_path).to_dict("records") if stats_path.exists() else []
+    known_ids: set[str] = set()
+    total_photos = 0
+    if meta_path.exists():
+        meta_df = pd.read_csv(meta_path)
+        total_photos = len(meta_df)
+        if "id" in meta_df.columns:
+            known_ids = set(meta_df["id"])
+        del meta_df
 
-    # Comprobación de consistencia: embeddings.npy e index_meta.csv deben
-    # tener el mismo número de filas (van alineados fila a fila). Con las
-    # escrituras agrupadas de _persist_state esto no debería poder pasar,
-    # pero si alguna vez ocurre (p.ej. datos mezclados de antes del fix,
-    # o un fallo a mitad de los renombrados agrupados) es mejor parar en
-    # seco con un error claro que seguir con un índice desalineado sin
-    # que nadie se entere -- un vector en la fila N que en realidad no
-    # corresponde al id/lat/lon de la fila N de index_meta.csv es peor
-    # que no tener datos, porque no se nota hasta que el índice ya está
-    # dando resultados incorrectos.
-    if len(embeddings) != len(meta_rows):
-        print(f"Error: embeddings.npy tiene {len(embeddings)} vectores pero index_meta.csv tiene "
-              f"{len(meta_rows)} filas -- no coinciden.")
+    # Comprobación de consistencia (ver también _persist_state):
+    # embeddings.npy e index_meta.csv deben tener el mismo número de
+    # filas. Se usa mmap_mode="r" para consultar solo shape[0] (el número
+    # de filas) sin cargar el array completo en memoria -- este chequeo
+    # de arranque no debería, por sí mismo, competir por la misma memoria
+    # que se acaba de liberar con el cambio de arriba.
+    n_embeddings = 0
+    if embeddings_path.exists():
+        embeddings_mmap = np.load(embeddings_path, mmap_mode="r")
+        n_embeddings = embeddings_mmap.shape[0]
+        del embeddings_mmap
+
+    if n_embeddings != total_photos:
+        print(f"Error: embeddings.npy tiene {n_embeddings} vectores pero index_meta.csv tiene "
+              f"{total_photos} filas -- no coinciden.")
         print("Seguir así arriesga desalinear qué vector corresponde a qué foto en el índice final.")
         print(f"Revisa manualmente {output_dir} antes de continuar (lo más seguro, si no hay forma de saber "
               f"cuál de los dos ficheros es el bueno, es borrar la carpeta entera y volver a empezar).")
         sys.exit(1)
 
+    completed = set(completed_path.read_text().splitlines()) if completed_path.exists() else set()
+    cell_stats = pd.read_csv(stats_path).to_dict("records") if stats_path.exists() else []
+
     if completed:
-        print(f"Reanudando: {len(completed)} celdas y {len(meta_rows)} fotos ya procesadas.")
+        print(f"Reanudando: {len(completed)} celdas y {total_photos} fotos ya procesadas.")
 
-    return embeddings, meta_rows, completed, cell_stats
+    return known_ids, total_photos, completed, cell_stats
 
 
-def _persist_state(output_dir: Path, embeddings: list, meta_rows: list, completed: set, cell_stats: list) -> None:
-    """Escribe todo el estado de forma ATÓMICA: cada fichero se escribe
-    primero a una ruta temporal en el mismo directorio, y todos los
-    renombrados sobre el destino final (`os.replace`, atómico por
-    fichero en el mismo volumen tanto en Windows como en POSIX) se hacen
-    SEGUIDOS al final, una vez que los 5 temporales ya están completos en
-    disco -- no intercalados con el trabajo de construir cada fichero.
-    Esto no hace la operación atómica como GRUPO (no hay forma portable
-    de renombrar 5 ficheros a la vez en una única operación), pero
-    reduce al mínimo posible la ventana en la que una interrupción podría
-    dejar unos ficheros con la versión nueva y otros con la vieja --
-    ahora esa ventana son los 5 `os.replace()` seguidos (milisegundos),
-    no todo el tiempo de construir los DataFrames/el índice FAISS.
+def _persist_state(output_dir: Path, new_embeddings: list, new_meta_rows: list, completed: set, cell_stats: list) -> None:
+    """Fusiona NEW_EMBEDDINGS/NEW_META_ROWS -- SOLO el lote acumulado
+    desde el último flush, NO todo el historial de la ejecución -- con lo
+    que ya hay en disco, y escribe el resultado combinado.
 
-    Motivo del cambio: la primera versión escribía con `to_csv()`
-    directamente sobre el fichero final, que lo trunca antes de escribir
-    el contenido nuevo. En un caso real, una interrupción justo en ese
-    instante dejó `index_meta.csv` completamente vacío -- perdiendo la
-    referencia a cientos de miles de filas que solo seguían existiendo
-    en `embeddings.npy` (vectores sin coordenadas ya es un dato inútil),
-    sin ninguna copia de seguridad del contenido bueno anterior. Ver
-    también la comprobación de consistencia en `_load_existing_state`,
-    que ahora para en seco si estos ficheros alguna vez quedan
-    desalineados entre sí, en vez de seguir en silencio.
+    Este cambio (de "recibe todo el historial acumulado" a "recibe solo
+    el lote nuevo, y fusiona aquí con lo persistido") es lo que permite
+    que _run() vacíe sus listas en memoria después de cada flush, en vez
+    de mantener en RAM los embeddings de TODAS las fotos aceptadas
+    durante una ejecución de varios días. El lote en memoria en un
+    momento dado queda acotado por
+    `--flush-every-cells * --cap-per-cell` (unas pocas decenas de miles
+    como mucho), no por el total final del índice (hasta ~1.22M
+    proyectados). El coste es releer lo ya persistido en cada flush --
+    aceptable porque los flushes son cada bastantes celdas
+    (`--flush-every-cells`), no por cada foto individual; y solo durante
+    ese momento puntual, no de forma continua.
+
+    Escritura atómica: cada fichero final se escribe primero a una ruta
+    temporal en el mismo directorio, y todos los renombrados
+    (`os.replace`, atómico por fichero en el mismo volumen tanto en
+    Windows como en POSIX) se hacen SEGUIDOS al terminar, una vez que los
+    temporales ya están completos en disco -- no intercalados con el
+    trabajo de construirlos. Esto no hace la operación atómica como GRUPO
+    (no hay forma portable de renombrar varios ficheros a la vez en una
+    única operación), pero reduce al mínimo posible la ventana en la que
+    una interrupción podría dejar unos ficheros con la versión nueva y
+    otros con la vieja. Motivo original del cambio a atómico: una
+    escritura directa con `to_csv()` sobre el fichero final, interrumpida
+    a mitad, dejó `index_meta.csv` completamente vacío en un caso real --
+    ver la comprobación de consistencia en `_load_existing_state`.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     pid_suffix = f".tmp{os.getpid()}"
     pending_renames: list[tuple[Path, Path]] = []
 
-    if embeddings:
-        embeddings_matrix = np.vstack(embeddings).astype("float32")
+    embeddings_path = output_dir / "embeddings.npy"
+    meta_path = output_dir / "index_meta.csv"
 
-        # np.save() añade ".npy" automáticamente si la ruta no termina ya
-        # en eso -- pasar un fichero ya abierto (en vez de una ruta con
-        # sufijo .tmpNNN) evita ese comportamiento, que rompería el
-        # renombrado posterior.
+    if new_embeddings or embeddings_path.exists():
+        if new_embeddings:
+            new_matrix = np.vstack(new_embeddings).astype("float32")
+            if embeddings_path.exists():
+                with open(embeddings_path, "rb") as f:
+                    existing_matrix = np.load(f)
+                combined_matrix = np.concatenate([existing_matrix, new_matrix], axis=0)
+                del existing_matrix
+            else:
+                combined_matrix = new_matrix
+            del new_matrix
+        else:
+            with open(embeddings_path, "rb") as f:
+                combined_matrix = np.load(f)
+
         emb_tmp = output_dir / f"embeddings.npy{pid_suffix}"
         with open(emb_tmp, "wb") as f:
-            np.save(f, embeddings_matrix)
-        pending_renames.append((emb_tmp, output_dir / "embeddings.npy"))
+            np.save(f, combined_matrix)
+        pending_renames.append((emb_tmp, embeddings_path))
 
-        dimension = embeddings_matrix.shape[1]
+        dimension = combined_matrix.shape[1]
         index = faiss.IndexFlatIP(dimension)
-        index.add(embeddings_matrix)
+        index.add(combined_matrix)
         index_tmp = output_dir / f"index.faiss{pid_suffix}"
         faiss.write_index(index, str(index_tmp))
         pending_renames.append((index_tmp, output_dir / "index.faiss"))
+        del combined_matrix, index
 
-    meta_tmp = output_dir / f"index_meta.csv{pid_suffix}"
-    pd.DataFrame(meta_rows).to_csv(meta_tmp, index=False)
-    pending_renames.append((meta_tmp, output_dir / "index_meta.csv"))
+    if new_meta_rows or meta_path.exists():
+        new_df = pd.DataFrame(new_meta_rows)
+        if meta_path.exists():
+            existing_df = pd.read_csv(meta_path)
+            combined_df = pd.concat([existing_df, new_df], ignore_index=True) if len(new_df) else existing_df
+            del existing_df
+        else:
+            combined_df = new_df
+
+        meta_tmp = output_dir / f"index_meta.csv{pid_suffix}"
+        combined_df.to_csv(meta_tmp, index=False)
+        pending_renames.append((meta_tmp, meta_path))
+        del combined_df, new_df
 
     completed_tmp = output_dir / f"_completed_cells.txt{pid_suffix}"
     completed_tmp.write_text("\n".join(sorted(completed)))
@@ -501,7 +556,7 @@ def _persist_state(output_dir: Path, embeddings: list, meta_rows: list, complete
     pd.DataFrame(cell_stats).to_csv(stats_tmp, index=False)
     pending_renames.append((stats_tmp, output_dir / "_cell_stats.csv"))
 
-    # Todos los temporales están completos en disco -- ahora sí, los 5
+    # Todos los temporales están completos en disco -- ahora sí, los
     # renombrados seguidos, sin nada más de por medio.
     for tmp_path, final_path in pending_renames:
         os.replace(tmp_path, final_path)
@@ -586,15 +641,8 @@ def _run(args: argparse.Namespace, output_dir: Path) -> None:
         str(ensure_yunet_model()), "", (320, 320), score_threshold=0.6, nms_threshold=0.3, top_k=5000
     )
 
-    embeddings, meta_rows, completed, cell_stats = _load_existing_state(output_dir)
-    # ids ya presentes en el índice (formato "commons_<pageid>") -- se usa
-    # para poder REABRIR una celda ya completada más adelante (quitándola
-    # a mano de _completed_cells.txt, p.ej. para subir --cap-per-cell y
-    # sacarle más fotos) sin arriesgarse a duplicados: si el nuevo barajado
-    # de esa celda vuelve a elegir una foto que ya estaba, se descarta en
-    # vez de añadirse por segunda vez. Sin esto, reabrir una celda podía
-    # meter la MISMA foto dos veces en el índice.
-    known_ids: set[str] = {m["id"] for m in meta_rows}
+    known_ids, total_photos, completed, cell_stats = _load_existing_state(output_dir)
+    photos_at_start = total_photos
 
     all_cells = generate_spain_grid(cell_km=args.cell_km)
     pending_cells = [c for c in all_cells if c.id not in completed]
@@ -610,6 +658,13 @@ def _run(args: argparse.Namespace, output_dir: Path) -> None:
 
     print(f"{len(all_cells)} celdas en el grid ({len(pending_cells)} pendientes en esta ejecucion).")
 
+    # Buffers de SOLO lo acumulado desde el último flush -- NO todo el
+    # historial de la ejecución (ver _persist_state). Se vacían tras cada
+    # flush para que la memoria del proceso no crezca sin límite durante
+    # una ejecución de varios días.
+    since_flush_embeddings: list = []
+    since_flush_meta: list = []
+
     client = httpx.Client()
     cells_since_flush = 0
     cells_run_this_execution = 0
@@ -618,6 +673,12 @@ def _run(args: argparse.Namespace, output_dir: Path) -> None:
     global_rejected_mime: dict[str, int] = {}
     global_download_errors: dict[str, int] = {}
     n_duplicates_skipped = 0
+
+    def _flush() -> None:
+        nonlocal since_flush_embeddings, since_flush_meta
+        _persist_state(output_dir, since_flush_embeddings, since_flush_meta, completed, cell_stats)
+        since_flush_embeddings = []
+        since_flush_meta = []
 
     try:
         for cell in tqdm(pending_cells, desc="Celdas"):
@@ -638,8 +699,9 @@ def _run(args: argparse.Namespace, output_dir: Path) -> None:
                 known_ids.add(meta["id"])
                 new_embeddings.append(emb)
                 new_meta.append(meta)
-            embeddings.extend(new_embeddings)
-            meta_rows.extend(new_meta)
+            since_flush_embeddings.extend(new_embeddings)
+            since_flush_meta.extend(new_meta)
+            total_photos += len(new_meta)
             # Solo se marca la celda como completada si no hubo un fallo
             # sin recuperar (p.ej. "cirrussearch-too-busy-error" agotando
             # los reintentos) -- si no, esa celda se queda pendiente para
@@ -671,18 +733,18 @@ def _run(args: argparse.Namespace, output_dir: Path) -> None:
             cells_run_this_execution += 1
 
             if cells_since_flush >= args.flush_every_cells:
-                _persist_state(output_dir, embeddings, meta_rows, completed, cell_stats)
+                _flush()
                 cells_since_flush = 0
     except KeyboardInterrupt:
         print("\nInterrumpido por el usuario. Guardando progreso antes de salir...")
     finally:
         client.close()
-        _persist_state(output_dir, embeddings, meta_rows, completed, cell_stats)
+        _flush()
 
     elapsed_s = time.monotonic() - run_start
-    n_photos_run = sum(r["n_aceptadas"] for r in cell_stats[-cells_run_this_execution:]) if cells_run_this_execution else 0
+    n_photos_run = total_photos - photos_at_start
 
-    print(f"\n{len(meta_rows)} fotos en el índice total, guardadas en {output_dir}")
+    print(f"\n{total_photos} fotos en el índice total, guardadas en {output_dir}")
     if n_duplicates_skipped:
         print(f"({n_duplicates_skipped} fotos descartadas por ya estar en el índice -- normal solo si has reabierto alguna celda ya completada.)")
     if elapsed_s > 0 and cells_run_this_execution > 0:
