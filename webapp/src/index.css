@@ -1369,16 +1369,33 @@ body {
    wrap), así que nunca se encogía ni hacía wrap -- simplemente se salía
    del contenedor y el overflow:hidden de arriba lo recortaba en silencio.
    min-width: 0 permite que el texto sí se ajuste/rompa dentro del espacio
-   disponible. */
+   disponible.
+
+   Mismo bug aquí: este enlace no siempre lleva un texto corto tipo "Ver
+   publicación" -- point.visual_description_general (la descripción
+   general que genera Moondream2, ver PhotoLink en LocationMap.tsx) puede
+   ser una frase larga, y con flex-shrink:0 sin min-width:0 se salía del
+   recuadro y quedaba recortada por el overflow:hidden de .photo-details
+   en vez de bajar a una segunda línea. flex-grow se deja en 0 a
+   propósito (a diferencia del span de fecha/confianza) para que un texto
+   corto no le quite espacio innecesariamente a la fecha; con contenido
+   largo, flex-shrink:1 + min-width:0 + overflow-wrap ya bastan para que
+   ajuste/rompa en vez de desbordar. */
 .photo-details summary a {
-  flex-shrink: 0;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow-wrap: anywhere;
 }
 
 /* Mismo hueco de layout que el enlace "Ver publicación"/"Foto de perfil",
    pero sin subrayado ni color de enlace -- se usa cuando no hay ninguna
-   URL a la que enlazar (ver PhotoLink en LocationMap.tsx). */
+   URL a la que enlazar (ver PhotoLink en LocationMap.tsx). Mismo ajuste
+   que en el enlace de arriba, por si en el futuro este label también
+   acaba llevando texto largo. */
 .photo-details summary .photo-link-label {
-  flex-shrink: 0;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow-wrap: anywhere;
   color: var(--text-dim);
 }
 

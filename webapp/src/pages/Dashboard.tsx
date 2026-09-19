@@ -283,14 +283,30 @@ const Dashboard: React.FC = () => {
                   {t(`dashboard.stages.${stage}`, { defaultValue: stage })}
                 </li>
               ))}
+              {/* `key` explícita en las tres líneas de abajo -- no es solo
+                  estilo: sin ella, React identifica estos <li> por su
+                  POSICIÓN entre los hijos de <ul>, y esa posición se
+                  desplaza cada vez que completedStages (arriba) gana un
+                  elemento más. Un desplazamiento de posición puede hacer
+                  que React reconcilie este <li> con un nodo del DOM que
+                  antes era OTRA cosa (p.ej. el spinner de una fase general
+                  ya completada), heredando su `transform: rotate(...)`
+                  residual -- mismo tipo de bug que el `key` de StatusIcon
+                  ya evita DENTRO de cada <li>, pero a nivel del <li>
+                  completo. Por eso se veía casi siempre en la línea de
+                  geolocalización (DINOv2 termina pronto, con muchas fases
+                  generales aún por completarse detrás -- muchos
+                  desplazamientos tras marcarse como terminada) y casi
+                  nunca en la de fotos (Moondream2 termina tarde, cuando
+                  completedStages ya casi no crece más). */}
               {currentStage && (
-                <li className="progress-current">
+                <li key="current-stage" className="progress-current">
                   <span className="spinner spinner-sm" aria-hidden="true" />
                   {t(`dashboard.stages.${currentStage}`, { defaultValue: currentStage })}
                 </li>
               )}
               {geoCounts && (
-                <li className={geoDone ? 'progress-done' : 'progress-current'}>
+                <li key="geo-track" className={geoDone ? 'progress-done' : 'progress-current'}>
                   <StatusIcon done={geoDone} />
                   {formatPhotosLabel(
                     geoCounts,
@@ -301,7 +317,7 @@ const Dashboard: React.FC = () => {
                 </li>
               )}
               {photosCounts && (
-                <li className={photosDone ? 'progress-done' : 'progress-current'}>
+                <li key="photos-track" className={photosDone ? 'progress-done' : 'progress-current'}>
                   <StatusIcon done={photosDone} />
                   {formatPhotosLabel(
                     photosCounts,
