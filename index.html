@@ -3801,6 +3801,41 @@ tendría sentido un dominio propio pensado para más de un usuario
 simultáneo.</p>
 </div>
 </div>
+<div class="sect3">
+<h4 id="_adr_45_cliente_mistral_compartido_con_throttle_de_ráfaga_y_reintento_único_en_429">9.2.7. ADR-45: Cliente Mistral compartido con throttle de ráfaga y reintento único en 429</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: cada módulo que llama a Mistral (<code>ai_attribute_extraction.py</code>
+para autodeclaraciones, <code>ai_analysis.py</code> para el veredicto/conclusiones)
+hacía su propia petición HTTP directa, sin ningún control de cadencia
+entre ellas. El plan gratuito de Mistral limita a 1 petición/segundo de
+ráfaga, además de 30/minuto&#8201;&#8212;&#8201;con <code>ai_analysis.py</code> disparándose
+automáticamente en cuanto el informe está listo (ADR-14) justo detrás de
+la extracción de autodeclaraciones, sin ningún botón intermedio, el hueco
+real entre ambas llamadas podía ser inferior a 1s. Confirmado en
+producción (Docker, primer análisis del día, sin repetir ninguna
+llamada): el 429 observado no era cuota mensual agotada, era el límite de
+ráfaga.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: nuevo módulo <code>app/nlp/mistral_client.py</code>, con una única
+función <code>call_mistral_json()</code> que centraliza toda llamada a la API de
+Mistral desde el backend. Aplica un throttle (<code>asyncio.Lock</code> + timestamp
+de la última llamada, margen de 1.1s) antes de cada petición, y si aun
+así llega un 429, reintenta UNA vez tras 1.5s adicionales antes de
+rendirse. <code>ai_attribute_extraction.py</code> y <code>ai_analysis.py</code> se migran a
+delegar en este cliente en vez de construir su propia petición <code>httpx</code>
+directamente&#8201;&#8212;&#8201;las nuevas llamadas de ADR-46 y ADR-47 lo usan desde el
+principio.</p>
+</div>
+<div class="paragraph">
+<p><strong>Justificación</strong>: el reintento es deliberadamente único y solo ante 429&#8201;&#8212;&#8201;nunca ante 401/5xx/fallo de red&#8201;&#8212;&#8201;para no arriesgar gasto de cuota
+real si el 429 resultara ser la cuota MENSUAL agotada, no la ráfaga: en
+ese caso, reintentar a ciegas varias veces solo tendría coste, nunca
+beneficio. El cuerpo completo de la respuesta de error se loguea ahora
+(antes solo se logueaba el status code), para poder distinguir a mano
+ambos motivos si vuelve a pasar en producción.</p>
+</div>
+</div>
 </div>
 <div class="sect2">
 <h3 id="adr-cat-privacidad-etica-y-rgpd">9.3. Privacidad, ética y RGPD</h3>
@@ -4959,6 +4994,37 @@ IA + paso propio) es más superficie de mantenimiento, aunque menor que
 detección nuevo.</p>
 </div>
 </div>
+<div class="sect3">
+<h4 id="_adr_46_inferencia_de_atributos_a_partir_de_las_descripciones_de_fotos_de_moondream2_llamada_aparte_de_las_autodeclaraciones_de_texto">9.5.8. ADR-46: Inferencia de atributos a partir de las descripciones de fotos de Moondream2, llamada aparte de las autodeclaraciones de texto</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: <code>extract_demographics_with_ai()</code> (ADR-13) ya analiza el texto
+de los posts/bio buscando autodeclaraciones explícitas, pero nunca las
+descripciones visuales que Moondream2 ya genera para cada foto
+(<code>descripcion_general</code>, ver <code>app/vision/scene_analysis.py</code>)&#8201;&#8212;&#8201;esa señal
+se perdía por completo pese a estar ya calculada por el pipeline de
+fotos.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: nueva función <code>extract_soft_inferences_from_photos()</code> en
+<code>ai_attribute_extraction.py</code>, con su propio prompt de sistema
+(<code>_PHOTO_SYSTEM_PROMPT</code>), llamada aparte de <code>extract_demographics_with_ai()</code>
+y disparada desde <code>report/generator.py::_apply_image_geolocation()</code> una
+vez que las fotos ya están analizadas&#8201;&#8212;&#8201;no se pudo fusionar con la
+llamada de texto porque esa corre ANTES, en paralelo con el análisis de
+fotos (lo más lento del pipeline), precisamente para no bloquearlo.</p>
+</div>
+<div class="paragraph">
+<p><strong>Justificación</strong>: se usa un prompt distinto, no una reutilización de
+<code>_SYSTEM_PROMPT</code>, porque ese prompt está calibrado para buscar
+autodeclaraciones EXPLÍCITAS en primera persona&#8201;&#8212;&#8201;una descripción
+generada por un modelo de visión sobre lo que VE en una foto nunca es
+eso. Todo lo que sale de esta llamada se trata como razonamiento
+indirecto (mismo nivel que las <code>inferencias_blandas</code> simbólicas ya
+existentes para texto, nunca como un campo "duro" de
+<code>DemographicFindings</code>), reutilizando la misma clave/forma de JSON para
+parsear con <code>_parse_soft_inferences</code> sin duplicar lógica de validación.</p>
+</div>
+</div>
 </div>
 <div class="sect2">
 <h3 id="adr-cat-analisis-visual-vision-por-computador">9.6. Análisis visual (visión por computador)</h3>
@@ -6030,6 +6096,40 @@ a propósito; (-) una foto real con una franja de margen blanco/negro
 fina y bien posicionada por casualidad (poco frecuente, pero no
 imposible) se descartaría sin necesidad&#8201;&#8212;&#8201;falso positivo aceptado
 como coste residual del diseño.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_47_resolución_de_edificios_emblemáticos_vía_mistral_para_sobreescribir_la_geolocalización_por_imagen_de_esa_foto_en_concreto">9.6.13. ADR-47: Resolución de edificios emblemáticos vía Mistral, para sobreescribir la geolocalización por imagen de esa foto en concreto</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: la geolocalización por imagen (<code>app/vision/geolocation.py</code>)
+estima la ubicación de una foto por SIMILITUD VISUAL contra un índice
+(DINOv2)&#8201;&#8212;&#8201;una aproximación estadística ("esta foto se parece a otras
+fotos de esta zona"), nunca una identificación real de un lugar concreto.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: sexto campo <code>EDIFICIO_EMBLEMATICO</code> añadido al prompt
+estructurado de Moondream2 (<code>_STRUCTURED_QUERY</code>, junto a
+PERSONAS/AFICION/PAREJA/TEXTO_VISIBLE/MATRICULA), y nuevo módulo
+<code>app/vision/landmark_resolution.py</code>: si Moondream2 propone un nombre de
+edificio/monumento para una foto, se le pasa ESE NOMBRE (nunca la
+imagen) a Mistral, que sí tiene conocimiento general del mundo, para que
+intente resolver coordenadas reales. Si Mistral lo reconoce con
+<code>confianza &gt;= 0.75</code> (<code>MIN_CONFIDENCE_FOR_LANDMARK_OVERRIDE</code>),
+<code>report/generator.py::_apply_image_geolocation()</code> sobreescribe la
+estimación de DINOv2 para esa foto concreta con esas coordenadas,
+marcándola como representativa.</p>
+</div>
+<div class="paragraph">
+<p><strong>Justificación</strong>: Moondream2 (VQA local pequeño, sin especialización en
+reconocimiento de monumentos) solo PROPONE un nombre, nunca coordenadas&#8201;&#8212;&#8201;pedírselas directamente habría inventado precisión inexistente. El
+umbral de confianza alto es deliberado: un edificio mal resuelto sería
+PEOR que no resolverlo (afirmaría una ubicación exacta incorrecta con la
+misma confianza visual que un acierto real). Sin validar aún con fotos
+reales en producción&#8201;&#8212;&#8201;a diferencia de MATRICULA, aquí no hay
+validación posible por FORMATO de si el nombre que propone Moondream2 es
+correcto, así que conviene revisar en la práctica cuántas veces dispara
+este campo y con qué precisión antes de confiar en él más allá de un
+intento best-effort.</p>
 </div>
 </div>
 </div>
@@ -7559,7 +7659,7 @@ este proyecto:</p>
 <div id="footer">
 <div id="footer-text">
 Version 1.0<br>
-Last updated 2026-09-18 23:25:28 UTC
+Last updated 2026-09-19 00:20:58 UTC
 </div>
 </div>
 </body>
