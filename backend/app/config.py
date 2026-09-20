@@ -217,6 +217,17 @@ class Settings(BaseSettings):
     # igual, activado o no.
     enable_scene_analysis: bool = False
 
+    # Interruptor para el frente de correlación de cuentas por username
+    # (ver ADR-44/ADR-48, app/osint/username_correlation.py). Desactivado
+    # por defecto por DOS motivos: (1) un barrido completo son ~5000
+    # peticiones HTTP a sitios de terceros y tarda del orden de minutos --
+    # no todo despliegue quiere pagar ese coste en cada análisis; (2) sin
+    # esto en False por defecto, la suite de tests (que no mockea esta
+    # llamada globalmente, ver test_analysis_router.py) haría miles de
+    # peticiones de red reales en cada `pytest`. Mismo patrón que
+    # `enable_scene_analysis` justo arriba.
+    enable_username_correlation: bool = False
+
     # Tiempo máximo (segundos) que se deja a Moondream2 analizar UNA foto
     # antes de rendirse y seguir sin descripción para esa foto concreta
     # (ver `_maybe_analyze_content` en app/vision/geolocation.py). El valor

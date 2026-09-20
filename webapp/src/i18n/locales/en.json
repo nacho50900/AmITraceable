@@ -79,6 +79,10 @@
       "analyzingVerb": "Analyzing photos",
       "analyzedDone": "Photos analyzed"
     },
+    "accounts": {
+      "checkingVerb": "Checking related accounts",
+      "checkedDone": "Related accounts checked"
+    },
     "errorPrefix": "Couldn't generate the report: {{error}}",
     "cancelAnalysis": "Cancel analysis",
     "backToStart": "Back to start",
@@ -432,6 +436,11 @@
         "paidItem6": "Full technical data and EuroNCAP score",
         "closingNote": "In other words: posting a photo where the plate is readable already lets anyone check the vehicle's age and status for free, and for €8.67 also find out who owns it and where they live."
       }
+    },
+    "relatedAccounts": {
+      "title": "Related accounts found",
+      "subtitle": "Your username was checked against {{total}} other sites (existence check only -- the content of those accounts is never accessed).",
+      "noMatches": "No account with this same username was found on the sites checked."
     },
     "populationPictogram": {
       "compactAriaLabel": "Approximately {{percent}} of the population: 1 in every {{ratio}} people",

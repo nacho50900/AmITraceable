@@ -15,6 +15,8 @@ from app.models.schemas import (
     PopulationEstimate,
     PrivacyScore,
     SocialPost,
+    UsernameCorrelationSummary,
+    UsernameSiteMatch,
     VisualDescriptionCodes,
     WritingFingerprint,
 )
@@ -497,6 +499,16 @@ async def generate_report(
     # directamente), se crea aquí mismo como antes -- sin cambio de
     # comportamiento para quien no use este parámetro.
     geolocation_task: "asyncio.Task | None" = None,
+    # Tarea de correlación de cuentas por username (ver ADR-44/ADR-48,
+    # app/osint/username_correlation.py) ya lanzada en segundo plano por
+    # el llamador -- mismo patrón que geolocation_task justo arriba, y
+    # por la misma razón: puede tardar del orden de minutos (~5000
+    # sitios), así que corre en PARALELO con el resto desde el principio
+    # en vez de esperar a que todo lo demás termine. None si no se pasa
+    # (p. ej. tests que llaman a generate_report directamente) -- en ese
+    # caso `related_accounts` queda a None en el informe, sin cambio de
+    # comportamiento para quien no use este parámetro.
+    username_correlation_task: "asyncio.Task | None" = None,
 ) -> ExposureReport:
 
     posts_for_demographics = _posts_with_bio_pseudo_post(platform, posts, bio)
@@ -570,6 +582,26 @@ async def generate_report(
     async with timed_stage("recomendaciones"):
         recommendations = _build_recommendations(fingerprint, inferred_attributes, score)
 
+    # Igual comentario que "espera_geolocalizacion_fotos" más arriba: mide
+    # sobre todo la ESPERA a que termine la tarea lanzada al principio del
+    # pipeline (ver analysis_router._build_report) -- si ya terminó para
+    # cuando se llega aquí, este tramo sale casi a cero.
+    related_accounts: UsernameCorrelationSummary | None = None
+    if username_correlation_task is not None:
+        async with timed_stage("espera_correlacion_username"):
+            site_results = await username_correlation_task
+            related_accounts = UsernameCorrelationSummary(
+                total_sites_checked=len(site_results),
+                # Solo las ENCONTRADAS (exists=True) -- ver docstring de
+                # UsernameCorrelationSummary sobre por qué no tiene sentido
+                # incluir aquí los ~5000 "no existe"/"no concluyente".
+                matches=[
+                    UsernameSiteMatch(site=r.site, url=r.url, exists=r.exists)
+                    for r in site_results
+                    if r.exists is True
+                ],
+            )
+
     return ExposureReport(
         platform=platform,
         username=username,
@@ -587,6 +619,7 @@ async def generate_report(
         image_location_points=image_location_points,
         geolocation_available=geolocation_available,
         avatar_url=avatar_url,
+        related_accounts=related_accounts,
     )
 
 

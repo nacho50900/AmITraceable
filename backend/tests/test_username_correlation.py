@@ -169,6 +169,63 @@ class TestCheckUsernameAcrossSites:
         assert not protocols & {"tor", "i2p", "dns"}
 
 
+class TestProgressCallback:
+    """`progress_callback` es opcional (ver docstring del modulo) -- estos
+    tests no esperan `PROGRESS_POLL_INTERVAL_SECONDS` real (1s): con
+    `_maigret_check` resolviendo casi al instante, la tarea de sondeo se
+    cancela antes de disparar ningun evento intermedio, asi que lo que se
+    prueba aqui es el evento FINAL de cierre (100%), que se emite siempre
+    tras `await`, y que sin callback no hay ningun overhead ni error."""
+
+    @pytest.mark.asyncio
+    async def test_no_callback_means_no_progress_calls_and_no_error(self, monkeypatch):
+        async def _fake_check(**kwargs):
+            assert "query_notify" in kwargs  # se pasa igual, aunque no haya callback
+            return {}
+
+        monkeypatch.setattr("app.osint.username_correlation._maigret_check", _fake_check)
+
+        results = await check_username_across_sites(
+            "comandante", sites={"Sitio": object()}, progress_callback=None
+        )
+
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_emits_a_final_100_percent_event_after_completion(self):
+        events = []
+
+        async def _progress_callback(stage, counts):
+            events.append((stage, counts))
+
+        async def _fake_check(**kwargs):
+            return {}
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.osint.username_correlation._maigret_check", _fake_check)
+            results = await check_username_across_sites(
+                "comandante",
+                sites={"A": object(), "B": object()},
+                progress_callback=_progress_callback,
+            )
+
+        assert results == []
+        assert events  # al menos el evento final
+        stage, counts = events[-1]
+        assert counts["track"] == "correlacion_cuentas"
+        assert counts["accounts_checked"] == 2
+        assert counts["total_accounts"] == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_username_never_calls_the_progress_callback(self):
+        async def _should_not_be_called(stage, counts):
+            raise AssertionError("no deberia emitir progreso para un username vacio")
+
+        results = await check_username_across_sites("   ", progress_callback=_should_not_be_called)
+
+        assert results == []
+
+
 class TestMaigretDatabase:
     """Lee el fichero de datos real que trae `maigret` instalado -- dato
     estatico del paquete, ninguna peticion de red."""

@@ -917,6 +917,48 @@ class TestGenerateReportProgress:
         assert len(report.image_location_points) == 1
 
 
+class TestUsernameCorrelationReachesTheReport:
+    """`generate_report` recoge `username_correlation_task` (ver ADR-44/
+    ADR-48, app/osint/username_correlation.py) igual que geolocation_task
+    -- ver TestGenerateReportProgress arriba para el mismo patrón."""
+
+    @pytest.mark.asyncio
+    async def test_related_accounts_is_none_without_the_task(self, monkeypatch):
+        async def _no_images(*args, **kwargs):
+            return geolocation.GeolocationOutcome(index_available=False, results=[])
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _no_images)
+
+        report = await generate_report("reddit", "user", [_post()], _fingerprint(), [], _score())
+
+        assert report.related_accounts is None
+
+    @pytest.mark.asyncio
+    async def test_related_accounts_keeps_only_found_sites(self, monkeypatch):
+        import asyncio
+
+        from app.osint.username_correlation import UsernameSiteResult
+
+        async def _fake_check():
+            return [
+                UsernameSiteResult(site="GitHub", url="https://github.com/user", exists=True),
+                UsernameSiteResult(site="GitLab", url="https://gitlab.com/user", exists=False),
+                UsernameSiteResult(site="SitioCaido", url="https://sitiocaido.test/user", exists=None),
+                UsernameSiteResult(site="Keybase", url="https://keybase.io/user", exists=True),
+            ]
+
+        task = asyncio.create_task(_fake_check())
+        report = await generate_report(
+            "reddit", "user", [_post()], _fingerprint(), [], _score(),
+            username_correlation_task=task,
+        )
+
+        assert report.related_accounts is not None
+        assert report.related_accounts.total_sites_checked == 4
+        assert {m.site for m in report.related_accounts.matches} == {"GitHub", "Keybase"}
+        assert all(m.exists is True for m in report.related_accounts.matches)
+
+
 class TestBuildRecommendations:
     def test_high_geolocation_risk_produces_specific_recommendation(self):
         recs = _build_recommendations(_fingerprint(), [], _score(geolocation_risk=31))

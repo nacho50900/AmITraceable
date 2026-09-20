@@ -79,6 +79,10 @@
       "analyzingVerb": "Analizando fotos",
       "analyzedDone": "Fotos analizadas"
     },
+    "accounts": {
+      "checkingVerb": "Comprobando cuentas relacionadas",
+      "checkedDone": "Cuentas relacionadas comprobadas"
+    },
     "errorPrefix": "No se pudo generar el informe: {{error}}",
     "cancelAnalysis": "Cancelar análisis",
     "backToStart": "Volver al inicio",
@@ -432,6 +436,11 @@
         "paidItem6": "Datos técnicos completos y puntuación EuroNCAP",
         "closingNote": "Es decir: publicar una foto donde se lea la matrícula ya permite a cualquiera consultar gratis la antigüedad y el estado del vehículo, y por 8,67 € acceder también a quién es el titular y dónde vive."
       }
+    },
+    "relatedAccounts": {
+      "title": "Cuentas relacionadas encontradas",
+      "subtitle": "Se comprobó si tu nombre de usuario existe en otros {{total}} sitios (comprobación de existencia únicamente, nunca se accede al contenido de esas cuentas).",
+      "noMatches": "No se encontró ninguna cuenta con este mismo nombre de usuario en los sitios comprobados."
     },
     "populationPictogram": {
       "compactAriaLabel": "Aproximadamente {{percent}} de la población: 1 de cada {{ratio}} personas",

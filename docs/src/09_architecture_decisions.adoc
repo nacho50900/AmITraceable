@@ -737,9 +737,8 @@ consistente: se consume una librería de terceros con el alcance más
 estrecho posible, no se copia ni se amplía su parte de "dossier";
 (-) un barrido completo son varios miles de peticiones HTTP a sitios de
 terceros y tarda del orden de minutos incluso con concurrencia alta --
-aceptado por ahora (el endpoint es síncrono/bloqueante), con streaming
-de progreso (mismo patrón que ADR-11) como trabajo futuro si se integra
-en el frontend; (-) sin `cloudflare_bypass` activado (decisión
+la integración real en el pipeline y el streaming de progreso se
+resuelven en ADR-48, no aquí; (-) sin `cloudflare_bypass` activado (decisión
 deliberada, no se monta un servicio de bypass), los sitios protegidos
 por Cloudflare devuelven `UNKNOWN` en vez de un resultado concluyente;
 (-) la precisión de la detección depende por completo del mantenimiento
@@ -747,6 +746,68 @@ de `maigret` aguas arriba -- si esa base de datos queda desactualizada
 o un sitio cambia su HTML sin que el proyecto lo corrija, este módulo
 hereda ese desfase sin poder solucionarlo por sí solo (ver fila
 correspondiente en `11_technical_risks.adoc`).
+
+==== ADR-48: Integración de la correlación de username en el pipeline principal -- tarea en paralelo, progreso en streaming, `related_accounts` en el informe, detrás de un feature flag
+
+*Contexto*: ADR-44 dejó `check_username_across_sites()` implementada y
+accesible vía `POST /api/username-correlation`, pero como endpoint
+standalone -- sin conexión con la pantalla de carga ni con el informe
+final. Sin eso, la funcionalidad no aportaba nada visible: el usuario no
+tenía forma de ver, dentro del flujo normal de análisis, qué cuentas se
+habían encontrado.
+
+*Decisión*: se integra como una tarea más lanzada en paralelo dentro de
+`analysis_router._build_report`, con el mismo patrón que
+`geolocation_task` (ver ADR-11): se crea con `asyncio.create_task` al
+principio del pipeline -- funciona sobre `profile.username`, así que a
+diferencia de `geolocation_task` no depende de la plataforma ni de que
+haya fotos -- y se recoge más tarde dentro de `generate_report`
+(parámetro `username_correlation_task`), que construye
+`ExposureReport.related_accounts` (`UsernameCorrelationSummary`) con
+SOLO los sitios con `exists=True`: de los ~5000 comprobados, la mayoría
+son "no existe" y no aportan nada que enseñar en un informe.
+
+Progreso en streaming: `check_username_across_sites()` gana un parámetro
+`progress_callback` opcional. Como `maigret.checking.maigret()` no
+expone un callback async por sitio comprobado sino un objeto
+`query_notify` cuyo `.update()` se llama de forma SÍNCRONA una vez por
+sitio, se usa un `query_notify` propio (`_CountingQueryNotify`) que solo
+cuenta, sondeado cada `PROGRESS_POLL_INTERVAL_SECONDS` (1s) por una tarea
+de fondo que emite el evento real -- evita tanto tener que await-ear
+código síncrono como inundar el SSE con ~5000 eventos individuales. En
+el frontend, `Dashboard.tsx` gana una tercera línea de progreso
+independiente (`track: "correlacion_cuentas"`), generalizando
+`formatPhotosLabel`/`isTrackDone` (antes solo para las dos líneas de
+fotos) para aceptar las claves de contador como parámetro en vez de
+duplicar la función una tercera vez. El informe final gana una sección
+nueva (`RelatedAccountsList.tsx`), que no se pinta si
+`related_accounts` es `null`.
+
+Feature flag: `settings.enable_username_correlation` (`False` por
+defecto). Dos motivos, no solo uno: (1) coste real -- no todo despliegue
+quiere pagar varios minutos y miles de peticiones HTTP de terceros en
+cada análisis; (2) sin esto en `False` por defecto, la suite de tests
+lanzaría esas ~5000 peticiones reales en cada `pytest` -- mismo patrón
+que `enable_scene_analysis`.
+
+*Consecuencias*: (+) la funcionalidad por fin es visible de principio a
+fin -- pantalla de carga y informe -- en vez de un endpoint suelto sin
+usar; (+) reutiliza el mismo patrón de tarea-en-paralelo y de
+progress_callback que ya existía para geolocalización, sin introducir un
+mecanismo nuevo; (+) `related_accounts` filtrado a solo "encontradas"
+mantiene el informe legible en vez de una lista de miles de negativos;
+(-) al no depender de la plataforma, esta tarea se lanza en TODO
+análisis (reddit e instagram) cuando el flag está activo, a diferencia
+de `geolocation_task` que solo corre para instagram -- coste aceptado
+conscientemente, ya que el username a comprobar existe siempre,
+independientemente de la plataforma; (-) el sondeo de progreso cada 1s
+significa que el evento intermedio más reciente puede tener hasta un
+segundo de retraso respecto al conteo real -- aceptable para una barra
+de progreso, no para nada que necesite precisión; (-) activar el flag en
+producción sin más cambios implica que CADA análisis paga el coste
+completo de ADR-44 (varios minutos, miles de peticiones) -- no hay
+todavía una opción de "análisis rápido sin correlación de cuentas" a
+nivel de producto, solo el flag de todo-o-nada a nivel de servidor.
 
 [[adr-cat-modelo-de-datos-y-dominio]]
 === Modelo de datos y dominio

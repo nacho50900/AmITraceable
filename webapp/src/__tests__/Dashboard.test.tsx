@@ -206,6 +206,47 @@ describe('Dashboard', () => {
     });
   });
 
+  test('correlación de cuentas (track "correlacion_cuentas"): su propia línea, con su propio contador', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([
+      { done: false, stage: 'reading_posts' },
+      {
+        done: false,
+        stage: 'Comprobando cuentas relacionadas...',
+        accounts_checked: 120,
+        total_accounts: 5185,
+        track: 'correlacion_cuentas',
+      },
+      {
+        done: false,
+        stage: 'Comprobando cuentas relacionadas...',
+        accounts_checked: 5185,
+        total_accounts: 5185,
+        track: 'correlacion_cuentas',
+      },
+    ]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Cuentas relacionadas comprobadas (5185/5185)')).toBeInTheDocument();
+    });
+  });
+
+  test('la línea de cuentas relacionadas no aparece si nunca llega su track (funcionalidad desactivada en el backend)', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([
+      { done: false, stage: 'reading_posts' },
+      { done: false, stage: 'Analizando fotos...', photos_analyzed: 1, total_photos: 1, track: 'fotos' },
+    ]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Fotos analizadas (1/1)')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/[Cc]uentas relacionadas/)).not.toBeInTheDocument();
+  });
+
+
   test('todos los spinners visibles giran sincronizados (mismo transform en todo momento)', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
     mockStream([
@@ -446,6 +487,42 @@ describe('Dashboard', () => {
       expect(screen.getAllByText('Qué se puede inferir sobre ti')).toHaveLength(1);
     });
   });
+
+  test('la sección de cuentas relacionadas no aparece cuando related_accounts es null (funcionalidad desactivada en el backend)', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([{ done: true, report: makeExposureReport({ related_accounts: null }) }]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Qué se puede inferir sobre ti')).toHaveLength(1);
+    });
+    expect(screen.queryByText('Cuentas relacionadas encontradas')).not.toBeInTheDocument();
+  });
+
+  test('la sección de cuentas relacionadas aparece con los sitios encontrados cuando related_accounts viene informado', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([
+      {
+        done: true,
+        report: makeExposureReport({
+          related_accounts: {
+            total_sites_checked: 5185,
+            matches: [{ site: 'GitHub', url: 'https://github.com/usuario_prueba', exists: true }],
+          },
+        }),
+      },
+    ]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Cuentas relacionadas encontradas')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('link', { name: 'GitHub' })).toHaveAttribute(
+      'href',
+      'https://github.com/usuario_prueba',
+    );
+  });
+
 
   test('avisa de confianza insuficiente cuando hay fotos pero ninguna dio una ubicación de residencia fiable', async () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });

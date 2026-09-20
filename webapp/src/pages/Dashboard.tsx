@@ -9,6 +9,7 @@ import LanguageSwitcher from '../components/LanguageSwitcher';
 import LocationMap from '../components/LocationMap';
 import PopulationNarrowingTable from '../components/PopulationNarrowingTable';
 import InferredAttributesList from '../components/InferredAttributesList';
+import RelatedAccountsList from '../components/RelatedAccountsList';
 import ScoreBar from '../components/ScoreBar';
 import { ManualTraitsSelector } from '../components/ManualTraitsSelector';
 import type { ExposureReport, Platform, ManualAttribute } from '../types';
@@ -21,26 +22,49 @@ function readPlatform(): Platform {
 // Duración del ciclo de rotación del spinner, en ms.
 const SPINNER_PERIOD_MS = 800;
 
-// Las líneas de fotos son las únicas con contador -- se muestran siempre
-// igual tanto si siguen en curso ("Analizando fotos (3/10)...") como cuando
-// ya terminaron ("Fotos analizadas (10/10)"), a partir de photos_analyzed/
-// total_photos (ver app/vision/geolocation.py). Hay DOS líneas de fotos
-// independientes -- geolocalización (DINOv2) y análisis de contenido
-// (Moondream2), dos modelos y dos propósitos sobre la misma foto -- así que
-// se parametriza el verbo/sustantivo (ya traducidos por el llamador) en vez
-// de duplicar la función.
+// Las líneas de fotos y la de cuentas relacionadas comparten el mismo
+// patrón de contador -- se muestran siempre igual tanto si siguen en curso
+// ("Analizando fotos (3/10)...") como cuando ya terminaron ("Fotos
+// analizadas (10/10)"), a partir de dos claves numéricas del evento SSE
+// (p.ej. photos_analyzed/total_photos para fotos, ver
+// app/vision/geolocation.py; accounts_checked/total_accounts para cuentas,
+// ver app/osint/username_correlation.py). Hay TRES líneas independientes
+// con este patrón -- geolocalización (DINOv2), análisis de contenido
+// (Moondream2) y correlación de cuentas por username (Maigret) -- así que
+// se parametrizan tanto el verbo/sustantivo como las claves del contador
+// en vez de duplicar la función tres veces.
+function formatCountLabel(
+  counts: Record<string, unknown>,
+  done: boolean,
+  verb: string,
+  doneLabel: string,
+  analyzedKey: string,
+  totalKey: string,
+): string {
+  const analyzed = counts[analyzedKey];
+  const total = counts[totalKey];
+  if (typeof analyzed !== 'number' || typeof total !== 'number') {
+    return done ? doneLabel : `${verb}...`;
+  }
+  return done ? `${doneLabel} (${analyzed}/${total})` : `${verb} (${analyzed}/${total})...`;
+}
+
 function formatPhotosLabel(
   counts: Record<string, unknown>,
   done: boolean,
   verb: string,
   doneLabel: string,
 ): string {
-  const analyzed = counts.photos_analyzed;
-  const total = counts.total_photos;
-  if (typeof analyzed !== 'number' || typeof total !== 'number') {
-    return done ? doneLabel : `${verb}...`;
-  }
-  return done ? `${doneLabel} (${analyzed}/${total})` : `${verb} (${analyzed}/${total})...`;
+  return formatCountLabel(counts, done, verb, doneLabel, 'photos_analyzed', 'total_photos');
+}
+
+function formatAccountsLabel(
+  counts: Record<string, unknown>,
+  done: boolean,
+  verb: string,
+  doneLabel: string,
+): string {
+  return formatCountLabel(counts, done, verb, doneLabel, 'accounts_checked', 'total_accounts');
 }
 
 function StatusIcon({ done }: { done: boolean }) {
@@ -58,13 +82,21 @@ function StatusIcon({ done }: { done: boolean }) {
   );
 }
 
-// Progreso de una pista de fotos (geolocalización o análisis de contenido,
-// ver docstring del estado más abajo) como "terminada": ambos contadores son
-// números válidos y ya se ha llegado al total.
-function isTrackDone(counts: Record<string, unknown>): boolean {
-  const analyzed = counts.photos_analyzed;
-  const total = counts.total_photos;
+// Progreso de una pista con contador (fotos o cuentas, ver
+// formatCountLabel arriba) como "terminada": ambos contadores son números
+// válidos y ya se ha llegado al total.
+function isCountTrackDone(counts: Record<string, unknown>, analyzedKey: string, totalKey: string): boolean {
+  const analyzed = counts[analyzedKey];
+  const total = counts[totalKey];
   return typeof analyzed === 'number' && typeof total === 'number' && analyzed >= total && total > 0;
+}
+
+function isTrackDone(counts: Record<string, unknown>): boolean {
+  return isCountTrackDone(counts, 'photos_analyzed', 'total_photos');
+}
+
+function isAccountsTrackDone(counts: Record<string, unknown>): boolean {
+  return isCountTrackDone(counts, 'accounts_checked', 'total_accounts');
 }
 
 const Dashboard: React.FC = () => {
@@ -104,6 +136,15 @@ const Dashboard: React.FC = () => {
   const [photosDone, setPhotosDone] = useState(false);
   const [geoCounts, setGeoCounts] = useState<Record<string, unknown> | null>(null);
   const [geoDone, setGeoDone] = useState(false);
+  // Tercera pista independiente, mismo criterio que fotos/geolocalización
+  // (ver comentario de más arriba): correlación de cuentas por username
+  // (ver ADR-44/ADR-48, app/osint/username_correlation.py), track
+  // "correlacion_cuentas" en el evento SSE. Solo aparece si el backend
+  // tiene la funcionalidad activada (settings.enable_username_correlation)
+  // -- si no, este evento nunca llega y accountsCounts se queda en null,
+  // así que la línea correspondiente ni se pinta (ver JSX más abajo).
+  const [accountsCounts, setAccountsCounts] = useState<Record<string, unknown> | null>(null);
+  const [accountsDone, setAccountsDone] = useState(false);
   const navigate = useNavigate();
   const stopStreamRef = useRef<(() => void) | null>(null);
   // Ref auxiliar para poder leer la fase "actual" dentro del callback del
@@ -169,6 +210,12 @@ const Dashboard: React.FC = () => {
           if (event.track === 'geolocalizacion') {
             setGeoCounts(counts);
             setGeoDone(isTrackDone(counts));
+            return;
+          }
+
+          if (event.track === 'correlacion_cuentas') {
+            setAccountsCounts(counts);
+            setAccountsDone(isAccountsTrackDone(counts));
             return;
           }
 
@@ -327,6 +374,17 @@ const Dashboard: React.FC = () => {
                   )}
                 </li>
               )}
+              {accountsCounts && (
+                <li key="accounts-track" className={accountsDone ? 'progress-done' : 'progress-current'}>
+                  <StatusIcon done={accountsDone} />
+                  {formatAccountsLabel(
+                    accountsCounts,
+                    accountsDone,
+                    t('dashboard.accounts.checkingVerb'),
+                    t('dashboard.accounts.checkedDone'),
+                  )}
+                </li>
+              )}
             </ul>
           </div>
           <div className="progress-actions">
@@ -435,6 +493,13 @@ const Dashboard: React.FC = () => {
         />
         <InferredAttributesList attributes={report.inferred_attributes} />
       </section>
+
+      {report.related_accounts !== null && (
+        <section className="card">
+          <h2>{t('components.relatedAccounts.title')}</h2>
+          <RelatedAccountsList relatedAccounts={report.related_accounts} />
+        </section>
+      )}
 
       <section className="card">
         <h2>{t('dashboard.estimatedLocations')}</h2>

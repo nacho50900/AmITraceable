@@ -236,6 +236,32 @@ class ImageLocationPoint(BaseModel):
     visual_description_codes: VisualDescriptionCodes | None = None
 
 
+class UsernameSiteMatch(BaseModel):
+    """Resultado de comprobar el username en UN sitio (ver
+    app/osint/username_correlation.py::UsernameSiteResult -- mismos campos,
+    version Pydantic para poder devolverse en JSON)."""
+
+    site: str
+    url: str
+    # None = no se pudo determinar (timeout, bloqueo anti-bot, codigo de
+    # estado inesperado) -- distinto de False ("se comprobo y no existe").
+    exists: bool | None
+
+
+class UsernameCorrelationSummary(BaseModel):
+    """Resumen embebido en ExposureReport.related_accounts (ver ADR-44 y
+    ADR-48 en 09_architecture_decisions.adoc). `matches` SOLO incluye los
+    sitios con `exists=True` -- de los ~5000 sitios comprobados, la
+    inmensa mayoria son "no existe" y no aportan nada que mostrar; el
+    informe no es el sitio para una lista de 5000 negativos. Si se quiere
+    el detalle completo (incluidos los `None` no concluyentes), ese es el
+    trabajo de `POST /api/username-correlation` (app/osint_router.py),
+    que sigue existiendo aparte para uso independiente/interactivo."""
+
+    total_sites_checked: int
+    matches: list[UsernameSiteMatch]
+
+
 class ExposureReport(BaseModel):
     platform: str
     username: str
@@ -279,6 +305,12 @@ class ExposureReport(BaseModel):
     # expone), para identificar visualmente de quién es el informe en el
     # título del dashboard. Solo la URL -- ver nota en SocialProfile.
     avatar_url: str | None = None
+    # Cuentas con el MISMO username encontradas en otros sitios (ver
+    # ADR-44/ADR-48, app/osint/username_correlation.py) -- solo existencia
+    # de cuenta, nunca contenido de esas cuentas. None si la comprobación
+    # no llegó a ejecutarse (p. ej. tests que llaman a generate_report
+    # directamente sin pasar username_correlation_task).
+    related_accounts: UsernameCorrelationSummary | None = None
 
 
 class TranslateDescriptionsRequest(BaseModel):
@@ -306,18 +338,6 @@ class UsernameCorrelationRequest(BaseModel):
     """Cuerpo de `POST /api/username-correlation` (ver app/osint_router.py)."""
 
     username: str
-
-
-class UsernameSiteMatch(BaseModel):
-    """Resultado de comprobar `username` en UN sitio (ver
-    app/osint/username_correlation.py::UsernameSiteResult -- mismos campos,
-    version Pydantic para poder devolverse en la respuesta HTTP)."""
-
-    site: str
-    url: str
-    # None = no se pudo determinar (timeout, bloqueo anti-bot, codigo de
-    # estado inesperado) -- distinto de False ("se comprobo y no existe").
-    exists: bool | None
 
 
 class UsernameCorrelationReport(BaseModel):

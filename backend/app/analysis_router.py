@@ -114,16 +114,37 @@ async def _build_report(
                 profile.posts, avatar_url=profile.avatar_url, progress_callback=progress_callback
             )
         )
-        # `asyncio.create_task` solo PROGRAMA la tarea -- no le cede el
-        # control de verdad. El resto de este bloque (build_fingerprint,
-        # infer_attributes, compute_score) es código SÍNCRONO que no hace
-        # ningún `await` real, así que sin este `sleep(0)` el event loop no
-        # tendría ninguna oportunidad de arrancar la tarea de fotos hasta
-        # que este bloque síncrono termine del todo -- el análisis de
-        # imágenes "empezaría en paralelo" solo de nombre, no en la
-        # práctica. Este yield explícito le da a la tarea su primer turno
-        # real (arranca la descarga de la primera foto) antes de seguir.
-        await asyncio.sleep(0)
+
+    # Igual criterio que geolocation_task arriba, pero SIN depender de la
+    # plataforma (funciona sobre cualquier profile.username) ni de fotos:
+    # comprobar el username en ~5000 sitios (ver ADR-44/ADR-48,
+    # app/osint/username_correlation.py) tarda del orden de minutos, así
+    # que se lanza YA, en paralelo con el resto del pipeline, en vez de
+    # esperar a que todo lo demás termine para empezar. Se recoge más
+    # adelante dentro de generate_report (parámetro
+    # `username_correlation_task`), igual que geolocation_task.
+    #
+    # Detrás de `settings.enable_username_correlation` (False por
+    # defecto, ver app/config.py) -- ni siquiera se importa el módulo si
+    # está desactivado, mismo criterio que `enable_scene_analysis`.
+    username_correlation_task: asyncio.Task | None = None
+    if settings.enable_username_correlation:
+        from app.osint.username_correlation import check_username_across_sites
+
+        username_correlation_task = asyncio.create_task(
+            check_username_across_sites(profile.username, progress_callback=progress_callback)
+        )
+
+    # `asyncio.create_task` solo PROGRAMA las tareas de arriba -- no les
+    # cede el control de verdad. El resto de este bloque (build_fingerprint,
+    # infer_attributes, compute_score) es código SÍNCRONO que no hace
+    # ningún `await` real, así que sin este `sleep(0)` el event loop no
+    # tendría ninguna oportunidad de arrancarlas hasta que este bloque
+    # síncrono termine del todo -- "empezarían en paralelo" solo de
+    # nombre, no en la práctica. Este yield explícito les da su primer
+    # turno real (arranca la descarga de la primera foto / la primera
+    # petición HTTP de la comprobación de cuentas) antes de seguir.
+    await asyncio.sleep(0)
 
     async with run_with_timer() as timer:
         if fetch_seconds is not None:
@@ -155,6 +176,7 @@ async def _build_report(
             full_name=profile.full_name,
             avatar_url=profile.avatar_url,
             geolocation_task=geolocation_task,
+            username_correlation_task=username_correlation_task,
         )
 
         total_seconds = time.monotonic() - pipeline_start + (fetch_seconds or 0.0)

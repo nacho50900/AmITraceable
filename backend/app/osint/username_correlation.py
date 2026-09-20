@@ -53,6 +53,21 @@ del paquete) -- NO se vendoriza una copia propia. Fijar la version exacta
 de `maigret` en requirements.txt (ver ese fichero) ya congela que base de
 datos se usa, igual que fijariamos la version de cualquier otra
 dependencia; actualizarla es tan simple como subir esa version.
+
+INTEGRACION EN LA PANTALLA DE CARGA Y EN EL INFORME (ver ADR-48): esta
+comprobacion se lanza como una tarea mas en paralelo con el resto del
+pipeline (analysis_router._build_report, mismo patron que
+`geolocation_task`), y su resultado (solo las cuentas ENCONTRADAS,
+`exists=True`) se incluye en `ExposureReport.related_accounts` (ver
+schemas.py::UsernameCorrelationSummary). El progreso en vivo usa
+`progress_callback` (ver app/progress.py), igual que el resto del
+pipeline -- con una salvedad: `maigret.checking.maigret()` no expone un
+callback async por sitio comprobado, sino un objeto `query_notify` cuyo
+`.update()` se llama de forma SINCRONA una vez por sitio. Por eso aqui se
+usa un `query_notify` propio que solo lleva la cuenta (sin async), y una
+tarea de fondo separada que la sondea cada segundo y emite el progreso
+real -- evita tanto tener que await-ear codigo sincrono como inundar el
+stream SSE con ~5000 eventos individuales.
 """
 import asyncio
 import logging
@@ -65,10 +80,18 @@ from maigret.checking import maigret as _maigret_check
 from maigret.result import MaigretCheckStatus
 from maigret.sites import MaigretDatabase
 
+from app.progress import ProgressCallback, emit_progress
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT_SECONDS = 10
 DEFAULT_MAX_CONNECTIONS = 40
+
+# Cada cuanto se sondea el contador de sitios ya comprobados para emitir un
+# evento de progreso -- ver docstring del modulo. No tiene sentido bajar
+# esto mucho: el frontend solo pinta "X/Y sitios comprobados", no hace
+# falta granularidad de sub-segundo para que se perciba en marcha.
+PROGRESS_POLL_INTERVAL_SECONDS = 1.0
 
 # Protocolos que no son HTTP normal (unos pocos sitios .onion/.i2p o
 # comprobaciones DNS) -- fuera de alcance para este TFG, igual que en la
@@ -120,11 +143,41 @@ class UsernameSiteResult:
     exists: bool | None
 
 
+class _CountingQueryNotify:
+    """Objeto duck-typed compatible con el `query_notify` de
+    `maigret.checking.maigret()` -- esa funcion llama a `.start()` una vez
+    al principio, `.update()` una vez por CADA sitio comprobado (de forma
+    sincrona, nunca `await`), y `.finish()`/`.warning()`/`.enrich()` en
+    otros puntos. Aqui no se imprime nada (a diferencia de su
+    `QueryNotifyPrint` por defecto) -- solo interesa CONTAR cuantos han
+    terminado; el resultado real se lee de lo que devuelve `maigret()`,
+    no de este objeto."""
+
+    def __init__(self) -> None:
+        self.checked = 0
+
+    def start(self, *args, **kwargs) -> None:
+        pass
+
+    def update(self, *args, **kwargs) -> None:
+        self.checked += 1
+
+    def finish(self, *args, **kwargs) -> None:
+        pass
+
+    def warning(self, *args, **kwargs) -> None:
+        pass
+
+    def enrich(self, *args, **kwargs) -> None:
+        pass
+
+
 async def check_username_across_sites(
     username: str,
     sites: dict | None = None,
     max_connections: int = DEFAULT_MAX_CONNECTIONS,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    progress_callback: ProgressCallback | None = None,
 ) -> list[UsernameSiteResult]:
     """Comprueba `username` contra `sites` (dict nombre -> MaigretSite; por
     defecto, la base de datos completa de Maigret tras excluir tor/i2p/dns,
@@ -136,28 +189,80 @@ async def check_username_across_sites(
     usernames), solo existencia. Ver docstring del modulo para el porque
     esto tambien excluye la recursion sin necesidad de una flag aparte.
 
+    `progress_callback` (ver app/progress.py) es opcional -- si se pasa,
+    se emite un evento `track="correlacion_cuentas"` con
+    `accounts_checked`/`total_accounts` aproximadamente cada
+    PROGRESS_POLL_INTERVAL_SECONDS, mas uno final al terminar. Si se omite
+    (p. ej. `POST /api/username-correlation`, uso independiente), el
+    comportamiento es exactamente el de antes: sin overhead de polling.
+
     RENDIMIENTO: con la base completa, un barrido son varios miles de
     peticiones HTTP y tarda del orden de minutos incluso con
     `max_connections` alto -- mismo aviso que en la version anterior de
     este modulo, ver docstring de app/osint_router.py.
 
-    Username vacio o solo espacios -> lista vacia, sin llamar a Maigret."""
+    Username vacio o solo espacios -> lista vacia, sin llamar a Maigret ni
+    al `progress_callback`."""
     username = username.strip()
     if not username:
         return []
 
     site_dict = _default_site_dict() if sites is None else sites
+    total_sites = len(site_dict)
 
-    raw_results = await _maigret_check(
-        username=username,
-        site_dict=site_dict,
-        logger=logger,
-        timeout=timeout,
-        is_parsing_enabled=False,
-        is_enrich_enabled=False,
-        max_connections=max_connections,
-        no_progressbar=True,
-    )
+    notifier = _CountingQueryNotify()
+    progress_task: asyncio.Task | None = None
+
+    async def _poll_progress() -> None:
+        last_reported = -1
+        while True:
+            await asyncio.sleep(PROGRESS_POLL_INTERVAL_SECONDS)
+            if notifier.checked != last_reported:
+                last_reported = notifier.checked
+                await emit_progress(
+                    progress_callback,
+                    "Comprobando cuentas relacionadas...",
+                    accounts_checked=notifier.checked,
+                    total_accounts=total_sites,
+                    track="correlacion_cuentas",
+                )
+
+    if progress_callback is not None and total_sites:
+        progress_task = asyncio.create_task(_poll_progress())
+
+    try:
+        raw_results = await _maigret_check(
+            username=username,
+            site_dict=site_dict,
+            logger=logger,
+            query_notify=notifier,
+            timeout=timeout,
+            is_parsing_enabled=False,
+            is_enrich_enabled=False,
+            max_connections=max_connections,
+            no_progressbar=True,
+        )
+    finally:
+        if progress_task is not None:
+            progress_task.cancel()
+            try:
+                await progress_task
+            except asyncio.CancelledError:
+                pass
+
+    if progress_callback is not None and total_sites:
+        # Evento final con el total exacto -- por si el ultimo tramo de
+        # comprobaciones termino entre dos sondeos y se quedo sin
+        # reportar (el poll de arriba solo corre CADA
+        # PROGRESS_POLL_INTERVAL_SECONDS, no justo al terminar), o si con
+        # 0 sitios de margen el bucle nunca llego a ejecutarse una vez.
+        await emit_progress(
+            progress_callback,
+            "Comprobando cuentas relacionadas...",
+            accounts_checked=total_sites,
+            total_accounts=total_sites,
+            track="correlacion_cuentas",
+        )
 
     results: list[UsernameSiteResult] = []
     for name, site_result in raw_results.items():
@@ -173,3 +278,4 @@ async def check_username_across_sites(
             )
         )
     return results
+

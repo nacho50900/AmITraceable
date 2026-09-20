@@ -15,8 +15,10 @@ from fastapi.testclient import TestClient
 
 from app import analysis_router
 from app.ai_analysis import AiAnalysisUnavailable
+from app.config import settings
 from app.main import app
 from app.models.schemas import ExposureReport, PrivacyScore, SocialPost, SocialProfile, WritingFingerprint
+from app.osint import username_correlation
 from app.vision import geolocation
 
 client = TestClient(app, base_url="https://testserver")
@@ -456,6 +458,100 @@ class TestGeolocationRunsConcurrentlyFromTheStart:
         await analysis_router._build_report(profile)
 
         assert received["avatar_url"] == "https://cdn.fake/avatar.jpg"
+
+
+class TestUsernameCorrelationIntegration:
+    """`_build_report` lanza la comprobación de cuentas (ver ADR-44/ADR-48,
+    app/osint/username_correlation.py) en paralelo, detrás de
+    `settings.enable_username_correlation` (False por defecto -- ver
+    app/config.py, motivo: sin esto, esta clase entera haría ~5000
+    peticiones de red reales en cada `pytest`)."""
+
+    @pytest.mark.asyncio
+    async def test_disabled_by_default_never_calls_the_checker(self, monkeypatch, patch_spacy_model):
+        async def _should_not_be_called(*args, **kwargs):
+            raise AssertionError("no deberia llamarse al checker con la funcionalidad desactivada")
+
+        monkeypatch.setattr(username_correlation, "check_username_across_sites", _should_not_be_called)
+        monkeypatch.setattr(settings, "enable_username_correlation", False)
+
+        profile = SocialProfile(platform="reddit", username="fake_user", posts=_make_posts())
+
+        report = await analysis_router._build_report(profile)
+
+        assert report.related_accounts is None
+
+    @pytest.mark.asyncio
+    async def test_enabled_calls_the_checker_with_the_profile_username(self, monkeypatch, patch_spacy_model):
+        received = {}
+
+        async def _fake_check(username, progress_callback=None):
+            received["username"] = username
+            return []
+
+        monkeypatch.setattr(username_correlation, "check_username_across_sites", _fake_check)
+        monkeypatch.setattr(settings, "enable_username_correlation", True)
+
+        profile = SocialProfile(platform="reddit", username="fake_user", posts=_make_posts())
+
+        await analysis_router._build_report(profile)
+
+        assert received["username"] == "fake_user"
+
+    @pytest.mark.asyncio
+    async def test_report_includes_only_found_accounts(self, monkeypatch, patch_spacy_model):
+        async def _fake_check(username, progress_callback=None):
+            return [
+                username_correlation.UsernameSiteResult(
+                    site="GitHub", url="https://github.com/fake_user", exists=True
+                ),
+                username_correlation.UsernameSiteResult(
+                    site="GitLab", url="https://gitlab.com/fake_user", exists=False
+                ),
+                username_correlation.UsernameSiteResult(
+                    site="SitioCaido", url="https://sitiocaido.test/fake_user", exists=None
+                ),
+            ]
+
+        monkeypatch.setattr(username_correlation, "check_username_across_sites", _fake_check)
+        monkeypatch.setattr(settings, "enable_username_correlation", True)
+
+        profile = SocialProfile(platform="reddit", username="fake_user", posts=_make_posts())
+
+        report = await analysis_router._build_report(profile)
+
+        assert report.related_accounts is not None
+        assert report.related_accounts.total_sites_checked == 3
+        assert [m.site for m in report.related_accounts.matches] == ["GitHub"]
+
+    @pytest.mark.asyncio
+    async def test_runs_concurrently_with_the_rest_of_the_pipeline(self, monkeypatch, patch_spacy_model):
+        """Mismo criterio que
+        TestGeolocationRunsConcurrentlyFromTheStart::test_geolocation_task_gets_first_turn_before_sync_pipeline_work
+        -- la tarea debe arrancar de verdad ANTES de que termine el
+        trabajo síncrono del resto del pipeline, no solo "crearse"."""
+        order = []
+
+        async def _fake_check(username, progress_callback=None):
+            order.append("username_correlation:started")
+            return []
+
+        def _tracking_build_fingerprint(posts):
+            order.append("fingerprint:done")
+            return WritingFingerprint(
+                avg_sentence_length=0, vocabulary_richness=0, emoji_usage_rate=0,
+                avg_posts_per_hour={}, top_groups=[], top_keywords=[], detected_language="es",
+            )
+
+        monkeypatch.setattr(username_correlation, "check_username_across_sites", _fake_check)
+        monkeypatch.setattr(settings, "enable_username_correlation", True)
+        monkeypatch.setattr(analysis_router, "build_fingerprint", _tracking_build_fingerprint)
+
+        profile = SocialProfile(platform="reddit", username="fake_user", posts=_make_posts())
+
+        await analysis_router._build_report(profile)
+
+        assert order == ["username_correlation:started", "fingerprint:done"]
 
 
 class TestRecalculateEndpoint:

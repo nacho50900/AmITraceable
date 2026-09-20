@@ -997,12 +997,22 @@ class TestEstimateLocationsForPosts:
     async def test_multiple_photos_are_analyzed_concurrently_not_one_at_a_time(self, monkeypatch, respx_mock):
         """Regresión: con `Settings.photo_analysis_concurrency >= 2`, la foto
         2 debe empezar a analizarse con los modelos SIN esperar a que la
-        foto 1 termine del todo -- si no, el tiempo total sería la suma de
-        ambas (procesamiento estrictamente secuencial), en vez de
-        aproximarse al tiempo de la más lenta (procesamiento solapado).
-        Se simula con dos pasadas de modelo bloqueantes de la misma
-        duración y se comprueba que el tiempo total es sensiblemente menor
-        que la suma de las dos, no solo mayor que la de una sola."""
+        foto 1 termine del todo -- si no, las dos llamadas bloqueantes se
+        ejecutarían una detrás de otra (secuencial), en vez de solaparse en
+        el tiempo (concurrente).
+
+        Se comprueba el SOLAPAMIENTO REAL entre los intervalos [inicio,
+        fin] de las dos llamadas -- NO un umbral de tiempo total transcurrido
+        (ver historial de este test: `assert elapsed < _SLEEP * 1.5` daba
+        falsos negativos repetidos en Windows, con overhead real medido de
+        hasta ~1s solo por arrancar el `ThreadPoolExecutor` por defecto de
+        `asyncio.to_thread` -- 5x el propio `_SLEEP` simulado, muy por
+        encima de cualquier margen razonable). Comparar el solapamiento de
+        intervalos es la propiedad que en realidad importa (¿se solapan
+        las dos ejecuciones?) y es inmune a cuánto tarde ese arranque en
+        una máquina/SO concretos, a diferencia de un tiempo total
+        absoluto."""
+        import threading
         import time
         import httpx
 
@@ -1025,24 +1035,33 @@ class TestEstimateLocationsForPosts:
         respx_mock.get("https://cdn.fake/2.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
 
         _SLEEP = 0.2
+        intervals: list[tuple[float, float]] = []
+        intervals_lock = threading.Lock()
 
         def _blocking_estimate(image, k=15):
+            call_start = time.monotonic()
             time.sleep(_SLEEP)  # bloqueante de verdad -- simula la pasada del modelo
+            call_end = time.monotonic()
+            with intervals_lock:
+                intervals.append((call_start, call_end))
             return geolocation.ImageLocationEstimate(
                 province="Madrid", confidence=0.9, k_neighbors=15, mean_similarity=0.8
             )
 
         monkeypatch.setattr(geolocation, "estimate_location_from_image", _blocking_estimate)
 
-        start = time.monotonic()
         outcome = await geolocation.estimate_locations_for_posts(posts)
-        elapsed = time.monotonic() - start
 
         assert len(outcome.results) == 2
-        # Secuencial habría tardado >= 2 * _SLEEP; solapado, sensiblemente
-        # menos -- el margen (1.5x en vez de 2x) deja hueco para el propio
-        # overhead de hilos/red sin que el test sea inestable.
-        assert elapsed < _SLEEP * 1.5
+        assert len(intervals) == 2
+        (start_a, end_a), (start_b, end_b) = intervals
+        # Solapan si el inicio más tardío queda por delante del final más
+        # temprano -- cierto en cualquier orden de finalización, y no
+        # depende de cuánto haya tardado cada llamada en arrancar.
+        assert max(start_a, start_b) < min(end_a, end_b), (
+            f"Las dos llamadas no se solaparon en el tiempo (ejecución secuencial, "
+            f"no concurrente): {intervals}"
+        )
 
     @pytest.mark.asyncio
     async def test_dinov2_of_next_photo_does_not_wait_for_moondream2_of_previous_photo(self, monkeypatch, respx_mock):

@@ -135,6 +135,26 @@ export interface ExposureReport {
   // carga directamente del CDN de la plataforma, nunca pasa por este
   // backend ni se persiste.
   avatar_url: string | null;
+  // Cuentas con el MISMO username encontradas en otros sitios (ver
+  // ADR-44/ADR-48, app/osint/username_correlation.py) -- solo existencia
+  // de cuenta, nunca contenido de esas cuentas. null si la comprobación
+  // está desactivada en este servidor (settings.enable_username_correlation)
+  // o no llegó a ejecutarse.
+  related_accounts: UsernameCorrelationSummary | null;
+}
+
+export interface UsernameSiteMatch {
+  site: string;
+  url: string;
+  exists: boolean | null;
+}
+
+export interface UsernameCorrelationSummary {
+  total_sites_checked: number;
+  // Solo los sitios con exists=true -- ver docstring de
+  // UsernameCorrelationSummary en schemas.py sobre por qué el backend no
+  // manda aquí los miles de "no existe"/"no concluyente".
+  matches: UsernameSiteMatch[];
 }
 
 // Eventos que llegan por /api/analyze/{platform}/stream (Server-Sent Events).

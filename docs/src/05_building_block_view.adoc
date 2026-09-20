@@ -734,12 +734,13 @@ Ubicación::
 ==== `osint_router.py` y `osint/username_correlation.py`
 
 Propósito/Responsabilidad::
-Frente de correlación de cuentas por nombre de usuario (ver ADR-44).
-Deliberadamente independiente del pipeline de `analysis_router.py`: no
-depende de sesión OAuth ni de un `ExposureReport` ya generado, solo del
-username que se quiere comprobar.
+Frente de correlación de cuentas por nombre de usuario (ver ADR-44/
+ADR-48). El endpoint standalone es independiente del pipeline de
+`analysis_router.py` (no depende de sesión OAuth ni de un
+`ExposureReport` ya generado), pero el módulo también se usa DESDE
+dentro del pipeline principal -- ver la integración más abajo.
 
-* `POST /api/username-correlation` -- único endpoint. Recibe
+* `POST /api/username-correlation` -- endpoint standalone. Recibe
   `{"username": str}`, delega en
   `username_correlation.check_username_across_sites()` y devuelve
   `UsernameCorrelationReport` (lista de `UsernameSiteMatch`: sitio, URL,
@@ -756,6 +757,17 @@ username que se quiere comprobar.
   para el porqué completo). Traduce su enum
   (`CLAIMED`/`AVAILABLE`/`UNKNOWN`/`ILLEGAL`) a `True`/`False`/`None`/
   excluido respectivamente.
+* Integración con el pipeline principal (ver ADR-48):
+  `check_username_across_sites()` acepta un `progress_callback` opcional
+  -- un `query_notify` propio (`_CountingQueryNotify`) cuenta los sitios
+  ya comprobados (Maigret lo llama de forma síncrona), sondeado cada
+  segundo por una tarea de fondo que emite el progreso real
+  (`track="correlacion_cuentas"`). `analysis_router._build_report`
+  lanza esta comprobación como tarea en paralelo (mismo patrón que
+  `geolocation_task`) cuando `settings.enable_username_correlation` está
+  activo (`False` por defecto); `report/generator.py::generate_report`
+  la recoge y construye `ExposureReport.related_accounts`
+  (`UsernameCorrelationSummary`, solo sitios con `exists=True`).
 
 Interfaces::
 Ver arriba. Documentado con su código de respuesta 422 en `/docs`
@@ -820,7 +832,13 @@ Dispara el análisis vía streaming SSE (`api.analyzeStream`, `EventSource`
 nativo) mostrando una pantalla de progreso en vivo con las fases reales
 del pipeline (incluida una confirmación explícita de si se ha recibido
 biografía del perfil y cuántos caracteres, para poder comprobar a simple
-vista que el dato llega -- no solo confiar en el código), y renderiza el
+vista que el dato llega -- no solo confiar en el código). Además de las
+fases generales, hay tres pistas independientes con su propio contador
+`X/Y` (geolocalización de fotos, análisis de contenido de fotos, y
+correlación de cuentas por username -- ver ADR-44/ADR-48 -- cada una en
+su propio `track` del evento SSE, con `key` explícita en su `<li>` para
+evitar que React la confunda con un elemento de la lista de fases
+generales, que crece durante todo el análisis), y renderiza el
 informe completo: score global con desglose, qué se puede inferir sobre
 ti (estrechamiento de población con pictograma visual, con su fuente y
 evidencia, más el número absoluto de personas que comparten TODOS los
@@ -828,7 +846,9 @@ rasgos detectados combinados -- "En España hay X personas que comparten
 tus rasgos", destacado en turquesa, calculado por
 `k_anonymity.py::final_remaining_population()`), el selector de rasgos
 físicos manuales (`ManualTraitsSelector.tsx`, justo encima de esta
-sección -- ver más abajo), mapa/lista de
+sección -- ver más abajo), cuentas relacionadas encontradas por el mismo
+username en otros sitios (`RelatedAccountsList.tsx`, ver más abajo --
+sección entera ausente si `related_accounts` es `null`), mapa/lista de
 ubicaciones estimadas por foto (con un aviso explícito si hubo fotos
 analizadas pero ninguna dio suficiente confianza para estimar la
 comunidad autónoma de residencia -- independiente de si el texto sí dio
@@ -886,6 +906,24 @@ que ese dato lo introdujo el propio usuario y no lo infirió el sistema.
 
 Ubicación::
 `webapp/src/components/PopulationNarrowingTable.tsx`.
+
+==== `RelatedAccountsList.tsx`
+
+Propósito/Responsabilidad::
+Pinta `ExposureReport.related_accounts` (ver ADR-44/ADR-48,
+`app/osint/username_correlation.py`): un aviso con el total de sitios
+comprobados y, si los hay, un enlace por cada sitio donde se encontró
+una cuenta con el mismo username (`exists=true` únicamente -- nunca se
+recibe del backend, y por tanto nunca se muestra, contenido de esas
+cuentas). `related_accounts` es `null` cuando
+`settings.enable_username_correlation` está desactivado en el servidor
+(por defecto) o la comprobación no llegó a ejecutarse -- en ese caso el
+componente no pinta nada (`return null`), y `Dashboard.tsx` ni siquiera
+renderiza la `<section>` que lo envuelve, mismo criterio que el resto de
+secciones opcionales del informe.
+
+Ubicación::
+`webapp/src/components/RelatedAccountsList.tsx`.
 
 ==== `PopulationPictogram.tsx`
 
