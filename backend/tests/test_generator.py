@@ -3,10 +3,26 @@ from datetime import datetime, timezone
 import pytest
 
 from app import stages
+from app.config import settings
 from app.models.schemas import InferredAttribute, PrivacyScore, SocialPost, WritingFingerprint
 from app.report import generator
 from app.report.generator import _build_recommendations, generate_report
 from app.vision import geolocation
+
+
+@pytest.fixture(autouse=True)
+def pin_ai_provider_to_mistral(monkeypatch):
+    """Varios tests de este archivo activan la IA con
+    `monkeypatch.setattr(settings, "mistral_api_key", "fake-key")` y
+    mockean `generator.extract_demographics_with_ai` directamente (sin
+    HTTP) -- pero `_apply_ai_findings` en generator.py comprueba
+    `settings.ai_key_configured`, que depende del PROVEEDOR ACTIVO
+    (`ai_provider`, "gemini" por defecto en app/config.py). Sin fijarlo
+    aquí a "mistral", esos tests configurarían la key de un proveedor que
+    no es el activo, `ai_key_configured` daría False, y el mock nunca
+    llegaría a invocarse -- mismo criterio que en tests/test_ai_analysis.py
+    y tests/test_ai_attribute_extraction.py."""
+    monkeypatch.setattr(settings, "ai_provider", "mistral")
 
 
 def _post(i: int = 1, platform="reddit", media_urls=None, post_type="post", permalink: str | None = None, text: str | None = None) -> SocialPost:

@@ -36,7 +36,6 @@ from app.progress import ProgressCallback, emit_progress
 from app.analysis_timing import timed_stage
 from app import stages
 from app.scoring.k_anonymity import estimate_population_narrowing, final_remaining_population
-from app.vision.landmark_resolution import resolve_landmark_coordinates
 
 # Umbrales para aceptar una estimación de RESIDENCIA HABITUAL a partir de
 # geolocalización de imágenes (ver `_infer_home_region`). Antes de este
@@ -268,12 +267,13 @@ async def _apply_ai_findings(
     nombre público de la cuenta, que sirve como señal débil de sexo -- de
     forma más flexible. Se ejecuta automáticamente en cada análisis, sin
     ningún botón. Ver docstring de app/nlp/ai_attribute_extraction.py para
-    el razonamiento RGPD. Módulo opcional/best-effort: sin MISTRAL_API_KEY,
-    o si la llamada falla, esto no aporta nada y el informe se sigue
-    generando solo con lo detectado por regex (devuelve los mismos
+    el razonamiento RGPD. Módulo opcional/best-effort: sin API key del
+    proveedor de IA activo (AI_PROVIDER, ver app/config.py), o si la
+    llamada falla, esto no aporta nada y el informe se sigue generando
+    solo con lo detectado por regex (devuelve los mismos
     `demographic_findings`/`travel_permalinks` de entrada, sin tocar, y
     ninguna inferencia blanda)."""
-    if not settings.mistral_api_key:
+    if not settings.ai_key_configured:
         return demographic_findings, travel_permalinks, []
 
     await emit_progress(progress_callback, stages.SEARCHING_AI_SELF_DISCLOSURES)
@@ -354,13 +354,14 @@ async def _apply_image_geolocation(
     app/nlp/ai_attribute_extraction.py), añadidas al final de esta
     función una vez que ya se conocen todas las descripciones.
 
-    También intenta, foto a foto, resolver coordenadas reales cuando
-    Moondream2 propuso un edificio/monumento emblemático concreto (campo
-    EDIFICIO_EMBLEMATICO -- ver app/vision/landmark_resolution.py): si
-    Mistral lo reconoce con confianza suficiente, esa foto en concreto
-    usa esas coordenadas en vez de la estimación por similitud visual de
-    DINOv2 -- más precisa, porque ya no depende de "esta foto se parece a
-    otras fotos de esta zona" sino de un lugar identificado por nombre.
+    La resolución de edificios/monumentos emblemáticos (campo
+    EDIFICIO_EMBLEMATICO -- ver app/vision/landmark_resolution.py) NO
+    ocurre aquí, sino antes, dentro de
+    app/vision/geolocation.py::_process_photo, foto a foto y en paralelo
+    con las demás fotos -- para cuando `geo_outcome.results` llega a esta
+    función, las coordenadas ya vienen resueltas para cualquier foto
+    donde el proveedor de IA activo confirmó el lugar con confianza
+    suficiente, en vez de la estimación por similitud visual de DINOv2.
 
     Módulo opcional/best-effort: si el índice FAISS no está construido (ver
     app/vision/geolocation.py), el segundo valor devuelto (disponibilidad)
@@ -424,33 +425,16 @@ async def _apply_image_geolocation(
         for permalink, estimate in geo_outcome.results
     ]
 
-    # Resolución de edificios emblemáticos (nuevo): para cada foto donde
-    # Moondream2 propuso un nombre en EDIFICIO_EMBLEMATICO, se le pregunta
-    # a Mistral (nunca a Moondream2, que no tiene conocimiento geográfico
-    # fiable -- ver landmark_resolution.py) si lo reconoce con certeza. Si
-    # sí, esa foto en concreto pasa a usar esas coordenadas en vez de la
-    # estimación por similitud visual de DINOv2 -- se sobreescribe el
-    # punto correspondiente de `image_location_points` in place, marcado
-    # como representativo y con confianza 1.0 (mismo criterio que un EXIF
-    # GPS real en geolocation.py: no es una estimación, es un lugar
-    # identificado por nombre). Solo se llama a Mistral por foto con un
-    # candidato -- no por cada foto analizada -- para no disparar
-    # llamadas de más contra el límite de ráfaga (ver mistral_client.py).
-    if settings.mistral_api_key:
-        for point in image_location_points:
-            codes = point.visual_description_codes
-            if codes is None or not codes.edificio_emblematico:
-                continue
-            resolution = await resolve_landmark_coordinates(
-                codes.edificio_emblematico, context_hint=point.visual_description_general
-            )
-            if resolution is None:
-                continue
-            point.province = resolution.canonical_name
-            point.lat = resolution.lat
-            point.lon = resolution.lon
-            point.confidence = resolution.confidence
-            point.representative = True
+    # La resolución de edificios emblemáticos YA ocurrió más abajo en el
+    # pipeline, dentro de app/vision/geolocation.py::_process_photo, foto
+    # a foto, en cuanto cada una termina su análisis (no aquí, en un bucle
+    # aparte al final de todas las fotos como en una primera versión de
+    # esta funcionalidad) -- ver ADR-47 y el docstring de `_process_photo`
+    # para el razonamiento completo. `geo_outcome.results` ya trae, para
+    # cada foto con un edificio emblemático confirmado por el proveedor de
+    # IA, las coordenadas resueltas en vez de la estimación de DINOv2 --
+    # este bucle de construcción de `image_location_points` ya las
+    # recibe hechas, no hay nada más que hacer aquí.
 
     has_location = (
         demographic_findings.provincia is not None

@@ -46,6 +46,7 @@ from app.log.performance_log import PhotoAnalysisTiming, log_photo_analysis_run
 from app.progress import emit_progress
 from app.vision import scene_analysis
 from app.vision.collage_detection import detect_collage
+from app.vision.landmark_resolution import resolve_landmark_coordinates
 from app.vision.scene_analysis import VisualDescriptionCodes, analyze_image_content
 
 import numpy as np
@@ -892,7 +893,45 @@ async def _process_photo(
     estimate, (scene_inferences, indicio_pareja, description, description_general, description_codes) = (
         await asyncio.gather(_run_dinov2(), _run_scene())
     )
+    # Medido aquí, ANTES de la resolución de edificio emblemático de abajo
+    # a propósito: esta métrica mide el coste de DINOv2 + Moondream2 (para
+    # diagnosticar el offload a iGPU, ver ADR-28/29) -- la llamada al
+    # proveedor de IA es un coste aparte, de red, no de cómputo local, y
+    # mezclarla aquí distorsionaría esa métrica sin aportar nada (no hay
+    # ADR ni panel que dependa de medir el tiempo de esa llamada en
+    # concreto; si hiciera falta, tiene más sentido como su propia métrica).
     timing.record(time.monotonic() - start)
+
+    # Resolución de edificio emblemático -- AQUÍ, por foto, no en un bucle
+    # aparte al final de todas (como se hizo en una primera versión de
+    # esta funcionalidad, ver ADR-47): con muchas fotos en lugares
+    # emblemáticos, cada llamada al proveedor de IA se dispara en cuanto
+    # ESTA foto concreta termina su análisis, mientras las demás fotos
+    # siguen descargándose/analizándose en paralelo (cada `_process_photo`
+    # es su propia tarea, ver `estimate_locations_for_posts`) -- no se
+    # espera a que las N fotos terminen para empezar a resolver la
+    # primera. Solo se llama si Moondream2 propuso un nombre Y la
+    # estimación de DINOv2 se pudo calcular (si `estimate` es None -- p.
+    # ej. la foto no encajó bien en el índice -- no hay nada que
+    # sobreescribir). Muta `estimate` in place (dataclass, no frozen):
+    # `_collect_photo_result` y `report/generator.py` ya reciben la
+    # estimación corregida, sin necesidad de otro paso posterior.
+    if (
+        estimate is not None
+        and description_codes is not None
+        and description_codes.edificio_emblematico
+        and settings.ai_key_configured
+    ):
+        resolution = await resolve_landmark_coordinates(
+            description_codes.edificio_emblematico, context_hint=description_general
+        )
+        if resolution is not None:
+            estimate.province = resolution.canonical_name
+            estimate.lat = resolution.lat
+            estimate.lon = resolution.lon
+            estimate.confidence = resolution.confidence
+            estimate.representative = True
+
     # `image` sale de scope tras este bloque y se descarta (nunca se escribe a disco)
     return image, estimate, scene_inferences, indicio_pareja, description, description_general, description_codes
 

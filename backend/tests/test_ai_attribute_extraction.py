@@ -45,7 +45,14 @@ def _mock_content(**fields) -> dict:
 
 @pytest.fixture(autouse=True)
 def reset_mistral_api_key(monkeypatch):
+    """Con AI_PROVIDER=mistral fijado explícitamente: este archivo entero
+    mockea MISTRAL_URL, así que necesita seguir hablando con el backend de
+    Mistral pase lo que pase con el valor por defecto de AI_PROVIDER en
+    app/config.py (Gemini) -- fijarlo aquí hace estos tests inmunes a que
+    ese default cambie otra vez en el futuro (mismo criterio que
+    tests/test_ai_analysis.py)."""
     monkeypatch.setattr(settings, "mistral_api_key", None)
+    monkeypatch.setattr(settings, "ai_provider", "mistral")
 
 
 class TestNoApiKeyOrEmptyInput:

@@ -93,7 +93,18 @@ def _default_photo_analysis_concurrency() -> int:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # `extra="ignore"`: no todas las variables de entorno de este proyecto
+    # pasan por este modelo -- p. ej. MOONDREAM_QUANT_TYPE se lee
+    # directamente con `os.environ.get()` en app/vision/scene_analysis.py
+    # (ver `_ensure_quantized_model`), aposta, sin modelarla aquí. Sin
+    # `extra="ignore"`, pydantic-settings usa "forbid" por defecto para
+    # BaseSettings: en cuanto el `.env` tenga CUALQUIER variable no
+    # declarada en esta clase -- aunque se use legítimamente en otro
+    # módulo -- `Settings()` revienta al arrancar la app entera (bug real
+    # observado: MOONDREAM_QUANT_TYPE en el `.env` local tumbaba el
+    # arranque, incluida toda la suite de tests, con un
+    # ValidationError que no tenía nada que ver con esa variable en sí).
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     reddit_client_id: str
     reddit_client_secret: str
@@ -115,17 +126,50 @@ class Settings(BaseSettings):
     # "http://localhost:5173" como valor por defecto si esto queda vacío.
     frontend_origin: str | None = None
 
-    # Análisis con IA (opcional): si no se rellena, el botón "Analizar con
-    # IA" del frontend simplemente devuelve "no disponible" en vez de
-    # fallar. Se usa el tier GRATUITO de Mistral AI (La Plateforme) --
-    # proveedor europeo (Francia), evitando transferencias internacionales
-    # de datos personales fuera de la UE (RGPD Cap. V). El tier gratuito
-    # tiene límite de peticiones/minuto y un tope mensual de tokens; al
-    # agotarse, la API devuelve 429 y este módulo lo trata como
-    # "no disponible ahora mismo", sin reintentar (para no arriesgar coste
-    # ni spamear la cuota).
+    # Análisis con IA (opcional): si no se rellena la key del proveedor
+    # activo, el análisis por IA simplemente devuelve "no disponible" en
+    # vez de fallar.
+    #
+    # AI_PROVIDER elige el proveedor -- "mistral" o "gemini" -- SIN tocar
+    # ningún módulo llamador (ver app/nlp/ai_client.py): los tres módulos
+    # que hablan con un LLM (ai_attribute_extraction.py, ai_analysis.py,
+    # landmark_resolution.py) pasan siempre por call_ai_json(), nunca
+    # directamente por la API de un proveedor concreto.
+    #
+    # Por defecto "gemini", no "mistral" -- decisión tomada en septiembre
+    # de 2026 tras un cambio real de política de Mistral: su free tier
+    # (rate-limit por API key, documentado en ADR-45) dejó de existir,
+    # sustituido por un modelo de crédito de pago que exige activar
+    # pay-as-you-go para tener CUALQUIER límite usable. El free tier de
+    # Gemini (AI Studio) es PERMANENTE y sin tarjeta -- no un crédito que
+    # se agota -- con margen de sobra (10 peticiones/minuto en Flash)
+    # para las ~4 llamadas por análisis de este proyecto. La contrapartida
+    # es que Gemini NO es un proveedor europeo (Google Cloud, EE.UU.,
+    # expuesto al Cloud Act) -- a diferencia de Mistral (Francia), que
+    # sigue siendo la opción si el requisito RGPD/soberanía de datos pesa
+    # más que la fiabilidad del tier gratuito: basta con poner
+    # AI_PROVIDER=mistral y rellenar mistral_api_key.
+    ai_provider: str = "gemini"
+
     mistral_api_key: str | None = None
     mistral_model: str = "mistral-small-latest"
+
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.5-flash"
+
+    @property
+    def ai_key_configured(self) -> bool:
+        """True si hay una API key rellenada para el proveedor ACTIVO
+        (`ai_provider`) -- centraliza la comprobación para que
+        ai_attribute_extraction.py, ai_analysis.py y landmark_resolution.py
+        no tengan que saber cuál es el proveedor activo, solo preguntar
+        "¿hay key?" antes de llamar a app.nlp.ai_client.call_ai_json()."""
+        if self.ai_provider == "gemini":
+            return bool(self.gemini_api_key)
+        if self.ai_provider == "mistral":
+            return bool(self.mistral_api_key)
+        return False
+
 
     # Límites de extracción para no machacar las APIs y acotar el volumen de
     # datos procesados (principio de minimización de datos, RGPD).

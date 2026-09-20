@@ -23,14 +23,16 @@ Decisiones de diseño (para la memoria):
    JSON se envía como contexto en cada llamada; no hay estado entre
    llamadas ni memoria del modelo entre usuarios.
 
-3. Tier gratuito, sin gasto: se usa el plan gratuito de Mistral (límite de
-   ráfaga de 1 petición/segundo + 30/minuto + tope mensual de tokens). Si
-   la API key no está configurada, o si Mistral sigue devolviendo 429 tras
-   el único reintento del throttle compartido (ver app/nlp/mistral_client.py
-   -- pensado para el límite de RÁFAGA, no para reintentar una cuota
-   mensual realmente agotada), este módulo degrada a "no disponible ahora
-   mismo" sin más intentos ni fallback a otro proveedor de pago, para que
-   nunca se genere gasto no presupuestado ni se rompa el resto de la app.
+3. Tier gratuito, sin gasto: se usa el plan gratuito del proveedor activo
+   (AI_PROVIDER, ver app/config.py -- Gemini por defecto, con free tier
+   permanente sin tarjeta; Mistral como alternativa europea). Si la API
+   key no está configurada, o si el proveedor sigue devolviendo 429 tras
+   el único reintento del throttle compartido (ver app/nlp/ai_client.py
+   -- pensado para un límite de RÁFAGA puntual, no para reintentar una
+   cuota diaria/mensual realmente agotada), este módulo degrada a "no
+   disponible ahora mismo" sin más intentos ni fallback a otro proveedor
+   de pago, para que nunca se genere gasto no presupuestado ni se rompa
+   el resto de la app.
 
 4. Minimización: se envía el informe ya generado (agregados, no el texto
    crudo de los posts). Se dispara automáticamente en cuanto el informe
@@ -50,7 +52,7 @@ Decisiones de diseño (para la memoria):
 """
 from app.config import settings
 from app.models.schemas import ExposureReport
-from app.nlp.mistral_client import MistralHTTPError, MistralRequestError, call_mistral_json
+from app.nlp.ai_client import AIHTTPError, AIRequestError, call_ai_json
 
 _SYSTEM_PROMPT = (
     "Eres un asistente que ayuda a personas no técnicas a entender su nivel de "
@@ -142,49 +144,63 @@ _LANGUAGE_INSTRUCTIONS = {
 SUPPORTED_LANGUAGES = frozenset({"es", *_LANGUAGE_INSTRUCTIONS.keys()})
 
 
-async def _call_mistral_chat(system_prompt: str, user_prompt: str, max_tokens: int) -> dict:
-    """Delegación fina sobre app.nlp.mistral_client.call_mistral_json (ver
-    ese módulo para el throttle de ráfaga compartido con
+async def _call_ai_chat(system_prompt: str, user_prompt: str, max_tokens: int) -> dict:
+    """Delegación fina sobre app.nlp.ai_client.call_ai_json (ver ese
+    módulo para el throttle de ráfaga compartido con
     ai_attribute_extraction.py y el reintento único en 429). Conserva la
     excepción `AiAnalysisUnavailable` de siempre -- el llamador
     (analyze_report_with_ai) no cambia."""
-    if not settings.mistral_api_key:
+    if not settings.ai_key_configured:
         raise AiAnalysisUnavailable(
-            "El análisis con IA no está configurado en este servidor (falta MISTRAL_API_KEY)."
+            f"El análisis con IA no está configurado en este servidor "
+            f"(falta la API key del proveedor activo: {settings.ai_provider})."
         )
 
     try:
-        return await call_mistral_json(
+        return await call_ai_json(
             system_prompt,
             user_prompt,
             max_tokens=max_tokens,
             temperature=0.3,
         )
-    except MistralRequestError as exc:
+    except AIRequestError as exc:
         raise AiAnalysisUnavailable(f"No se pudo contactar con el servicio de IA: {exc}") from exc
-    except MistralHTTPError as exc:
+    except AIHTTPError as exc:
+        if exc.status_code == 200:
+            # `call_ai_json` reutiliza el status_code de la respuesta HTTP
+            # incluso cuando el fallo NO es de HTTP sino de forma del
+            # contenido (JSON inválido, o sin "choices"/"candidates" --
+            # ver el except KeyError/IndexError/.../JSONDecodeError dentro
+            # de call_ai_json): como un error HTTP real nunca puede tener
+            # status_code 200, este valor identifica sin ambigüedad ese
+            # caso -- "la petición fue bien, pero lo que devolvió el
+            # proveedor no tenía la forma esperada", no "el proveedor
+            # devolvió un error". Antes esto caía en el bucket genérico de
+            # abajo y perdía el mensaje específico.
+            raise AiAnalysisUnavailable("Respuesta inesperada del servicio de IA.") from exc
         if exc.status_code == 429:
             # Rate limit -- ya se reintentó una vez dentro de
-            # call_mistral_json (pensado para el límite de RÁFAGA, 1/s).
-            # Si sigue en 429 tras ese reintento, es o bien la cuota
-            # mensual real agotada, o una ráfaga más sostenida que el
-            # margen del throttle -- en ambos casos, no se reintenta más
-            # aquí (mismo criterio de siempre: nunca gastar cuota extra a
-            # ciegas). El cuerpo real de la respuesta ya quedó logueado
-            # dentro de mistral_client.py para quien necesite distinguir
-            # el motivo exacto.
+            # call_ai_json (pensado para un límite de RÁFAGA puntual). Si
+            # sigue en 429 tras ese reintento, es o bien la cuota
+            # diaria/mensual real agotada, o una ráfaga más sostenida que
+            # el margen del throttle -- en ambos casos, no se reintenta
+            # más aquí (mismo criterio de siempre: nunca gastar cuota
+            # extra a ciegas). El cuerpo real de la respuesta ya quedó
+            # logueado dentro de ai_client.py para quien necesite
+            # distinguir el motivo exacto.
             raise AiAnalysisUnavailable(
                 "Se ha alcanzado el límite del plan gratuito de IA por ahora. Inténtalo de nuevo más tarde."
             ) from exc
         if exc.status_code == 401:
-            raise AiAnalysisUnavailable("La clave de API de Mistral no es válida.") from exc
+            raise AiAnalysisUnavailable("La clave de API del proveedor de IA no es válida.") from exc
         raise AiAnalysisUnavailable(f"El servicio de IA devolvió un error ({exc.status_code}).") from exc
 
 
 async def analyze_report_with_ai(report: ExposureReport, lang: str = "es") -> dict:
-    if not settings.mistral_api_key:
+    if not settings.ai_key_configured:
         raise AiAnalysisUnavailable(
-            "El análisis con IA no está configurado en este servidor (falta MISTRAL_API_KEY)."
+            f"El análisis con IA no está configurado en este servidor "
+            f"(falta la API key del proveedor activo: {settings.ai_provider})."
         )
 
     # Se manda el informe ya generado (agregados/conclusiones propias de la
@@ -199,12 +215,12 @@ async def analyze_report_with_ai(report: ExposureReport, lang: str = "es") -> di
         "Dame el veredicto general y tus conclusiones priorizadas."
     )
 
-    # call_mistral_json ya devuelve el `content` parseado como dict (no el
+    # call_ai_json ya devuelve el `content` parseado como dict (no el
     # payload crudo de la API) -- a diferencia de antes, aquí ya no hace
-    # falta volver a indexar ["choices"][0]["message"]["content"] ni
-    # llamar json.loads() otra vez; mistral_client.py ya lanza
-    # MistralHTTPError/AiAnalysisUnavailable si esa forma no se cumplió.
-    parsed = await _call_mistral_chat(system_prompt, user_prompt, max_tokens=600)
+    # falta volver a indexar la respuesta ni llamar json.loads() otra vez;
+    # ai_client.py ya lanza AIHTTPError/AiAnalysisUnavailable si esa forma
+    # no se cumplió.
+    parsed = await _call_ai_chat(system_prompt, user_prompt, max_tokens=600)
     if not isinstance(parsed, dict):
         raise AiAnalysisUnavailable("Respuesta inesperada del servicio de IA.")
 

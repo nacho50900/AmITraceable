@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime, timezone
 
@@ -56,10 +57,30 @@ def _mock_content(**fields) -> dict:
 
 
 @pytest.fixture(autouse=True)
-def reset_mistral_api_key(monkeypatch):
+def reset_ai_provider_settings(monkeypatch):
     """Cada test parte de una API key controlada explícitamente, en vez de
-    depender del .env real (que en CI puede o no tener MISTRAL_API_KEY)."""
+    depender del .env real (que en CI puede o no tener MISTRAL_API_KEY) --
+    y con AI_PROVIDER fijado a "mistral" explícitamente: este archivo
+    entero mockea MISTRAL_URL, así que necesita seguir hablando con el
+    backend de Mistral pase lo que pase con el valor por defecto de
+    AI_PROVIDER en app/config.py (Gemini, ver ADR de esa decisión) --
+    fijarlo aquí hace estos tests inmunes a que ese default cambie otra
+    vez en el futuro."""
     monkeypatch.setattr(settings, "mistral_api_key", None)
+    monkeypatch.setattr(settings, "ai_provider", "mistral")
+
+
+@pytest.fixture(autouse=True)
+def fast_retry_backoff(monkeypatch):
+    """El reintento ante 429 (ver app/nlp/ai_client.py, ADR-45) espera de
+    verdad _RETRY_BACKOFF_SECONDS (1.5s) en producción -- aquí se
+    sustituye asyncio.sleep por un no-op para que los tests que lo
+    disparan (ver test_429_raises_unavailable_after_one_retry) no tarden
+    1.5s cada uno de verdad."""
+    async def _instant_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", _instant_sleep)
 
 
 class TestAnalyzeReportWithAi:
@@ -126,7 +147,13 @@ class TestAnalyzeReportWithAi:
         assert result["conclusions"] == []
 
     @pytest.mark.asyncio
-    async def test_429_raises_unavailable_without_retrying(self, monkeypatch, respx_mock):
+    async def test_429_raises_unavailable_after_one_retry(self, monkeypatch, respx_mock):
+        """ADR-45: ante un 429 puntual (típico del límite de RÁFAGA del
+        free tier, no de la cuota mensual), call_ai_json reintenta UNA vez
+        antes de rendirse -- ya no es "cero reintentos" como antes de ese
+        cambio. Si el reintento TAMBIÉN da 429 (este caso, el mock
+        siempre responde 429), se rinde con el mismo mensaje de siempre,
+        pero tras exactamente 2 llamadas HTTP, no 1."""
         monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
         route = respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(429))
         report = _make_report()
@@ -134,8 +161,8 @@ class TestAnalyzeReportWithAi:
         with pytest.raises(AiAnalysisUnavailable, match="límite del plan gratuito"):
             await analyze_report_with_ai(report)
 
-        # Ni un solo reintento: exactamente una llamada HTTP.
-        assert route.call_count == 1
+        # Exactamente un reintento: dos llamadas HTTP, no una ni tres.
+        assert route.call_count == 2
 
     @pytest.mark.asyncio
     async def test_401_raises_unavailable_with_invalid_key_message(self, monkeypatch, respx_mock):

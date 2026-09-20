@@ -1,6 +1,8 @@
 """
-Extracción de datos demográficos autodeclarados usando un LLM (Mistral AI),
-como complemento de las regex de `demographic_extraction.py`.
+Extracción de datos demográficos autodeclarados usando un LLM (proveedor
+configurable vía AI_PROVIDER -- Gemini por defecto, o Mistral, ver
+app/nlp/ai_client.py y app/config.py), como complemento de las regex de
+`demographic_extraction.py`.
 
 Motivación: las regex cubren un vocabulario fijo ("estudio X", "estudiante
 de X", "vivo en X"...). Cualquier redacción real que no encaje en esas
@@ -26,17 +28,21 @@ Cuándo se ejecuta: automáticamente dentro del pipeline principal
 (conclusiones priorizadas en lenguaje natural), que TAMBIÉN se dispara
 solo en cuanto el informe está listo (ver su propio docstring): ya no hay
 ningún botón "Analizar con IA" en el frontend, así que ambos módulos
-llaman a Mistral automáticamente, uno detrás de otro, en el mismo
-análisis -- ver app/nlp/mistral_client.py para el throttle que evita que
-eso choque con el límite de ráfaga del free tier.
+llaman al proveedor de IA activo automáticamente, uno detrás de otro, en
+el mismo análisis -- ver app/nlp/ai_client.py para el throttle que evita
+que eso choque con el límite de ráfaga del free tier del proveedor.
 
 Nota RGPD (para la memoria): esto envía el TEXTO CRUDO de las
-publicaciones a un proveedor externo (Mistral AI, UE) en cada análisis, no
-solo agregados como hace `ai_analysis.py`. Es una excepción consciente al
+publicaciones al proveedor de IA activo en cada análisis, no solo
+agregados como hace `ai_analysis.py`. Es una excepción consciente al
 principio de minimización que se sigue en el resto del proyecto,
 justificada porque es indispensable para la propia función (detectar
 autodeclaraciones en lenguaje natural libre) y porque el usuario ya ha
-dado consentimiento OAuth explícito sobre su propio contenido.
+dado consentimiento OAuth explícito sobre su propio contenido. Con
+AI_PROVIDER=gemini (el por defecto), ese proveedor es Google (EE.UU.,
+expuesto al Cloud Act); con AI_PROVIDER=mistral, es Mistral AI (Francia,
+UE) -- ver la justificación completa de la elección de proveedor por
+defecto en app/config.py.
 
 También se envían la biografía y el nombre público de la cuenta (si la
 plataforma los expone), por el mismo motivo de minimización justificada.
@@ -81,7 +87,7 @@ narrowear población): se añade directamente a la lista general de
 "atributos inferidos" del informe (ver `report/generator.py`), igual que
 las inferencias indirectas por hashtags/comunidades de
 `attribute_inference.py`, pero basada en razonamiento del LLM en vez de
-coincidencia de palabras clave. Se pide en la MISMA llamada a Mistral que
+coincidencia de palabras clave. Se pide en la MISMA llamada al LLM que
 el resto de este módulo (un único mensaje, no una segunda petición aparte)
 para no duplicar coste ni latencia.
 """
@@ -102,7 +108,7 @@ from app.data.ine_reference import (
 )
 from app.models.schemas import InferredAttribute, SocialPost
 from app.nlp.demographic_extraction import DemographicFindings, _strip_accents, _ZODIAC_TEXT_MAP
-from app.nlp.mistral_client import MistralHTTPError, MistralRequestError, call_mistral_json
+from app.nlp.ai_client import AIHTTPError, AIRequestError, call_ai_json
 
 logger = logging.getLogger(__name__)
 
@@ -441,7 +447,7 @@ async def extract_demographics_with_ai(
     regex la analicen igual que un post) porque aquí sirve además de
     contexto para que el modelo entienda mejor el resto del perfil, no solo
     como una fuente más de autodeclaraciones."""
-    if not settings.mistral_api_key:
+    if not settings.ai_key_configured:
         return DemographicFindings()
 
     posts_text = _posts_prompt(posts)
@@ -452,7 +458,7 @@ async def extract_demographics_with_ai(
     prompt = f"{profile_text}\n\nPublicaciones:\n{posts_text}" if posts_text else profile_text
 
     try:
-        parsed = await _call_mistral(prompt)
+        parsed = await _call_ai(prompt)
     except AiExtractionUnavailable as exc:
         logger.warning("Extracción de atributos con IA no disponible: %s", exc)
         return DemographicFindings()
@@ -468,7 +474,7 @@ async def extract_demographics_with_ai(
 # hablando de sí misma. Reutilizar _SYSTEM_PROMPT tal cual habría
 # confundido al modelo (¿de qué "declaración explícita" habla si el texto
 # de entrada es "a person in scrubs in a hospital hallway"?) y, peor,
-# habría arriesgado que Mistral tratara una foto como si fuera tan fiable
+# habría arriesgado que el modelo tratara una foto como si fuera tan fiable
 # como un "vivo en Sevilla" escrito por la persona. Aquí se trata TODO
 # como razonamiento indirecto -- mismo criterio que 'inferencias_blandas'
 # en _SYSTEM_PROMPT -- y se reutiliza esa misma clave/forma de JSON
@@ -514,7 +520,7 @@ async def extract_soft_inferences_from_photos(
     username: str,
     full_name: str | None = None,
 ) -> list[InferredAttribute]:
-    """Segunda llamada a Mistral, INDEPENDIENTE de extract_demographics_with_ai:
+    """Segunda llamada al LLM, INDEPENDIENTE de extract_demographics_with_ai:
     razona sobre las descripciones visuales que Moondream2 ya generó para
     cada foto (ver app/vision/scene_analysis.py -- se usa la descripción
     GENERAL en inglés, `general_descriptions`/`descripcion_general`, no
@@ -540,7 +546,7 @@ async def extract_soft_inferences_from_photos(
     Nunca lanza excepciones, mismo criterio que extract_demographics_with_ai:
     sin API key, sin fotos con descripción, o si la llamada falla, se
     devuelve una lista vacía y el resto del informe sigue igual."""
-    if not settings.mistral_api_key or not photo_captions:
+    if not settings.ai_key_configured or not photo_captions:
         return []
 
     photos_text = _photos_prompt(photo_captions)
@@ -553,7 +559,7 @@ async def extract_soft_inferences_from_photos(
     prompt = f"{header}\n\nDescripciones automáticas de fotos publicadas por la cuenta:\n{photos_text}"
 
     try:
-        parsed = await _call_mistral(prompt, system_prompt=_PHOTO_SYSTEM_PROMPT, max_tokens=500)
+        parsed = await _call_ai(prompt, system_prompt=_PHOTO_SYSTEM_PROMPT, max_tokens=500)
     except AiExtractionUnavailable as exc:
         logger.warning("Inferencia de atributos por fotos con IA no disponible: %s", exc)
         return []
@@ -561,26 +567,26 @@ async def extract_soft_inferences_from_photos(
     return _parse_soft_inferences(parsed)
 
 
-async def _call_mistral(
+async def _call_ai(
     prompt_text: str,
     system_prompt: str = _SYSTEM_PROMPT,
     # Subido de 800 a 1000: los nuevos campos orientacion_sexual,
     # signo_zodiacal y religion añaden más espacio en la respuesta JSON.
     max_tokens: int = 1000,
 ) -> dict:
-    """Delegación fina sobre app.nlp.mistral_client.call_mistral_json (ver
+    """Delegación fina sobre app.nlp.ai_client.call_ai_json (ver
     ese módulo para el throttle de ráfaga y el reintento en 429) --
     conserva la firma/excepción de siempre para no tocar los dos
     llamadores existentes (extract_demographics_with_ai, y ahora también
     extract_soft_inferences_from_photos, que pasa su propio
     system_prompt/max_tokens)."""
     try:
-        return await call_mistral_json(
+        return await call_ai_json(
             system_prompt, prompt_text, max_tokens=max_tokens, temperature=0.0
         )
-    except MistralHTTPError as exc:
+    except AIHTTPError as exc:
         raise AiExtractionUnavailable(f"HTTP {exc.status_code}") from exc
-    except MistralRequestError as exc:
+    except AIRequestError as exc:
         raise AiExtractionUnavailable(f"error de red: {exc}") from exc
 
 

@@ -182,7 +182,7 @@ class VisualDescriptionCodes:
     español -- a diferencia de `descripcion_cruda` (la frase ya redactada
     que se sigue devolviendo tal cual, sin tocar, para no romper nada de
     lo que ya consume: la vista de detalle del frontend en español y el
-    contexto que recibe Mistral en app/ai_analysis.py), esto es para
+    contexto que recibe el LLM en app/ai_analysis.py), esto es para
     internacionalización (ver ADR-30): el frontend traduce `personas`
     (vocabulario cerrado: "una"/"varias", nunca "ninguna" -- mismo filtro
     que ya aplica `_build_clean_summary`) él mismo, sin llamar al backend,
@@ -210,8 +210,8 @@ class VisualDescriptionCodes:
     comprobar) -- solo un filtro de valores genéricos obvios (ver
     `_EDIFICIO_EMBLEMATICO_INVALID_VALUES`). Por eso `report/generator.py`
     nunca confía en este campo por sí solo para sobreescribir
-    coordenadas: se lo pasa a Mistral (app/vision/landmark_resolution.py),
-    que sí tiene conocimiento general del mundo, y solo si Mistral
+    coordenadas: se lo pasa al proveedor de IA activo (app/vision/landmark_resolution.py),
+    que sí tiene conocimiento general del mundo, y solo si ese modelo
     también lo reconoce con confianza alta se usa para nada -- Moondream2
     aquí solo propone un candidato de nombre, nunca coordenadas.
 
@@ -228,7 +228,14 @@ class VisualDescriptionCodes:
     texto_visible: str | None
     matricula: str | None
     indicio_pareja: bool
-    edificio_emblematico: str | None
+    # Con valor por defecto (a diferencia de los campos de arriba, que son
+    # obligatorios): se añadió DESPUÉS de que ya hubiera construcciones de
+    # VisualDescriptionCodes en tests/otros sitios sin este argumento --
+    # sin el default, cualquiera de esos sitios revienta con
+    # "missing 1 required positional argument" en vez de simplemente
+    # asumir "no se detectó ningún edificio", que es el valor correcto
+    # por defecto de todos modos.
+    edificio_emblematico: str | None = None
 
 
 _model = None
@@ -1206,7 +1213,7 @@ def _parse_edificio_emblematico(answer: str) -> str | None:
     posible -- un nombre de edificio no tiene una forma fija que
     comprobar por regex. La validación real de si el nombre corresponde a
     un lugar de verdad ocurre después, en
-    app/vision/landmark_resolution.py, vía Mistral (que sí tiene
+    app/vision/landmark_resolution.py, vía el proveedor de IA activo (que sí tiene
     conocimiento general del mundo) -- este parser solo hace un filtro
     mínimo de ruido obvio antes de gastar esa llamada."""
     match = _EDIFICIO_EMBLEMATICO_RE.search(answer)
@@ -1289,8 +1296,8 @@ def _parse_inferences(answer: str) -> list[InferredAttribute]:
     # reconocimiento de monumentos (ver nota en _STRUCTURED_QUERY), así
     # que esto es solo el candidato que propone, no una confirmación. La
     # resolución de verdad (si el lugar es real y dónde está) la hace
-    # Mistral en app/vision/landmark_resolution.py -- esta InferredAttribute
-    # se añade de todos modos, independientemente de si Mistral llega a
+    # el proveedor de IA activo en app/vision/landmark_resolution.py -- esta InferredAttribute
+    # se añade de todos modos, independientemente de si ese modelo llega a
     # confirmarlo o no, para que quede constancia en el informe de que
     # Moondream2 propuso algo, aunque no se use para sobreescribir
     # ninguna coordenada.
