@@ -2239,14 +2239,15 @@ y no de algo que la persona haya escrito.</p>
 <dl>
 <dt class="hdlist1">Propósito/Responsabilidad</dt>
 <dd>
-<p>Frente de correlación de cuentas por nombre de usuario (ver ADR-44).
-Deliberadamente independiente del pipeline de <code>analysis_router.py</code>: no
-depende de sesión OAuth ni de un <code>ExposureReport</code> ya generado, solo del
-username que se quiere comprobar.</p>
+<p>Frente de correlación de cuentas por nombre de usuario (ver ADR-44/
+ADR-48). El endpoint standalone es independiente del pipeline de
+<code>analysis_router.py</code> (no depende de sesión OAuth ni de un
+<code>ExposureReport</code> ya generado), pero el módulo también se usa DESDE
+dentro del pipeline principal&#8201;&#8212;&#8201;ver la integración más abajo.</p>
 <div class="ulist">
 <ul>
 <li>
-<p><code>POST /api/username-correlation</code>&#8201;&#8212;&#8201;único endpoint. Recibe
+<p><code>POST /api/username-correlation</code>&#8201;&#8212;&#8201;endpoint standalone. Recibe
 <code>{"username": str}</code>, delega en
 <code>username_correlation.check_username_across_sites()</code> y devuelve
 <code>UsernameCorrelationReport</code> (lista de <code>UsernameSiteMatch</code>: sitio, URL,
@@ -2264,6 +2265,18 @@ invoca la función de librería directamente, una sola vez (ver ADR-44
 para el porqué completo). Traduce su enum
 (<code>CLAIMED</code>/<code>AVAILABLE</code>/<code>UNKNOWN</code>/<code>ILLEGAL</code>) a <code>True</code>/<code>False</code>/<code>None</code>/
 excluido respectivamente.</p>
+</li>
+<li>
+<p>Integración con el pipeline principal (ver ADR-48):
+<code>check_username_across_sites()</code> acepta un <code>progress_callback</code> opcional&#8201;&#8212;&#8201;un <code>query_notify</code> propio (<code>_CountingQueryNotify</code>) cuenta los sitios
+ya comprobados (Maigret lo llama de forma síncrona), sondeado cada
+segundo por una tarea de fondo que emite el progreso real
+(<code>track="correlacion_cuentas"</code>). <code>analysis_router._build_report</code>
+lanza esta comprobación como tarea en paralelo (mismo patrón que
+<code>geolocation_task</code>) cuando <code>settings.enable_username_correlation</code> está
+activo (<code>False</code> por defecto); <code>report/generator.py::generate_report</code>
+la recoge y construye <code>ExposureReport.related_accounts</code>
+(<code>UsernameCorrelationSummary</code>, solo sitios con <code>exists=True</code>).</p>
 </li>
 </ul>
 </div>
@@ -2348,7 +2361,13 @@ indicadores.</p>
 nativo) mostrando una pantalla de progreso en vivo con las fases reales
 del pipeline (incluida una confirmación explícita de si se ha recibido
 biografía del perfil y cuántos caracteres, para poder comprobar a simple
-vista que el dato llega&#8201;&#8212;&#8201;no solo confiar en el código), y renderiza el
+vista que el dato llega&#8201;&#8212;&#8201;no solo confiar en el código). Además de las
+fases generales, hay tres pistas independientes con su propio contador
+<code>X/Y</code> (geolocalización de fotos, análisis de contenido de fotos, y
+correlación de cuentas por username&#8201;&#8212;&#8201;ver ADR-44/ADR-48&#8201;&#8212;&#8201;cada una en
+su propio <code>track</code> del evento SSE, con <code>key</code> explícita en su <code>&lt;li&gt;</code> para
+evitar que React la confunda con un elemento de la lista de fases
+generales, que crece durante todo el análisis), y renderiza el
 informe completo: score global con desglose, qué se puede inferir sobre
 ti (estrechamiento de población con pictograma visual, con su fuente y
 evidencia, más el número absoluto de personas que comparten TODOS los
@@ -2356,7 +2375,8 @@ rasgos detectados combinados&#8201;&#8212;&#8201;"En España hay X personas que 
 tus rasgos", destacado en turquesa, calculado por
 <code>k_anonymity.py::final_remaining_population()</code>), el selector de rasgos
 físicos manuales (<code>ManualTraitsSelector.tsx</code>, justo encima de esta
-sección&#8201;&#8212;&#8201;ver más abajo), mapa/lista de
+sección&#8201;&#8212;&#8201;ver más abajo), cuentas relacionadas encontradas por el mismo
+username en otros sitios (<code>RelatedAccountsList.tsx</code>, ver más abajo&#8201;&#8212;&#8201;sección entera ausente si <code>related_accounts</code> es <code>null</code>), mapa/lista de
 ubicaciones estimadas por foto (con un aviso explícito si hubo fotos
 analizadas pero ninguna dio suficiente confianza para estimar la
 comunidad autónoma de residencia&#8201;&#8212;&#8201;independiente de si el texto sí dio
@@ -2439,7 +2459,32 @@ que ese dato lo introdujo el propio usuario y no lo infirió el sistema.</p>
 </div>
 </div>
 <div class="sect3">
-<h4 id="_populationpictogram_tsx">5.3.5. <code>PopulationPictogram.tsx</code></h4>
+<h4 id="_relatedaccountslist_tsx">5.3.5. <code>RelatedAccountsList.tsx</code></h4>
+<div class="dlist">
+<dl>
+<dt class="hdlist1">Propósito/Responsabilidad</dt>
+<dd>
+<p>Pinta <code>ExposureReport.related_accounts</code> (ver ADR-44/ADR-48,
+<code>app/osint/username_correlation.py</code>): un aviso con el total de sitios
+comprobados y, si los hay, un enlace por cada sitio donde se encontró
+una cuenta con el mismo username (<code>exists=true</code> únicamente&#8201;&#8212;&#8201;nunca se
+recibe del backend, y por tanto nunca se muestra, contenido de esas
+cuentas). <code>related_accounts</code> es <code>null</code> cuando
+<code>settings.enable_username_correlation</code> está desactivado en el servidor
+(por defecto) o la comprobación no llegó a ejecutarse&#8201;&#8212;&#8201;en ese caso el
+componente no pinta nada (<code>return null</code>), y <code>Dashboard.tsx</code> ni siquiera
+renderiza la <code>&lt;section&gt;</code> que lo envuelve, mismo criterio que el resto de
+secciones opcionales del informe.</p>
+</dd>
+<dt class="hdlist1">Ubicación</dt>
+<dd>
+<p><code>webapp/src/components/RelatedAccountsList.tsx</code>.</p>
+</dd>
+</dl>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_populationpictogram_tsx">5.3.6. <code>PopulationPictogram.tsx</code></h4>
 <div class="dlist">
 <dl>
 <dt class="hdlist1">Propósito/Responsabilidad</dt>
@@ -2461,7 +2506,7 @@ proporción ya calculada por el backend (<code>k_anonymity.py</code>).</p>
 </div>
 </div>
 <div class="sect3">
-<h4 id="_locationmap_tsx">5.3.6. <code>LocationMap.tsx</code></h4>
+<h4 id="_locationmap_tsx">5.3.7. <code>LocationMap.tsx</code></h4>
 <div class="dlist">
 <dl>
 <dt class="hdlist1">Propósito/Responsabilidad</dt>
@@ -2484,7 +2529,7 @@ real.</p>
 </div>
 </div>
 <div class="sect3">
-<h4 id="_aisummarycard_tsx">5.3.7. <code>AiSummaryCard.tsx</code></h4>
+<h4 id="_aisummarycard_tsx">5.3.8. <code>AiSummaryCard.tsx</code></h4>
 <div class="dlist">
 <dl>
 <dt class="hdlist1">Propósito/Responsabilidad</dt>
@@ -4363,9 +4408,8 @@ argumentario RGPD del proyecto (ver ADR-18, ADR-35) se mantiene
 consistente: se consume una librería de terceros con el alcance más
 estrecho posible, no se copia ni se amplía su parte de "dossier";
 (-) un barrido completo son varios miles de peticiones HTTP a sitios de
-terceros y tarda del orden de minutos incluso con concurrencia alta&#8201;&#8212;&#8201;aceptado por ahora (el endpoint es síncrono/bloqueante), con streaming
-de progreso (mismo patrón que ADR-11) como trabajo futuro si se integra
-en el frontend; (-) sin <code>cloudflare_bypass</code> activado (decisión
+terceros y tarda del orden de minutos incluso con concurrencia alta&#8201;&#8212;&#8201;la integración real en el pipeline y el streaming de progreso se
+resuelven en ADR-48, no aquí; (-) sin <code>cloudflare_bypass</code> activado (decisión
 deliberada, no se monta un servicio de bypass), los sitios protegidos
 por Cloudflare devuelven <code>UNKNOWN</code> en vez de un resultado concluyente;
 (-) la precisión de la detección depende por completo del mantenimiento
@@ -4373,6 +4417,74 @@ de <code>maigret</code> aguas arriba&#8201;&#8212;&#8201;si esa base de datos qu
 o un sitio cambia su HTML sin que el proyecto lo corrija, este módulo
 hereda ese desfase sin poder solucionarlo por sí solo (ver fila
 correspondiente en <code>11_technical_risks.adoc</code>).</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_48_integración_de_la_correlación_de_username_en_el_pipeline_principaltarea_en_paralelo_progreso_en_streaming_related_accounts_en_el_informe_detrás_de_un_feature_flag">9.3.9. ADR-48: Integración de la correlación de username en el pipeline principal&#8201;&#8212;&#8201;tarea en paralelo, progreso en streaming, <code>related_accounts</code> en el informe, detrás de un feature flag</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: ADR-44 dejó <code>check_username_across_sites()</code> implementada y
+accesible vía <code>POST /api/username-correlation</code>, pero como endpoint
+standalone&#8201;&#8212;&#8201;sin conexión con la pantalla de carga ni con el informe
+final. Sin eso, la funcionalidad no aportaba nada visible: el usuario no
+tenía forma de ver, dentro del flujo normal de análisis, qué cuentas se
+habían encontrado.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: se integra como una tarea más lanzada en paralelo dentro de
+<code>analysis_router._build_report</code>, con el mismo patrón que
+<code>geolocation_task</code> (ver ADR-11): se crea con <code>asyncio.create_task</code> al
+principio del pipeline&#8201;&#8212;&#8201;funciona sobre <code>profile.username</code>, así que a
+diferencia de <code>geolocation_task</code> no depende de la plataforma ni de que
+haya fotos&#8201;&#8212;&#8201;y se recoge más tarde dentro de <code>generate_report</code>
+(parámetro <code>username_correlation_task</code>), que construye
+<code>ExposureReport.related_accounts</code> (<code>UsernameCorrelationSummary</code>) con
+SOLO los sitios con <code>exists=True</code>: de los ~5000 comprobados, la mayoría
+son "no existe" y no aportan nada que enseñar en un informe.</p>
+</div>
+<div class="paragraph">
+<p>Progreso en streaming: <code>check_username_across_sites()</code> gana un parámetro
+<code>progress_callback</code> opcional. Como <code>maigret.checking.maigret()</code> no
+expone un callback async por sitio comprobado sino un objeto
+<code>query_notify</code> cuyo <code>.update()</code> se llama de forma SÍNCRONA una vez por
+sitio, se usa un <code>query_notify</code> propio (<code>_CountingQueryNotify</code>) que solo
+cuenta, sondeado cada <code>PROGRESS_POLL_INTERVAL_SECONDS</code> (1s) por una tarea
+de fondo que emite el evento real&#8201;&#8212;&#8201;evita tanto tener que await-ear
+código síncrono como inundar el SSE con ~5000 eventos individuales. En
+el frontend, <code>Dashboard.tsx</code> gana una tercera línea de progreso
+independiente (<code>track: "correlacion_cuentas"</code>), generalizando
+<code>formatPhotosLabel</code>/<code>isTrackDone</code> (antes solo para las dos líneas de
+fotos) para aceptar las claves de contador como parámetro en vez de
+duplicar la función una tercera vez. El informe final gana una sección
+nueva (<code>RelatedAccountsList.tsx</code>), que no se pinta si
+<code>related_accounts</code> es <code>null</code>.</p>
+</div>
+<div class="paragraph">
+<p>Feature flag: <code>settings.enable_username_correlation</code> (<code>False</code> por
+defecto). Dos motivos, no solo uno: (1) coste real&#8201;&#8212;&#8201;no todo despliegue
+quiere pagar varios minutos y miles de peticiones HTTP de terceros en
+cada análisis; (2) sin esto en <code>False</code> por defecto, la suite de tests
+lanzaría esas ~5000 peticiones reales en cada <code>pytest</code>&#8201;&#8212;&#8201;mismo patrón
+que <code>enable_scene_analysis</code>.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () la funcionalidad por fin es visible de principio a
+fin -- pantalla de carga y informe -- en vez de un endpoint suelto sin
+usar; () reutiliza el mismo patrón de tarea-en-paralelo y de
+progress_callback que ya existía para geolocalización, sin introducir un
+mecanismo nuevo; (+) <code>related_accounts</code> filtrado a solo "encontradas"
+mantiene el informe legible en vez de una lista de miles de negativos;
+(-) al no depender de la plataforma, esta tarea se lanza en TODO
+análisis (reddit e instagram) cuando el flag está activo, a diferencia
+de <code>geolocation_task</code> que solo corre para instagram&#8201;&#8212;&#8201;coste aceptado
+conscientemente, ya que el username a comprobar existe siempre,
+independientemente de la plataforma; (-) el sondeo de progreso cada 1s
+significa que el evento intermedio más reciente puede tener hasta un
+segundo de retraso respecto al conteo real&#8201;&#8212;&#8201;aceptable para una barra
+de progreso, no para nada que necesite precisión; (-) activar el flag en
+producción sin más cambios implica que CADA análisis paga el coste
+completo de ADR-44 (varios minutos, miles de peticiones)&#8201;&#8212;&#8201;no hay
+todavía una opción de "análisis rápido sin correlación de cuentas" a
+nivel de producto, solo el flag de todo-o-nada a nivel de servidor.</p>
 </div>
 </div>
 </div>
@@ -7312,20 +7424,25 @@ este proyecto:</p>
 </tr>
 <tr>
 <td class="tableblock halign-left valign-top"><p class="tableblock">Correlación de cuentas por username (<code>osint/username_correlation.py</code>,
-  ver ADR-44) depende por completo de la librería <code>maigret</code> de
+  ver ADR-44/ADR-48) depende por completo de la librería <code>maigret</code> de
   terceros: coste/latencia de un barrido completo (~5000 sitios, del
-  orden de minutos) y precisión sujeta a que su base de datos de sitios
-  siga mantenida al día</p></td>
+  orden de minutos, ahora lanzado en TODO análisis con el flag activo&#8201;&#8212;&#8201;  ver ADR-48) y precisión sujeta a que su base de datos de sitios siga
+  mantenida al día</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">Media</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Bajo (endpoint aislado, no bloquea el resto del pipeline de análisis;
-  resultados <code>UNKNOWN</code> en vez de falsos positivos/negativos cuando un
-  sitio cambia o bloquea la petición)</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">Endpoint síncrono aceptado por ahora, con streaming de progreso (ver
-  ADR-11) como trabajo futuro si se integra en el frontend. Actualizar
-  la versión de <code>maigret</code> en <code>requirements.txt</code> es la vía de
-  mantenimiento&#8201;&#8212;&#8201;no se vendoriza una copia propia de su base de datos
-  (ver ADR-44), así que actualizar la dependencia ya trae los sitios y
-  reglas de detección más recientes de esa comunidad.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Bajo (detrás de <code>settings.enable_username_correlation</code>, <code>False</code> por
+  defecto&#8201;&#8212;&#8201;ningún despliegue paga este coste sin activarlo
+  explícitamente; corre en paralelo con el resto del pipeline, no lo
+  bloquea; resultados <code>UNKNOWN</code> en vez de falsos positivos/negativos
+  cuando un sitio cambia o bloquea la petición)</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Progreso en streaming ya implementado (ADR-48, sondeo cada 1s vía
+  <code>progress_callback</code>), así que ya no es trabajo futuro. Actualizar la
+  versión de <code>maigret</code> en <code>requirements.txt</code> es la vía de mantenimiento
+  de la base de datos de sitios&#8201;&#8212;&#8201;no se vendoriza una copia propia (ver
+  ADR-44), así que actualizar la dependencia ya trae los sitios y reglas
+  de detección más recientes de esa comunidad. Si el coste por análisis
+  resulta excesivo en producción, la siguiente palanca sería una opción
+  de "análisis rápido" a nivel de producto (no solo el flag de servidor
+  todo-o-nada que hay hoy).</p></td>
 </tr>
 </tbody>
 </table>
@@ -7659,7 +7776,7 @@ este proyecto:</p>
 <div id="footer">
 <div id="footer-text">
 Version 1.0<br>
-Last updated 2026-09-19 00:20:58 UTC
+Last updated 2026-09-20 15:42:32 UTC
 </div>
 </div>
 </body>
