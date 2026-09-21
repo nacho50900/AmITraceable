@@ -9,6 +9,9 @@ from app.nlp.ai_attribute_extraction import extract_demographics_with_ai, merge_
 from app.nlp.demographic_extraction import DemographicFindings, extract_demographics
 
 MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
+# Debe coincidir con GEMINI_API_URL_TEMPLATE.format(model=settings.gemini_model)
+# en app/nlp/ai_client.py -- ver tests/test_ai_analysis.py, mismo valor.
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
 
 def _post(text: str, permalink: str = "https://x/1", i: str = "1") -> SocialPost:
@@ -25,7 +28,25 @@ def _post(text: str, permalink: str = "https://x/1", i: str = "1") -> SocialPost
     )
 
 
-def _mock_content(**fields) -> dict:
+def _wrap_mistral(content: dict) -> dict:
+    return {"choices": [{"message": {"content": __import__("json").dumps(content)}}]}
+
+
+def _wrap_gemini(content: dict) -> dict:
+    return {"candidates": [{"content": {"parts": [{"text": __import__("json").dumps(content)}]}}]}
+
+
+def _mock_content(wrap=_wrap_mistral, **fields) -> dict:
+    """Construye el cuerpo de respuesta mockeado. Por defecto envuelve en
+    la forma de Mistral (la mayoría de tests de este archivo prueban
+    lógica de PARSEO de contenido ya extraído -- _to_findings,
+    merge_findings... -- que es idéntica sea cual sea el proveedor que
+    entregó ese contenido, así que no se ha parametrizado cada uno de
+    ellos contra los dos proveedores; ver TestNoApiKeyOrEmptyInput y
+    TestGracefulDegradation, parametrizadas de verdad porque SÍ prueban
+    el propio mecanismo de llamada/degradación). Pasa wrap=_wrap_gemini
+    (o provider.wrap, ver el fixture `provider`) para un test que sí
+    necesite validar contra Gemini en concreto."""
     base = {
         "sexo": None,
         "edad": None,
@@ -40,18 +61,51 @@ def _mock_content(**fields) -> dict:
         "evidence": {},
     }
     base.update(fields)
-    return {"choices": [{"message": {"content": __import__("json").dumps(base)}}]}
+    return wrap(base)
+
+
+class _Provider:
+    """Mismo helper que en tests/test_ai_analysis.py -- agrupa la URL a
+    mockear y cómo envolver el contenido para cada proveedor."""
+
+    __slots__ = ("name", "url", "wrap")
+
+    def __init__(self, name: str, url: str, wrap):
+        self.name = name
+        self.url = url
+        self.wrap = wrap
+
+
+_PROVIDERS = {
+    "mistral": _Provider("mistral", MISTRAL_URL, _wrap_mistral),
+    "gemini": _Provider("gemini", GEMINI_URL, _wrap_gemini),
+}
+
+
+@pytest.fixture(params=["mistral", "gemini"])
+def provider(request, monkeypatch) -> _Provider:
+    """Parametriza el test que lo pida para correr una vez contra CADA
+    backend de app/nlp/ai_client.py -- ver el mismo fixture en
+    tests/test_ai_analysis.py para el razonamiento completo."""
+    p = _PROVIDERS[request.param]
+    monkeypatch.setattr(settings, "ai_provider", p.name)
+    monkeypatch.setattr(settings, "mistral_api_key", "fake-key" if p.name == "mistral" else None)
+    monkeypatch.setattr(settings, "gemini_api_key", "fake-key" if p.name == "gemini" else None)
+    return p
 
 
 @pytest.fixture(autouse=True)
 def reset_mistral_api_key(monkeypatch):
-    """Con AI_PROVIDER=mistral fijado explícitamente: este archivo entero
-    mockea MISTRAL_URL, así que necesita seguir hablando con el backend de
+    """Con AI_PROVIDER=mistral fijado explícitamente: la mayoría de tests
+    de este archivo mockean MISTRAL_URL directamente (ver comentario de
+    _mock_content), así que necesitan seguir hablando con el backend de
     Mistral pase lo que pase con el valor por defecto de AI_PROVIDER en
-    app/config.py (Gemini) -- fijarlo aquí hace estos tests inmunes a que
+    app/config.py (Gemini) -- fijarlo aquí hace esos tests inmunes a que
     ese default cambie otra vez en el futuro (mismo criterio que
-    tests/test_ai_analysis.py)."""
+    tests/test_ai_analysis.py). Los tests que piden el fixture `provider`
+    de arriba lo pisan explícitamente para correr también contra Gemini."""
     monkeypatch.setattr(settings, "mistral_api_key", None)
+    monkeypatch.setattr(settings, "gemini_api_key", None)
     monkeypatch.setattr(settings, "ai_provider", "mistral")
 
 
@@ -62,9 +116,53 @@ class TestNoApiKeyOrEmptyInput:
         assert findings == DemographicFindings()
 
     @pytest.mark.asyncio
-    async def test_returns_empty_findings_when_nothing_to_send(self, monkeypatch):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+    async def test_returns_empty_findings_when_nothing_to_send(self, provider):
         findings = await extract_demographics_with_ai([], username="")
+        assert findings == DemographicFindings()
+
+
+class TestGracefulDegradation:
+    """A diferencia del resto de clases de este archivo (que prueban el
+    PARSEO de contenido ya extraído, algo idéntico sea cual sea el
+    proveedor), esta clase prueba el propio mecanismo de llamada y
+    degradación -- justo lo que SÍ cambia entre proveedores (URL, forma
+    de la respuesta de error). Parametrizada contra Mistral y Gemini con
+    el fixture `provider`."""
+
+    @pytest.mark.asyncio
+    async def test_network_error_returns_empty_findings(self, provider, respx_mock):
+        respx_mock.post(provider.url).mock(side_effect=httpx.ConnectError("no network"))
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings == DemographicFindings()
+
+    @pytest.mark.asyncio
+    async def test_429_returns_empty_findings_without_raising(self, provider, respx_mock):
+        respx_mock.post(provider.url).mock(return_value=httpx.Response(429))
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings == DemographicFindings()
+
+    @pytest.mark.asyncio
+    async def test_malformed_json_content_returns_empty_findings(self, provider, respx_mock):
+        if provider.name == "mistral":
+            body = {"choices": [{"message": {"content": "no es json"}}]}
+        else:
+            body = {"candidates": [{"content": {"parts": [{"text": "no es json"}]}}]}
+        respx_mock.post(provider.url).mock(return_value=httpx.Response(200, json=body))
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings == DemographicFindings()
+
+    @pytest.mark.asyncio
+    async def test_unexpected_response_shape_returns_empty_findings(self, provider, respx_mock):
+        respx_mock.post(provider.url).mock(return_value=httpx.Response(200, json={"unexpected": "shape"}))
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
         assert findings == DemographicFindings()
 
 
@@ -542,46 +640,6 @@ class TestSexoPorNombre:
         sent_body = route.calls[0].request.content.decode()
         assert "Ana García" in sent_body
         assert "Enfermera en León" in sent_body
-
-
-class TestGracefulDegradation:
-    @pytest.mark.asyncio
-    async def test_network_error_returns_empty_findings(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(side_effect=httpx.ConnectError("no network"))
-
-        findings = await extract_demographics_with_ai([_post("hola")], username="x")
-
-        assert findings == DemographicFindings()
-
-    @pytest.mark.asyncio
-    async def test_429_returns_empty_findings_without_raising(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(429))
-
-        findings = await extract_demographics_with_ai([_post("hola")], username="x")
-
-        assert findings == DemographicFindings()
-
-    @pytest.mark.asyncio
-    async def test_malformed_json_content_returns_empty_findings(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json={"choices": [{"message": {"content": "no es json"}}]})
-        )
-
-        findings = await extract_demographics_with_ai([_post("hola")], username="x")
-
-        assert findings == DemographicFindings()
-
-    @pytest.mark.asyncio
-    async def test_unexpected_response_shape_returns_empty_findings(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json={"unexpected": "shape"}))
-
-        findings = await extract_demographics_with_ai([_post("hola")], username="x")
-
-        assert findings == DemographicFindings()
 
 
 class TestMergeFindings:
