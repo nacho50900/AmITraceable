@@ -150,7 +150,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/python3.12 /usr/local/bin/python3
 
 COPY requirements.txt ./
-RUN python -m pip install --no-cache-dir -r requirements.txt
+# --ignore-installed blinker: `software-properties-common` (arriba) trae
+# consigo `python3-blinker` vía apt, instalado en formato distutils (sin
+# el RECORD que pip necesita para desinstalarlo limpiamente). Mientras
+# ninguna dependencia de requirements.txt necesitaba blinker, esto no
+# daba problema -- pip lo dejaba tal cual, sin tocarlo. Desde que
+# `maigret` (ver requirements.txt) tira de `flask[async]`, que a su vez
+# necesita una versión de blinker más nueva que la de apt, pip intenta
+# actualizarlo y falla en seco con
+# "error: uninstall-distutils-installed-package". `--ignore-installed`
+# le dice a pip que instale su propia copia en site-packages por encima,
+# sin intentar desinstalar la de apt primero -- exactamente lo que hace
+# falta aquí, no un fix genérico "por si acaso".
+RUN python -m pip install --no-cache-dir --ignore-installed blinker -r requirements.txt
 
 # Geolocalización por imagen (opcional, ver app/vision/geolocation.py):
 # torch/faiss/transformers pesan varios cientos de MB y solo aportan algo
