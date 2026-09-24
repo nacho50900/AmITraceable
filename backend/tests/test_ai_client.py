@@ -1,16 +1,13 @@
 """
 Tests de app/nlp/ai_client.py (cliente del modelo de IA local Qwen3.5-4B).
 
-No se carga ningún modelo real ni se descarga nada: `llama_cpp`, `torch` y
-`huggingface_hub` no son dependencias de test (ver requirements-vision.txt),
-así que se sustituyen por módulos falsos en `sys.modules`, y el sistema de
-ficheros de la caché de cuantización se redirige a `tmp_path`.
+No se carga ningún modelo real ni se descarga nada: `llama_cpp` y `torch`
+no son dependencias de test (ver requirements-vision.txt), así que se
+sustituyen por módulos falsos en `sys.modules`.
 """
 import json
-import subprocess
 import sys
 import types
-from pathlib import Path as RealPath
 
 import pytest
 
@@ -34,18 +31,15 @@ def configured_model(monkeypatch):
 
 @pytest.fixture
 def fake_llama_cpp(monkeypatch):
-    """Módulo `llama_cpp` falso: `Llama(...)` y `Llama.from_pretrained(...)`
-    registran los kwargs con los que se les llamó."""
-    calls = {"init": [], "from_pretrained": []}
+    """Módulo `llama_cpp` falso: `Llama.from_pretrained(...)` registra los
+    kwargs con los que se le llamó."""
+    calls = {"from_pretrained": []}
 
     class FakeLlama:
-        def __init__(self, **kwargs):
-            calls["init"].append(kwargs)
-
         @classmethod
         def from_pretrained(cls, **kwargs):
             calls["from_pretrained"].append(kwargs)
-            return object.__new__(cls)  # sin pasar por __init__: no cuenta como Llama(...)
+            return cls()
 
     module = types.ModuleType("llama_cpp")
     module.Llama = FakeLlama
@@ -57,19 +51,6 @@ def _fake_torch(monkeypatch, cuda: bool):
     module = types.ModuleType("torch")
     module.cuda = types.SimpleNamespace(is_available=lambda: cuda)
     monkeypatch.setitem(sys.modules, "torch", module)
-
-
-@pytest.fixture
-def redirected_cache(monkeypatch, tmp_path):
-    """`_ensure_quantized_model` construye rutas absolutas bajo
-    /root/.cache/...; se reencaminan a `tmp_path` para no tocar el disco
-    real."""
-    monkeypatch.setattr(
-        ai_client,
-        "Path",
-        lambda p: tmp_path / RealPath(p).relative_to("/"),
-    )
-    return tmp_path / "root/.cache/huggingface/qwen3.5-4b-quantized"
 
 
 class TestErrors:
@@ -120,103 +101,6 @@ class TestQwenAvailable:
         assert ai_client._qwen_available() is True
 
 
-class TestEnsureQuantizedModel:
-    def test_none_without_llama_quantize(self, monkeypatch):
-        monkeypatch.setattr(ai_client.shutil, "which", lambda name: None)
-
-        assert ai_client._ensure_quantized_model() is None
-
-    def test_returns_cached_file_without_downloading(self, monkeypatch, redirected_cache):
-        monkeypatch.setattr(ai_client.shutil, "which", lambda name: "/usr/bin/llama-quantize")
-        monkeypatch.delenv("QWEN_QUANT_TYPE", raising=False)
-        redirected_cache.mkdir(parents=True)
-        cached = redirected_cache / "qwen3.5-4b-q4_k_m.gguf"
-        cached.write_bytes(b"gguf")
-        # Si intentara descargar, fallaría: no hay huggingface_hub
-        monkeypatch.setitem(sys.modules, "huggingface_hub", None)
-
-        assert ai_client._ensure_quantized_model() == (str(cached), "Q4_K_M")
-
-    def test_quant_type_from_env_is_normalized(self, monkeypatch, redirected_cache):
-        monkeypatch.setattr(ai_client.shutil, "which", lambda name: "/usr/bin/llama-quantize")
-        monkeypatch.setenv("QWEN_QUANT_TYPE", "  q5_k_m ")
-        redirected_cache.mkdir(parents=True)
-        cached = redirected_cache / "qwen3.5-4b-q5_k_m.gguf"
-        cached.write_bytes(b"gguf")
-
-        assert ai_client._ensure_quantized_model() == (str(cached), "Q5_K_M")
-
-    def test_quantizes_and_renames_tmp_on_success(self, configured_model, monkeypatch, redirected_cache):
-        monkeypatch.setattr(ai_client.shutil, "which", lambda name: "/usr/bin/llama-quantize")
-        monkeypatch.delenv("QWEN_QUANT_TYPE", raising=False)
-        hf_calls = []
-        fake_hf = types.ModuleType("huggingface_hub")
-        fake_hf.hf_hub_download = lambda **kwargs: hf_calls.append(kwargs) or "/base/model.gguf"
-        monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hf)
-
-        run_args = []
-
-        def fake_run(cmd, **kwargs):
-            run_args.append(cmd)
-            RealPath(cmd[2]).write_bytes(b"cuantizado")  # llama-quantize escribe el .tmp
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-
-        monkeypatch.setattr(ai_client.subprocess, "run", fake_run)
-
-        result = ai_client._ensure_quantized_model()
-
-        final_path = redirected_cache / "qwen3.5-4b-q4_k_m.gguf"
-        assert result == (str(final_path), "Q4_K_M")
-        assert final_path.read_bytes() == b"cuantizado"
-        assert not (redirected_cache / "qwen3.5-4b-q4_k_m.gguf.tmp").exists()
-        assert hf_calls == [{"repo_id": "fake/repo", "filename": "fake-model.gguf"}]
-        assert run_args[0][0] == "/usr/bin/llama-quantize"
-        assert run_args[0][1] == "/base/model.gguf"
-        assert run_args[0][3] == "Q4_K_M"
-
-    def test_none_and_no_final_file_when_quantize_fails(self, configured_model, monkeypatch, redirected_cache, caplog):
-        monkeypatch.setattr(ai_client.shutil, "which", lambda name: "/usr/bin/llama-quantize")
-        monkeypatch.delenv("QWEN_QUANT_TYPE", raising=False)
-        fake_hf = types.ModuleType("huggingface_hub")
-        fake_hf.hf_hub_download = lambda **kwargs: "/base/model.gguf"
-        monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hf)
-        monkeypatch.setattr(
-            ai_client.subprocess,
-            "run",
-            lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="fallo de cuantización"),
-        )
-
-        with caplog.at_level("WARNING", logger=ai_client.logger.name):
-            result = ai_client._ensure_quantized_model()
-
-        assert result is None
-        assert not (redirected_cache / "qwen3.5-4b-q4_k_m.gguf").exists()
-        assert "fallo de cuantización" in caplog.text
-
-    def test_none_when_download_raises(self, configured_model, monkeypatch, redirected_cache, caplog):
-        monkeypatch.setattr(ai_client.shutil, "which", lambda name: "/usr/bin/llama-quantize")
-        monkeypatch.delenv("QWEN_QUANT_TYPE", raising=False)
-
-        def _raise(**kwargs):
-            raise ConnectionError("sin red")
-
-        fake_hf = types.ModuleType("huggingface_hub")
-        fake_hf.hf_hub_download = _raise
-        monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hf)
-
-        with caplog.at_level("WARNING", logger=ai_client.logger.name):
-            assert ai_client._ensure_quantized_model() is None
-
-        assert "ConnectionError" in caplog.text
-
-    def test_none_when_huggingface_hub_missing(self, configured_model, monkeypatch, redirected_cache):
-        monkeypatch.setattr(ai_client.shutil, "which", lambda name: "/usr/bin/llama-quantize")
-        monkeypatch.delenv("QWEN_QUANT_TYPE", raising=False)
-        monkeypatch.setitem(sys.modules, "huggingface_hub", None)
-
-        assert ai_client._ensure_quantized_model() is None
-
-
 class TestLazyLoad:
     def test_noop_when_already_loaded(self, monkeypatch):
         sentinel = object()
@@ -228,42 +112,44 @@ class TestLazyLoad:
 
         assert ai_client._model is sentinel
 
-    def test_loads_quantized_model_with_gpu(self, monkeypatch, fake_llama_cpp):
+    def test_loads_from_pretrained_with_configured_repo_on_gpu(self, configured_model, monkeypatch, fake_llama_cpp):
         _fake_torch(monkeypatch, cuda=True)
-        monkeypatch.setattr(ai_client, "_ensure_quantized_model", lambda: ("/cache/q.gguf", "Q4_K_M"))
+        monkeypatch.delenv("QWEN_N_CTX", raising=False)
 
         ai_client._lazy_load()
 
         assert ai_client._model is not None
-        assert fake_llama_cpp["from_pretrained"] == []
-        kwargs = fake_llama_cpp["init"][0]
-        assert kwargs["model_path"] == "/cache/q.gguf"
-        assert kwargs["n_gpu_layers"] == -1
-        assert kwargs["n_ctx"] == 4096
-        assert "chat_handler" not in kwargs  # solo texto
-        assert ai_client.get_model_variant() == "Qwen3.5-4B (Q4_K_M)"
-
-    def test_loads_quantized_model_on_cpu_without_gpu(self, monkeypatch, fake_llama_cpp):
-        _fake_torch(monkeypatch, cuda=False)
-        monkeypatch.setattr(ai_client, "_ensure_quantized_model", lambda: ("/cache/q.gguf", "Q5_K_M"))
-
-        ai_client._lazy_load()
-
-        assert fake_llama_cpp["init"][0]["n_gpu_layers"] == 0
-        assert ai_client.get_model_variant() == "Qwen3.5-4B (Q5_K_M)"
-
-    def test_falls_back_to_from_pretrained_when_not_quantized(self, configured_model, monkeypatch, fake_llama_cpp):
-        _fake_torch(monkeypatch, cuda=False)
-        monkeypatch.setattr(ai_client, "_ensure_quantized_model", lambda: None)
-
-        ai_client._lazy_load()
-
-        assert fake_llama_cpp["init"] == []
         kwargs = fake_llama_cpp["from_pretrained"][0]
         assert kwargs["repo_id"] == "fake/repo"
         assert kwargs["filename"] == "fake-model.gguf"
-        assert kwargs["n_gpu_layers"] == 0
-        assert ai_client.get_model_variant() == "Qwen3.5-4B (sin cuantizar)"
+        assert kwargs["n_gpu_layers"] == -1
+        assert kwargs["n_ctx"] == 32768
+        assert kwargs["verbose"] is False
+        assert "chat_handler" not in kwargs  # solo texto
+        assert ai_client.get_model_variant() == "Qwen3.5-4B (fake-model.gguf)"
+
+    def test_cpu_when_no_gpu(self, configured_model, monkeypatch, fake_llama_cpp):
+        _fake_torch(monkeypatch, cuda=False)
+
+        ai_client._lazy_load()
+
+        assert fake_llama_cpp["from_pretrained"][0]["n_gpu_layers"] == 0
+
+    def test_context_size_overridable_with_env(self, configured_model, monkeypatch, fake_llama_cpp):
+        _fake_torch(monkeypatch, cuda=False)
+        monkeypatch.setenv("QWEN_N_CTX", "8192")
+
+        ai_client._lazy_load()
+
+        assert fake_llama_cpp["from_pretrained"][0]["n_ctx"] == 8192
+
+    def test_second_call_does_not_reload(self, configured_model, monkeypatch, fake_llama_cpp):
+        _fake_torch(monkeypatch, cuda=False)
+
+        ai_client._lazy_load()
+        ai_client._lazy_load()
+
+        assert len(fake_llama_cpp["from_pretrained"]) == 1
 
 
 class _FakeModel:
