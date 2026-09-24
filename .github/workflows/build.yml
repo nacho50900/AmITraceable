@@ -96,19 +96,11 @@ jobs:
 
       - name: Tests backend con cobertura
         if: env.RUN_BACKEND == 'true'
-        env:
-          # Los tests de ai_analysis.py/ai_attribute_extraction.py usan
-          # respx.mock para simular las respuestas de Mistral Y de Gemini
-          # (parametrizados contra los dos backends de app/nlp/ai_client.py,
-          # ver el fixture `provider` en esos archivos), así que NINGUNA
-          # de las dos keys hace falta para pasar. Se inyectan igualmente
-          # por si en el futuro se añade algún test de integración real
-          # que sí las requiera; si el secret correspondiente no está
-          # definido en el repo, la variable llega vacía y
-          # Settings.mistral_api_key/gemini_api_key queda en None
-          # (comportamiento normal de "IA no configurada", no un fallo de CI).
-          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        # Los tests de ai_analysis.py/ai_attribute_extraction.py mockean
+        # call_ai_json directamente (ver app/nlp/ai_client.py, Qwen3.5-4B
+        # LOCAL) -- a diferencia del diseño anterior por HTTP a
+        # Mistral/Gemini, ya no hace falta ningún secret/API key para que
+        # esta suite pase en CI.
         run: cd backend && pytest --cov=app --cov-report=xml --cov-report=term
 
       - name: Analyze with SonarQube

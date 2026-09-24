@@ -1,22 +1,21 @@
 """
 Módulo opcional, best-effort: dado el NOMBRE de un edificio o monumento
 que Moondream2 dice reconocer en una foto (campo EDIFICIO_EMBLEMATICO,
-ver app/vision/scene_analysis.py), le pregunta al proveedor de IA ACTIVO
-(`settings.ai_provider` -- Gemini por defecto, o Mistral, ver
-app/nlp/ai_client.py) si reconoce ese lugar con certeza y, si es así, sus
-coordenadas reales -- para poder sobreescribir la estimación por
-similitud visual de DINOv2 (app/vision/geolocation.py) en esa foto
-concreta con algo mucho más preciso que "la foto se parece a otras fotos
-de esta provincia".
+ver app/vision/scene_analysis.py), le pregunta al modelo de IA LOCAL
+(Qwen3.5-4B, ver app/nlp/ai_client.py) si reconoce ese lugar con certeza y,
+si es así, sus coordenadas reales -- para poder sobreescribir la
+estimación por similitud visual de DINOv2 (app/vision/geolocation.py) en
+esa foto concreta con algo mucho más preciso que "la foto se parece a
+otras fotos de esta provincia".
 
 Por qué un LLM y no Moondream2 para las coordenadas: Moondream2 es un VQA
 pequeño (cuantizado localmente, ver su nota de fiabilidad en
 scene_analysis.py) sin conocimiento geográfico fiable de coordenadas --
 pedirle un lat/lon directamente sería inventar precisión donde no la hay.
-Un LLM de propósito general (Gemini o Mistral) tiene mucho más
-conocimiento del mundo real (nombres de monumentos, ciudades, países),
-así que aquí se usa su conocimiento general, NO visión -- solo recibe el
-NOMBRE que propuso Moondream2 (texto plano), nunca la imagen.
+Un LLM de propósito general tiene mucho más conocimiento del mundo real
+(nombres de monumentos, ciudades, países), así que aquí se usa su
+conocimiento general, NO visión -- solo recibe el NOMBRE que propuso
+Moondream2 (texto plano), nunca la imagen.
 
 Nunca se usa a ciegas: se le pide explícitamente al modelo que devuelva
 null si no reconoce el lugar con certeza (mismo criterio de "ante la duda,
@@ -25,14 +24,20 @@ no inventes" que el resto del proyecto usa con las regex/INE), y
 `confianza` alta -- ver MIN_CONFIDENCE_FOR_LANDMARK_OVERRIDE.
 
 Nota RGPD (para la memoria, mismo razonamiento que ai_analysis.py y
-ai_attribute_extraction.py): esto envía al proveedor de IA activo SOLO el
+ai_attribute_extraction.py): esto envía al modelo de IA local SOLO el
 nombre de un edificio/monumento propuesto por Moondream2 y, como contexto
 opcional para desambiguar nombres genéricos (p. ej. "catedral"), la
 descripción general de la foto -- nunca la imagen en sí, nunca datos
-personales de la cuenta analizada. Con AI_PROVIDER=gemini (el por
-defecto), ese proveedor es Google (EE.UU., expuesto al Cloud Act); con
-AI_PROVIDER=mistral, es Mistral AI (Francia, UE) -- ver la justificación
-completa de la elección de proveedor por defecto en app/config.py.
+personales de la cuenta analizada. Al ser un modelo local (ver
+app/nlp/ai_client.py), esta nota ya ni siquiera depende de la
+jurisdicción de un proveedor externo: no hay transferencia a nadie.
+
+RIESGO SIN VERIFICAR (ver app/nlp/ai_client.py, mismo aviso): este módulo
+se llama típicamente DURANTE el mismo pase de análisis de fotos en el que
+scene_analysis.py ya tiene Moondream2 cargado en GPU -- si Qwen3.5-4B
+(este módulo) y Moondream2 compiten por la misma VRAM limitada (GTX 1650,
+4GB) al mismo tiempo, hace falta medir en producción si conviven o si
+hace falta serializar su uso.
 """
 import logging
 

@@ -352,8 +352,8 @@ class GeolocationOutcome:
     # cerrado) sin llamar al backend, y solo pida traducción real de
     # `aficion` cuando la UI esté en un idioma distinto del español.
     # `visual_descriptions` (arriba) se mantiene intacto y sin tocar --
-    # sigue siendo lo que ve Mistral en ai_analysis.py y lo que se
-    # muestra en la vista de detalle en español.
+    # sigue siendo lo que ve el modelo de IA local en ai_analysis.py y lo
+    # que se muestra en la vista de detalle en español.
     visual_description_codes: dict[str, VisualDescriptionCodes] = field(default_factory=dict)
 
 

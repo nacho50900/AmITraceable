@@ -47,9 +47,10 @@ python -m spacy download es_core_news_sm
 ### Variables de entorno
 
 Ver `.env.example` para la lista completa y comentada. Las obligatorias
-son las de Reddit y `SESSION_SECRET_KEY`; Instagram y Mistral AI son
-opcionales (sin ellas, esas funciones concretas quedan desactivadas sin
-afectar al resto — ver el README raíz para el detalle).
+son las de Reddit y `SESSION_SECRET_KEY`; Instagram y el análisis con IA
+(Qwen3.5-4B local, ver `.env.example`) son opcionales (sin ellas, esas
+funciones concretas quedan desactivadas sin afectar al resto — ver el
+README raíz para el detalle).
 
 ## Datos de referencia poblacional (`app/data/ine_reference.py`)
 
@@ -109,7 +110,7 @@ app/
 ├── config.py                  # Settings (pydantic-settings, lee .env)
 ├── progress.py                # callback de progreso compartido
 ├── analysis_router.py         # endpoints de análisis
-├── ai_analysis.py             # veredicto + conclusiones sobre el informe vía Mistral AI (opcional)
+├── ai_analysis.py             # veredicto + conclusiones sobre el informe vía IA local (Qwen3.5-4B, opcional)
 ├── reddit_client.py           # extracción de datos de Reddit
 ├── instagram_client.py        # extracción de datos de Instagram
 ├── auth/
@@ -120,7 +121,7 @@ app/
 │   ├── fingerprint.py         # huella de escritura
 │   ├── attribute_inference.py # inferencia de atributos por comunidad/hashtag
 │   ├── demographic_extraction.py  # declaraciones explícitas en texto, por regex
-│   └── ai_attribute_extraction.py # lo mismo, vía IA (Mistral, opcional) -- complementa a la regex, no la sustituye
+│   └── ai_attribute_extraction.py # lo mismo, vía IA local (Qwen3.5-4B, opcional) -- complementa a la regex, no la sustituye
 ├── data/
 │   ├── ine_reference.py       # tablas de distribución poblacional (INE / Ministerio de Universidades) -- ver README arriba
 │   └── studies_by_university.json  # detalle completo matriculados/egresados por universidad, generado por update_studies_distribution.py
@@ -349,7 +350,7 @@ mantiene en el repo por si en el futuro compensa pagar la suscripción
 | `/auth/{reddit,instagram}/logout` | POST | Cierra sesión (borra la cookie) |
 | `/api/analyze/{platform}` | POST | Ejecuta el pipeline completo, devuelve el informe |
 | `/api/analyze/{platform}/stream` | GET | Igual que arriba, pero vía Server-Sent Events con progreso en vivo |
-| `/api/analyze/ai-summary` | POST | Envía un informe ya generado a Mistral AI, devuelve `{verdict, conclusions}` |
+| `/api/analyze/ai-summary` | POST | Envía un informe ya generado al modelo de IA local, devuelve `{verdict, conclusions}` |
 | `/metrics` | GET | Métricas Prometheus |
 | `/docs` | GET | Swagger UI |
 
@@ -364,7 +365,9 @@ pytest --cov=app --cov-report=xml --cov-report=term-missing   # con cobertura (p
 ```
 
 Los tests no requieren credenciales reales: usan `respx` para mockear las
-llamadas HTTP a Reddit/Instagram/Mistral, y un fixture (`patch_spacy_model`
+llamadas HTTP a Reddit/Instagram, mocks directos de `call_ai_json` para el
+análisis con IA (ver `app/nlp/ai_client.py`, Qwen3.5-4B local -- ya no hay
+ninguna API key de terceros que mockear), y un fixture (`patch_spacy_model`
 en `tests/conftest.py`) para no depender de tener el modelo de spaCy
 descargado en el entorno de test.
 
@@ -389,7 +392,7 @@ de lo que hace la herramienta — está silenciada explícitamente en
   y la extracción de atributos con IA (`nlp/ai_attribute_extraction.py`)
   están diseñados para fallar con gracia — sin índice FAISS construido (o
   sin sus dependencias pesadas instaladas, ver `requirements-vision.txt`),
-  o sin `MISTRAL_API_KEY`, el resto del pipeline sigue funcionando
+  o sin `QWEN_GGUF_REPO_ID` configurado (ver `.env.example`), el resto del pipeline sigue funcionando
   exactamente igual, y el frontend distingue explícitamente "la función no
   está disponible" de "no se encontró nada" (nunca ambos mensajes a la vez).
 - **Heurísticas explicables por diseño**: tanto la inferencia de atributos

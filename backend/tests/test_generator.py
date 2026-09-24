@@ -11,18 +11,16 @@ from app.vision import geolocation
 
 
 @pytest.fixture(autouse=True)
-def pin_ai_provider_to_mistral(monkeypatch):
-    """Varios tests de este archivo activan la IA con
-    `monkeypatch.setattr(settings, "mistral_api_key", "fake-key")` y
-    mockean `generator.extract_demographics_with_ai` directamente (sin
-    HTTP) -- pero `_apply_ai_findings` en generator.py comprueba
-    `settings.ai_key_configured`, que depende del PROVEEDOR ACTIVO
-    (`ai_provider`, "gemini" por defecto en app/config.py). Sin fijarlo
-    aquí a "mistral", esos tests configurarían la key de un proveedor que
-    no es el activo, `ai_key_configured` daría False, y el mock nunca
-    llegaría a invocarse -- mismo criterio que en tests/test_ai_analysis.py
-    y tests/test_ai_attribute_extraction.py."""
-    monkeypatch.setattr(settings, "ai_provider", "mistral")
+def enable_ai_analysis(monkeypatch):
+    """Varios tests de este archivo activan la IA y mockean
+    `generator.extract_demographics_with_ai` directamente (sin pasar por
+    el modelo real) -- pero `_apply_ai_findings` en generator.py comprueba
+    `settings.ai_key_configured`, que desde el cambio a Qwen3.5-4B local
+    exige `enable_ai_analysis=True` y un `qwen_gguf_repo_id` no vacío (ver
+    app/config.py) en vez de una API key de proveedor -- mismo criterio
+    que en tests/test_ai_analysis.py y tests/test_ai_attribute_extraction.py."""
+    monkeypatch.setattr(settings, "enable_ai_analysis", True)
+    monkeypatch.setattr(settings, "qwen_gguf_repo_id", "fake/repo")
 
 
 def _post(i: int = 1, platform="reddit", media_urls=None, post_type="post", permalink: str | None = None, text: str | None = None) -> SocialPost:
@@ -1014,7 +1012,6 @@ class TestSoftInferencesReachTheReport:
         from app.config import settings
         from app.nlp.demographic_extraction import DemographicFindings
 
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
 
         async def _fake_ai_extraction(posts, username, full_name=None, bio=None):
             findings = DemographicFindings()
@@ -1044,10 +1041,10 @@ class TestSoftInferencesReachTheReport:
         assert "pareja" in soft.value.lower()
 
     @pytest.mark.asyncio
-    async def test_without_mistral_api_key_no_soft_inferences_are_added(self, monkeypatch):
+    async def test_without_ai_analysis_enabled_no_soft_inferences_are_added(self, monkeypatch):
         from app.config import settings
 
-        monkeypatch.setattr(settings, "mistral_api_key", None)
+        monkeypatch.setattr(settings, "enable_ai_analysis", False)
 
         report = await generate_report(
             "instagram", "user", [_post(platform="instagram")], _fingerprint(), [], _score(),
@@ -1064,7 +1061,6 @@ class TestSoftInferencesReachTheReport:
         from app.config import settings
         from app.nlp.demographic_extraction import DemographicFindings
 
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
 
         async def _fake_ai_extraction(posts, username, full_name=None, bio=None):
             return DemographicFindings(
@@ -1160,7 +1156,6 @@ class TestVisualAnalysisReachesTheReport:
         from app.config import settings
         from app.nlp.demographic_extraction import DemographicFindings
 
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
 
         async def _fake_ai_extraction(posts, username, full_name=None, bio=None):
             return DemographicFindings(

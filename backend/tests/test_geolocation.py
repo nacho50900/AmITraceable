@@ -946,8 +946,8 @@ class TestEstimateLocationsForPosts:
         """Regresión: `estimate_location_from_image` es síncrona y hace
         trabajo de CPU real (la pasada del modelo) -- llamarla directamente
         bloquearía el hilo único del event loop mientras dura, impidiendo
-        que CUALQUIER otra tarea (incluida la llamada a Mistral que corre
-        en paralelo, ver analysis_router._build_report) avance mientras
+        que CUALQUIER otra tarea (incluida la llamada al modelo de IA local
+        que corre en paralelo, ver analysis_router._build_report) avance mientras
         tanto. Se simula con un `time.sleep` (bloqueante de verdad, a
         diferencia de `asyncio.sleep`) dentro de la función "de modelo", y
         se comprueba que otra tarea concurrente sí progresa durante ese

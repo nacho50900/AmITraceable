@@ -164,7 +164,7 @@ class VisualDescriptionCodes(BaseModel):
     `matricula`, no tiene validación de formato posible: solo llega
     hasta aquí filtrado por `_EDIFICIO_EMBLEMATICO_INVALID_VALUES`
     (ruido genérico obvio), no confirmado como un lugar real -- esa
-    confirmación (vía Mistral) vive en app/vision/landmark_resolution.py,
+    confirmación (vía el modelo de IA local) vive en app/vision/landmark_resolution.py,
     fuera de este módulo."""
 
     personas: str | None = None
@@ -214,7 +214,7 @@ class ImageLocationPoint(BaseModel):
     # bloquea el resto del análisis).
     #
     # Al formar parte de este modelo, se incluye automáticamente en el JSON
-    # completo del informe que ai_analysis.py le manda a Mistral para las
+    # completo del informe que ai_analysis.py le manda al modelo de IA local para las
     # conclusiones finales -- sin necesitar ningún cambio ahí.
     visual_description: str | None = None
     # Descripción GENERAL de la escena (campo DESCRIPCION del prompt de
@@ -230,7 +230,7 @@ class ImageLocationPoint(BaseModel):
     # Mismas señales que `visual_description`, pero SIN formatear a texto
     # en español -- ver VisualDescriptionCodes arriba y ADR-30.
     # `visual_description` (arriba) se mantiene intacto y sin tocar: sigue
-    # siendo lo que ve Mistral en app/ai_analysis.py y lo que se muestra
+    # siendo lo que ve el modelo de IA local en app/ai_analysis.py y lo que se muestra
     # en la vista de detalle en español. Este campo es ADITIVO, pensado
     # solo para que el frontend pueda traducir sin depender de ese texto.
     visual_description_codes: VisualDescriptionCodes | None = None

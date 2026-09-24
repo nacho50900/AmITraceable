@@ -39,8 +39,8 @@ terceros.
    ocupación, rutina) a partir de en qué comunidades/hashtags participas.
 4. **Detecta declaraciones explícitas** sobre ti mismo en el texto ("tengo
    24 años", "vivo en León", "estudio Medicina"...) combinando regex
-   (rápido, gratuito, determinista) con un modelo de IA (Mistral, opcional)
-   que capta redacciones más libres que la regex no reconoce -- y también
+   (rápido, gratuito, determinista) con un modelo de IA LOCAL (Qwen3.5-4B,
+   opcional) que capta redacciones más libres que la regex no reconoce -- y también
    una estimación (más débil, marcada aparte) de sexo por convención
    cultural del nombre público de la cuenta. A partir de ahí, y de
    distribuciones agregadas del INE, estima **cuánta gente en España
@@ -61,10 +61,10 @@ terceros.
    tomó la foto sino *qué hay* en ella.
 7. Calcula un **score de privacidad** (0-100) con desglose por componente.
 8. Envía automáticamente el informe ya generado (incluidas las
-   recomendaciones por reglas fijas, como insumo) a un modelo de IA
-   (Mistral AI, tier gratuito) para obtener un **veredicto general** de una
-   frase y conclusiones específicas y no obvias -- sin necesidad de pulsar
-   ningún botón.
+   recomendaciones por reglas fijas, como insumo) a un modelo de IA LOCAL
+   (Qwen3.5-4B, sin llamada a ningún tercero) para obtener un **veredicto
+   general** de una frase y conclusiones específicas y no obvias -- sin
+   necesidad de pulsar ningún botón.
 9. Permite **descargar el informe completo en JSON** (portabilidad de
    datos, RGPD Art. 20).
 
@@ -153,10 +153,12 @@ navegador.
   (listas + regex) para mantener el sistema explicable y auditable.
 - El análisis con IA (`backend/app/ai_analysis.py`,
   `backend/app/nlp/ai_attribute_extraction.py`) es **totalmente opcional**:
-  ambos usan la misma `MISTRAL_API_KEY`. Sin ella, el veredicto/conclusiones
-  del dashboard indican que no está disponible, y la detección de
-  atributos se queda solo con lo que encuentren las regex -- el resto de
-  la app funciona igual.
+  ambos usan el mismo modelo local (Qwen3.5-4B, ver
+  `backend/app/nlp/ai_client.py`). Sin `QWEN_GGUF_REPO_ID` configurado (o
+  sin `llama-cpp-python` instalado), el veredicto/conclusiones del
+  dashboard indican que no está disponible, y la detección de atributos se
+  queda solo con lo que encuentren las regex -- el resto de la app
+  funciona igual.
 - La correlación *entre plataformas* (Reddit + Instagram combinados) y el
   componente `identity_consistency_risk` del scoring quedan como
   **trabajo futuro**, documentado explícitamente en
@@ -187,14 +189,14 @@ navegador.
 - `app/nlp/fingerprint.py` — huella de escritura (longitud de frase, vocabulario, emojis, patrón horario, keywords TF-IDF, idioma).
 - `app/nlp/attribute_inference.py` — inferencia explicable de atributos (ubicación, ocupación, rutina) a partir de comunidades/hashtags.
 - `app/nlp/demographic_extraction.py` — extracción de declaraciones explícitas en texto por regex (edad, sexo, ubicación, estudios, ocupación, universidad, empresa).
-- `app/nlp/ai_attribute_extraction.py` — la misma extracción, pero vía IA (Mistral, opcional): capta redacciones libres que la regex no reconoce, y una estimación aparte de sexo por nombre público de la cuenta (marcada con menor fiabilidad). Complementa a la regex, nunca la sustituye.
+- `app/nlp/ai_attribute_extraction.py` — la misma extracción, pero vía IA local (Qwen3.5-4B, opcional): capta redacciones libres que la regex no reconoce, y una estimación aparte de sexo por nombre público de la cuenta (marcada con menor fiabilidad). Complementa a la regex, nunca la sustituye.
 - `app/nlp/travel_detection.py` — detección regex de menciones de "de viaje/vacaciones" en el pie de foto, para excluir esas publicaciones del cálculo de dónde vives habitualmente (ver `report/generator.py`). Complementa (no sustituye) a una detección equivalente vía IA en `ai_attribute_extraction.py`.
 - `app/data/ine_reference.py` — tablas de distribución poblacional (INE) usadas para el estrechamiento de población.
 - `app/scoring/k_anonymity.py` — motor de estimación de k-anonimato (estrechamiento de población en cascada), expone también la proporción ya calculada para el pictograma del frontend.
 - `app/scoring/privacy_score.py` — motor de scoring de privacidad (0-100).
 - `app/vision/geolocation.py` — geolocalización de fotos por similitud visual (DINOv2 + FAISS), opcional. Devuelve todas las estimaciones (con su confianza real) más un flag de si el índice está disponible, para poder distinguir "no hay índice" de "no hay resultados fiables".
 - `app/vision/scene_analysis.py` — análisis del contenido visual de cada foto (Moondream2, modelo de visión-lenguaje local vía `llama-cpp-python`/GGUF, ~1.4B parámetros de texto): objetos, actividades, aficiones, señales de relación de pareja, matrícula. Arquitectónicamente distinto de `geolocation.py` (que compara similitud visual contra un índice sin "entender" la foto). Opcional, mismo flag de activación que la geolocalización (`WITH_GEOLOCATION`), aunque ya no comparte sus mismas dependencias de Python (ver más abajo).
-- `app/ai_analysis.py` — veredicto general + conclusiones sobre el informe vía Mistral AI, opcional; se dispara automáticamente, sin botón, y usa `recommendations` como insumo.
+- `app/ai_analysis.py` — veredicto general + conclusiones sobre el informe vía IA local (Qwen3.5-4B), opcional; se dispara automáticamente, sin botón, y usa `recommendations` como insumo.
 - `app/progress.py` — callback de progreso compartido, usado por el endpoint de streaming.
 - `app/analysis_router.py` — endpoints de análisis (`/api/analyze/{platform}`, `/api/analyze/{platform}/stream`, `/api/analyze/ai-summary`).
 - `app/report/generator.py` — ensamblado del informe final + recomendaciones (estas últimas ya no se muestran como sección propia en el dashboard, ver más arriba).
@@ -359,8 +361,8 @@ Ver `backend/.env.example` para la lista completa comentada. Resumen:
 | `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | No | Sin ellas, Instagram devuelve 503 pero Reddit sigue funcionando. App "API setup with Instagram Login" en Meta for Developers |
 | `INSTAGRAM_REDIRECT_URI` | No | Déjala vacía si usas Docker (ver nota de túnel más abajo): se deriva sola del Host de cada petición. Fíjala solo con dominio propio en producción |
 | `FRONTEND_ORIGIN` | No | Déjala vacía si usas Docker: se deriva sola del Host. Fíjala (p. ej. `http://localhost:5173`) solo si sirves frontend y backend en puertos distintos sin Docker |
-| `MISTRAL_API_KEY` | No | Tier gratuito de [Mistral AI](https://console.mistral.ai). Sin ella, la sección "Analizar con IA" del dashboard indica que no está disponible, sin afectar al resto |
-| `MISTRAL_MODEL` | No | Por defecto `mistral-small-latest` |
+| `ENABLE_AI_ANALYSIS` | No | `true` por defecto. Desactiva del todo el análisis con IA (veredicto/conclusiones + extracción de atributos, ver `backend/app/nlp/ai_client.py`) sin desinstalar nada |
+| `QWEN_GGUF_REPO_ID`, `QWEN_GGUF_FILENAME` | No | Repo/fichero de Hugging Face con el GGUF de Qwen3.5-4B a cuantizar localmente (Q4_K_M vía llama-cpp-python) -- SIN VALOR POR DEFECTO A PROPÓSITO, hay que confirmarlo contra lo disponible en Hugging Face antes de desplegar (ver `.env.example`). Sin rellenar, la sección "Analizar con IA" del dashboard indica que no está disponible, sin afectar al resto |
 | `ENABLE_SCENE_ANALYSIS` | No | `false` por defecto. Activa el análisis de **contenido** visual con Moondream2 (descripción de escena por foto). Afecta exclusivamente a esto: la geolocalización por similitud visual (DINOv2) no lee esta variable y sigue funcionando igual, esté esto activado o no -- probado explícitamente en `test_geolocation.py`. Para que Moondream2 pueda funcionar (con esta variable en `true`) hace falta además `WITH_GEOLOCATION=true` en el build de Docker (mismo build-arg, aunque desde ADR-43 instala `llama-cpp-python` para Moondream2, no las mismas librerías que DINOv2). **Ver ADR-43 en `docs/`** (sustituye a ADR-19, que documentaba el backend `transformers` anterior): la cifra de RAM/VRAM necesaria depende ahora de si `MOONDREAM_QUANT_TYPE` está cuantizando el modelo o no, no hay un único número fijo como antes |
 
 **Nota sobre Instagram y HTTPS en local:** la API de Instagram (Business

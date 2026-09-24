@@ -108,12 +108,13 @@ export const api = {
     };
   },
   // Endpoint aislado del pipeline principal: manda el informe YA generado
-  // (que el frontend ya tiene en memoria) para que una IA externa (Mistral,
-  // tier gratuito) dé conclusiones priorizadas. Si no está disponible,
-  // lanza AiSummaryUnavailableError en vez de un Error genérico.
+  // (que el frontend ya tiene en memoria) para que un modelo de IA LOCAL
+  // (Qwen3.5-4B, ver backend/app/nlp/ai_client.py -- nunca sale del
+  // servidor) dé conclusiones priorizadas. Si no está disponible, lanza
+  // AiSummaryUnavailableError en vez de un Error genérico.
   aiSummary: (report: ExposureReport): Promise<{ verdict: string; conclusions: string[] }> =>
     // Se manda el idioma de UI actual (ver src/i18n) como query param, para
-    // que Mistral genere el veredicto/conclusiones DIRECTAMENTE en ese
+    // que el modelo de IA local genere el veredicto/conclusiones DIRECTAMENTE en ese
     // idioma en la misma llamada -- ver docstring de
     // `_LANGUAGE_INSTRUCTIONS` en backend/app/ai_analysis.py sobre por qué
     // no se traduce después en vez de generar directo.

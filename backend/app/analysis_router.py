@@ -200,7 +200,7 @@ async def _build_report(
             n_comments=n_comments,
             n_media_items=n_media_items,
             n_photos=n_photos,
-            ai_enabled=bool(settings.mistral_api_key),
+            ai_enabled=settings.ai_key_configured,
             scene_analysis_enabled=settings.enable_scene_analysis,
             geolocation_available=report.geolocation_available,
             total_seconds=total_seconds,

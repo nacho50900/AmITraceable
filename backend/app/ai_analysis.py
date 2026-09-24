@@ -1,20 +1,26 @@
 """
-Módulo 8 (nuevo, opcional): pide a un LLM (Mistral AI) que lea el informe
-de exposición YA GENERADO y devuelva conclusiones priorizadas en lenguaje
-natural. No es parte del pipeline de análisis principal, en el sentido de
-que es una llamada aislada y opcional aparte -- pero SÍ se dispara
-automáticamente en cuanto el informe principal está listo (ver punto 4
-más abajo): ya no hay ningún botón "Analizar con IA" en el frontend.
+Módulo 8 (nuevo, opcional): pide a un LLM que lea el informe de exposición
+YA GENERADO y devuelva conclusiones priorizadas en lenguaje natural. No es
+parte del pipeline de análisis principal, en el sentido de que es una
+llamada aislada y opcional aparte -- pero SÍ se dispara automáticamente en
+cuanto el informe principal está listo (ver punto 4 más abajo): ya no hay
+ningún botón "Analizar con IA" en el frontend.
 
 Decisiones de diseño (para la memoria):
 
-1. Proveedor: Mistral AI (La Plateforme), empresa francesa. Se eligió
-   frente a alternativas más baratas fuera de la UE (p. ej. DeepSeek) para
-   evitar transferencias internacionales de datos personales fuera del
-   Espacio Económico Europeo (RGPD, Capítulo V, Art. 44-49) -- aquí se
-   están enviando datos personales inferidos de un usuario real (ubicación,
-   ocupación, edad...), así que la jurisdicción del proveedor es relevante,
-   no solo el precio.
+1. Proveedor: Qwen3.5-4B, LOCAL (vía llama-cpp-python, ver
+   app/nlp/ai_client.py) -- sustituye al diseño anterior de Mistral AI /
+   Google Gemini por HTTP (ver historial de ese módulo). El motivo
+   original de elegir un proveedor EUROPEO (Mistral, para evitar
+   transferencias internacionales de datos personales fuera del EEE,
+   RGPD Cap. V Art. 44-49) queda resuelto de raíz con un modelo local: no
+   hay transferencia a NINGÚN tercero, ni europeo ni de fuera, porque el
+   informe (con datos personales inferidos de un usuario real: ubicación,
+   ocupación, edad...) nunca sale del servidor. Trade-off aceptado a
+   cambio: un modelo de 4B parámetros cuantizado razona peor que Mistral
+   Small o Gemini Flash -- sin verificar todavía con casos reales de
+   producción si la calidad del veredicto/conclusiones se resiente (ver
+   app/nlp/ai_client.py para el estado de esa verificación).
 
 2. Sin entrenamiento ni fine-tuning: es una tarea de razonamiento en
    contexto (in-context learning) sobre datos ya estructurados, no una
@@ -23,16 +29,14 @@ Decisiones de diseño (para la memoria):
    JSON se envía como contexto en cada llamada; no hay estado entre
    llamadas ni memoria del modelo entre usuarios.
 
-3. Tier gratuito, sin gasto: se usa el plan gratuito del proveedor activo
-   (AI_PROVIDER, ver app/config.py -- Gemini por defecto, con free tier
-   permanente sin tarjeta; Mistral como alternativa europea). Si la API
-   key no está configurada, o si el proveedor sigue devolviendo 429 tras
-   el único reintento del throttle compartido (ver app/nlp/ai_client.py
-   -- pensado para un límite de RÁFAGA puntual, no para reintentar una
-   cuota diaria/mensual realmente agotada), este módulo degrada a "no
-   disponible ahora mismo" sin más intentos ni fallback a otro proveedor
-   de pago, para que nunca se genere gasto no presupuestado ni se rompa
-   el resto de la app.
+3. Sin coste ni cuota: al ser local, no hay tier gratuito que agotar ni
+   límite de peticiones por minuto que gestionar (ver el historial de
+   app/nlp/ai_client.py sobre por qué esto sustituyó al diseño anterior
+   de throttle + reintento en 429 contra Mistral/Gemini) -- el único
+   límite real es el hardware de despliegue (VRAM/tiempo de inferencia).
+   Si el modelo no puede cargarse o ejecutarse (dependencia no instalada,
+   fallo de inferencia), este módulo degrada a "no disponible ahora
+   mismo" sin reintentos ni fallback a un proveedor de pago.
 
 4. Minimización: se envía el informe ya generado (agregados, no el texto
    crudo de los posts). Se dispara automáticamente en cuanto el informe
@@ -145,15 +149,14 @@ SUPPORTED_LANGUAGES = frozenset({"es", *_LANGUAGE_INSTRUCTIONS.keys()})
 
 
 async def _call_ai_chat(system_prompt: str, user_prompt: str, max_tokens: int) -> dict:
-    """Delegación fina sobre app.nlp.ai_client.call_ai_json (ver ese
-    módulo para el throttle de ráfaga compartido con
-    ai_attribute_extraction.py y el reintento único en 429). Conserva la
-    excepción `AiAnalysisUnavailable` de siempre -- el llamador
-    (analyze_report_with_ai) no cambia."""
+    """Delegación fina sobre app.nlp.ai_client.call_ai_json (modelo local
+    Qwen3.5-4B, ver ese módulo). Conserva la excepción
+    `AiAnalysisUnavailable` de siempre -- el llamador (analyze_report_with_ai)
+    no cambia."""
     if not settings.ai_key_configured:
         raise AiAnalysisUnavailable(
-            f"El análisis con IA no está configurado en este servidor "
-            f"(falta la API key del proveedor activo: {settings.ai_provider})."
+            "El análisis con IA no está disponible en este servidor "
+            "(el modelo local no está instalado o configurado)."
         )
 
     try:
@@ -164,43 +167,23 @@ async def _call_ai_chat(system_prompt: str, user_prompt: str, max_tokens: int) -
             temperature=0.3,
         )
     except AIRequestError as exc:
-        raise AiAnalysisUnavailable(f"No se pudo contactar con el servicio de IA: {exc}") from exc
+        raise AiAnalysisUnavailable(f"No se pudo ejecutar el modelo de IA local: {exc}") from exc
     except AIHTTPError as exc:
-        if exc.status_code == 200:
-            # `call_ai_json` reutiliza el status_code de la respuesta HTTP
-            # incluso cuando el fallo NO es de HTTP sino de forma del
-            # contenido (JSON inválido, o sin "choices"/"candidates" --
-            # ver el except KeyError/IndexError/.../JSONDecodeError dentro
-            # de call_ai_json): como un error HTTP real nunca puede tener
-            # status_code 200, este valor identifica sin ambigüedad ese
-            # caso -- "la petición fue bien, pero lo que devolvió el
-            # proveedor no tenía la forma esperada", no "el proveedor
-            # devolvió un error". Antes esto caía en el bucket genérico de
-            # abajo y perdía el mensaje específico.
-            raise AiAnalysisUnavailable("Respuesta inesperada del servicio de IA.") from exc
-        if exc.status_code == 429:
-            # Rate limit -- ya se reintentó una vez dentro de
-            # call_ai_json (pensado para un límite de RÁFAGA puntual). Si
-            # sigue en 429 tras ese reintento, es o bien la cuota
-            # diaria/mensual real agotada, o una ráfaga más sostenida que
-            # el margen del throttle -- en ambos casos, no se reintenta
-            # más aquí (mismo criterio de siempre: nunca gastar cuota
-            # extra a ciegas). El cuerpo real de la respuesta ya quedó
-            # logueado dentro de ai_client.py para quien necesite
-            # distinguir el motivo exacto.
-            raise AiAnalysisUnavailable(
-                "Se ha alcanzado el límite del plan gratuito de IA por ahora. Inténtalo de nuevo más tarde."
-            ) from exc
-        if exc.status_code == 401:
-            raise AiAnalysisUnavailable("La clave de API del proveedor de IA no es válida.") from exc
-        raise AiAnalysisUnavailable(f"El servicio de IA devolvió un error ({exc.status_code}).") from exc
+        # A diferencia del diseño anterior (Mistral/Gemini por HTTP), un
+        # modelo local nunca devuelve un status_code real -- AIHTTPError
+        # solo se lanza ahora cuando el modelo SÍ respondió pero su salida
+        # no se pudo interpretar como JSON (ver app/nlp/ai_client.py). Los
+        # antiguos casos 429 (cuota agotada del proveedor) y 401 (key
+        # inválida) ya no existen: no hay proveedor de terceros ni API key
+        # que pueda fallar de esas formas.
+        raise AiAnalysisUnavailable(f"Respuesta inesperada del modelo de IA local: {exc.body}") from exc
 
 
 async def analyze_report_with_ai(report: ExposureReport, lang: str = "es") -> dict:
     if not settings.ai_key_configured:
         raise AiAnalysisUnavailable(
-            f"El análisis con IA no está configurado en este servidor "
-            f"(falta la API key del proveedor activo: {settings.ai_provider})."
+            "El análisis con IA no está disponible en este servidor "
+            "(el modelo local no está instalado o configurado)."
         )
 
     # Se manda el informe ya generado (agregados/conclusiones propias de la

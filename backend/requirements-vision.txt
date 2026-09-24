@@ -84,7 +84,21 @@ faiss-cpu>=1.8,<2.0
 # arreglable con solo cambiar una versión de paquete).
 
 # llama-cpp-python: backend actual de Moondream2 (GGUF, ver _GGUF_REPO_ID
-# en scene_analysis.py). YA NO se instala desde aquí un wheel
+# en scene_analysis.py) Y, desde el cambio a Qwen3.5-4B local, TAMBIEN de
+# app/nlp/ai_client.py (extraccion de atributos, veredicto final,
+# resolucion de nombres de monumento -- antes HTTP a Mistral/Gemini, sin
+# ninguna dependencia pesada; ver ADR-49). CAMBIO DE COMPORTAMIENTO
+# IMPORTANTE: un despliegue "solo Reddit" o "Instagram sin
+# geolocalizacion" (WITH_GEOLOCATION sin activar, ver Dockerfile) que
+# antes SI tenia analisis con IA (con solo una API key de Mistral/Gemini,
+# sin instalar nada pesado) ahora tambien pierde esa funcionalidad si no
+# instala este fichero -- degrada con gracia igual que el resto
+# (settings.ai_key_configured/_qwen_available() devuelven False, "no
+# disponible", nunca una excepcion que rompa el resto del pipeline), pero
+# es una perdida de funcionalidad real en ese perfil de despliegue que
+# antes no existia, a cambio de las ventajas de privacidad/coste de un
+# modelo local (ver docstring de ai_client.py).
+# YA NO se instala desde aquí un wheel
 # PRECOMPILADO con CUDA (el índice cu130 de `abetlen/llama-cpp-python`
 # cargaba el modelo pero moría con SIGILL, exit 132, en cuanto tocaba GPU
 # en la GTX 1650 real -- confirmado en producción, 12/9: en CPU pura SÍ

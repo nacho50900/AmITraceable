@@ -14,7 +14,8 @@ muestre igual -- solo se excluyen del cálculo de dónde vive la persona).
 
 Esto es una red de seguridad determinista y gratuita, complementaria a la
 detección por IA (ver ai_attribute_extraction.py, campo "fotos_de_viaje" del
-prompt a Mistral): funciona siempre, incluso sin MISTRAL_API_KEY, y cubre
+prompt al modelo de IA local): funciona siempre, incluso sin
+QWEN_GGUF_REPO_ID configurado, y cubre
 las expresiones más habituales en español. Las dos fuentes se UNEN (nunca se
 sustituyen entre sí) porque aquí un falso positivo (excluir por error una
 foto que sí es de casa) es mucho menos grave que un falso negativo (usar una

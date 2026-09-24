@@ -14,7 +14,7 @@ para `risk_level`, `source`, etc. en `PopulationNarrowingStep`.
 Es un conjunto CERRADO y pequeño (a diferencia de `attribute_label` o las
 conclusiones de la IA, que llevan texto libre o nombres propios y no
 encajan en este patrón) -- por eso una tabla de constantes simple es
-suficiente, sin necesitar tocar los prompts de Mistral ni reestructurar
+suficiente, sin necesitar tocar los prompts del modelo de IA ni reestructurar
 ningún modelo de datos.
 """
 

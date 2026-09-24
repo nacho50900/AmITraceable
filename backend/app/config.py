@@ -126,49 +126,51 @@ class Settings(BaseSettings):
     # "http://localhost:5173" como valor por defecto si esto queda vacío.
     frontend_origin: str | None = None
 
-    # Análisis con IA (opcional): si no se rellena la key del proveedor
-    # activo, el análisis por IA simplemente devuelve "no disponible" en
-    # vez de fallar.
+    # Análisis con IA (opcional): si el modelo local no está instalado o
+    # no puede cargarse, el análisis por IA simplemente devuelve "no
+    # disponible" en vez de fallar (ver app/nlp/ai_client.py y su
+    # historial: sustituye al diseño anterior de Mistral/Gemini por HTTP).
     #
-    # AI_PROVIDER elige el proveedor -- "mistral" o "gemini" -- SIN tocar
-    # ningún módulo llamador (ver app/nlp/ai_client.py): los tres módulos
-    # que hablan con un LLM (ai_attribute_extraction.py, ai_analysis.py,
-    # landmark_resolution.py) pasan siempre por call_ai_json(), nunca
-    # directamente por la API de un proveedor concreto.
-    #
-    # Por defecto "gemini", no "mistral" -- decisión tomada en septiembre
-    # de 2026 tras un cambio real de política de Mistral: su free tier
-    # (rate-limit por API key, documentado en ADR-45) dejó de existir,
-    # sustituido por un modelo de crédito de pago que exige activar
-    # pay-as-you-go para tener CUALQUIER límite usable. El free tier de
-    # Gemini (AI Studio) es PERMANENTE y sin tarjeta -- no un crédito que
-    # se agota -- con margen de sobra (10 peticiones/minuto en Flash)
-    # para las ~4 llamadas por análisis de este proyecto. La contrapartida
-    # es que Gemini NO es un proveedor europeo (Google Cloud, EE.UU.,
-    # expuesto al Cloud Act) -- a diferencia de Mistral (Francia), que
-    # sigue siendo la opción si el requisito RGPD/soberanía de datos pesa
-    # más que la fiabilidad del tier gratuito: basta con poner
-    # AI_PROVIDER=mistral y rellenar mistral_api_key.
-    ai_provider: str = "gemini"
+    # enable_ai_analysis: interruptor único para desactivar del todo esta
+    # funcionalidad (p. ej. en un despliegue sin GPU/VRAM suficiente para
+    # cargar NINGÚN modelo de IA generativa) sin tener que desinstalar
+    # `llama-cpp-python` -- los tres módulos que hablan con un LLM
+    # (ai_attribute_extraction.py, ai_analysis.py, landmark_resolution.py)
+    # comprueban esto (vía `ai_key_configured`, nombre heredado de cuando
+    # SÍ hacía falta una API key -- se mantiene para no tocar esos tres
+    # módulos solo por un renombrado cosmético) antes de llamar a
+    # app.nlp.ai_client.call_ai_json().
+    enable_ai_analysis: bool = True
 
-    mistral_api_key: str | None = None
-    mistral_model: str = "mistral-small-latest"
-
-    gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.5-flash"
+    # Repo de Hugging Face con el GGUF base (F16/BF16) de Qwen3.5-4B a
+    # cuantizar la primera vez (mismo patrón que Moondream2, ver
+    # app/vision/scene_analysis.py _ensure_quantized_model()) -- SIN
+    # RELLENAR A PROPÓSITO: no se ha podido verificar desde este entorno
+    # (sin acceso a huggingface.co) cuál es el repo/fichero correcto para
+    # Qwen3.5-4B ahora mismo -- Nacho debe confirmarlo (buscar en
+    # huggingface.co un GGUF de "Qwen3.5-4B-Instruct", idealmente ya en
+    # formato GGUF para no depender de una conversión propia) y rellenar
+    # estas dos variables de entorno antes de desplegar. Con
+    # `qwen_gguf_repo_id` vacío, app/nlp/ai_client.py se comporta igual
+    # que si `llama_cpp` no estuviera instalado: "no disponible", sin
+    # excepción que rompa el resto del pipeline.
+    qwen_gguf_repo_id: str = ""
+    qwen_gguf_filename: str = ""  # nombre EXACTO del fichero .gguf en ese repo, no un glob
 
     @property
     def ai_key_configured(self) -> bool:
-        """True si hay una API key rellenada para el proveedor ACTIVO
-        (`ai_provider`) -- centraliza la comprobación para que
-        ai_attribute_extraction.py, ai_analysis.py y landmark_resolution.py
-        no tengan que saber cuál es el proveedor activo, solo preguntar
-        "¿hay key?" antes de llamar a app.nlp.ai_client.call_ai_json()."""
-        if self.ai_provider == "gemini":
-            return bool(self.gemini_api_key)
-        if self.ai_provider == "mistral":
-            return bool(self.mistral_api_key)
-        return False
+        """True si el análisis con IA está activado Y hay un repo GGUF
+        configurado para el modelo local (ver `qwen_gguf_repo_id`) --
+        nombre heredado de cuando esto comprobaba una API key de un
+        proveedor externo (ver historial de app/nlp/ai_client.py); se
+        mantiene tal cual para que ai_attribute_extraction.py,
+        ai_analysis.py y landmark_resolution.py no necesiten ningún
+        cambio. NO comprueba que `llama_cpp` esté instalado de verdad ni
+        que el modelo cargue sin fallos -- eso lo decide
+        app.nlp.ai_client.call_ai_json() en el momento de la llamada
+        (mismo criterio que _scene_analysis_available(), comprobación
+        barata aquí, comprobación real al usar)."""
+        return self.enable_ai_analysis and bool(self.qwen_gguf_repo_id)
 
 
     # Límites de extracción para no machacar las APIs y acotar el volumen de

@@ -43,7 +43,7 @@ def load_log(path: Path = _LOG_PATH) -> pd.DataFrame:
 def stage_breakdown(df: pd.DataFrame) -> pd.DataFrame:
     """Expande la columna `stages_seconds` (un dict por análisis) en una
     fila por (análisis, etapa), para poder agregarlas todas juntas -- no
-    todas las filas tienen las mismas etapas (p. ej. sin MISTRAL_API_KEY,
+    todas las filas tienen las mismas etapas (p. ej. sin QWEN_GGUF_REPO_ID,
     "autodeclaraciones_ia" no aparece con tiempo significativo, y sin
     Instagram, "espera_geolocalizacion_fotos" no aparece)."""
     records = []
