@@ -3848,6 +3848,26 @@ simultáneo.</p>
 </div>
 <div class="sect3">
 <h4 id="_adr_45_cliente_mistral_compartido_con_throttle_de_ráfaga_y_reintento_único_en_429">9.2.7. ADR-45: Cliente Mistral compartido con throttle de ráfaga y reintento único en 429</h4>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">
+<strong>Superada por ADR-49</strong> (24/9): tanto Mistral como Gemini (el
+proveedor por defecto, ver la nota de ese ADR) dejaron de usarse en favor
+de un modelo local (Qwen3.5-4B vía <code>llama-cpp-python</code>)&#8201;&#8212;&#8201;el problema de
+fondo que motivó esta ADR (límite de ráfaga de un proveedor de pago/free
+tier) ya no aplica: un modelo local no tiene cuota ni rate limit que
+gestionar. Se conserva íntegra por su valor histórico: el throttle
+compartido y el reintento único en 429 documentan un problema real de
+producción y el criterio (nunca reintentar a ciegas ante una cuota
+posiblemente agotada) que sigue siendo relevante para entender ADR-49.
+</td>
+</tr>
+</table>
+</div>
 <div class="paragraph">
 <p><strong>Contexto</strong>: cada módulo que llama a Mistral (<code>ai_attribute_extraction.py</code>
 para autodeclaraciones, <code>ai_analysis.py</code> para el veredicto/conclusiones)
@@ -3879,6 +3899,122 @@ ese caso, reintentar a ciegas varias veces solo tendría coste, nunca
 beneficio. El cuerpo completo de la respuesta de error se loguea ahora
 (antes solo se logueaba el status code), para poder distinguir a mano
 ambos motivos si vuelve a pasar en producción.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_49_sustitución_de_mistralgemini_por_qwen3_5_4b_local_vía_llama_cpp_python">9.2.8. ADR-49: Sustitución de Mistral/Gemini por Qwen3.5-4B local vía <code>llama-cpp-python</code></h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: <code>ai_attribute_extraction.py</code> (autodeclaraciones no captadas
+por regex), <code>ai_analysis.py</code> (veredicto/conclusiones sobre el informe ya
+generado) y <code>landmark_resolution.py</code> (ADR-47) dependían de un proveedor
+de IA externo por HTTP, con <code>AI_PROVIDER</code> eligiendo entre Gemini (free
+tier permanente de Google AI Studio, por defecto desde que el free tier
+de Mistral cambió de plan a mitad de desarrollo, ver ADR-45) y Mistral
+(alternativa europea, para evitar transferencias de datos personales
+inferidos&#8201;&#8212;&#8201;ubicación, ocupación, edad&#8201;&#8212;&#8201;fuera del EEE bajo RGPD Cap.
+V). Ninguna de las dos opciones resolvía el problema de fondo: Gemini
+sigue siendo un proveedor de EE.UU. (Cloud Act) pese a su free tier más
+fiable, y Mistral, pese a ser europeo, sigue siendo un TERCERO al que se
+le envían esos datos. El diseño de dos proveedores intercambiables
+(<code>call_ai_json()</code>, ver ADR-45) ya dejaba la puerta abierta a un tercer
+backend sin tocar los tres módulos llamadores&#8201;&#8212;&#8201;llegado el momento, la
+opción evidente era dejar de depender de cualquier tercero.</p>
+</div>
+<div class="paragraph">
+<p><strong>Alternativas consideradas</strong>:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Mantener Mistral con plan de pago activado</strong> (pay-as-you-go, tras el
+cambio de free tier de ADR-45): descartada&#8201;&#8212;&#8201;no elimina el problema de
+fondo (sigue siendo una transferencia a un tercero) y añade un coste
+económico recurrente no presupuestado para un TFG.</p>
+</li>
+<li>
+<p><strong>Quedarse con Gemini como proveedor por defecto</strong>: descartada por el
+mismo motivo&#8201;&#8212;&#8201;resuelve la fiabilidad del tier gratuito (ADR-45) pero
+no la transferencia de datos ni la dependencia de un proveedor externo.</p>
+</li>
+<li>
+<p><strong>Modelo local multimodal (visión + texto) único, sustituyendo también a
+Moondream2</strong>: la ventaja sería un solo modelo cargado en VRAM en vez de
+dos (Moondream2 + este), y unificar razonamiento sobre imagen y sobre
+texto en una sola llamada. Descartada por ahora: <code>llama-cpp-python</code>
+mainline (el paquete oficial, no un fork) todavía no tiene chat handler
+para la parte de visión de la familia Qwen3.x&#8201;&#8212;&#8201;solo existe en forks no
+oficiales (p. ej. el de JamePeng) con builds propios, mezclar un fork no
+oficial con el pipeline de producción (CUDA compilado a medida para la
+GTX 1650, ver ADR-43) es un riesgo que merece su propia decisión, no
+colarse de rondón en esta. <code>scene_analysis.py</code>/Moondream2 se queda
+exactamente como está.</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: nuevo <code>app/nlp/ai_client.py</code> (sustituye por completo al
+cliente HTTP de ADR-45), que carga Qwen3.5-4B (Apache-2.0) SOLO EN SU
+PARTE DE TEXTO vía <code>llama-cpp-python</code>, cuantizado a Q4_K_M&#8201;&#8212;&#8201;mismo
+patrón de carga perezosa + cuantización cacheada en disco que ya usa
+Moondream2 (<code>_ensure_quantized_model()</code>, ADR-43), pero a Q4_K_M en vez de
+Q8_0: en Q8_0 los 4.5B parámetros del modelo (~4.5GB) no caben en los 4GB
+de VRAM de la GTX 1650 de referencia; en Q4_K_M (~4-5 bits efectivos por
+parámetro) el modelo ronda 2.5-3GB, dejando margen para el KV cache. La
+firma y las excepciones de <code>call_ai_json()</code> (<code>AIHTTPError</code>,
+<code>AIRequestError</code>) se mantienen intactas&#8201;&#8212;&#8201;los tres módulos llamadores no
+cambian ninguna línea de su lógica de llamada/degradación, solo pierden
+las ramas ya inalcanzables de 429 (cuota) y 401 (key inválida), que no
+tienen equivalente con un modelo local.</p>
+</div>
+<div class="paragraph">
+<p><strong>Justificación</strong>: un modelo local elimina el problema de raíz&#8201;&#8212;&#8201;nunca hay
+transferencia de datos personales a NINGÚN tercero, ni siquiera europeo,
+porque nada sale del proceso. A cambio se acepta un modelo de 4B
+parámetros cuantizado, que previsiblemente razona peor que Mistral Small
+o Gemini Flash para tareas como resumir un informe completo o detectar
+autodeclaraciones en redacción libre&#8201;&#8212;&#8201;sin medir todavía en casos reales
+si esa pérdida de calidad es aceptable (ver Consecuencias). Se prioriza
+la garantía de privacidad, verificable por diseño, sobre una calidad de
+razonamiento que de todos modos nunca se midió de forma rigurosa contra
+los proveedores anteriores.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () elimina de raíz cualquier transferencia de datos
+personales inferidos a un tercero, resolviendo el objetivo que ADR-45 (y
+el propio `AI_PROVIDER=mistral`) solo atenuaba; () sin coste económico ni
+cuota que gestionar&#8201;&#8212;&#8201;desaparecen el throttle y el reintento en 429 de
+ADR-45, ya no aplicables; (+) sin dependencia de la política de un
+proveedor externo (el propio motivo que forzó el cambio de Mistral a
+Gemini en ADR-45 a mitad de desarrollo); (-) <strong>calidad de razonamiento
+del modelo, sin verificar</strong>: no se ha medido con casos reales si
+Qwen3.5-4B en Q4_K_M mantiene una calidad de veredicto/extracción
+comparable a Mistral Small/Gemini Flash&#8201;&#8212;&#8201;pendiente de una comparación
+deliberada antes de dar esto por cerrado, mismo criterio que la
+comparación de calidad pendiente de ADR-43 para Moondream2; (-) <strong>riesgo
+de contención de VRAM sin verificar</strong>: <code>landmark_resolution.py</code> se llama
+típicamente durante el mismo pase de fotos en el que <code>scene_analysis.py</code>
+ya tiene Moondream2 cargado en GPU&#8201;&#8212;&#8201;Moondream2 (Q8_0, ~1.8GB) + este
+modelo (Q4_K_M, ~2.6GB) sumados rondan ya 4-5GB solo en pesos, muy
+probablemente por encima de los 4GB de la GTX 1650 de referencia; sin GPU
+en el entorno donde se escribió este cambio, no se ha podido medir si
+ambos conviven, si <code>llama.cpp</code> degrada uno de los dos a CPU sin avisar, o
+si hace falta serializar su carga explícitamente; (-) el modelo BASE
+(F16/BF16) a cuantizar es bastante más grande que el de Moondream2 (~9GB
+frente a ~3.5GB), por lo que la primera cuantización en un despliegue
+nuevo tarda y consume disco/red sensiblemente más, sin medir en concreto;
+(-) el repo/fichero GGUF exacto de Qwen3.5-4B (<code>qwen_gguf_repo_id</code>/
+<code>qwen_gguf_filename</code>, ver <code>app/config.py</code>) se deja sin rellenar a
+propósito&#8201;&#8212;&#8201;no se pudo verificar cuál es el correcto sin acceso a
+Hugging Face desde el entorno donde se escribió este cambio.</p>
+</div>
+<div class="paragraph">
+<p>Conclusión honesta para la memoria: el cambio resuelve con certeza el
+objetivo de privacidad (verificable por diseño, no por confianza en la
+política de un tercero), pero dos aspectos quedan como trabajo pendiente
+antes de considerarlo terminado&#8201;&#8212;&#8201;la calidad real del modelo local frente
+a los proveedores anteriores, y si el hardware de referencia (GTX 1650,
+4GB) soporta Moondream2 y Qwen3.5-4B cargados a la vez sin degradar el
+resto del pipeline.</p>
 </div>
 </div>
 </div>
@@ -7776,7 +7912,7 @@ este proyecto:</p>
 <div id="footer">
 <div id="footer-text">
 Version 1.0<br>
-Last updated 2026-09-20 15:42:32 UTC
+Last updated 2026-09-24 11:52:31 UTC
 </div>
 </div>
 </body>
