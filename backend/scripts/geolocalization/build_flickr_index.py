@@ -73,8 +73,15 @@ import httpx
 import imagehash
 import numpy as np
 import pandas as pd
+from dotenv import load_dotenv
 from PIL import Image
 from tqdm import tqdm
+
+# Ver el mismo comentario en build_mapillary_index.py: carga backend/.env
+# (dos niveles por encima de scripts/geolocalization/), el mismo fichero
+# que usa la app, para no tener que fijar FLICKR_API_KEY a mano en cada
+# sesión de terminal. No falla si el fichero no existe.
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 sys.path.insert(0, str(Path(__file__).parent))
 from build_faiss_index import MODEL_NAME, embed_image, load_model  # noqa: E402

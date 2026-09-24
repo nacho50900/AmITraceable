@@ -140,3 +140,9 @@ opencv-python-headless>=4.8,<5.0
 # duplicadas dentro de una misma celda del grid antes de aceptarlas en el
 # índice -- ver _is_near_duplicate en image_ingest_common.py.
 imagehash>=4.3,<5.0
+# python-dotenv: build_mapillary_index.py y build_flickr_index.py cargan
+# backend/.env automáticamente (MAPILLARY_API_KEY/FLICKR_API_KEY) -- ya es
+# dependencia de requirements.txt (la usa el backend en producción), se
+# lista aquí también porque estos scripts se ejecutan sueltos y podrían
+# instalarse solo desde este fichero.
+python-dotenv>=1.0,<2.0

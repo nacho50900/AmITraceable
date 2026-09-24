@@ -146,8 +146,11 @@ scripts/
     ├── flickr_grid.py             # genera el grid de celdas sobre España, reutilizado por los scripts de abajo
     ├── image_ingest_common.py     # utilidades compartidas: blur de caras, dedup por perceptual hash, provincia más cercana
     ├── build_commons_index.py     # ingestión de Wikimedia Commons (fotos a pie, en uso -- ver sección propia)
+    ├── build_mapillary_index.py   # ingestión de Mapillary (en paralelo a Commons, en uso -- ver sección propia)
+    ├── mapillary_grid.py           # sub-tiling por celda para respetar el límite de bbox de Mapillary
+    ├── shard_store.py              # persistencia por shards + lock + compilación, compartido Commons/Mapillary
     ├── build_flickr_index.py      # ingestión de Flickr (implementado, sin usar: requiere Flickr Pro de pago)
-    └── merge_faiss_indices.py     # fusiona varios índices (p.ej. OSV-5M + Commons) en uno solo
+    └── merge_faiss_indices.py     # fusiona varios índices (p.ej. OSV-5M + Commons + Mapillary) en uno solo
 
 tests/                         # pytest, ~153 tests, ~95% cobertura
 monitoring/                    # config de Prometheus/Grafana
@@ -194,7 +197,7 @@ entre zona urbana y rural:
 
 ```bash
 cd scripts/geolocalization
-python build_commons_index.py --output ../../data/commons_calibracion --sample-cells 30 --cap-per-cell 400
+python build_commons_index.py --sample-cells 30 --cap-per-cell 400
 ```
 
 Al terminar, imprime un desglose de por qué se descarta cada candidato
@@ -208,25 +211,55 @@ Para probar una celda concreta en vez de una muestra aleatoria (p. ej.
 para verificar que todo funciona antes de calibrar en serio):
 
 ```bash
-python build_commons_index.py --output ../../data/commons_test --near "40.4168,-3.7038" --max-cells 1 --cap-per-cell 10
+python build_commons_index.py --near "40.4168,-3.7038" --max-cells 1 --cap-per-cell 10
 ```
 
 ### Lanzar la ingestión completa
 
 ```bash
-python build_commons_index.py --output ../../data/commons_spain > commons_ingest.log 2>&1
+python build_commons_index.py
 ```
 
 Sin `--sample-cells`/`--near`/`--max-cells` (esos son solo para
-calibrar). Resumible: se puede interrumpir con Ctrl+C en cualquier
-momento (guarda el progreso al momento, no solo cada `--flush-every-cells`)
-y relanzar exactamente el mismo comando -- sigue por donde se quedó, sin
-duplicar fotos ya presentes en el índice aunque se reabra una celda ya
-completada a mano (quitándola de `_completed_cells.txt`).
+calibrar), y sin redirigir la salida a un fichero -- déjala en la
+terminal para ver el progreso en vivo (barra de `tqdm`, avisos de
+celdas con fallo transitorio, etc.). Resumible: se puede interrumpir con
+Ctrl+C en cualquier momento (guarda el progreso al momento, no solo cada
+`--flush-every-cells`) y relanzar exactamente el mismo comando -- sigue
+por donde se quedó, sin duplicar fotos ya presentes en el índice aunque
+se reabra una celda ya completada a mano (quitándola de
+`_completed_cells.txt`).
 
-No consume apenas disco: las imágenes nunca se guardan, solo
-`embeddings.npy`/`index.faiss`/`index_meta.csv` (unos pocos GB incluso
-para más de 1M de fotos, ya que cada vector son 384 floats).
+Cada foto aceptada se guarda en memoria solo hasta el siguiente flush
+-- cada `--flush-every-cells` celdas se escribe un **shard** propio y
+pequeño en `<output>/_shards/` (nunca se relee ni se reescribe el
+histórico acumulado en cada flush), así que el consumo de memoria del
+proceso no crece con el tamaño total del índice, solo con el tamaño de
+un lote entre flushes. Dado lo larga que puede ser la ejecución completa
+(varios días) en un equipo con recursos limitados, es más robusto
+lanzarlo en tandas con `--max-cells N` e ir relanzando, que dejarlo un
+único proceso corriendo sin parar 18 días seguidos.
+
+### Compilar el índice para usarlo (`--compile`)
+
+Los `_shards/` no son directamente utilizables por la app ni por
+`merge_faiss_indices.py` -- hay que combinarlos primero en el
+`embeddings.npy`/`index.faiss`/`index_meta.csv` de siempre:
+
+```bash
+python build_commons_index.py --compile
+```
+
+No hace falta esperar a que termine la ingestión completa para lanzar
+esto -- combina lo que haya hasta ese momento (histórico antiguo, si lo
+hay, más todos los shards existentes) y no borra los shards, así que se
+puede repetir tantas veces como haga falta a medida que avanza la
+ingestión. A diferencia de un flush normal, aquí sí se carga todo el
+índice en memoria de golpe -- es un paso puntual que lanzas tú cuando
+quieras (por ejemplo para probar el índice a medio construir), no algo
+que tenga que sobrevivir sin fallos durante toda la ejecución, así que
+si la máquina anda justa de memoria, cierra otros programas antes de
+lanzarlo.
 
 ### Fusionar con el índice de OSV-5M
 
@@ -238,15 +271,73 @@ Después, apunta `_INDEX_DIR` en `app/vision/geolocation.py` a
 `data/spain_combined` (o copia/renombra el resultado encima de
 `data/osv5m_spain` si prefieres no tocar código).
 
+### Ampliar el índice, en paralelo, con Mapillary
+
+`build_mapillary_index.py` corre EN PARALELO a `build_commons_index.py`
+(usa un `--output` distinto, así que no se pisan) mientras Commons sigue
+en marcha -- pensado para cuando Commons por sí sola tarda más de lo
+esperado o da menos fotos de las previstas.
+
+**Antes de nada, el token** (gratuito, a diferencia de Flickr): crea una
+aplicación en https://www.mapillary.com/dashboard/developers ("Register
+application", con permiso de solo lectura basta) y copia el **"Client
+Token"** que te genera (no el "Client Secret", que es para otra cosa).
+Ponlo en `backend/.env` (cópialo de `.env.example` si no lo tienes
+todavía):
+
+```
+MAPILLARY_API_KEY=tu_client_token_aqui
+```
+
+El script carga ese `.env` automáticamente -- no hace falta fijar la
+variable de entorno a mano en cada sesión de terminal, ni pasarla por
+`--api-key` cada vez (aunque `--api-key` sigue funcionando si lo
+prefieres).
+
+**Contexto importante para la memoria del TFG**: Mapillary es imagery
+mayoritariamente capturada desde vehículo -- el mismo domain gap que
+motivó añadir Commons en primer lugar. Desde junio de 2026, Mapillary
+expone un campo `on_foot` por imagen, así que el script filtra por
+fotos tomadas a pie por defecto (`--on-foot-only`, activado salvo que
+se indique `--no-on-foot-only`) -- sin ese filtro, esta fuente aportaría
+sobre todo volumen adicional de imagery de vehículo, no reducción de
+domain gap.
+
+**Restricción de escala real**: desde enero de 2026, Mapillary formalizó
+que toda consulta a `/images` debe ser menor de 0.01° cuadrados
+(~0.9-1.1km²) -- cada celda de 10km del grid necesita ~100-130
+sub-consultas para cubrirse entera (`mapillary_grid.py`). Con las 11.720
+celdas, son del orden de ~1,4M de sub-consultas solo para *localizar*
+candidatos, antes de descargar nada -- a los ~50.000 req/día
+documentados, la fase de búsqueda por sí sola son varias semanas.
+**Calibra primero**, igual que con Commons:
+
+```bash
+python build_mapillary_index.py --sample-cells 20 --cap-per-cell 400
+```
+
+Revisa el desglose y la extrapolación al final antes de lanzar la
+ejecución completa (sin `--sample-cells`):
+
+```bash
+python build_mapillary_index.py
+```
+
+Mismo diseño que Commons en todo lo demás (shards en `_shards/`,
+resumible con Ctrl+C, `--compile` para el índice usable, fusión con
+`merge_faiss_indices.py`) -- de hecho comparten el mismo módulo de
+persistencia (`shard_store.py`), así que cualquier fix futuro ahí
+beneficia a las dos fuentes a la vez.
+
 ### Por qué no Flickr
 
 `build_flickr_index.py` existe y funciona (mismo diseño que el de
-Commons), pero **no está en uso**: Flickr exige desde 2025/2026 una
-suscripción Flickr Pro de pago (~75€/año) para poder crear una API key,
-algo que no existía cuando se diseñó el script. Se mantiene en el repo
-por si en el futuro compensa pagar la suscripción -- en ese caso, el
-flujo es idéntico al de Commons, solo con `--api-key`/`FLICKR_API_KEY`
-de más.
+Commons/Mapillary), pero **no está en uso**: Flickr exige desde
+2025/2026 una suscripción Flickr Pro de pago (~75€/año) para poder crear
+una API key, algo que no existía cuando se diseñó el script. Se
+mantiene en el repo por si en el futuro compensa pagar la suscripción
+-- en ese caso, pon `FLICKR_API_KEY` en `backend/.env` igual que
+`MAPILLARY_API_KEY` arriba, el script también lo carga automáticamente.
 
 ## Endpoints principales
 
