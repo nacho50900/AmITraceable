@@ -896,3 +896,94 @@ class TestSceneAnalysisAvailable:
         monkeypatch.setattr(builtins, "__import__", _fake_import)
 
         assert scene_analysis._scene_analysis_available() is False
+
+
+class TestParseEdificioEmblematico:
+    def test_extracts_name(self):
+        assert scene_analysis._parse_edificio_emblematico("EDIFICIO_EMBLEMATICO: Torre Eiffel") == "Torre Eiffel"
+
+    def test_strips_whitespace_and_trailing_period(self):
+        assert scene_analysis._parse_edificio_emblematico("EDIFICIO_EMBLEMATICO:   Alhambra de Granada. ") == (
+            "Alhambra de Granada"
+        )
+
+    def test_case_insensitive_key_and_line_isolated_from_other_fields(self):
+        answer = "PERSONAS: una\nedificio_emblematico: Sagrada Familia\nPAREJA: no"
+
+        assert scene_analysis._parse_edificio_emblematico(answer) == "Sagrada Familia"
+
+    def test_none_when_line_missing(self):
+        assert scene_analysis._parse_edificio_emblematico("PERSONAS: una\nPAREJA: no") is None
+
+    @pytest.mark.parametrize("value", ["ninguno", "Ninguna", "none", "N/A", ".", "  "])
+    def test_none_for_explicit_absence(self, value):
+        assert scene_analysis._parse_edificio_emblematico(f"EDIFICIO_EMBLEMATICO: {value}") is None
+
+    @pytest.mark.parametrize("value", ["edificio", "Monumento", "catedral", "castillo", "playa", "ayuntamiento"])
+    def test_none_for_generic_building_types(self, value):
+        """Eco de un tipo de edificio, no un nombre propio: no se gasta una
+        llamada al LLM en resolverlo."""
+        assert scene_analysis._parse_edificio_emblematico(f"EDIFICIO_EMBLEMATICO: {value}") is None
+
+
+class TestEdificioEmblematicoInferenceAndSummary:
+    def test_parse_inferences_adds_low_confidence_candidate(self):
+        inferences = scene_analysis._parse_inferences(
+            "PERSONAS: ninguna\nEDIFICIO_EMBLEMATICO: Torre Eiffel\nPAREJA: no"
+        )
+
+        edificios = [i for i in inferences if i.category == "edificio_emblematico"]
+        assert len(edificios) == 1
+        assert "Torre Eiffel" in edificios[0].value
+        assert "sin confirmar" in edificios[0].value
+        assert edificios[0].confidence == 0.3
+        assert edificios[0].evidence == []
+
+    def test_parse_inferences_skips_generic_building(self):
+        inferences = scene_analysis._parse_inferences("PERSONAS: ninguna\nEDIFICIO_EMBLEMATICO: catedral")
+
+        assert not [i for i in inferences if i.category == "edificio_emblematico"]
+
+    def test_clean_summary_includes_building_line(self):
+        summary = scene_analysis._build_clean_summary(
+            personas="ninguna",
+            aficion_raw=None,
+            indicio_pareja=False,
+            texto_visible=None,
+            matricula=None,
+            edificio_emblematico="Torre Eiffel",
+        )
+
+        assert summary == "Edificio/monumento reconocido: Torre Eiffel (propuesto por IA, sin confirmar)"
+
+
+class TestVisualDescriptionLogging:
+    def test_logs_caption_structured_and_variant_when_flag_enabled(self, monkeypatch):
+        _install_fake_model(monkeypatch, "PERSONAS: ninguna\nAFICION: ninguno", caption_answer="una playa vacía.")
+        monkeypatch.setattr(scene_analysis.settings, "log_visual_descriptions", True)
+        monkeypatch.setattr(scene_analysis, "get_model_variant", lambda: "Moondream2 (Q8_0)")
+        logged = []
+        monkeypatch.setattr(
+            scene_analysis.visual_description_log,
+            "log_visual_description",
+            lambda **kwargs: logged.append(kwargs),
+        )
+
+        scene_analysis.analyze_image_content(_fake_image())
+
+        assert len(logged) == 1
+        assert logged[0]["caption"] == "una playa vacía"
+        assert logged[0]["structured"].startswith("PERSONAS: ninguna")
+        assert logged[0]["model_variant"] == "Moondream2 (Q8_0)"
+        assert len(logged[0]["image_id"]) == 16
+
+    def test_does_not_hash_image_when_flag_disabled(self, monkeypatch):
+        _install_fake_model(monkeypatch, "PERSONAS: ninguna")
+        assert scene_analysis.settings.log_visual_descriptions is False
+        monkeypatch.setattr(
+            scene_analysis.visual_description_log,
+            "image_content_id",
+            lambda image: pytest.fail("no debe hashear la imagen con el log desactivado"),
+        )
+
+        scene_analysis.analyze_image_content(_fake_image())

@@ -142,20 +142,19 @@ class Settings(BaseSettings):
     # app.nlp.ai_client.call_ai_json().
     enable_ai_analysis: bool = True
 
-    # Repo de Hugging Face con el GGUF base (F16/BF16) de Qwen3.5-4B a
-    # cuantizar la primera vez (mismo patrón que Moondream2, ver
-    # app/vision/scene_analysis.py _ensure_quantized_model()) -- SIN
-    # RELLENAR A PROPÓSITO: no se ha podido verificar desde este entorno
-    # (sin acceso a huggingface.co) cuál es el repo/fichero correcto para
-    # Qwen3.5-4B ahora mismo -- Nacho debe confirmarlo (buscar en
-    # huggingface.co un GGUF de "Qwen3.5-4B-Instruct", idealmente ya en
-    # formato GGUF para no depender de una conversión propia) y rellenar
-    # estas dos variables de entorno antes de desplegar. Con
-    # `qwen_gguf_repo_id` vacío, app/nlp/ai_client.py se comporta igual
-    # que si `llama_cpp` no estuviera instalado: "no disponible", sin
-    # excepción que rompa el resto del pipeline.
-    qwen_gguf_repo_id: str = ""
-    qwen_gguf_filename: str = ""  # nombre EXACTO del fichero .gguf en ese repo, no un glob
+    # Repo de Hugging Face con el GGUF ya cuantizado (Q4_K_M) de
+    # Qwen3.5-4B a usar -- ver app/nlp/ai_client.py: se descarga y cachea
+    # solo, sin cuantización propia. unsloth/Qwen3.5-4B-GGUF es una fuente
+    # de confianza (mismo criterio que se usaría para Moondream2) que ya
+    # publica el fichero cuantizado; alternativas equivalentes si dejase
+    # de estar disponible: bartowski/Qwen_Qwen3.5-4B-GGUF o
+    # lmstudio-community/Qwen3.5-4B-GGUF (ver ADR-49 en
+    # docs/src/09_architecture_decisions.adoc). Con `qwen_gguf_repo_id`
+    # vacío, app/nlp/ai_client.py se comporta igual que si `llama_cpp` no
+    # estuviera instalado: "no disponible", sin excepción que rompa el
+    # resto del pipeline.
+    qwen_gguf_repo_id: str = "unsloth/Qwen3.5-4B-GGUF"
+    qwen_gguf_filename: str = "Qwen3.5-4B-Q4_K_M.gguf"  # nombre EXACTO del fichero .gguf en ese repo, no un glob
 
     @property
     def ai_key_configured(self) -> bool:
