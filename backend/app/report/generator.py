@@ -34,7 +34,7 @@ from app.nlp.ai_attribute_extraction import (
 )
 from app.nlp.demographic_extraction import DemographicFindings, extract_demographics
 from app.nlp.travel_detection import detect_travel_permalinks
-from app.progress import ProgressCallback, emit_progress
+from app.progress import ProgressCallback, emit_progress, run_with_heartbeat
 from app.analysis_timing import timed_stage
 from app import stages
 from app.scoring.k_anonymity import estimate_population_narrowing, final_remaining_population
@@ -269,17 +269,28 @@ async def _apply_ai_findings(
     nombre público de la cuenta, que sirve como señal débil de sexo -- de
     forma más flexible. Se ejecuta automáticamente en cada análisis, sin
     ningún botón. Ver docstring de app/nlp/ai_attribute_extraction.py para
-    el razonamiento RGPD. Módulo opcional/best-effort: sin API key del
-    proveedor de IA activo (AI_PROVIDER, ver app/config.py), o si la
-    llamada falla, esto no aporta nada y el informe se sigue generando
-    solo con lo detectado por regex (devuelve los mismos
+    el razonamiento RGPD. Módulo opcional/best-effort: sin el modelo de IA
+    local disponible (ver `settings.ai_key_configured`, app/config.py), o
+    si la llamada falla, esto no aporta nada y el informe se sigue
+    generando solo con lo detectado por regex (devuelve los mismos
     `demographic_findings`/`travel_permalinks` de entrada, sin tocar, y
     ninguna inferencia blanda)."""
     if not settings.ai_key_configured:
         return demographic_findings, travel_permalinks, []
 
     await emit_progress(progress_callback, stages.SEARCHING_AI_SELF_DISCLOSURES)
-    ai_findings = await extract_demographics_with_ai(posts, username=username, full_name=full_name, bio=bio)
+    # run_with_heartbeat en vez de un await directo: esta llamada puede
+    # tardar minutos con el modelo local (carga inicial o inferencia en
+    # una GPU modesta, ver docstring de run_with_heartbeat en
+    # app/progress.py) -- sin re-emitir progreso durante esa espera, el
+    # EventSource del navegador puede dar la conexión por muerta y
+    # reconectar solo, reiniciando TODO el pipeline desde cero (fallo real
+    # visto en producción, 24/9).
+    ai_findings = await run_with_heartbeat(
+        extract_demographics_with_ai(posts, username=username, full_name=full_name, bio=bio),
+        progress_callback,
+        stages.SEARCHING_AI_SELF_DISCLOSURES,
+    )
     soft_inferences = ai_findings.soft_inferences
     demographic_findings = merge_findings(demographic_findings, ai_findings)
     # La IA también señala fotos de viaje/vacaciones en el mismo pase (campo
