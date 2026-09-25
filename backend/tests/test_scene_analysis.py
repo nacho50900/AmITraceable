@@ -594,7 +594,8 @@ class TestVisualDescriptionCodes:
         _, _, _, _, codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert codes.personas == "una"
-        assert codes.aficion is not None and "guitarra" in codes.aficion.lower()
+        assert codes.aficion is not None
+        assert "guitarra" in codes.aficion.lower()
         assert codes.texto_visible == "Bar El Rincón"
         assert codes.indicio_pareja is False
 

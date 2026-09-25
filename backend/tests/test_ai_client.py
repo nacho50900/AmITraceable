@@ -216,7 +216,7 @@ class TestCallAiJson:
 
         monkeypatch.setattr(ai_client, "_call_ai_json_sync", fake_sync)
 
-        result = await call_ai_json("sis", "usr", model="ignorado", max_tokens=55, temperature=0.3)
+        result = await call_ai_json("sis", "usr", max_tokens=55, temperature=0.3)
 
         assert result == {"a": 1}
         assert captured == {"system": "sis", "user": "usr", "max_tokens": 55, "temperature": 0.3}

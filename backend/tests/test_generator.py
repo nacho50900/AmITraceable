@@ -243,9 +243,13 @@ class TestGenerateReportPlatformBranching:
         points_by_link = {p.permalink: p for p in report.image_location_points}
         codes_1 = points_by_link["https://ig/carousel?img_index=1"].visual_description_codes
         codes_2 = points_by_link["https://ig/carousel?img_index=2"].visual_description_codes
-        assert codes_1 is not None and codes_1.personas == "una" and codes_1.aficion == "playa"
+        assert codes_1 is not None
+        assert codes_1.personas == "una"
+        assert codes_1.aficion == "playa"
         assert codes_1.indicio_pareja is False
-        assert codes_2 is not None and codes_2.personas == "varias" and codes_2.texto_visible == "Restaurante Los Olivos"
+        assert codes_2 is not None
+        assert codes_2.personas == "varias"
+        assert codes_2.texto_visible == "Restaurante Los Olivos"
         assert codes_2.indicio_pareja is True
 
     @pytest.mark.asyncio

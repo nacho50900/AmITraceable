@@ -10,6 +10,7 @@ import pytest
 
 from app.log import performance_log
 from app.log.performance_log import (
+    PhotoAnalysisRunMetrics,
     PhotoAnalysisTiming,
     _average,
     _compute_device_seconds,
@@ -32,7 +33,7 @@ def _read_entries(log_dir):
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def _run_kwargs(**overrides):
+def _run_metrics(**overrides) -> PhotoAnalysisRunMetrics:
     base = dict(
         total_photos=2,
         cpu_count=8,
@@ -50,7 +51,7 @@ def _run_kwargs(**overrides):
         per_photo_scene_seconds=[3.0, 3.0],
     )
     base.update(overrides)
-    return base
+    return PhotoAnalysisRunMetrics(**base)
 
 
 class TestPhotoAnalysisTiming:
@@ -142,7 +143,7 @@ class TestComputeDeviceSeconds:
 
 class TestLogPhotoAnalysisRun:
     def test_writes_one_line_with_expected_fields(self, isolated_log_dir):
-        log_photo_analysis_run(**_run_kwargs())
+        log_photo_analysis_run(_run_metrics())
 
         entries = _read_entries(isolated_log_dir)
         assert len(entries) == 1
@@ -158,7 +159,7 @@ class TestLogPhotoAnalysisRun:
         assert "timestamp" in entry
 
     def test_device_seconds_and_percentages(self, isolated_log_dir):
-        log_photo_analysis_run(**_run_kwargs())
+        log_photo_analysis_run(_run_metrics())
 
         entry = _read_entries(isolated_log_dir)[0]
         assert entry["cuda_gpu_seconds"] == 8.0  # 2 (DINOv2) + 6 (Moondream2)
@@ -169,7 +170,7 @@ class TestLogPhotoAnalysisRun:
         assert entry["cpu_usage_pct"] == 0.0
 
     def test_igpu_offload_is_reported_separately(self, isolated_log_dir):
-        log_photo_analysis_run(**_run_kwargs(igpu_offload_used=True))
+        log_photo_analysis_run(_run_metrics(igpu_offload_used=True))
 
         entry = _read_entries(isolated_log_dir)[0]
         assert entry["igpu_seconds"] == 2.0
@@ -178,7 +179,7 @@ class TestLogPhotoAnalysisRun:
 
     def test_scene_analysis_disabled_leaves_scene_average_null(self, isolated_log_dir):
         log_photo_analysis_run(
-            **_run_kwargs(
+            _run_metrics(
                 enable_scene_analysis=False,
                 moondream_device=None,
                 moondream_model_variant=None,
@@ -192,19 +193,19 @@ class TestLogPhotoAnalysisRun:
 
     def test_appends_multiple_runs(self, isolated_log_dir):
         for _ in range(3):
-            log_photo_analysis_run(**_run_kwargs())
+            log_photo_analysis_run(_run_metrics())
 
         assert len(_read_entries(isolated_log_dir)) == 3
 
     def test_zero_photos_is_noop(self, isolated_log_dir):
-        log_photo_analysis_run(**_run_kwargs(total_photos=0, per_photo_seconds=[]))
+        log_photo_analysis_run(_run_metrics(total_photos=0, per_photo_seconds=[]))
 
         assert not (isolated_log_dir / "photo_analysis_log.jsonl").exists()
 
     def test_disabled_via_settings_does_not_write(self, isolated_log_dir, monkeypatch):
         monkeypatch.setattr(performance_log.settings, "enable_performance_logging", False)
 
-        log_photo_analysis_run(**_run_kwargs())
+        log_photo_analysis_run(_run_metrics())
 
         assert not (isolated_log_dir / "photo_analysis_log.jsonl").exists()
 
@@ -220,14 +221,14 @@ class TestAppendEntryUnwritable:
     def test_unwritable_dir_does_not_raise(self, monkeypatch):
         self._break_mkdir(monkeypatch)
 
-        log_photo_analysis_run(**_run_kwargs())  # no debe lanzar
+        log_photo_analysis_run(_run_metrics())  # no debe lanzar
 
     def test_warns_only_once(self, monkeypatch, caplog):
         self._break_mkdir(monkeypatch)
 
         with caplog.at_level("WARNING", logger=performance_log.logger.name):
-            log_photo_analysis_run(**_run_kwargs())
-            log_photo_analysis_run(**_run_kwargs())
+            log_photo_analysis_run(_run_metrics())
+            log_photo_analysis_run(_run_metrics())
 
         warnings = [r for r in caplog.records if "No se pudo escribir el log de rendimiento" in r.getMessage()]
         assert len(warnings) == 1

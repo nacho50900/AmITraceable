@@ -12,11 +12,14 @@ traduce su resultado (MaigretCheckStatus) a nuestro UsernameSiteResult
 correctamente -- el motor de deteccion HTTP en si ya es responsabilidad
 (y esta testeado) por la propia libreria Maigret, no por este proyecto.
 """
+import asyncio
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app import osint_router
 from app.main import app
+from app.osint import username_correlation
 from app.osint.username_correlation import (
     UsernameSiteResult,
     check_username_across_sites,
@@ -192,6 +195,39 @@ class TestProgressCallback:
         assert results == []
 
     @pytest.mark.asyncio
+    async def test_intermediate_progress_is_reported_while_polling(self, monkeypatch):
+        """A diferencia del resto de tests de esta clase, aquí SÍ se deja
+        que `_poll_progress` corra al menos una vuelta completa
+        (`PROGRESS_POLL_INTERVAL_SECONDS` se baja a un valor ínfimo y
+        `_fake_check` se retrasa lo justo para que a esa vuelta le dé
+        tiempo) -- cubre el cuerpo de `_poll_progress` en sí, no solo el
+        evento final de cierre que prueban los demás tests de esta
+        clase."""
+        monkeypatch.setattr(username_correlation, "PROGRESS_POLL_INTERVAL_SECONDS", 0.01)
+        events = []
+
+        async def _progress_callback(stage, counts):
+            events.append((stage, counts))
+
+        async def _fake_check(**kwargs):
+            notifier = kwargs["query_notify"]
+            notifier.update()
+            await asyncio.sleep(0.05)  # deja tiempo a que el poll (cada 0.01s) lo detecte
+            return {}
+
+        monkeypatch.setattr("app.osint.username_correlation._maigret_check", _fake_check)
+
+        results = await check_username_across_sites(
+            "comandante", sites={"A": object(), "B": object()}, progress_callback=_progress_callback
+        )
+
+        assert results == []
+        intermediate = [counts for _, counts in events if counts["accounts_checked"] == 1]
+        assert intermediate
+        assert intermediate[0]["track"] == "correlacion_cuentas"
+        assert intermediate[0]["total_accounts"] == 2
+
+    @pytest.mark.asyncio
     async def test_emits_a_final_100_percent_event_after_completion(self):
         events = []
 
@@ -287,3 +323,29 @@ class TestUsernameCorrelationEndpoint:
         assert resp.status_code == 200
         assert seen["username"] == "comandante"
         assert resp.json()["username"] == "comandante"
+
+
+class TestCountingQueryNotify:
+    """`_maigret_check` está mockeado en el resto de este fichero, así que
+    Maigret nunca llega a llamar de verdad a `start`/`finish`/`warning`/
+    `enrich` de `_CountingQueryNotify` -- se comprueban aquí directamente:
+    son no-op a propósito (ver los comentarios de cada método en
+    app/osint/username_correlation.py), `update` es el único que hace
+    algo."""
+
+    def test_update_increments_checked(self):
+        notifier = username_correlation._CountingQueryNotify()
+
+        notifier.update()
+        notifier.update()
+
+        assert notifier.checked == 2
+
+    @pytest.mark.parametrize("method_name", ["start", "finish", "warning", "enrich"])
+    def test_other_methods_are_noop_regardless_of_arguments(self, method_name):
+        notifier = username_correlation._CountingQueryNotify()
+        method = getattr(notifier, method_name)
+
+        assert method() is None
+        assert method("algo", clave="valor") is None
+        assert notifier.checked == 0  # ninguno de estos toca el contador

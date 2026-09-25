@@ -42,7 +42,7 @@ import httpx
 
 from app.config import settings
 from app.models.schemas import InferredAttribute
-from app.log.performance_log import PhotoAnalysisTiming, log_photo_analysis_run
+from app.log.performance_log import PhotoAnalysisRunMetrics, PhotoAnalysisTiming, log_photo_analysis_run
 from app.progress import emit_progress
 from app.vision import scene_analysis
 from app.vision.collage_detection import detect_collage
@@ -1184,30 +1184,34 @@ async def estimate_locations_for_posts(
     import os
 
     log_photo_analysis_run(
-        total_photos=total,
-        cpu_count=os.cpu_count() or 4,
-        configured_concurrency=settings.photo_analysis_concurrency,
-        actual_concurrency=actual_concurrency,
-        # Igual que se calcula en app/main.py -- se repite aquí (en vez de
-        # leerlo de algún sitio compartido) porque es una cuenta trivial y
-        # así este módulo no depende de detalles de arranque de main.py.
-        threads_per_inference=max(1, (os.cpu_count() or 4) // max(1, settings.photo_analysis_concurrency)),
-        enable_scene_analysis=settings.enable_scene_analysis,
-        # Estado REAL de offload en ESTE análisis, no solo si el flag de
-        # config está activado -- si el worker de iGPU nunca llegó a
-        # inicializarse (_igpu_worker_device_index sigue None) o falló a
-        # mitad de análisis (_igpu_worker_failed), el resto de fotos ya se
-        # procesaron en local pese a tener ENABLE_IGPU_OFFLOAD=true, y el
-        # log de rendimiento debe reflejar eso, no la config nominal (ver
-        # el comentario de este mismo campo en log/performance_log.py).
-        igpu_offload_used=_igpu_worker_device_index is not None and not _igpu_worker_failed,
-        dinov2_local_device=get_local_device(),
-        moondream_device=scene_analysis.get_device(),
-        moondream_model_variant=scene_analysis.get_model_variant(),
-        total_wall_seconds=time.monotonic() - run_start,
-        per_photo_seconds=timing.per_photo_seconds,
-        per_photo_dinov2_seconds=timing.dinov2_seconds,
-        per_photo_scene_seconds=timing.scene_seconds,
+        PhotoAnalysisRunMetrics(
+            total_photos=total,
+            cpu_count=os.cpu_count() or 4,
+            configured_concurrency=settings.photo_analysis_concurrency,
+            actual_concurrency=actual_concurrency,
+            # Igual que se calcula en app/main.py -- se repite aquí (en vez
+            # de leerlo de algún sitio compartido) porque es una cuenta
+            # trivial y así este módulo no depende de detalles de arranque
+            # de main.py.
+            threads_per_inference=max(1, (os.cpu_count() or 4) // max(1, settings.photo_analysis_concurrency)),
+            enable_scene_analysis=settings.enable_scene_analysis,
+            # Estado REAL de offload en ESTE análisis, no solo si el flag
+            # de config está activado -- si el worker de iGPU nunca llegó
+            # a inicializarse (_igpu_worker_device_index sigue None) o
+            # falló a mitad de análisis (_igpu_worker_failed), el resto de
+            # fotos ya se procesaron en local pese a tener
+            # ENABLE_IGPU_OFFLOAD=true, y el log de rendimiento debe
+            # reflejar eso, no la config nominal (ver el comentario de
+            # este mismo campo en log/performance_log.py).
+            igpu_offload_used=_igpu_worker_device_index is not None and not _igpu_worker_failed,
+            dinov2_local_device=get_local_device(),
+            moondream_device=scene_analysis.get_device(),
+            moondream_model_variant=scene_analysis.get_model_variant(),
+            total_wall_seconds=time.monotonic() - run_start,
+            per_photo_seconds=timing.per_photo_seconds,
+            per_photo_dinov2_seconds=timing.dinov2_seconds,
+            per_photo_scene_seconds=timing.scene_seconds,
+        )
     )
 
     return GeolocationOutcome(

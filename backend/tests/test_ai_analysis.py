@@ -100,8 +100,9 @@ class TestNoModelConfigured:
     async def test_raises_unavailable_when_ai_analysis_disabled(self, monkeypatch):
         monkeypatch.setattr(settings, "enable_ai_analysis", False)
 
+        report = _make_report()
         with pytest.raises(AiAnalysisUnavailable):
-            await analyze_report_with_ai(_make_report())
+            await analyze_report_with_ai(report)
 
 
 class TestSuccessfulAnalysis:
@@ -160,15 +161,17 @@ class TestErrorHandling:
             ai_analysis, "call_ai_json", _ai_raises(AIRequestError("llama_cpp no disponible"))
         )
 
+        report = _make_report()
         with pytest.raises(AiAnalysisUnavailable):
-            await analyze_report_with_ai(_make_report())
+            await analyze_report_with_ai(report)
 
     @pytest.mark.asyncio
     async def test_inference_failure_raises_unavailable_not_raw_exception(self, monkeypatch):
         monkeypatch.setattr(ai_analysis, "call_ai_json", _ai_raises(AIRequestError("fallo de inferencia")))
 
+        report = _make_report()
         with pytest.raises(AiAnalysisUnavailable):
-            await analyze_report_with_ai(_make_report())
+            await analyze_report_with_ai(report)
 
     @pytest.mark.asyncio
     async def test_malformed_response_raises_unavailable(self, monkeypatch):
@@ -176,8 +179,9 @@ class TestErrorHandling:
             ai_analysis, "call_ai_json", _ai_raises(AIHTTPError(200, "respuesta con forma inesperada"))
         )
 
+        report = _make_report()
         with pytest.raises(AiAnalysisUnavailable):
-            await analyze_report_with_ai(_make_report())
+            await analyze_report_with_ai(report)
 
     @pytest.mark.asyncio
     async def test_unexpected_response_shape_defaults_gracefully(self, monkeypatch):

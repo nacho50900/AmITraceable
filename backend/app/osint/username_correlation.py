@@ -84,7 +84,7 @@ from app.progress import ProgressCallback, emit_progress
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT_SECONDS = 10
+DEFAULT_SITE_TIMEOUT_SECONDS = 10
 DEFAULT_MAX_CONNECTIONS = 40
 
 # Cada cuanto se sondea el contador de sitios ya comprobados para emitir un
@@ -196,19 +196,18 @@ async def _poll_progress(notifier: _CountingQueryNotify, total_sites: int, progr
 async def _cancel_and_await(task: asyncio.Task) -> None:
     """Cancela `task` y espera a que termine de propagar la cancelación.
 
-    El `asyncio.CancelledError` que llega aquí SIEMPRE viene de nuestro
-    propio `task.cancel()` de la línea anterior -- `task` (el poll de
-    `_poll_progress`) no se expone a nadie más, así que nunca puede haber
-    una cancelación externa mezclada con esta. Por eso absorberlo aquí es
-    correcto y no una excepción "tragada" a ciegas: re-lanzarlo
-    propagaría hacia `check_username_across_sites` una cancelación que
-    esa misma función inició para limpiar, no una cancelación real de
-    quien la llamó a ella."""
+    Usa `asyncio.wait()` en vez de `await task` -- a diferencia de
+    `await`, `asyncio.wait()` espera a que la tarea termine SIN relanzar
+    la excepción con la que acabó, así que aquí no hace falta ningún
+    `except asyncio.CancelledError` que decidir si relanzar o no (ver el
+    issue de Sonar "Ensure that the asyncio.CancelledError exception is
+    re-raised after your cleanup code"): relanzarla propagaría hacia
+    `check_username_across_sites` una cancelación que esa misma función
+    inició para limpiar (`task` -- el poll de `_poll_progress` -- no se
+    expone a nadie más), no una cancelación real de quien la llamó a
+    ella."""
     task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    await asyncio.wait([task])
 
 
 def _raw_results_to_site_results(raw_results: dict) -> list[UsernameSiteResult]:
@@ -235,12 +234,23 @@ async def check_username_across_sites(
     username: str,
     sites: dict | None = None,
     max_connections: int = DEFAULT_MAX_CONNECTIONS,
-    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    site_timeout_seconds: int = DEFAULT_SITE_TIMEOUT_SECONDS,
     progress_callback: ProgressCallback | None = None,
 ) -> list[UsernameSiteResult]:
     """Comprueba `username` contra `sites` (dict nombre -> MaigretSite; por
     defecto, la base de datos completa de Maigret tras excluir tor/i2p/dns,
     ~5000 sitios).
+
+    `site_timeout_seconds` (renombrado desde `timeout` -- ver el issue de
+    Sonar "Remove this timeout parameter and use a timeout context
+    manager instead"): es el timeout POR PETICIÓN HTTP que se reenvía tal
+    cual a `maigret.checking.maigret()`, NO un plazo total para toda la
+    función -- envolver esta función entera en un `asyncio.timeout(...)`
+    con este valor (la sugerencia literal de esa regla) cortaría el
+    barrido a los pocos segundos, cuando el barrido completo tarda del
+    orden de MINUTOS (ver aviso de RENDIMIENTO más abajo). El nombre
+    `timeout` a secas invitaba a esa lectura errónea; de ahí el rename,
+    en vez de aplicar la sugerencia literalmente.
 
     Llama a maigret.checking.maigret() -- el motor real de Maigret -- con
     `is_parsing_enabled=False` e `is_enrich_enabled=False`: nunca se
@@ -281,7 +291,7 @@ async def check_username_across_sites(
             site_dict=site_dict,
             logger=logger,
             query_notify=notifier,
-            timeout=timeout,
+            timeout=site_timeout_seconds,
             is_parsing_enabled=False,
             is_enrich_enabled=False,
             max_connections=max_connections,

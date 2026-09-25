@@ -207,15 +207,11 @@ async def call_ai_json(
     system_prompt: str,
     user_prompt: str,
     *,
-    model: str | None = None,
     max_tokens: int = 1000,
     temperature: float = 0.0,
 ) -> dict:
     """Pide al modelo local respuesta JSON y devuelve el contenido ya
-    parseado (dict). `model` se conserva en la firma por compatibilidad
-    con el diseño anterior (permitía pisar el modelo del proveedor activo
-    por llamada) pero se IGNORA -- solo hay un modelo local cargado por
-    proceso, ver docstring del módulo.
+    parseado (dict).
 
     No comprueba `settings.ai_key_configured` -- eso sigue siendo
     responsabilidad de cada llamador, igual que antes.

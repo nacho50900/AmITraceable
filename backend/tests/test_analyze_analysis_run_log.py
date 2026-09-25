@@ -134,7 +134,8 @@ class TestMain:
         out = capsys.readouterr().out
         assert "2 análisis completos registrados." in out
         assert "Totales por plataforma:" in out
-        assert "reddit" in out and "instagram" in out
+        assert "reddit" in out
+        assert "instagram" in out
         assert "Etapa que más pesa de media: 'atributos'" in out
         assert "2.50s de media (2 análisis)" in out
 

@@ -94,37 +94,46 @@ class PhotoAnalysisTiming:
         self.scene_seconds.append(round(seconds, 3))
 
 
-def log_photo_analysis_run(
-    *,
-    total_photos: int,
-    cpu_count: int,
-    configured_concurrency: int,
-    actual_concurrency: int,
-    threads_per_inference: int,
-    enable_scene_analysis: bool,
-    igpu_offload_used: bool,
-    dinov2_local_device: str | None,
-    moondream_device: str | None,
+@dataclass(frozen=True, kw_only=True)
+class PhotoAnalysisRunMetrics:
+    """Agrupa los datos que `log_photo_analysis_run()` necesita de UN
+    análisis de fotos completo -- antes 14 parámetros sueltos en esa
+    función (ver el issue de Sonar "Function has 14 parameters, which is
+    greater than the 13 authorized"). Ningún campo cambia de nombre ni de
+    significado respecto a los parámetros que sustituye -- ver los
+    comentarios de `log_photo_analysis_run` para el detalle de cada uno."""
+
+    total_photos: int
+    cpu_count: int
+    configured_concurrency: int
+    actual_concurrency: int
+    threads_per_inference: int
+    enable_scene_analysis: bool
+    igpu_offload_used: bool
+    dinov2_local_device: str | None
+    moondream_device: str | None
     # Ver `app.vision.scene_analysis.get_model_variant()`: separa en el
     # log qué build de Moondream2 produjo cada entrada (bf16 completo vs.
     # GGUF/llama.cpp, ver historial en ese módulo) -- sin esto, comparar
     # rendimiento entre backends en el mismo .jsonl no sería fiable, que
     # es justamente el motivo por el que se añade este campo.
-    moondream_model_variant: str | None,
-    total_wall_seconds: float,
-    per_photo_seconds: list[float],
-    per_photo_dinov2_seconds: list[float],
-    per_photo_scene_seconds: list[float],
-) -> None:
+    moondream_model_variant: str | None
+    total_wall_seconds: float
+    per_photo_seconds: list[float]
+    per_photo_dinov2_seconds: list[float]
+    per_photo_scene_seconds: list[float]
+
+
+def log_photo_analysis_run(metrics: PhotoAnalysisRunMetrics) -> None:
     """Añade una línea al log de rendimiento. Nunca lanza excepción hacia
     el llamador: un fallo al escribir el log no debe tumbar ni degradar el
     análisis real.
 
-    `dinov2_local_device`/`moondream_device`: dispositivo REAL donde
-    corrió cada modelo en este proceso (ver
+    `metrics.dinov2_local_device`/`metrics.moondream_device`: dispositivo
+    REAL donde corrió cada modelo en este proceso (ver
     `app.vision.geolocation.get_local_device()` y
     `app.vision.scene_analysis.get_device()`) -- IMPORTANTE, y motivo por
-    el que existen estos dos parámetros en vez de asumir nada a partir de
+    el que existen estos dos campos en vez de asumir nada a partir de
     `igpu_offload_used`: sin offload activo, DINOv2 NO corre en CPU, sino
     en la MISMA GPU dedicada que Moondream2 (ver
     `_select_igpu_worker_device_index()` en geolocation.py -- el offload
@@ -140,7 +149,7 @@ def log_photo_analysis_run(
     if not settings.enable_performance_logging:
         return  # logging de rendimiento desactivado, ver ENABLE_PERFORMANCE_LOGGING
 
-    if total_photos == 0:
+    if metrics.total_photos == 0:
         return  # nada que registrar -- no hubo fotos que analizar
 
     # `throughput_seconds_per_photo` (total_wall_seconds / total_photos) es
@@ -155,7 +164,7 @@ def log_photo_analysis_run(
     # del 21/8). El throughput SÍ es comparable entre configuraciones;
     # la latencia media es útil solo para estimar cuánto tarda en
     # aparecer el resultado de UNA foto concreta (progreso de UI).
-    throughput = total_wall_seconds / total_photos
+    throughput = metrics.total_wall_seconds / metrics.total_photos
 
     # Tiempo de cómputo por DISPOSITIVO durante ESTE análisis de fotos (no
     # incluye traducción -- ver app/log/translation_log.py, es una
@@ -186,29 +195,29 @@ def log_photo_analysis_run(
     # puede superar el 100% con buen solapamiento (señal de que el
     # pipeline aprovecha bien la concurrencia entre modelos).
     cuda_gpu_seconds, igpu_seconds, cpu_seconds = _compute_device_seconds(
-        igpu_offload_used=igpu_offload_used,
-        dinov2_local_device=dinov2_local_device,
-        moondream_device=moondream_device,
-        dinov2_total=sum(per_photo_dinov2_seconds),
-        scene_total=sum(per_photo_scene_seconds),
+        igpu_offload_used=metrics.igpu_offload_used,
+        dinov2_local_device=metrics.dinov2_local_device,
+        moondream_device=metrics.moondream_device,
+        dinov2_total=sum(metrics.per_photo_dinov2_seconds),
+        scene_total=sum(metrics.per_photo_scene_seconds),
     )
 
-    cuda_gpu_usage_pct = _pct_of_wall_time(cuda_gpu_seconds, total_wall_seconds)
-    igpu_usage_pct = _pct_of_wall_time(igpu_seconds, total_wall_seconds)
-    cpu_usage_pct = _pct_of_wall_time(cpu_seconds, total_wall_seconds)
+    cuda_gpu_usage_pct = _pct_of_wall_time(cuda_gpu_seconds, metrics.total_wall_seconds)
+    igpu_usage_pct = _pct_of_wall_time(igpu_seconds, metrics.total_wall_seconds)
+    cpu_usage_pct = _pct_of_wall_time(cpu_seconds, metrics.total_wall_seconds)
 
-    avg = _average(per_photo_seconds)
-    avg_dinov2 = _average(per_photo_dinov2_seconds)
-    avg_scene = _average(per_photo_scene_seconds)
+    avg = _average(metrics.per_photo_seconds)
+    avg_dinov2 = _average(metrics.per_photo_dinov2_seconds)
+    avg_scene = _average(metrics.per_photo_scene_seconds)
 
     entry = {
         "timestamp": time.time(),
-        "total_photos": total_photos,
-        "cpu_count": cpu_count,
-        "configured_concurrency": configured_concurrency,
-        "actual_concurrency": actual_concurrency,
-        "threads_per_inference": threads_per_inference,
-        "enable_scene_analysis": enable_scene_analysis,
+        "total_photos": metrics.total_photos,
+        "cpu_count": metrics.cpu_count,
+        "configured_concurrency": metrics.configured_concurrency,
+        "actual_concurrency": metrics.actual_concurrency,
+        "threads_per_inference": metrics.threads_per_inference,
+        "enable_scene_analysis": metrics.enable_scene_analysis,
         # Estado REAL en el momento de este análisis, no si
         # ENABLE_IGPU_OFFLOAD estaba a true en la config: si el worker
         # falló o nunca respondió, esto sale False aunque el flag esté
@@ -217,12 +226,12 @@ def log_photo_analysis_run(
         # rendimiento "con offload vs sin offload" no sería de fiar (un
         # fallback silencioso al modelo local contaminaría el grupo "con
         # offload" con tiempos que en realidad son de ejecución local).
-        "igpu_offload_used": igpu_offload_used,
+        "igpu_offload_used": metrics.igpu_offload_used,
         # Dispositivo real por modelo -- ver docstring de la función.
-        "dinov2_local_device": dinov2_local_device,
-        "moondream_device": moondream_device,
-        "moondream_model_variant": moondream_model_variant,
-        "total_wall_seconds": round(total_wall_seconds, 3),
+        "dinov2_local_device": metrics.dinov2_local_device,
+        "moondream_device": metrics.moondream_device,
+        "moondream_model_variant": metrics.moondream_model_variant,
+        "total_wall_seconds": round(metrics.total_wall_seconds, 3),
         # Métrica principal para COMPARAR configuraciones -- ver el
         # comentario de arriba sobre por qué no vale usar
         # `avg_seconds_per_photo` para esto.
@@ -248,9 +257,9 @@ def log_photo_analysis_run(
         # error de los datos.
         "avg_dinov2_seconds_per_photo": round(avg_dinov2, 3) if avg_dinov2 is not None else None,
         "avg_scene_seconds_per_photo": round(avg_scene, 3) if avg_scene is not None else None,
-        "per_photo_seconds": per_photo_seconds,
-        "per_photo_dinov2_seconds": per_photo_dinov2_seconds,
-        "per_photo_scene_seconds": per_photo_scene_seconds,
+        "per_photo_seconds": metrics.per_photo_seconds,
+        "per_photo_dinov2_seconds": metrics.per_photo_dinov2_seconds,
+        "per_photo_scene_seconds": metrics.per_photo_scene_seconds,
     }
 
     _append_entry(entry)

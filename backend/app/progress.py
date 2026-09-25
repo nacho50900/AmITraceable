@@ -11,12 +11,10 @@ cualquier cliente que no necesite progreso en vivo) siga funcionando
 exactamente igual sin ningún cambio de comportamiento.
 """
 import asyncio
-from typing import Awaitable, Callable, Optional, TypeVar
+from typing import Awaitable, Callable, Optional
 
 # (mensaje_de_etapa, contadores_parciales) -> None
 ProgressCallback = Callable[[str, dict], Awaitable[None]]
-
-T = TypeVar("T")
 
 
 async def emit_progress(callback: Optional[ProgressCallback], stage: str, **counts) -> None:
@@ -24,7 +22,7 @@ async def emit_progress(callback: Optional[ProgressCallback], stage: str, **coun
         await callback(stage, counts)
 
 
-async def run_with_heartbeat(
+async def run_with_heartbeat[T](
     coro: Awaitable[T],
     callback: Optional[ProgressCallback],
     stage: str,
