@@ -460,6 +460,16 @@ _CCAA_CASTILLA_LA_MANCHA = "castilla la mancha"
 _CCAA_COMUNIDAD_VALENCIANA = "comunidad valenciana"
 _CCAA_PAIS_VASCO = "pais vasco"
 
+# Nombres de provincia que se repiten entre PROVINCE_POPULATION,
+# PLATE_PROVINCE_CODE_TO_PROVINCE y AUTONOMOUS_COMMUNITY_PROVINCES (las
+# provincias insulares y "ciudad real" aparecen en las tres) -- mismo
+# criterio que las constantes _CCAA_* de arriba, para no duplicar el
+# literal.
+_PROVINCE_A_CORUNA = "a coruna"
+_PROVINCE_LAS_PALMAS = "las palmas"
+_PROVINCE_SANTA_CRUZ_DE_TENERIFE = "santa cruz de tenerife"
+_PROVINCE_CIUDAD_REAL = "ciudad real"
+
 
 # Población por provincia (aprox. 2024, INE - Estadística Continua de
 # Población). Cubre una selección representativa; añade más si tu análisis
@@ -474,10 +484,10 @@ PROVINCE_POPULATION = {
     "murcia": 1_586_989,
     "cadiz": 1_261_420,
     "vizcaya": 1_167_233,
-    "a coruna": 1_135_623,
+    _PROVINCE_A_CORUNA: 1_135_623,
     "baleares": 1_249_844,
-    "las palmas": 1_171_547,
-    "santa cruz de tenerife": 1_087_319,
+    _PROVINCE_LAS_PALMAS: 1_171_547,
+    _PROVINCE_SANTA_CRUZ_DE_TENERIFE: 1_087_319,
     "zaragoza": 998_443,
     "asturias": 1_015_128,
     "pontevedra": 947_818,
@@ -505,7 +515,7 @@ PROVINCE_POPULATION = {
     "orense": 305_278,
     "albacete": 390_751,
     "guadalajara": 285_839,
-    "ciudad real": 494_848,
+    _PROVINCE_CIUDAD_REAL: 494_848,
     "alava": 341_961,
     "huesca": 230_087,
     "zamora": 165_564,
@@ -550,11 +560,11 @@ PLATE_PROVINCE_CODE_TO_PROVINCE = {
     "CC": "caceres",
     "CS": "castellon",
     "CE": "ceuta",
-    "CR": "ciudad real",
+    "CR": _PROVINCE_CIUDAD_REAL,
     "CO": "cordoba",
-    "C": "a coruna",
+    "C": _PROVINCE_A_CORUNA,
     "CU": "cuenca",
-    "GC": "las palmas",
+    "GC": _PROVINCE_LAS_PALMAS,
     "GE": "gerona",  # código antiguo, sustituido por GI
     "GI": "gerona",
     "GR": "granada",
@@ -582,7 +592,7 @@ PLATE_PROVINCE_CODE_TO_PROVINCE = {
     "SE": "sevilla",
     "SO": "soria",
     "T": "tarragona",
-    "TF": "santa cruz de tenerife",
+    "TF": _PROVINCE_SANTA_CRUZ_DE_TENERIFE,
     "TE": "teruel",
     "TO": "toledo",
     "V": "valencia",
@@ -636,14 +646,14 @@ AUTONOMOUS_COMMUNITY_PROVINCES: dict[str, list[str]] = {
     "aragon": ["zaragoza", "huesca", "teruel"],
     "asturias": ["asturias"],
     "baleares": ["baleares"],
-    "canarias": ["las palmas", "santa cruz de tenerife"],
+    "canarias": [_PROVINCE_LAS_PALMAS, _PROVINCE_SANTA_CRUZ_DE_TENERIFE],
     "cantabria": ["cantabria"],
     _CCAA_CASTILLA_Y_LEON: ["valladolid", "leon", "burgos", "salamanca", "zamora", "avila", "palencia", "segovia", "soria"],
-    _CCAA_CASTILLA_LA_MANCHA: ["toledo", "ciudad real", "albacete", "guadalajara", "cuenca"],
+    _CCAA_CASTILLA_LA_MANCHA: ["toledo", _PROVINCE_CIUDAD_REAL, "albacete", "guadalajara", "cuenca"],
     "cataluna": ["barcelona", "tarragona", "gerona", "lerida"],
     _CCAA_COMUNIDAD_VALENCIANA: ["valencia", "alicante", "castellon"],
     "extremadura": ["badajoz", "caceres"],
-    "galicia": ["a coruna", "pontevedra", "lugo", "orense"],
+    "galicia": [_PROVINCE_A_CORUNA, "pontevedra", "lugo", "orense"],
     "madrid": ["madrid"],
     "murcia": ["murcia"],
     "navarra": ["navarra"],

@@ -621,34 +621,37 @@ _SPORT_LABELS = {
 }
 
 
+def _age_band_for_range(lo: int, hi: int) -> str | None:
+    """Tramo de SPORT_PRACTICE_BY_AGE_BAND (15_24/25_54/55_mas) que cubre
+    POR COMPLETO el rango [lo, hi] -- None si el rango cruza más de un
+    tramo, o cae parcialmente fuera de 15+. Extraído de `_sport_age_band`
+    (antes dos bloques if/if/if casi idénticos, uno para edad exacta con
+    lo=hi y otro para rango) para bajar su complejidad cognitiva -- ver el
+    issue de Sonar sobre esa función."""
+    if lo >= 15 and hi <= 24:
+        return "15_24"
+    if lo >= 25 and hi <= 54:
+        return "25_54"
+    if lo >= 55:
+        return "55_mas"
+    return None
+
+
 def _sport_age_band(findings: DemographicFindings) -> str | None:
     """Determina a qué tramo de SPORT_PRACTICE_BY_AGE_BAND (15_24/25_54/
     55_mas -- fronteras de la Encuesta de Hábitos Deportivos, coinciden
     con quinquenios INE) corresponde `findings`, o None si no se puede
-    determinar sin adivinar. Con una edad exacta es directo; con un rango
+    determinar sin adivinar. Con una edad exacta es directo (equivale a
+    un rango de un solo valor, lo=hi=edad); con un rango
     (`edad_rango_min/max`, ver DemographicFindings) solo se usa si el
     rango ENTERO cae dentro de un único tramo -- si abarca más de uno
     (p. ej. un rango estimado 20-30 cruza 15-24 y 25-54), no hay forma de
     saber a cuál pertenece de verdad sin inventar un reparto, así que se
     devuelve None y el llamante cae de vuelta a la marginal."""
     if findings.edad is not None:
-        edad = findings.edad
-        if 15 <= edad <= 24:
-            return "15_24"
-        if 25 <= edad <= 54:
-            return "25_54"
-        if edad >= 55:
-            return "55_mas"
-        return None  # <15, fuera de la población que cubre la encuesta
+        return _age_band_for_range(findings.edad, findings.edad)
     if findings.edad_rango_min is not None and findings.edad_rango_max is not None:
-        lo, hi = findings.edad_rango_min, findings.edad_rango_max
-        if lo >= 15 and hi <= 24:
-            return "15_24"
-        if lo >= 25 and hi <= 54:
-            return "25_54"
-        if lo >= 55:
-            return "55_mas"
-        return None  # el rango cruza más de un tramo, o cae parcialmente fuera de 15+
+        return _age_band_for_range(findings.edad_rango_min, findings.edad_rango_max)
     return None
 
 
@@ -1070,6 +1073,44 @@ _CHAINED_STEPS = (
 # estrechamiento (no hay tabla de proporción nacional para ellos).
 _STANDALONE_STEPS = (_step_universidad, _step_empresa)
 
+# Nota común a los tres rasgos físicos añadidos a mano (ver
+# _apply_manual_physical_trait) -- antes repetida literalmente en cada uno
+# de los tres bloques if/elif que ahora reemplaza esa función.
+_MANUAL_PHYSICAL_TRAIT_NOTE = "Rasgo físico añadido manualmente. Proporción estimada contextualmente."
+
+# category de ManualAttribute -> (tabla de distribución, etiqueta para el
+# informe). Antes tres bloques if/elif/elif idénticos salvo estos dos
+# valores -- ver _apply_manual_physical_trait.
+_MANUAL_PHYSICAL_TRAIT_TABLES: dict[str, tuple[dict, str]] = {
+    "color_ojos": (EYE_COLOR_DISTRIBUTION, "Color de ojos"),
+    "color_pelo": (HAIR_COLOR_DISTRIBUTION, "Color de pelo"),
+    "color_piel": (SKIN_TONE_DISTRIBUTION, "Color de piel"),
+}
+
+
+def _apply_manual_physical_trait(
+    remaining: float, attr: ManualAttribute
+) -> tuple[float, PopulationNarrowingStep | None]:
+    """Un único paso para los tres atributos físicos manuales
+    (color_ojos/color_pelo/color_piel) -- antes tres bloques if/elif
+    idénticos en `estimate_population_narrowing` salvo la tabla y la
+    etiqueta. Extraído para bajar la complejidad cognitiva de esa función
+    (ver el issue de Sonar) y para no repetir `_MANUAL_PHYSICAL_TRAIT_NOTE`
+    tres veces. Solo se llama con `attr.category` ya validado contra
+    `_MANUAL_PHYSICAL_TRAIT_TABLES` (ver `estimate_population_narrowing`)."""
+    table, label = _MANUAL_PHYSICAL_TRAIT_TABLES[attr.category]
+    return _apply_proportion(
+        remaining,
+        table.get(attr.value),
+        f"{label}: {attr.value.title()}",
+        attr.category,
+        [],
+        source="manual",
+        note=_MANUAL_PHYSICAL_TRAIT_NOTE,
+        note_code=None,
+        value_raw=attr.value,
+    )
+
 
 def estimate_population_narrowing(findings: DemographicFindings, manual_attributes: list[ManualAttribute] | None = None) -> list[PopulationNarrowingStep]:
     steps: list[PopulationNarrowingStep] = []
@@ -1079,48 +1120,14 @@ def estimate_population_narrowing(findings: DemographicFindings, manual_attribut
         remaining, step = step_fn(findings, remaining)
         if step:
             steps.append(step)
-            
+
     if manual_attributes:
         for attr in manual_attributes:
-            if attr.category == "color_ojos":
-                remaining, step = _apply_proportion(
-                    remaining,
-                    EYE_COLOR_DISTRIBUTION.get(attr.value),
-                    f"Color de ojos: {attr.value.title()}",
-                    attr.category,
-                    [],
-                    source="manual",
-                    note="Rasgo físico añadido manualmente. Proporción estimada contextualmente.",
-                    note_code=None,
-                    value_raw=attr.value,
-                )
-                if step: steps.append(step)
-            elif attr.category == "color_pelo":
-                remaining, step = _apply_proportion(
-                    remaining,
-                    HAIR_COLOR_DISTRIBUTION.get(attr.value),
-                    f"Color de pelo: {attr.value.title()}",
-                    attr.category,
-                    [],
-                    source="manual",
-                    note="Rasgo físico añadido manualmente. Proporción estimada contextualmente.",
-                    note_code=None,
-                    value_raw=attr.value,
-                )
-                if step: steps.append(step)
-            elif attr.category == "color_piel":
-                remaining, step = _apply_proportion(
-                    remaining,
-                    SKIN_TONE_DISTRIBUTION.get(attr.value),
-                    f"Color de piel: {attr.value.title()}",
-                    attr.category,
-                    [],
-                    source="manual",
-                    note="Rasgo físico añadido manualmente. Proporción estimada contextualmente.",
-                    note_code=None,
-                    value_raw=attr.value,
-                )
-                if step: steps.append(step)
+            if attr.category not in _MANUAL_PHYSICAL_TRAIT_TABLES:
+                continue
+            remaining, step = _apply_manual_physical_trait(remaining, attr)
+            if step:
+                steps.append(step)
 
     for standalone_fn in _STANDALONE_STEPS:
         step = standalone_fn(findings)

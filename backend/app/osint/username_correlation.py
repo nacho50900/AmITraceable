@@ -157,19 +157,78 @@ class _CountingQueryNotify:
         self.checked = 0
 
     def start(self, *args, **kwargs) -> None:
-        pass
+        pass  # Nada que inicializar: `checked` ya arranca en 0 en __init__.
 
     def update(self, *args, **kwargs) -> None:
         self.checked += 1
 
     def finish(self, *args, **kwargs) -> None:
-        pass
+        pass  # El resultado se lee de lo que devuelve maigret(), no de aquí.
 
     def warning(self, *args, **kwargs) -> None:
-        pass
+        pass  # Solo interesa CONTAR comprobaciones (ver docstring de la clase); se descarta.
 
     def enrich(self, *args, **kwargs) -> None:
+        pass  # is_enrich_enabled=False (ver check_username_across_sites): Maigret no debería llamar a esto nunca; se implementa igualmente porque el duck-typing lo exige.
+
+
+async def _poll_progress(notifier: _CountingQueryNotify, total_sites: int, progress_callback: ProgressCallback) -> None:
+    """Bucle de sondeo extraído de `check_username_across_sites` (antes una
+    función anidada) para que su `while`/`if` no sumen a la complejidad
+    cognitiva de esa función -- ver el issue de Sonar "Cognitive
+    Complexity" sobre ese refactor. Cancelada externamente por
+    `check_username_across_sites` vía `_cancel_and_await` cuando
+    `_maigret_check` termina."""
+    last_reported = -1
+    while True:
+        await asyncio.sleep(PROGRESS_POLL_INTERVAL_SECONDS)
+        if notifier.checked != last_reported:
+            last_reported = notifier.checked
+            await emit_progress(
+                progress_callback,
+                "Comprobando cuentas relacionadas...",
+                accounts_checked=notifier.checked,
+                total_accounts=total_sites,
+                track="correlacion_cuentas",
+            )
+
+
+async def _cancel_and_await(task: asyncio.Task) -> None:
+    """Cancela `task` y espera a que termine de propagar la cancelación.
+
+    El `asyncio.CancelledError` que llega aquí SIEMPRE viene de nuestro
+    propio `task.cancel()` de la línea anterior -- `task` (el poll de
+    `_poll_progress`) no se expone a nadie más, así que nunca puede haber
+    una cancelación externa mezclada con esta. Por eso absorberlo aquí es
+    correcto y no una excepción "tragada" a ciegas: re-lanzarlo
+    propagaría hacia `check_username_across_sites` una cancelación que
+    esa misma función inició para limpiar, no una cancelación real de
+    quien la llamó a ella."""
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
         pass
+
+
+def _raw_results_to_site_results(raw_results: dict) -> list[UsernameSiteResult]:
+    """Convierte el dict que devuelve `maigret.checking.maigret()` a
+    `UsernameSiteResult`, extraído de `check_username_across_sites` por el
+    mismo motivo que `_poll_progress` (complejidad cognitiva)."""
+    results: list[UsernameSiteResult] = []
+    for name, site_result in raw_results.items():
+        check_result = site_result.get("status")
+        status = check_result.status if check_result is not None else None
+        if status not in _STATUS_TO_EXISTS:
+            continue  # ILLEGAL (username no aplica a este sitio) o sin resultado -- se omite
+        results.append(
+            UsernameSiteResult(
+                site=name,
+                url=site_result.get("url_user") or site_result.get("url_main") or "",
+                exists=_STATUS_TO_EXISTS[status],
+            )
+        )
+    return results
 
 
 async def check_username_across_sites(
@@ -211,24 +270,10 @@ async def check_username_across_sites(
     total_sites = len(site_dict)
 
     notifier = _CountingQueryNotify()
+    report_progress = progress_callback is not None and total_sites
     progress_task: asyncio.Task | None = None
-
-    async def _poll_progress() -> None:
-        last_reported = -1
-        while True:
-            await asyncio.sleep(PROGRESS_POLL_INTERVAL_SECONDS)
-            if notifier.checked != last_reported:
-                last_reported = notifier.checked
-                await emit_progress(
-                    progress_callback,
-                    "Comprobando cuentas relacionadas...",
-                    accounts_checked=notifier.checked,
-                    total_accounts=total_sites,
-                    track="correlacion_cuentas",
-                )
-
-    if progress_callback is not None and total_sites:
-        progress_task = asyncio.create_task(_poll_progress())
+    if report_progress:
+        progress_task = asyncio.create_task(_poll_progress(notifier, total_sites, progress_callback))
 
     try:
         raw_results = await _maigret_check(
@@ -244,13 +289,9 @@ async def check_username_across_sites(
         )
     finally:
         if progress_task is not None:
-            progress_task.cancel()
-            try:
-                await progress_task
-            except asyncio.CancelledError:
-                pass
+            await _cancel_and_await(progress_task)
 
-    if progress_callback is not None and total_sites:
+    if report_progress:
         # Evento final con el total exacto -- por si el ultimo tramo de
         # comprobaciones termino entre dos sondeos y se quedo sin
         # reportar (el poll de arriba solo corre CADA
@@ -264,18 +305,5 @@ async def check_username_across_sites(
             track="correlacion_cuentas",
         )
 
-    results: list[UsernameSiteResult] = []
-    for name, site_result in raw_results.items():
-        check_result = site_result.get("status")
-        status = check_result.status if check_result is not None else None
-        if status not in _STATUS_TO_EXISTS:
-            continue  # ILLEGAL (username no aplica a este sitio) o sin resultado -- se omite
-        results.append(
-            UsernameSiteResult(
-                site=name,
-                url=site_result.get("url_user") or site_result.get("url_main") or "",
-                exists=_STATUS_TO_EXISTS[status],
-            )
-        )
-    return results
+    return _raw_results_to_site_results(raw_results)
 

@@ -120,6 +120,15 @@ _igpu_worker_failed = False
 # las siguientes son mucho más rápidas.
 _IGPU_WORKER_TIMEOUT = httpx.Timeout(5.0, read=30.0)
 
+# Mensajes de progreso de las dos pistas paralelas (DINOv2/geolocalización
+# y Moondream2/análisis de escena, ver `track` en las llamadas a
+# `emit_progress` más abajo) -- cada uno se emite desde tres puntos
+# distintos de `_process_one_photo` (foto sin descargar, collage
+# descartado, análisis real terminado), de ahí la constante en vez de
+# repetir el literal en los tres.
+_PROGRESS_MESSAGE_GEOLOCATING = "Geolocalizando fotos..."
+_PROGRESS_MESSAGE_ANALYZING = "Analizando fotos..."
+
 
 @dataclass
 class ImageLocationEstimate:
@@ -801,14 +810,14 @@ async def _process_photo(
         progress_state["scene"] += 1
         await emit_progress(
             progress_callback,
-            "Geolocalizando fotos...",
+            _PROGRESS_MESSAGE_GEOLOCATING,
             photos_analyzed=progress_state["dinov2"],
             total_photos=total,
             track="geolocalizacion",
         )
         await emit_progress(
             progress_callback,
-            "Analizando fotos...",
+            _PROGRESS_MESSAGE_ANALYZING,
             photos_analyzed=progress_state["scene"],
             total_photos=total,
             track="fotos",
@@ -832,14 +841,14 @@ async def _process_photo(
         progress_state["scene"] += 1
         await emit_progress(
             progress_callback,
-            "Geolocalizando fotos...",
+            _PROGRESS_MESSAGE_GEOLOCATING,
             photos_analyzed=progress_state["dinov2"],
             total_photos=total,
             track="geolocalizacion",
         )
         await emit_progress(
             progress_callback,
-            "Analizando fotos...",
+            _PROGRESS_MESSAGE_ANALYZING,
             photos_analyzed=progress_state["scene"],
             total_photos=total,
             track="fotos",
@@ -861,7 +870,7 @@ async def _process_photo(
         progress_state["dinov2"] += 1
         await emit_progress(
             progress_callback,
-            "Geolocalizando fotos...",
+            _PROGRESS_MESSAGE_GEOLOCATING,
             photos_analyzed=progress_state["dinov2"],
             total_photos=total,
             track="geolocalizacion",
@@ -876,7 +885,7 @@ async def _process_photo(
         progress_state["scene"] += 1
         await emit_progress(
             progress_callback,
-            "Analizando fotos...",
+            _PROGRESS_MESSAGE_ANALYZING,
             photos_analyzed=progress_state["scene"],
             total_photos=total,
             # Desde que este análisis corre en PARALELO con el resto del
