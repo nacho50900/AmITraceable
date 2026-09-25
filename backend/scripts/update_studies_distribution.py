@@ -117,9 +117,10 @@ _URLS_SIN_AÑO: dict[str, str] = {
 # (".../EEU_2024/Serie/TotalSUE/..."), porque el Ministerio publica una
 # carpeta nueva cada curso bajo ese patrón -- confirmado con la hermana
 # de matriculados de este mismo fichero (HIS_Mat_TotalSUE_Rama_Univ.xlsx,
-# bajo EEU_2024). Aquí SÍ tiene sentido ir probando de más reciente a más
-# antiguo, para que este script siga funcionando en cursos futuros sin
-# tener que tocar el código -- ver `_descargar_con_fallback_de_año`.
+# bajo EEU_2024). Aquí SÍ tiene sentido ir probando año a año, para que
+# este script siga funcionando en cursos futuros sin tener que tocar el
+# código -- ver `_descargar_con_fallback_de_año` (búsqueda hacia
+# ADELANTE desde el último año confirmado, no hacia atrás desde hoy).
 #
 # CONFIRMADO CONTRA LA RED REAL (Nacho, sesión posterior a cuando se
 # escribió el bucle de plantillas múltiples): de las 4 combinaciones que
@@ -142,21 +143,69 @@ _URLS_SIN_AÑO: dict[str, str] = {
 _PLANTILLAS_URL_CON_AÑO: dict[str, list[str]] = {
     "egresados_historico_rama": [
         "https://estadisticas.ciencia.gob.es/jaxiPx/files/_px/es/xlsx/Universitaria/Alumnado/EEU_{año}/Serie/TotalSUE/l0/HIS_Egr_TotalSUE_Rama_Univ.xlsx",
-        # Descartadas por no funcionar en la prueba real (ver comentario de arriba) -- se dejan aquí, comentadas, como referencia:
+        # CONFIRMADO funcionando en la ejecución real de Vicen (con
+        # --insecure, que reveló el 404 real en vez del SSL enmascarándolo):
+        # curso 2025 encontrado, parseado por `procesar_historico_rama` con
+        # la comprobación interna cuadrando exacto (8.622.396 = 8.622.396) --
+        # esta es la única plantilla activa que hace falta.
+        #
+        # Descartadas por no funcionar en la prueba real -- se dejan aquí, comentadas, como referencia:
         # "https://estadisticas.universidades.gob.es/jaxiPx/files/_px/es/xlsx/Universitaria/Alumnado/EEU_{año}/Serie/TotalSUE/l0/HIS_Egr_TotalSUE_Rama_Univ.xlsx",
         # "https://estadisticas.universidades.gob.es/jaxiPx/files/_px/es/csv/Universitaria/Alumnado/EEU_{año}/Serie/TotalSUE/l0/HIS_Egr_TotalSUE_Rama_Univ.px",
         # "https://estadisticas.ciencia.gob.es/jaxiPx/files/_px/es/csv/Universitaria/Alumnado/EEU_{año}/Serie/TotalSUE/l0/HIS_Egr_TotalSUE_Rama_Univ.px",
+        # "https://estadisticas.ciencia.gob.es/jaxiPx/files/_px/es/csv_c/Universitaria/Alumnado/EEU_{año}/Serie/TotalSUE/l0/HIS_Egr_TotalSUE_Rama_Univ.csv_c",
+        # "https://estadisticas.ciencia.gob.es/jaxiPx/files/_px/es/csv_c/Universitaria/Alumnado/EEU_{año}/Serie/TotalSUE/l0/HIS_Egr_TotalSUE_Rama_Univ.px",
+        # -- estas dos últimas (csv_c) se probaron a petición de Nacho tras
+        # encontrar una página indexada real con contenido CSV auténtico en
+        # ese mismo dominio y segmento de ruta para OTRA tabla del sistema
+        # (PAU0106.csv_c) -- pero para ESTE fichero concreto (HIS_Egr_
+        # TotalSUE_Rama_Univ) dieron 404 limpio y confirmado (no un SSL
+        # enmascarándolo, ya con --insecure): esa variante de exportación
+        # simplemente no existe para esta tabla, aunque exista para otras
+        # del mismo sistema jaxiPx.
     ],
 }
-_PRIMER_AÑO_CONOCIDO = 2023  # el más antiguo que se ha visto funcionar de verdad -- tope inferior del bucle, no bajar de aquí sin motivo
-# El Ministerio publica los datos del curso que ACABA de terminar, no por
-# adelantado -- así que no hay motivo para mirar muy por delante del año
-# actual. El margen de 1 (no 0) es solo por una ambigüedad real que sí se
-# ha visto en los ejemplos encontrados: no está confirmado si la carpeta
-# se nombra por el año de INICIO o de FIN del curso (p. ej. si "curso
-# 2025-2026" cae bajo "EEU_2025" o "EEU_2026") -- con margen 1 se cubren
-# las dos convenciones sin tener que decidir cuál es la correcta.
-_MARGEN_AÑOS_FUTUROS = 1
+
+
+# --- Búsqueda ADAPTATIVA hacia adelante (rediseño pedido por Nacho en
+# esta sesión, sustituye al enfoque anterior de "buscar hacia atrás
+# desde hoy hasta un suelo fijo") ---
+#
+# EL PROBLEMA DEL ENFOQUE ANTERIOR: buscaba desde `hoy + margen` hacia
+# atrás hasta un suelo fijo (2023). Como "hoy" avanza cada año pero el
+# suelo se queda fijo, el rango a probar CRECE sin límite con el tiempo
+# -- en 2030, sin tocar el código, ya serían 8 intentos (2031..2023) en
+# vez de los 2 de hoy, la mayoría con la certeza de fallar (años ya
+# probados y fallidos en ejecuciones anteriores).
+#
+# ENFOQUE NUEVO: en vez de partir de "hoy" (que crece solo), se parte
+# del ÚLTIMO año que se ha CONFIRMADO de verdad que funciona
+# (`_ULTIMO_AÑO_CONFIRMADO`) y se prueba HACIA ADELANTE (año+1, año+2,
+# ...) hasta un margen (`_MARGEN_AÑOS_ADELANTE`) que es, a propósito, un
+# número PEQUEÑO y AUTOAJUSTABLE a mano en vez de un suelo fijo que
+# nunca se toca:
+#
+#   - `_MARGEN_AÑOS_ADELANTE` empieza en el mínimo teórico (5): el
+#     Ministerio publica un curso nuevo cada año, así que en condiciones
+#     normales el siguiente dato real debería estar a 1-2 años vista,
+#     nunca a más de 5 salvo una interrupción real de la publicación.
+#   - Si una ejecución real encuentra el dato a `hueco` años del último
+#     confirmado (p. ej. hueco=3 dentro de un margen de 5), la función
+#     imprime cuál sería el margen recomendado para la PRÓXIMA vez:
+#     `max(5, hueco * 2)` -- el doble del hueco real observado, nunca
+#     por debajo del mínimo teórico de 5 (fórmula acordada explícitamente
+#     con Nacho, no una elección arbitraria de Claude). Es un margen de
+#     seguridad proporcional al hueco que de verdad ha pasado, no un
+#     número fijo que haya que adivinar de antemano.
+#   - Actualizar `_ULTIMO_AÑO_CONFIRMADO` (al año recién encontrado) y
+#     `_MARGEN_AÑOS_ADELANTE` (según la fórmula de arriba) tras cada
+#     ejecución real que encuentre un año nuevo es un paso MANUAL --
+#     mismo patrón que el resto de constantes hand-tuned de este fichero
+#     (`_PLANTILLAS_URL_CON_AÑO`, las URLs de `_URLS_SIN_AÑO`...): este
+#     script no se ejecuta solo ni con memoria entre ejecuciones, así
+#     que no hay dónde persistir el ajuste salvo en el propio código.
+_ULTIMO_AÑO_CONFIRMADO = 2025  # actualizado tras la ejecución real (Vicen, con --insecure): encontrado en 2025 (hueco de 2 años desde el 2023 anterior) -- margen recomendado = max(5, 2*2) = 5, sin cambios
+_MARGEN_AÑOS_ADELANTE = 5  # ventana de búsqueda hacia adelante desde _ULTIMO_AÑO_CONFIRMADO -- mínimo teórico, autoajustable a mano (ver bloque de comentario de arriba)
 _PAUSA_ENTRE_INTENTOS_SEG = 1.5  # entre cada intento del bucle de año x plantilla -- por si el corte de conexión visto era anti-bot por peticiones demasiado seguidas
 
 # Instrucciones de navegación manual, para cuando la descarga automática
@@ -276,12 +325,23 @@ def _descargar(clave: str, destino: Path, *, insecure: bool = False) -> Path | N
 
 def _descargar_con_fallback_de_año(clave: str, destino: Path, *, insecure: bool = False) -> Path | None:
     """Para los ficheros CON año en la URL (`_PLANTILLAS_URL_CON_AÑO`) --
-    para cada año (de `hoy + _MARGEN_AÑOS_FUTUROS` hacia atrás hasta
-    `_PRIMER_AÑO_CONOCIDO`), prueba TODAS las plantillas de esa clave en
-    orden, y se queda con la PRIMERA combinación año+plantilla que
-    responda -- así el script sigue funcionando en cursos futuros sin
-    tocar código, y también se adapta solo si cambia el dominio/formato
-    que funciona (ver comentario de `_PLANTILLAS_URL_CON_AÑO`).
+    para cada año HACIA ADELANTE desde `_ULTIMO_AÑO_CONFIRMADO` (probando
+    `_ULTIMO_AÑO_CONFIRMADO + 1`, `+ 2`, ... hasta `_MARGEN_AÑOS_ADELANTE`
+    años por delante), prueba TODAS las plantillas de esa clave en orden,
+    y se queda con la PRIMERA combinación año+plantilla que responda --
+    así el script sigue funcionando en cursos futuros sin tocar código
+    mientras el hueco real no supere el margen configurado (ver el
+    bloque de comentario junto a `_ULTIMO_AÑO_CONFIRMADO`/
+    `_MARGEN_AÑOS_ADELANTE` para el motivo de este diseño y cómo
+    reajustar el margen a mano tras cada ejecución real).
+
+    Recorrer HACIA ADELANTE desde un año conocido, con una ventana
+    pequeña y autoajustable, resuelve de paso la ambigüedad real que
+    había con el enfoque anterior (¿se nombra la carpeta por el año de
+    inicio o de fin del curso, p. ej. "EEU_2025" vs "EEU_2026" para el
+    curso 2025-2026?): como se prueban TODOS los años consecutivos de la
+    ventana, cualquiera de las dos convenciones cae dentro sin necesidad
+    de decidir cuál es la correcta de antemano.
 
     Pequeña pausa entre intentos (`_PAUSA_ENTRE_INTENTOS_SEG`) por si el
     'Server disconnected without sending a response' visto en la primera
@@ -293,14 +353,17 @@ def _descargar_con_fallback_de_año(clave: str, destino: Path, *, insecure: bool
     solo sabe leer .xlsx por ahora -- pásamelo y le añado el parseo de
     CSV con el formato real delante, en vez de adivinarlo sin verlo."""
     import time
-    from datetime import date as _date
 
     plantillas = _PLANTILLAS_URL_CON_AÑO[clave]
-    año_mas_reciente_a_probar = _date.today().year + _MARGEN_AÑOS_FUTUROS
-    print(f"Buscando '{clave}' probando años {año_mas_reciente_a_probar} -> {_PRIMER_AÑO_CONOCIDO}, {len(plantillas)} plantilla(s) por año:")
+    año_mas_reciente_a_probar = _ULTIMO_AÑO_CONFIRMADO + _MARGEN_AÑOS_ADELANTE
+    print(
+        f"Buscando '{clave}' probando años {_ULTIMO_AÑO_CONFIRMADO + 1} -> "
+        f"{año_mas_reciente_a_probar} (adelante desde el último confirmado, "
+        f"{_ULTIMO_AÑO_CONFIRMADO}), {len(plantillas)} plantilla(s) por año:"
+    )
 
     primer_intento = True
-    for año in range(año_mas_reciente_a_probar, _PRIMER_AÑO_CONOCIDO - 1, -1):
+    for año in range(_ULTIMO_AÑO_CONFIRMADO + 1, año_mas_reciente_a_probar + 1):
         for plantilla in plantillas:
             if not primer_intento:
                 time.sleep(_PAUSA_ENTRE_INTENTOS_SEG)
@@ -312,11 +375,22 @@ def _descargar_con_fallback_de_año(clave: str, destino: Path, *, insecure: bool
             if contenido is None:
                 continue
 
+            hueco = año - _ULTIMO_AÑO_CONFIRMADO
+            margen_recomendado = max(_MARGEN_AÑOS_ADELANTE, hueco * 2)
+            print(f"  OK -- encontrado curso {año} (hueco de {hueco} año(s) desde el último confirmado)")
+            if margen_recomendado != _MARGEN_AÑOS_ADELANTE:
+                print(
+                    f"  RECOMENDACIÓN: actualiza a mano en este fichero "
+                    f"_ULTIMO_AÑO_CONFIRMADO = {año} y "
+                    f"_MARGEN_AÑOS_ADELANTE = {margen_recomendado} "
+                    f"(doble del hueco encontrado, {hueco} x 2) para la próxima ejecución."
+                )
+
             extension_real = ".xlsx" if url.endswith(".xlsx") else ".csv"
             destino_real = destino.with_suffix(extension_real)
             destino_real.parent.mkdir(parents=True, exist_ok=True)
             destino_real.write_bytes(contenido)
-            print(f"  OK -- encontrado curso {año}, {len(contenido):,} bytes guardados en {destino_real}")
+            print(f"  {len(contenido):,} bytes guardados en {destino_real}")
             if extension_real == ".csv":
                 print(
                     "  AVISO: esto es un .px/CSV, no un .xlsx -- "
@@ -329,7 +403,12 @@ def _descargar_con_fallback_de_año(clave: str, destino: Path, *, insecure: bool
                 return None
             return destino_real
 
-    print(f"\n  Ninguna combinación de año+plantilla entre {_PRIMER_AÑO_CONOCIDO} y {año_mas_reciente_a_probar} funcionó.")
+    print(f"\n  Ninguna combinación de año+plantilla entre {_ULTIMO_AÑO_CONFIRMADO + 1} y {año_mas_reciente_a_probar} funcionó.")
+    print(
+        f"  Si sabes que ya hay una edición más reciente publicada, sube "
+        f"_MARGEN_AÑOS_ADELANTE (ahora mismo {_MARGEN_AÑOS_ADELANTE}) a mano y repite -- "
+        f"si no, puede que el Ministerio aún no haya publicado el curso siguiente."
+    )
     print(f"  Descarga manual para '{clave}':\n  {_INSTRUCCIONES_MANUALES[clave]}\n")
     return None
 

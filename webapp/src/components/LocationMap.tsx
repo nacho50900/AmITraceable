@@ -5,13 +5,13 @@ import { useTranslation } from 'react-i18next';
 import type { ImageLocationPoint, Platform } from '../types';
 
 interface LocationMapProps {
-  points: ImageLocationPoint[];
-  platform: Platform;
+  readonly points: ImageLocationPoint[];
+  readonly platform: Platform;
   /** report.geolocation_available -- false si el índice FAISS no está
    * construido en este servidor (o faltan sus dependencias opcionales).
    * Distinto de "se analizaron fotos pero ninguna dio resultado fiable":
    * nunca se muestran ambos mensajes a la vez. */
-  available: boolean;
+  readonly available: boolean;
 }
 
 // Centro aproximado de España peninsular, usado como fallback si no hay

@@ -53,7 +53,7 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
 
       {status === 'success' && (
         <>
-          {/* verdict y conclusions vienen del backend (Mistral) ya
+          {/* verdict y conclusions vienen del backend (modelo de IA local) ya
               generados en un idioma fijo -- traducir contenido generado
               por IA queda fuera del alcance de esta primera fase de i18n
               (solo UI estática). */}

@@ -52,37 +52,64 @@ torch>=2.2,<3.0
 # fichero interno de integración con HuggingFace (`hf_moondream.py`, no
 # versionado por separado, va empaquetado con cada revisión) puede no
 # tener el mismo problema.
+# OJO: la justificación original de este rango (compatibilidad con el
+# `from_pretrained(device_map=...)` de Moondream2 vía `trust_remote_code`,
+# ver el bloque de comentarios de abajo) ya NO aplica -- Moondream2 se
+# carga ahora vía `llama-cpp-python`, no `transformers` (ver más abajo).
+# Este pin queda solo por y para DINOv2 (geolocation.py), que no usa
+# `device_map` en ningún sitio y probablemente toleraría un rango bastante
+# más amplio -- no se ha tocado por no introducir un cambio sin verificar
+# más en la misma sesión que ya tiene varios sin confirmar (ver
+# scene_analysis.py). Revisar si algún día da problemas de compatibilidad
+# con una versión más reciente que DINOv2 sí necesite.
 transformers>=4.48,<4.54
 faiss-cpu>=1.8,<2.0
 
-# accelerate: mismo razonamiento que transformers arriba -- es la propia
-# librería que implementa la inicialización en "meta device" que ha dado
-# todos los problemas (ver historial en scene_analysis.py), así que su
-# versión importa tanto como la de transformers. Ventana aproximada para
-# mediados de 2025 -- accelerate llegó a la versión 1.0 en septiembre de
-# 2024, así que hacia junio de 2025 estaría en algún punto de la serie
-# 1.x. Aproximación de mejor esfuerzo, igual que arriba.
-accelerate>=1.0,<1.8
+# accelerate: ELIMINADO de aquí (estaba fijado por el mismo motivo que
+# `transformers` arriba -- la inicialización en "meta device" de
+# `from_pretrained(device_map=...)` de Moondream2, que ya no se usa).
+# DINOv2 (geolocation.py) no llama a `from_pretrained` con `device_map`
+# en ningún sitio, así que no debería necesitarlo -- si al quitarlo
+# aparece un `ImportError` pidiendo `accelerate` en la carga de DINOv2,
+# es la señal de que sí hacía falta por algún otro motivo no documentado
+# aquí; basta con volver a añadirlo.
 
-# Dependencias específicas de Moondream2 (app/vision/scene_analysis.py,
-# análisis de CONTENIDO visual -- aficiones/actividades/señales de pareja
-# en cada foto, distinto del embedding de similitud de arriba). `timm` y
-# `einops` los pide directamente el código del propio modelo
-# (trust_remote_code=True). `pyvips` es el binding Python que importa el
-# propio modelo; por sí solo requeriría tener libvips instalado a nivel de
-# sistema operativo, así que se instala junto a `pyvips-binary` (versión
-# estática, precompilada) para evitar esa dependencia del SO -- deben
-# declararse los DOS paquetes, uno no sustituye al otro. (`accelerate` ya
-# está fijado más arriba, junto a `transformers` -- misma razón: su
-# versión importa tanto como la de transformers para este modelo en
-# concreto, ver el comentario de ahí arriba.) Estas dependencias las exige
-# la revisión reciente del modelo fijada en `_MODEL_REVISION` -- si se
-# cambia a una revisión más antigua, puede que alguna ya no haga falta;
-# verificar el error exacto de carga si cambia.
-timm>=1.0,<2.0
-einops>=0.7,<1.0
-pyvips-binary>=8.14
-pyvips>=2.2,<3.0
+# timm/einops/pyvips/pyvips-binary YA NO SE INSTALAN AQUÍ (hasta hace
+# poco, dependencias de Moondream2 vía `transformers`/`trust_remote_code`)
+# -- ese backend se abandonó por completo a favor de `llama-cpp-python`
+# (ver el bloque más abajo, y el historial completo junto a
+# `_GGUF_REPO_ID` en scene_analysis.py sobre TODO lo que se probó antes de
+# llegar aquí: torchao 4-bit, el runtime "Photon" de Moondream, un export
+# ONNX comunitario -- los tres bloqueados por motivos distintos, ninguno
+# arreglable con solo cambiar una versión de paquete).
+
+# llama-cpp-python: backend actual de Moondream2 (GGUF, ver _GGUF_REPO_ID
+# en scene_analysis.py) Y, desde el cambio a Qwen3.5-4B local, TAMBIEN de
+# app/nlp/ai_client.py (extraccion de atributos, veredicto final,
+# resolucion de nombres de monumento -- antes HTTP a Mistral/Gemini, sin
+# ninguna dependencia pesada; ver ADR-49). CAMBIO DE COMPORTAMIENTO
+# IMPORTANTE: un despliegue "solo Reddit" o "Instagram sin
+# geolocalizacion" (WITH_GEOLOCATION sin activar, ver Dockerfile) que
+# antes SI tenia analisis con IA (con solo una API key de Mistral/Gemini,
+# sin instalar nada pesado) ahora tambien pierde esa funcionalidad si no
+# instala este fichero -- degrada con gracia igual que el resto
+# (settings.ai_key_configured/_qwen_available() devuelven False, "no
+# disponible", nunca una excepcion que rompa el resto del pipeline), pero
+# es una perdida de funcionalidad real en ese perfil de despliegue que
+# antes no existia, a cambio de las ventajas de privacidad/coste de un
+# modelo local (ver docstring de ai_client.py).
+# YA NO se instala desde aquí un wheel
+# PRECOMPILADO con CUDA (el índice cu130 de `abetlen/llama-cpp-python`
+# cargaba el modelo pero moría con SIGILL, exit 132, en cuanto tocaba GPU
+# en la GTX 1650 real -- confirmado en producción, 12/9: en CPU pura SÍ
+# cargaba bien, así que era específico de ese wheel con CUDA, no de la
+# CPU) -- probablemente el wheel no trae código compilado para compute
+# capability 7.5 (Turing) entre sus arquitecturas. Se compila ahora desde
+# código fuente en el `Dockerfile`
+# (`CMAKE_ARGS="-DGGML_CUDA=on" -DCMAKE_CUDA_ARCHITECTURES=75`,
+# explícitamente para esta GPU), en una etapa aparte con el toolkit
+# completo de CUDA -- ver ese fichero. El wheel resultante se instala ahí,
+# no desde este fichero.
 
 # Traducción LOCAL de descripciones de fotos al idioma de la UI (ver
 # app/nlp/translation.py, ADR-31) -- MarianMT (Helsinki-NLP/opus-mt-*)
@@ -109,3 +136,27 @@ pyvips>=2.2,<3.0
 #                                 # transitiva de transformers, arriba
 ctranslate2>=4.0,<5.0
 sentencepiece>=0.2,<1.0
+
+# Dependencias EXCLUSIVAS de scripts/geolocalization/build_flickr_index.py
+# y build_commons_index.py (ingestión de fuentes externas para ampliar el
+# índice FAISS) -- no las usa el backend en producción, solo estos scripts
+# offline. Se dejan aquí y no en requirements.txt por el mismo motivo que
+# el resto de este fichero: son específicas del flujo de construcción del
+# índice, no del servicio desplegado.
+#
+# opencv-python-headless (no opencv-python a secas): estos scripts corren
+# en servidores/CI sin entorno gráfico -- la variante "headless" evita
+# arrastrar dependencias de sistema de GUI (libGL, etc.) que no hacen
+# falta para FaceDetectorYN ni para las operaciones de resize/color usadas
+# aquí.
+opencv-python-headless>=4.8,<5.0
+# imagehash: perceptual hashing (phash) para descartar fotos casi
+# duplicadas dentro de una misma celda del grid antes de aceptarlas en el
+# índice -- ver _is_near_duplicate en image_ingest_common.py.
+imagehash>=4.3,<5.0
+# python-dotenv: build_mapillary_index.py y build_flickr_index.py cargan
+# backend/.env automáticamente (MAPILLARY_API_KEY/FLICKR_API_KEY) -- ya es
+# dependencia de requirements.txt (la usa el backend en producción), se
+# lista aquí también porque estos scripts se ejecutan sueltos y podrían
+# instalarse solo desde este fichero.
+python-dotenv>=1.0,<2.0

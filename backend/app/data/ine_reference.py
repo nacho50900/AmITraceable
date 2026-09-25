@@ -42,11 +42,29 @@ from datetime import date, timedelta
 # abajo para el porqué en cada caso -- esas no se comprueban.
 _LAST_VERIFIED: dict[str, date | None] = {
     "TOTAL_POPULATION_ES": date(2025, 1, 1),
-    "SEX_DISTRIBUTION": date(2025, 1, 1),
+    "SEX_DISTRIBUTION": date(2026, 9, 11),
     "MARITAL_STATUS_DISTRIBUTION": date(2026, 8, 11),
     "MARITAL_STATUS_BY_SEX": date(2026, 8, 11),
-    "AGE_DISTRIBUTION_5Y": date(2025, 1, 1),
+    # Tabla 01003 del INE (Padrón continuo, población año a año), año
+    # 2022 -- ver comentario junto a AGE_DISTRIBUTION_1Y para el porqué
+    # del desfase con TOTAL_POPULATION_ES (2025). AGE_DISTRIBUTION_5Y se
+    # deriva de esta misma tabla (ver _build_age_distribution_5y_from_1y),
+    # así que comparten fecha de verificación.
+    "AGE_DISTRIBUTION_1Y": date(2022, 1, 1),
+    "AGE_DISTRIBUTION_5Y": date(2022, 1, 1),
     "PROVINCE_POPULATION": date(2026, 8, 11),
+    # Mismo Padrón que TOTAL_POPULATION_ES/SEX_DISTRIBUTION (2025) --
+    # ejemplo de ciudades grandes, no la tabla completa de ~8.000
+    # municipios (ver comentario junto a MUNICIPALITY_POPULATION: "amplía
+    # según necesites"). Añadida en esta sesión junto con el candidato de
+    # automatización en update_ine_reference.py (fetch_municipality_population,
+    # tabla 29005) -- antes no tenía entrada aquí, así que stale_tables()
+    # nunca la comprobaba.
+    "MUNICIPALITY_POPULATION": date(2026, 9, 11),
+    # Sistema de matriculación provincial: histórico, cerrado desde el 18
+    # de septiembre de 2000 -- no hay "fecha de verificación" que pueda
+    # caducar, los códigos no van a cambiar retroactivamente.
+    "PLATE_PROVINCE_CODE_TO_PROVINCE": None,
     # Sin tabla INE concreta citada al construir esta -- es un orden de
     # magnitud estimado a mano, no una cifra derivada de una fuente con
     # fecha de publicación. No tiene sentido marcarla "caducada" frente a
@@ -59,26 +77,36 @@ _LAST_VERIFIED: dict[str, date | None] = {
     # `scripts/update_studies_distribution.py` (intenta descargar solo,
     # cae a instrucciones manuales si falla) cuando el Ministerio
     # publique una edición más reciente de cualquiera de los ficheros.
-    "STUDIES_DISTRIBUTION": date(2026, 8, 11),  # fecha de esta ejecución -- el histórico llega hasta el curso 2023-2024, el detalle por titulación hasta 2023 (egresados) / 2024 (matriculados)
+    "STUDIES_DISTRIBUTION": date(2026, 9, 11),  # fecha de esta ejecución -- el histórico llega hasta el curso 2023-2024, el detalle por titulación hasta 2023 (egresados) / 2024 (matriculados)
     "NATIONALITY_DISTRIBUTION": date(2026, 8, 11),
-    "SITUACION_LABORAL_DISTRIBUTION": date(2025, 10, 1),  # EPA T4 2025
-    "HOUSEHOLD_TYPE_DISTRIBUTION": date(2024, 1, 1),
+    "SITUACION_LABORAL_DISTRIBUTION": date(2026, 9, 11),  # EPA T4 2025
+    "HOUSEHOLD_TYPE_DISTRIBUTION": date(2026, 9, 11),
     # ECEPOV es una encuesta puntual del INE, sin periodicidad anual fija
     # (la última es de 2021, la anterior de 2018) -- un umbral de "1 año"
     # saltaría permanentemente sin que haya nada nuevo que revisar. Se
     # comprueba con un umbral mucho más largo (ver STALE_THRESHOLDS).
     "LANGUAGE_BY_CCAA": date(2021, 1, 1),
-    # Encuesta de Hábitos Deportivos en España (Ministerio de Cultura y
-    # Deporte + Consejo Superior de Deportes, con colaboración del INE en
-    # el diseño muestral) -- periodicidad quinquenal. Edición usada: 2022
-    # (trabajo de campo may.-sep.2022, publicada dic.2022), la más
-    # reciente con desglose completo verificado por modalidad (incluye
-    # ciclismo/pádel/tenis/baloncesto, que la edición 2020 no traía en
-    # las fuentes consultadas). Hay indicios de una edición 2024/25 ya
-    # publicada (csd.gob.es la menciona actualizada a enero de 2026), pero
-    # no se ha verificado su desglose por modalidad al escribir esto --
-    # revisar csd.gob.es/es/estadisticas-deportivas al actualizar.
-    "SPORT_PRACTICE_DISTRIBUTION": date(2022, 5, 1),
+    # Encuesta de Hábitos Deportivos en España (Ministerio de Educación,
+    # FP y Deportes + CSD + INE), tabla 1.21. Edición usada: 2024/25
+    # (fichero oficial descargado del portal de estadísticas del
+    # Ministerio en esta sesión, con el desglose completo de las 41
+    # modalidades que trae esa tabla -- reemplaza un primer borrador
+    # basado en cifras sueltas de prensa sobre la edición 2022, que solo
+    # cubría 9 modalidades). Periodicidad quinquenal: no se espera una
+    # edición más reciente hasta dentro de varios años.
+    "SPORT_PRACTICE_DISTRIBUTION": date(2025, 1, 1),
+    # Tabla 1.22 de la misma encuesta y edición (2024/25) -- mismo
+    # fichero, mismo día de descarga.
+    "SPORT_PRACTICE_BY_SEX": date(2025, 1, 1),
+    "SPORT_PRACTICE_BY_AGE_BAND": date(2025, 1, 1),
+    # INE/EPA, indicador "Nivel de formación de la población adulta", año 2024.
+    "EDUCATION_LEVEL_DISTRIBUTION": date(2026, 9, 11),
+    # Ver comentario junto a RAMA_ESTUDIOS_DISTRIBUTION: mezcla 2015/16
+    # (público) + 2019/20 (privado) -- se usa la fecha más antigua de las
+    # dos como fecha de verificación, no la más reciente, para no
+    # aparentar más actualidad de la que realmente tiene el dato.
+    "RAMA_ESTUDIOS_DISTRIBUTION": date(2015, 9, 1),
+    "SPORT_PRACTICE_BY_EDUCATION_LEVEL": date(2025, 1, 1),
 }
 
 # Umbral de antigüedad (días) a partir del cual `stale_tables()` avisa,
@@ -92,8 +120,10 @@ _STALE_THRESHOLD_MULTIYEAR = timedelta(days=6 * 365)  # Censo (~cada 10 años, p
 _STALE_THRESHOLDS: dict[str, timedelta] = {
     "TOTAL_POPULATION_ES": _STALE_THRESHOLD_ANNUAL,
     "SEX_DISTRIBUTION": _STALE_THRESHOLD_ANNUAL,
+    "AGE_DISTRIBUTION_1Y": _STALE_THRESHOLD_ANNUAL,
     "AGE_DISTRIBUTION_5Y": _STALE_THRESHOLD_ANNUAL,
     "PROVINCE_POPULATION": _STALE_THRESHOLD_ANNUAL,
+    "MUNICIPALITY_POPULATION": _STALE_THRESHOLD_ANNUAL,
     "NATIONALITY_DISTRIBUTION": _STALE_THRESHOLD_ANNUAL,
     "SITUACION_LABORAL_DISTRIBUTION": _STALE_THRESHOLD_ANNUAL,
     # STUDIES_DISTRIBUTION: el Ministerio publica una edición nueva del
@@ -108,6 +138,11 @@ _STALE_THRESHOLDS: dict[str, timedelta] = {
     # umbral anual saltaría constantemente sin que haya nada nuevo que
     # revisar, igual que ECEPOV/Censo.
     "SPORT_PRACTICE_DISTRIBUTION": _STALE_THRESHOLD_MULTIYEAR,
+    "SPORT_PRACTICE_BY_SEX": _STALE_THRESHOLD_MULTIYEAR,
+    "SPORT_PRACTICE_BY_AGE_BAND": _STALE_THRESHOLD_MULTIYEAR,
+    "EDUCATION_LEVEL_DISTRIBUTION": _STALE_THRESHOLD_ANNUAL,
+    "RAMA_ESTUDIOS_DISTRIBUTION": _STALE_THRESHOLD_MULTIYEAR,
+    "SPORT_PRACTICE_BY_EDUCATION_LEVEL": _STALE_THRESHOLD_MULTIYEAR,
 }
 
 
@@ -229,8 +264,8 @@ SEXUAL_ORIENTATION_DISTRIBUTION = {
 # Reparto por sexo. Aproximado (España tiene ligera mayoría femenina por
 # esperanza de vida más alta en edades avanzadas).
 SEX_DISTRIBUTION = {
-    "hombre": 0.492,
-    "mujer": 0.508,
+    "hombre": 0.490,
+    "mujer": 0.510,
 }
 
 # Estado civil (simplificado a 5 categorías, ver DemographicFindings.estado_civil).
@@ -317,57 +352,85 @@ MARITAL_STATUS_BY_SEX = {
     },
 }
 
-# Distribución de edad en tramos de 5 años, proporción sobre el total.
-# Pirámide poblacional aproximada de España (envejecida, con menos peso en
-# tramos jóvenes). Suma ~1.0.
-AGE_DISTRIBUTION_5Y = {
-    "0-4": 0.038, "5-9": 0.042, "10-14": 0.046, "15-19": 0.045,
-    "20-24": 0.045, "25-29": 0.052, "30-34": 0.062, "35-39": 0.070,
-    "40-44": 0.081, "45-49": 0.084, "50-54": 0.078, "55-59": 0.072,
-    "60-64": 0.064, "65-69": 0.056, "70-74": 0.052, "75-79": 0.042,
-    "80-84": 0.030, "85+": 0.041,
+# Proporción de población por EDAD EXACTA (0-100), año a año.
+#
+# Fuente: INE, "Cifras de Población" / Padrón continuo, tabla 01003
+# ("Población por edad -año a año-, Españoles/Extranjeros, Sexo y Año",
+# https://www.ine.es/jaxi/Tabla.htm?path=/t20/e245/p08/l0/&file=01003.px),
+# columna "Ambos sexos", año 2022 (última con datos año-a-año descargados
+# en esta sesión -- el selector de esa tabla no es un CSV descargable
+# directamente por URL, hay que exportarlo a mano desde el navegador).
+# Reemplaza un primer borrador que DERIVABA esta distribución repartiendo
+# uniformemente AGE_DISTRIBUTION_5Y dentro de cada tramo quinquenal (ver
+# `_build_age_distribution_1y_approx`, más abajo, que se conserva solo
+# como referencia histórica de esa aproximación) -- esa aproximación
+# llegó a producir tasas de práctica deportiva por tramo de edad
+# superiores al 100% al cruzarla con la Encuesta de Hábitos Deportivos
+# 2024/25 (el tramo 15-24, el más pequeño y sensible a errores, es donde
+# más se notaba), señal de que el reparto uniforme dentro de cada tramo
+# de 5 años no se ajustaba lo bastante bien a la pirámide real en esa
+# franja concreta.
+#
+# Desfase de año: esta tabla es de 2022, TOTAL_POPULATION_ES es de 2025
+# (Censo a 1 de enero de 2025, ~1,65M más de población total, sobre todo
+# por migración neta). Se usa esta distribución como PROPORCIÓN (no como
+# cifra absoluta) aplicada sobre TOTAL_POPULATION_ES, asumiendo que la
+# FORMA de la pirámide de edad no cambia mucho en 2-3 años aunque el
+# total crezca -- la misma clase de aproximación que ya hacía la versión
+# anterior (uniforme dentro de tramo), pero based on datos reales de
+# población en vez de un reparto artificial, lo cual evita el problema
+# de tasas por encima del 100%.
+AGE_DISTRIBUTION_1Y = {
+    0: 0.006754, 1: 0.007176, 2: 0.007585, 3: 0.008025, 4: 0.00858,
+    5: 0.009041, 6: 0.009293, 7: 0.009466, 8: 0.00938, 9: 0.009937,
+    10: 0.010194, 11: 0.010428, 12: 0.01061, 13: 0.011093, 14: 0.010699,
+    15: 0.010668, 16: 0.010434, 17: 0.010417, 18: 0.010385, 19: 0.010158,
+    20: 0.010192, 21: 0.010332, 22: 0.010174, 23: 0.009977, 24: 0.010215,
+    25: 0.010194, 26: 0.010329, 27: 0.01053, 28: 0.010908, 29: 0.011237,
+    30: 0.011217, 31: 0.011394, 32: 0.011588, 33: 0.011808, 34: 0.011959,
+    35: 0.012257, 36: 0.012659, 37: 0.013144, 38: 0.013579, 39: 0.014339,
+    40: 0.01494, 41: 0.015655, 42: 0.016074, 43: 0.016757, 44: 0.01696,
+    45: 0.017238, 46: 0.01709, 47: 0.016952, 48: 0.016504, 49: 0.016411,
+    50: 0.016122, 51: 0.015884, 52: 0.015673, 53: 0.015516, 54: 0.015575,
+    55: 0.015163, 56: 0.015011, 57: 0.015167, 58: 0.014381, 59: 0.013854,
+    60: 0.01349, 61: 0.013479, 62: 0.013056, 63: 0.012697, 64: 0.012334,
+    65: 0.011445, 66: 0.011052, 67: 0.010477, 68: 0.010417, 69: 0.01028,
+    70: 0.009564, 71: 0.00923, 72: 0.009482, 73: 0.009783, 74: 0.00882,
+    75: 0.008304, 76: 0.008505, 77: 0.007927, 78: 0.007635, 79: 0.006405,
+    80: 0.005736, 81: 0.006785, 82: 0.004307, 83: 0.004672, 84: 0.004973,
+    85: 0.005099, 86: 0.004606, 87: 0.004193, 88: 0.00385, 89: 0.003411,
+    90: 0.002812, 91: 0.002406, 92: 0.001897, 93: 0.001531, 94: 0.001134,
+    95: 0.000877, 96: 0.000633, 97: 0.00046, 98: 0.000319, 99: 0.000221,
+    100: 0.000414,
 }
 
 
+def _build_age_distribution_5y_from_1y() -> dict[str, float]:
+    """Deriva AGE_DISTRIBUTION_5Y sumando AGE_DISTRIBUTION_1Y dentro de
+    cada tramo quinquenal -- garantiza que ambas tablas sean consistentes
+    entre sí por construcción (antes era al revés: 1Y se derivaba de 5Y
+    repartiendo uniformemente, ver comentario en AGE_DISTRIBUTION_1Y de
+    arriba sobre por qué se invirtió)."""
+    bands: dict[str, float] = {}
+    for age, proportion in AGE_DISTRIBUTION_1Y.items():
+        band = age_bin(age)
+        bands[band] = bands.get(band, 0.0) + proportion
+    return bands
+
+
 def age_bin(age: int) -> str:
-    """Convierte una edad concreta en su tramo quinquenal de AGE_DISTRIBUTION_5Y.
-    Se mantiene por si se necesita el agregado por tramo en algún otro sitio,
-    pero `AGE_DISTRIBUTION_1Y` (más abajo) es lo que usa k_anonymity.py."""
+    """Convierte una edad concreta en su tramo quinquenal de AGE_DISTRIBUTION_5Y."""
     if age >= 85:
         return "85+"
     lower = (age // 5) * 5
     return f"{lower}-{lower + 4}"
 
 
-def _build_age_distribution_1y() -> dict[int, float]:
-    """Deriva una proporción por EDAD EXACTA (año a año) a partir de
-    AGE_DISTRIBUTION_5Y, repartiendo uniformemente la proporción de cada
-    tramo quinquenal entre las edades que lo componen.
-
-    Nota de precisión: el INE sí publica población año a año (tabla
-    "Población por edad (año a año), Españoles/Extranjeros, Sexo y Año",
-    https://www.ine.es/jaxi/Tabla.htm?path=%2Ft20%2Fe245%2Fp08%2Fl0%2F&file=01003.px),
-    pero es un selector interactivo, no un CSV descargable directamente por
-    URL, así que aquí se DERIVA a partir de los tramos de 5 años en vez de
-    usar el dato exacto. El reparto uniforme dentro de cada tramo es una
-    aproximación razonable (la pirámide de población no varía mucho entre
-    edades consecutivas), pero si se quiere máxima precisión, sustituye
-    esta función por una carga directa de esa tabla del INE exportada a CSV.
-    """
-    distribution: dict[int, float] = {}
-    for band, proportion in AGE_DISTRIBUTION_5Y.items():
-        ages = range(85, 101) if band == "85+" else range(int(band.split("-")[0]), int(band.split("-")[0]) + 5)
-        ages = list(ages)
-        per_age = proportion / len(ages)
-        for age in ages:
-            distribution[age] = per_age
-    return distribution
-
-
-# Proporción de población por EDAD EXACTA (0-100), derivada de
-# AGE_DISTRIBUTION_5Y (ver docstring de _build_age_distribution_1y). Es lo
-# que usa scoring/k_anonymity.py para no agrupar edades en tramos de 5 años.
-AGE_DISTRIBUTION_1Y = _build_age_distribution_1y()
+# Distribución de edad en tramos de 5 años, proporción sobre el total --
+# derivada de AGE_DISTRIBUTION_1Y (ver función de arriba), no al revés.
+# Se mantiene por si se necesita el agregado por tramo en algún otro
+# sitio; k_anonymity.py usa AGE_DISTRIBUTION_1Y directamente.
+AGE_DISTRIBUTION_5Y = _build_age_distribution_5y_from_1y()
 
 
 def age_range_proportion(min_age: int, max_age: int) -> float:
@@ -456,34 +519,107 @@ PROVINCE_POPULATION = {
     "melilla": 87_067,
 }
 
+# Código de provincia del sistema de matriculación antiguo (1971-2000):
+# 1 o 2 letras al inicio de la matrícula que identificaban la provincia de
+# matriculación, ANTES de las 4 cifras y el sufijo de 1-2 letras
+# (formato "M-1234-AB"). Desapareció el 18 de septiembre de 2000 al
+# adoptarse el sistema nacional actual (4 cifras + 3 consonantes, sin
+# código geográfico -- ver `_SPANISH_PLATE_OLD_FORMAT_RE`/
+# `_SPANISH_PLATE_NEW_FORMAT_RE` en scene_analysis.py). Claves EN
+# MAYÚSCULAS (así aparecen en la matrícula real, a diferencia del resto de
+# tablas de este fichero); valores con las mismas claves que
+# PROVINCE_POPULATION de arriba, para poder encadenarlas directamente.
+#
+# Dos provincias cambiaron de código poco antes de abandonarse el sistema
+# provincial (fuente: matriculasdelmundo.com/espana/codigos-por-provincia.php,
+# knowledge de dominio público sobre matriculación española) -- se aceptan
+# AMBOS códigos, antiguo y nuevo, para no perder matrículas más viejas:
+# Girona pasó de GE a GI, y Ourense de OR a OU.
+PLATE_PROVINCE_CODE_TO_PROVINCE = {
+    "VI": "alava",
+    "AB": "albacete",
+    "A": "alicante",
+    "AL": "almeria",
+    "O": "asturias",
+    "AV": "avila",
+    "BA": "badajoz",
+    "B": "barcelona",
+    "BU": "burgos",
+    "CA": "cadiz",
+    "S": "cantabria",
+    "CC": "caceres",
+    "CS": "castellon",
+    "CE": "ceuta",
+    "CR": "ciudad real",
+    "CO": "cordoba",
+    "C": "a coruna",
+    "CU": "cuenca",
+    "GC": "las palmas",
+    "GE": "gerona",  # código antiguo, sustituido por GI
+    "GI": "gerona",
+    "GR": "granada",
+    "GU": "guadalajara",
+    "SS": "guipuzcoa",
+    "H": "huelva",
+    "HU": "huesca",
+    "IB": "baleares",
+    "J": "jaen",
+    "LE": "leon",
+    "L": "lerida",
+    "LO": _CCAA_LA_RIOJA,
+    "LU": "lugo",
+    "M": "madrid",
+    "MA": "malaga",
+    "ML": "melilla",
+    "MU": "murcia",
+    "NA": "navarra",
+    "OR": "orense",  # código antiguo, sustituido por OU
+    "OU": "orense",
+    "P": "palencia",
+    "PO": "pontevedra",
+    "SA": "salamanca",
+    "SG": "segovia",
+    "SE": "sevilla",
+    "SO": "soria",
+    "T": "tarragona",
+    "TF": "santa cruz de tenerife",
+    "TE": "teruel",
+    "TO": "toledo",
+    "V": "valencia",
+    "VA": "valladolid",
+    "BI": "vizcaya",
+    "ZA": "zamora",
+    "Z": "zaragoza",
+}
+
 # Población por municipio (aprox.). Solo capitales/ciudades grandes de
 # ejemplo; amplía según necesites. Cuando se detecta un municipio, se usa
 # ESTA tabla en lugar de la de provincia (más específica), no ambas a la vez.
 MUNICIPALITY_POPULATION = {
-    "madrid": 3_330_000,
-    "barcelona": 1_660_000,
-    "valencia": 800_000,
-    "sevilla": 690_000,
-    "zaragoza": 680_000,
-    "malaga": 590_000,
-    "murcia": 460_000,
-    "bilbao": 345_000,
-    "leon": 122_000,
-    "salamanca": 143_000,
-    "avila": 57_000,
-    "valladolid": 296_000,
-    "burgos": 174_000,
-    "santander": 172_000,
-    "vitoria": 253_000,
-    "gijon": 267_000,
-    "oviedo": 220_000,
-    "pamplona": 205_000,
-    "santiago de compostela": 98_000,
-    "logrono": 152_000,
-    "caceres": 96_000,
-    "segovia": 51_000,
-    "soria": 39_000,
-    "teruel": 35_000,
+    "madrid": 3_506_730,
+    "barcelona": 1_731_649,
+    "valencia": 840_792,
+    "sevilla": 689_423,
+    "zaragoza": 693_091,
+    "malaga": 599_063,
+    "murcia": 479_405,
+    "bilbao": 351_124,
+    "leon": 123_446,
+    "salamanca": 146_110,
+    "avila": 59_107,
+    "valladolid": 302_614,
+    "burgos": 177_402,
+    "santander": 175_425,
+    "vitoria": 260_699,
+    "gijon": 269_894,
+    "oviedo": 223_968,
+    "pamplona": 209_094,
+    "santiago de compostela": 100_965,
+    "logrono": 152_150,
+    "caceres": 96_651,
+    "segovia": 52_375,
+    "soria": 41_025,
+    "teruel": 36_655,
 }
 
 # Mapeo comunidad autónoma -> provincias del INE que la componen (claves de
@@ -725,21 +861,137 @@ PROVINCE_TO_CCAA: dict[str, str] = {
 # historial completo de intentos previos, incluido el método de respaldo
 # (reparto reciente x 40% asumido) usado antes de conseguir el fichero
 # histórico por rama.
+# Nivel de formación MÁXIMO alcanzado por la población, en los 3 tramos
+# de la clasificación CNED-2014/ISCED que usa el INE/EPA: "superior"
+# (universidad + FP grado superior + doctorado, niveles 5-8),
+# "secundaria_superior" (bachillerato + FP grado medio + postsecundaria no
+# superior, niveles 3-4) y "secundaria_o_inferior" (ESO, primaria, sin
+# estudios, niveles 0-2). DISTINTO de STUDIES_DISTRIBUTION (más abajo),
+# que es la CARRERA UNIVERSITARIA concreta, no el nivel alcanzado.
+#
+# Fuente: INE/EPA (Encuesta de Población Activa), indicador "Nivel de
+# formación de la población adulta", año 2024, por sexo:
+#   hombres: secundaria_o_inferior 38,3% / secundaria_superior 23,0% / superior 38,7%
+#   mujeres: secundaria_o_inferior 31,9% / secundaria_superior 22,8% / superior 45,3%
+# Combinado ponderando por SEX_DISTRIBUTION (misma técnica que
+# MARITAL_STATUS_BY_SEX -- ver su comentario -- para obtener un marginal
+# único a partir de cifras oficiales por sexo).
+#
+# LIMITACIÓN IMPORTANTE (documentada a propósito, no oculta): el
+# indicador EPA cubre población de 25 a 64 años, NO toda la población de
+# 15+ que es la referencia habitual del resto de este fichero. Se aplica
+# aquí igualmente como aproximación de la población general porque:
+# (a) es la única cifra oficial de nivel educativo con desglose por sexo
+# fácilmente verificable, y (b) es el rango de edad estándar que usan
+# INE/Eurostat precisamente porque medir "nivel COMPLETADO" en gente más
+# joven (todavía cursando estudios) o considerar por igual a gente mucho
+# mayor (con un contexto de acceso a la educación muy distinto en su
+# época) sesga la comparación en ambos sentidos. El resultado es una
+# aproximación razonable para adultos en edad típica de trabajar, pero
+# probablemente sobre-estima "superior" en el extremo joven (15-24, donde
+# mucha gente aún no ha terminado) y lo infra-estima en el extremo mayor
+# (65+, generación con mucho menor acceso histórico a estudios
+# superiores) -- mismo tipo de aproximación que ya se acepta en otras
+# tablas de este fichero (p. ej. golf/2022, ver historial de
+# SPORT_PRACTICE_DISTRIBUTION), documentada en vez de escondida.
+EDUCATION_LEVEL_DISTRIBUTION = {
+    "secundaria_o_inferior": 0.3504,
+    "secundaria_superior": 0.229,
+    "superior": 0.4207,
+}
+
+
 STUDIES_DISTRIBUTION = {
-    "medicina": 0.0128,
-    "enfermeria": 0.0231,
-    "derecho": 0.0308,
-    "ingenieria informatica": 0.0300,
-    "ingenieria industrial": 0.0114,
-    "administracion de empresas": 0.0328,
-    "psicologia": 0.0331,
-    "magisterio": 0.0524,
-    "arquitectura": 0.0127,
-    "farmacia": 0.0048,
-    "biologia": 0.0201,
-    "periodismo": 0.0064,
-    "economia": 0.0101,
-    "veterinaria": 0.0027,
+    "medicina": 0.0108,
+    "enfermeria": 0.0134,
+    "derecho": 0.0274,
+    "ingenieria informatica": 0.0163,
+    "ingenieria industrial": 0.0037,
+    "administracion de empresas": 0.0282,
+    "psicologia": 0.0256,
+    "magisterio": 0.0325,
+    "arquitectura": 0.0066,
+    "farmacia": 0.0046,
+    "biologia": 0.0039,
+    "periodismo": 0.0036,
+    "economia": 0.0078,
+    "veterinaria": 0.0023,
+}
+
+# Rama de conocimiento oficial de cada una de las 14 carreras de
+# STUDIES_DISTRIBUTION, según la clasificación de 5 ramas del Real
+# Decreto 1393/2007 (modificado por RD 43/2015), art. único: Artes y
+# Humanidades / Ciencias / Ciencias de la Salud / Ciencias Sociales y
+# Jurídicas / Ingeniería y Arquitectura -- la adscripción de cada título
+# concreto se registra en el RUCT (Registro de Universidades, Centros y
+# Títulos) del Ministerio.
+#
+# SOLO INFORMATIVO -- NUNCA genera un paso de estrechamiento de
+# población propio (ver _step_rama_estudios en k_anonymity.py): quien
+# estudia "derecho" ya está, con probabilidad 1, dentro de "Ciencias
+# Sociales y Jurídicas" -- aplicar la proporción de la rama ENCIMA de la
+# proporción de la carrera concreta (STUDIES_DISTRIBUTION) contaría el
+# mismo hecho dos veces y estrecharía la población sin ninguna
+# justificación estadística (el suceso "estudia derecho" no es
+# independiente del suceso "está en la rama CS y J", es un subconjunto
+# exacto). Por eso esta tabla es solo un mapeo de exhibición: se usa
+# para RELLENAR `rama_estudios` cuando `estudios` ya se conoce (mismo
+# patrón que `nivel_estudios` se infiere de `estudios`), pero el paso de
+# k-anonimato de `rama_estudios` se salta por completo en ese caso.
+#
+# Dos casos verificados explícitamente por no ser obvios (búsqueda
+# dedicada, no asumidos): "psicologia" está adscrita oficialmente a
+# Ciencias de la Salud como rama PRINCIPAL (BOE-A-2022-12576, código
+# RUCT 2502443), aunque muchas facultades también imparten créditos
+# básicos de Ciencias Sociales y Jurídicas como rama secundaria -- se
+# usa aquí solo la principal. "veterinaria" está adscrita a Ciencias de
+# la Salud (confirmado en documentación oficial de admisión de la
+# Universidad de Zaragoza y en el propio catálogo de asignaturas de la
+# USC), NO a "Ciencias" como podría parecer a primera vista.
+STUDIES_TO_RAMA = {
+    "medicina": "ciencias_salud",
+    "enfermeria": "ciencias_salud",
+    "farmacia": "ciencias_salud",
+    "psicologia": "ciencias_salud",
+    "veterinaria": "ciencias_salud",
+    "derecho": "ciencias_sociales_juridicas",
+    "administracion de empresas": "ciencias_sociales_juridicas",
+    "magisterio": "ciencias_sociales_juridicas",
+    "periodismo": "ciencias_sociales_juridicas",
+    "economia": "ciencias_sociales_juridicas",
+    "ingenieria informatica": "ingenieria_arquitectura",
+    "ingenieria industrial": "ingenieria_arquitectura",
+    "arquitectura": "ingenieria_arquitectura",
+    "biologia": "ciencias",
+}
+
+# Proporción de la población que ha estudiado en cada rama de
+# conocimiento (marginal, no depende de qué carrera concreta). Fuente:
+# Ministerio de Ciencia/Universidades, Estadística de Estudiantes
+# Universitarios (EEU) -- matriculados de Grado por rama de enseñanza,
+# universidades PÚBLICAS presenciales curso 2015/16 (última serie
+# encontrada con desglose completo de las 5 ramas en una sola fuente)
+# más universidades PRIVADAS curso 2019/20 (idem, fuente distinta).
+#
+# LIMITACIÓN DOCUMENTADA: mezcla dos cursos académicos distintos
+# (2015/16 público + 2019/20 privado) porque no se encontró una única
+# fuente con el desglose completo de las 5 ramas para ambos tipos de
+# universidad en el mismo curso. Se valida cruzando con una cifra
+# independiente de otro informe (EEU, nuevo ingreso curso 2021/22:
+# Ciencias Sociales y Jurídicas 46,4% de las nuevas matrículas, Ciencias
+# la menor con 6,3%) -- las proporciones calculadas aquí (46,66% y
+# 6,02% respectivamente) coinciden lo bastante bien como para dar
+# confianza en el orden de magnitud, a pesar del desfase de cursos.
+# Como con otras tablas de este fichero basadas en matriculación/
+# egresados en vez of población total, es una aproximación de "quién ha
+# pasado por la universidad recientemente", no un censo de toda la
+# población adulta que alguna vez estudió cada rama.
+RAMA_ESTUDIOS_DISTRIBUTION = {
+    "ciencias_sociales_juridicas": 0.4666,
+    "ingenieria_arquitectura": 0.1903,
+    "ciencias_salud": 0.1806,
+    "artes_humanidades": 0.1023,
+    "ciencias": 0.0602,
 }
 
 # Proporción de la población ocupada por gran categoría profesional
@@ -755,16 +1007,16 @@ STUDIES_DISTRIBUTION = {
 # conocidas. Corre `python scripts/update_ine_reference.py` para comparar
 # estos valores contra el INE.
 OCCUPATION_DISTRIBUTION = {
-    "docente": 0.049,
-    "sanitario": 0.055,
-    "desarrollador de software": 0.018,
-    "ingeniero": 0.020,
-    "abogado": 0.008,
-    "comercial": 0.049,
-    "hosteleria": 0.044,
-    "administracion publica": 0.065,
-    "construccion": 0.060,
-    "transporte": 0.030,
+    "docente": 0.058,
+    "sanitario": 0.070,
+    "desarrollador de software": 0.034,
+    "ingeniero": 0.051,
+    "abogado": 0.012,
+    "comercial": 0.090,
+    "hosteleria": 0.053,
+    "administracion publica": 0.082,
+    "construccion": 0.055,
+    "transporte": 0.067,
 }
 
 # Práctica deportiva declarada, por modalidad. Fuente: Encuesta de Hábitos
@@ -788,24 +1040,319 @@ OCCUPATION_DISTRIBUTION = {
 # modalidad en concreto"), no probabilidades mutuamente excluyentes -- no
 # tiene sentido comprobar que sumen 1, y no deberían forzarse a sumarlo.
 #
-# Cálculo: (% de quienes practicaron ALGÚN deporte en el último año que
-# practican esta modalidad) × 0.573 (% de la población de 15+ años que
-# practicó algún deporte en el último año, cifra 2022). Se eligió la
-# edición 2022 en vez de la 2020 usada en un primer borrador de esta
-# tabla porque 2022 sí tiene cifras verificadas de TODAS estas
-# modalidades desde una única edición consistente (misma base
-# poblacional para las 9), evitando mezclar años distintos.
+# Fuente: Encuesta de Hábitos Deportivos en España 2024/25 (Ministerio de
+# Educación, FP y Deportes + CSD + INE), tabla 1.21 "Personas que
+# practicaron deporte en el último año por modalidad deportiva y
+# frecuencia" -- a diferencia de un primer borrador de esta tabla (basado
+# en cifras de prensa sobre la edición 2022, que solo cubrían 9
+# modalidades porque la prensa nunca cita la tabla completa), esta
+# versión sale directamente del fichero oficial descargado del portal de
+# estadísticas del Ministerio, con el dato exacto de practicantes en
+# miles de TODAS las modalidades que desglosa la encuesta.
+#
+# Cálculo: (practicantes de esta modalidad en miles ÷ 26.605, total de
+# practicantes de ALGÚN deporte en miles) × 0.627 (% de la población de
+# 15+ años que practicó algún deporte en el último año, cifra 2024/25 --
+# confirmada por prensa oficial del CSD, no viene en este fichero
+# concreto). El primer factor es la cuota de esta modalidad DENTRO de
+# quienes hacen deporte; el segundo la convierte a proporción sobre la
+# POBLACIÓN TOTAL, que es lo que necesita _apply_proportion.
+#
+# Se excluyen deliberadamente dos filas de la tabla original:
+#   - "Total" -- es la fila de cabecera (26.605 miles = 100% de
+#     practicantes), no una modalidad.
+#   - "Otro deporte" -- es un cajón de sastre sin identidad propia; no
+#     existe ninguna frase-ancla de práctica que distinga a alguien
+#     declarando "otro deporte" de cualquier otra frase genérica del
+#     texto, así que no se puede detectar con el mismo criterio que el
+#     resto (frase-ancla específica de la modalidad).
+#
+# "yoga_pilates" y "baile_fitness" son aproximaciones -- ver comentario
+# en cada clave: la encuesta agrupa actividades bajo un paraguas más
+# amplio que la frase-ancla concreta que la gente usa para declararlas en
+# primera persona (p. ej. "gimnasia suave" también incluye "gimnasia de
+# mantenimiento" sin más detalle, que no tiene una frase-ancla propia
+# distinguible de una mención genérica). El resto de claves SÍ tiene
+# correspondencia 1:1 exacta con una fila de la encuesta.
 SPORT_PRACTICE_DISTRIBUTION = {
-    "senderismo": round(0.308 * 0.573, 3),   # "senderismo y montañismo"
-    "ciclismo": round(0.284 * 0.573, 3),
-    "natacion": round(0.272 * 0.573, 3),
-    "running": round(0.190 * 0.573, 3),      # "carrera a pie"
-    "musculacion": round(0.170 * 0.573, 3),  # "musculación y halterofilia"
-    "padel": round(0.158 * 0.573, 3),
-    "futbol": round(0.145 * 0.573, 3),       # "fútbol 11 y 7"
-    "baloncesto": round(0.097 * 0.573, 3),
-    "tenis": round(0.080 * 0.573, 3),
+    "yoga_pilates": 0.183,           # "Gimnasia suave" -- yoga, pilates, tai-chi, gimnasia de mantenimiento (aproximación, ver nota arriba)
+    "gimnasia_intensa": 0.171,       # "Gimnasia intensa" -- aerobic, step, spinning (distinto de baile_fitness, ver esa clave)
+    "senderismo": 0.156,             # "Senderismo, montañismo"
+    "musculacion": 0.147,            # "Musculación, halterofilia"
+    "natacion": 0.140,               # "Natación"
+    "ciclismo": 0.134,               # "Ciclismo"
+    "running": 0.111,                # "Carrera a pie, running, marcha" -- DISTINTO de "atletismo" (ver esa clave), son dos filas separadas en la encuesta
+    "padel": 0.096,                  # "Pádel"
+    "futbol": 0.068,                 # "Fútbol 11 y 7"
+    "baloncesto": 0.041,             # "Baloncesto"
+    "baile_fitness": 0.039,          # "Otra act. fís. con música" -- zumba, baile fitness, aerobic con coreografía (aproximación, ver nota arriba)
+    "futbol_sala": 0.039,            # "Fútbol sala, fútbol playa" -- DISTINTO de "futbol" (11 y 7) de arriba
+    "ajedrez": 0.038,                # "Ajedrez" -- sedentario, pero la propia encuesta oficial lo cuenta como modalidad deportiva (federado en España)
+    "tenis": 0.033,                  # "Tenis"
+    "tenis_mesa": 0.033,             # "Tenis de mesa" -- ping-pong
+    "atletismo": 0.029,              # "Atletismo" -- DISTINTO de "running" de arriba
+    "esqui": 0.028,                  # "Deportes de invierno" -- esquí, snowboard
+    "voleibol": 0.026,               # "Voleibol"
+    "boxeo": 0.021,                  # "Boxeo"
+    "submarinismo": 0.020,           # "Actividades subacuáticas" -- buceo, submarinismo
+    "pesca": 0.019,                  # "Pesca"
+    "patinaje": 0.019,               # "Patinaje, monopatín"
+    "petanca": 0.014,                # "Petanca o bolos"
+    "golf": 0.014,                   # "Golf, pitch and putt, minigolf" -- ya no es un caso especial (ver ADR): esta tabla oficial lo trata igual que el resto, no como % directo sobre población total
+    "artes_marciales": 0.012,        # "Artes marciales" -- DISTINTO de "lucha_defensa_personal" (ver esa clave)
+    "piraguismo_remo": 0.012,        # "Piragüismo, remo, descensos"
+    "badminton": 0.011,              # "Bádminton"
+    "pelota_vasca": 0.011,           # "Frontón, frontenis, trinquete"
+    "caza": 0.010,                   # "Caza"
+    "motociclismo": 0.009,           # "Motociclismo"
+    "surf": 0.008,                   # "Surf"
+    "automovilismo": 0.006,          # "Automovilismo"
+    "vela": 0.005,                   # "Vela"
+    "hipica": 0.005,                 # "Hípica"
+    "balonmano": 0.005,              # "Balonmano"
+    "triatlon": 0.004,               # "Triatlón"
+    "rugby": 0.004,                  # "Rugby, rugby 7"
+    "lucha_defensa_personal": 0.003, # "Lucha o defensa personal" -- DISTINTO de "artes_marciales" de arriba
+    "esqui_nautico": 0.003,          # "Esquí náutico, motonáutica"
+    "squash": 0.002,                 # "Squash"
+    "aeronautica": 0.002,            # "Actividades aeronáuticas" -- parapente, ala delta, paracaidismo
 }
+
+# Práctica deportiva CONDICIONADA por sexo (tabla 1.22 de la misma
+# encuesta y edición, "Personas que practicaron deporte en el último año
+# por modalidad deportiva, sexo, edad y nivel de estudios"), es decir
+# P(practica X | sexo). Mismo patrón que MARITAL_STATUS_BY_SEX (ver
+# arriba) -- se usa en k_anonymity.py::_step_practica_deportiva SOLO
+# cuando también se conoce el sexo de la persona (aplicado antes en la
+# cadena): da la proporción REAL de esa combinación concreta en vez de
+# aplicar la marginal de SPORT_PRACTICE_DISTRIBUTION sin distinguir sexo.
+# El efecto es grande: p. ej. "caza" lo practican los hombres ~32 veces
+# más que las mujeres; "yoga_pilates" lo practican las mujeres ~4 veces
+# más que los hombres. Aplicar la marginal a alguien que ya declaró su
+# sexo desperdicia esa señal.
+#
+# A DIFERENCIA de MARITAL_STATUS_BY_SEX (donde cada sub-diccionario suma
+# 1.0 porque es una partición sobre categorías excluyentes), aquí cada
+# sub-diccionario NO suma 1.0 -- mismo motivo que SPORT_PRACTICE_DISTRIBUTION
+# (encuesta de respuesta múltiple, ver esa tabla arriba): son proporciones
+# marginales dentro de cada sexo, no una partición.
+#
+# Cálculo: la tabla 1.22 da, para cada modalidad, el % de practicantes DE
+# ESE SEXO (no de la población total) que hacen esa modalidad -- p. ej.
+# "19,0% de los hombres que practican algún deporte juegan al fútbol".
+# Para convertirlo a P(fútbol | hombre) sobre la POBLACIÓN masculina total
+# (no solo los practicantes), se multiplica por la tasa de práctica
+# deportiva DENTRO de cada sexo (practicantes de ese sexo ÷ población de
+# ese sexo). Esa tasa no viene en esta tabla -- se ha derivado aquí mismo
+# a partir de datos YA presentes en este fichero (TOTAL_POPULATION_ES,
+# SEX_DISTRIBUTION y age_range_proportion(0, 14) para estimar población
+# 15+), asumiendo que el reparto hombre/mujer es igual dentro de la
+# población 15+ que en la población total -- aproximación razonable (el
+# desequilibrio de sexos por esperanza de vida se concentra sobre todo en
+# edades muy avanzadas, no en el corte "menor/mayor de 15 años"), no una
+# cifra oficial de "población española de 15+ por sexo":
+#   población_15+ = TOTAL_POPULATION_ES × (1 − age_range_proportion(0, 14))
+#   población_hombres_15+ = población_15+ × SEX_DISTRIBUTION["hombre"]
+#   tasa_hombres = 13.661.000 (practicantes hombres, tabla 1.21) ÷ población_hombres_15+ = 0,6467
+#   población_mujeres_15+ = población_15+ × SEX_DISTRIBUTION["mujer"]
+#   tasa_mujeres = 12.945.000 (practicantes mujeres, tabla 1.21) ÷ población_mujeres_15+ = 0,5935
+# Y luego, por modalidad: P(X | sexo) = (%_de_practicantes_de_ese_sexo_que_hacen_X ÷ 100) × tasa_ese_sexo
+#
+# CASOS OMITIDOS A PROPÓSITO: cuando la tabla 1.22 redondea el % de un
+# sexo a 0,0 (solo pasa con "squash" y mujeres -- muestra demasiado
+# pequeña para el diseño muestral de la encuesta en esa combinación
+# concreta), NO se incluye esa clave de sexo en el sub-diccionario. Un
+# 0,0% redondeado no significa "cero mujeres practican squash", significa
+# "por debajo del umbral de detección de esta encuesta" -- forzar un 0.0
+# literal aquí haría que el escalón de estrechamiento mostrara "0
+# personas comparten tus rasgos", una certeza que el dato real no
+# respalda. Al faltar la clave, _step_practica_deportiva cae de vuelta a
+# la marginal de SPORT_PRACTICE_DISTRIBUTION para ese caso -- ver esa
+# función.
+SPORT_PRACTICE_BY_SEX = {
+    "yoga_pilates": {"hombre": 0.0731, "mujer": 0.2849},
+    "gimnasia_intensa": {"hombre": 0.1474, "mujer": 0.1899},
+    "senderismo": {"hombre": 0.1714, "mujer": 0.1377},
+    "musculacion": {"hombre": 0.1908, "mujer": 0.1015},
+    "natacion": {"hombre": 0.1365, "mujer": 0.1407},
+    "ciclismo": {"hombre": 0.1966, "mujer": 0.0700},
+    "running": {"hombre": 0.1306, "mujer": 0.0902},
+    "padel": {"hombre": 0.1345, "mujer": 0.0576},
+    "futbol": {"hombre": 0.1229, "mujer": 0.0137},
+    "baloncesto": {"hombre": 0.0595, "mujer": 0.0220},
+    "baile_fitness": {"hombre": 0.0103, "mujer": 0.0665},
+    "futbol_sala": {"hombre": 0.0731, "mujer": 0.0059},
+    "ajedrez": {"hombre": 0.0576, "mujer": 0.0172},
+    "tenis": {"hombre": 0.0479, "mujer": 0.0178},
+    "tenis_mesa": {"hombre": 0.0485, "mujer": 0.0166},
+    "atletismo": {"hombre": 0.0407, "mujer": 0.0166},
+    "esqui": {"hombre": 0.0349, "mujer": 0.0202},
+    "voleibol": {"hombre": 0.0265, "mujer": 0.0255},
+    "boxeo": {"hombre": 0.0285, "mujer": 0.0125},
+    "submarinismo": {"hombre": 0.0252, "mujer": 0.0148},
+    "patinaje": {"hombre": 0.0175, "mujer": 0.0208},
+    "pesca": {"hombre": 0.0323, "mujer": 0.0059},
+    "petanca": {"hombre": 0.0194, "mujer": 0.0089},
+    "golf": {"hombre": 0.0188, "mujer": 0.0083},
+    "badminton": {"hombre": 0.0116, "mujer": 0.0113},
+    "artes_marciales": {"hombre": 0.0168, "mujer": 0.0059},
+    "piraguismo_remo": {"hombre": 0.0162, "mujer": 0.0065},
+    "pelota_vasca": {"hombre": 0.0168, "mujer": 0.0059},
+    "caza": {"hombre": 0.0194, "mujer": 0.0006},
+    "motociclismo": {"hombre": 0.0142, "mujer": 0.0024},
+    "surf": {"hombre": 0.0097, "mujer": 0.0059},
+    "automovilismo": {"hombre": 0.0110, "mujer": 0.0012},
+    "vela": {"hombre": 0.0071, "mujer": 0.0030},
+    "balonmano": {"hombre": 0.0071, "mujer": 0.0030},
+    "hipica": {"hombre": 0.0052, "mujer": 0.0047},
+    "triatlon": {"hombre": 0.0065, "mujer": 0.0018},
+    "rugby": {"hombre": 0.0058, "mujer": 0.0018},
+    "lucha_defensa_personal": {"hombre": 0.0045, "mujer": 0.0024},
+    "esqui_nautico": {"hombre": 0.0039, "mujer": 0.0012},
+    "squash": {"hombre": 0.0045},  # sin "mujer": redondeaba a 0,0 en la encuesta -- ver nota arriba
+    "aeronautica": {"hombre": 0.0013, "mujer": 0.0030},
+}
+
+
+# Práctica deportiva CONDICIONADA por tramo de edad (misma tabla 1.22 que
+# SPORT_PRACTICE_BY_SEX, columnas de edad en vez de sexo), es decir
+# P(practica X | tramo de edad). Mismo patrón, mismo motivo -- ver el
+# comentario largo de SPORT_PRACTICE_BY_SEX arriba para el porqué general
+# (no reinventarlo aquí).
+#
+# Los tramos de la encuesta (15-24, 25-54, 55+) coinciden EXACTAMENTE con
+# fronteras de quinquenios estándar del INE, así que la conversión a
+# población total no necesita aproximar nada de reparto dentro de tramo:
+#   tasa_15_24 = 4.459.000 (practicantes, tabla 1.21) ÷ (TOTAL_POPULATION_ES × age_range_proportion(15, 24)) = 0,8816
+#   tasa_25_54 = 14.813.000 ÷ (TOTAL_POPULATION_ES × age_range_proportion(25, 54)) = 0,7171
+#   tasa_55_mas = 7.333.000 ÷ (TOTAL_POPULATION_ES × age_range_proportion(55, 100)) = 0,4412
+# Y por modalidad: P(X | tramo) = (%_de_practicantes_de_ese_tramo_que_hacen_X ÷ 100) × tasa_ese_tramo
+#
+# NOTA HISTÓRICA IMPORTANTE: un primer intento de esto usaba
+# age_range_proportion() derivado de la APROXIMACIÓN uniforme dentro de
+# tramo que tenía AGE_DISTRIBUTION_1Y en su momento -- daba una tasa
+# imposible del 100,85% para el tramo 15-24 (más practicantes que
+# población). Fue precisamente ESTE cálculo el que forzó a sustituir
+# AGE_DISTRIBUTION_1Y por datos reales año-a-año del INE (tabla 01003,
+# ver el comentario junto a esa tabla) en vez de seguir aproximando.
+#
+# CASOS OMITIDOS A PROPÓSITO (mismo criterio que SPORT_PRACTICE_BY_SEX):
+# "automovilismo" y "triatlon" no tienen clave "55_mas" -- la encuesta
+# redondeó su % en ese tramo a 0,0 (muestra insuficiente en esa
+# combinación concreta), no "cero personas de 55+ los practican". Al
+# faltar la clave, _step_practica_deportiva cae de vuelta a la marginal
+# de SPORT_PRACTICE_DISTRIBUTION para ese caso.
+
+SPORT_PRACTICE_BY_AGE_BAND = {
+    "aeronautica": {"15_24": 0.0018, "25_54": 0.0029, "55_mas": 0.0009},
+    "ajedrez": {"15_24": 0.0934, "25_54": 0.0423, "55_mas": 0.015},
+    "artes_marciales": {"15_24": 0.0353, "25_54": 0.0136, "55_mas": 0.0022},
+    "atletismo": {"15_24": 0.0732, "25_54": 0.0359, "55_mas": 0.0066},
+    "automovilismo": {"15_24": 0.0212, "25_54": 0.0079},
+    "badminton": {"15_24": 0.0432, "25_54": 0.0108, "55_mas": 0.0026},
+    "baile_fitness": {"15_24": 0.067, "25_54": 0.043, "55_mas": 0.0269},
+    "baloncesto": {"15_24": 0.1516, "25_54": 0.0423, "55_mas": 0.0053},
+    "balonmano": {"15_24": 0.0264, "25_54": 0.0029, "55_mas": 0.0013},
+    "boxeo": {"15_24": 0.0723, "25_54": 0.0222, "55_mas": 0.0031},
+    "caza": {"15_24": 0.0132, "25_54": 0.0086, "55_mas": 0.0106},
+    "ciclismo": {"15_24": 0.1569, "25_54": 0.1721, "55_mas": 0.0803},
+    "esqui": {"15_24": 0.0503, "25_54": 0.0373, "55_mas": 0.0088},
+    "esqui_nautico": {"15_24": 0.0026, "25_54": 0.0036, "55_mas": 0.0018},
+    "futbol": {"15_24": 0.2336, "25_54": 0.076, "55_mas": 0.0079},
+    "futbol_sala": {"15_24": 0.149, "25_54": 0.0416, "55_mas": 0.0035},
+    "gimnasia_intensa": {"15_24": 0.2671, "25_54": 0.223, "55_mas": 0.0781},
+    "golf": {"15_24": 0.0282, "25_54": 0.0122, "55_mas": 0.0115},
+    "hipica": {"15_24": 0.0123, "25_54": 0.0057, "55_mas": 0.0026},
+    "lucha_defensa_personal": {"15_24": 0.0071, "25_54": 0.0036, "55_mas": 0.0018},
+    "motociclismo": {"15_24": 0.0141, "25_54": 0.0115, "55_mas": 0.0031},
+    "musculacion": {"15_24": 0.3015, "25_54": 0.1929, "55_mas": 0.0446},
+    "natacion": {"15_24": 0.1913, "25_54": 0.1513, "55_mas": 0.1121},
+    "padel": {"15_24": 0.2248, "25_54": 0.1212, "55_mas": 0.0269},
+    "patinaje": {"15_24": 0.0573, "25_54": 0.0244, "55_mas": 0.0013},
+    "pelota_vasca": {"15_24": 0.0317, "25_54": 0.0115, "55_mas": 0.0053},
+    "pesca": {"15_24": 0.0326, "25_54": 0.0208, "55_mas": 0.0141},
+    "petanca": {"15_24": 0.0441, "25_54": 0.0129, "55_mas": 0.0066},
+    "piraguismo_remo": {"15_24": 0.0247, "25_54": 0.0158, "55_mas": 0.0026},
+    "rugby": {"15_24": 0.0176, "25_54": 0.0029, "55_mas": 0.0004},
+    "running": {"15_24": 0.1499, "25_54": 0.1506, "55_mas": 0.0521},
+    "senderismo": {"15_24": 0.1402, "25_54": 0.1915, "55_mas": 0.1182},
+    "squash": {"15_24": 0.0009, "25_54": 0.0043, "55_mas": 0.0004},
+    "submarinismo": {"15_24": 0.0317, "25_54": 0.0301, "55_mas": 0.0044},
+    "surf": {"15_24": 0.0282, "25_54": 0.0093, "55_mas": 0.0004},
+    "tenis": {"15_24": 0.0899, "25_54": 0.0366, "55_mas": 0.0119},
+    "tenis_mesa": {"15_24": 0.0917, "25_54": 0.0351, "55_mas": 0.0119},
+    "triatlon": {"15_24": 0.0071, "25_54": 0.0065},
+    "vela": {"15_24": 0.0088, "25_54": 0.005, "55_mas": 0.004},
+    "voleibol": {"15_24": 0.1296, "25_54": 0.0215, "55_mas": 0.0013},
+    "yoga_pilates": {"15_24": 0.1534, "25_54": 0.1915, "55_mas": 0.1831},
+}
+
+
+# Práctica deportiva CONDICIONADA por nivel de estudios (misma tabla 1.22
+# que SPORT_PRACTICE_BY_SEX/BY_AGE_BAND, columnas de nivel de estudios en
+# vez de sexo/edad), es decir P(practica X | nivel_estudios). Mismo
+# patrón, mismo motivo -- ver el comentario largo de SPORT_PRACTICE_BY_SEX
+# para el porqué general.
+#
+# A diferencia de sexo (binario limpio) y edad (tramos que coinciden con
+# quinquenios INE exactos), aquí la conversión a población total exige
+# apoyarse en EDUCATION_LEVEL_DISTRIBUTION (ver esa tabla arriba, y su
+# comentario sobre la limitación de basarse en población 25-64, no 15+):
+#   población_15_más = TOTAL_POPULATION_ES × (1 − age_range_proportion(0, 14))
+#   población_tramo = población_15_más × EDUCATION_LEVEL_DISTRIBUTION[tramo]
+#   tasa_secundaria_o_inferior = 6.289.000 (practicantes, tabla 1.21) ÷ población_tramo = 0,4238
+#   tasa_secundaria_superior = 7.067.000 ÷ población_tramo = 0,7289
+#   tasa_superior = 13.250.000 ÷ población_tramo = 0,7443
+# Y por modalidad: P(X | tramo) = (%_de_practicantes_de_ese_tramo_que_hacen_X ÷ 100) × tasa_ese_tramo
+#
+# A diferencia de SPORT_PRACTICE_BY_SEX y SPORT_PRACTICE_BY_AGE_BAND, esta
+# tabla no tuvo ningún caso de "0,0% redondeado" que omitir -- las 41
+# modalidades tienen dato en los 3 tramos.
+
+SPORT_PRACTICE_BY_EDUCATION_LEVEL = {
+    "aeronautica": {"secundaria_o_inferior": 0.0008, "secundaria_superior": 0.0029, "superior": 0.003},
+    "ajedrez": {"secundaria_o_inferior": 0.0195, "secundaria_superior": 0.0445, "superior": 0.0491},
+    "artes_marciales": {"secundaria_o_inferior": 0.0093, "secundaria_superior": 0.016, "superior": 0.0112},
+    "atletismo": {"secundaria_o_inferior": 0.0148, "secundaria_superior": 0.0372, "superior": 0.0357},
+    "automovilismo": {"secundaria_o_inferior": 0.0047, "secundaria_superior": 0.0051, "superior": 0.0082},
+    "badminton": {"secundaria_o_inferior": 0.0085, "secundaria_superior": 0.0175, "superior": 0.0112},
+    "baile_fitness": {"secundaria_o_inferior": 0.0174, "secundaria_superior": 0.0496, "superior": 0.0528},
+    "baloncesto": {"secundaria_o_inferior": 0.0335, "secundaria_superior": 0.0576, "superior": 0.038},
+    "balonmano": {"secundaria_o_inferior": 0.003, "secundaria_superior": 0.0117, "superior": 0.0037},
+    "boxeo": {"secundaria_o_inferior": 0.0165, "secundaria_superior": 0.0292, "superior": 0.0194},
+    "caza": {"secundaria_o_inferior": 0.0089, "secundaria_superior": 0.0146, "superior": 0.0082},
+    "ciclismo": {"secundaria_o_inferior": 0.0737, "secundaria_superior": 0.1662, "superior": 0.1675},
+    "esqui": {"secundaria_o_inferior": 0.0089, "secundaria_superior": 0.0313, "superior": 0.0417},
+    "esqui_nautico": {"secundaria_o_inferior": 0.0013, "secundaria_superior": 0.0029, "superior": 0.0037},
+    "futbol": {"secundaria_o_inferior": 0.0636, "secundaria_superior": 0.094, "superior": 0.0581},
+    "futbol_sala": {"secundaria_o_inferior": 0.0335, "secundaria_superior": 0.0561, "superior": 0.0357},
+    "gimnasia_intensa": {"secundaria_o_inferior": 0.0763, "secundaria_superior": 0.2034, "superior": 0.233},
+    "golf": {"secundaria_o_inferior": 0.0064, "secundaria_superior": 0.0175, "superior": 0.0179},
+    "hipica": {"secundaria_o_inferior": 0.0051, "secundaria_superior": 0.0058, "superior": 0.0045},
+    "lucha_defensa_personal": {"secundaria_o_inferior": 0.0034, "secundaria_superior": 0.0044, "superior": 0.003},
+    "motociclismo": {"secundaria_o_inferior": 0.0068, "secundaria_superior": 0.008, "superior": 0.0104},
+    "musculacion": {"secundaria_o_inferior": 0.0631, "secundaria_superior": 0.1779, "superior": 0.2017},
+    "natacion": {"secundaria_o_inferior": 0.0771, "secundaria_superior": 0.1618, "superior": 0.1816},
+    "padel": {"secundaria_o_inferior": 0.042, "secundaria_superior": 0.1057, "superior": 0.1377},
+    "patinaje": {"secundaria_o_inferior": 0.0119, "secundaria_superior": 0.0226, "superior": 0.0238},
+    "pelota_vasca": {"secundaria_o_inferior": 0.0047, "secundaria_superior": 0.0211, "superior": 0.0119},
+    "pesca": {"secundaria_o_inferior": 0.0229, "secundaria_superior": 0.0277, "superior": 0.0119},
+    "petanca": {"secundaria_o_inferior": 0.0114, "secundaria_superior": 0.0182, "superior": 0.0141},
+    "piraguismo_remo": {"secundaria_o_inferior": 0.003, "secundaria_superior": 0.0138, "superior": 0.0171},
+    "rugby": {"secundaria_o_inferior": 0.0038, "secundaria_superior": 0.0036, "superior": 0.0037},
+    "running": {"secundaria_o_inferior": 0.05, "secundaria_superior": 0.121, "superior": 0.1585},
+    "senderismo": {"secundaria_o_inferior": 0.0716, "secundaria_superior": 0.1669, "superior": 0.2218},
+    "squash": {"secundaria_o_inferior": 0.0004, "secundaria_superior": 0.0015, "superior": 0.0045},
+    "submarinismo": {"secundaria_o_inferior": 0.0072, "secundaria_superior": 0.0262, "superior": 0.0283},
+    "surf": {"secundaria_o_inferior": 0.0017, "secundaria_superior": 0.0095, "superior": 0.0127},
+    "tenis": {"secundaria_o_inferior": 0.0161, "secundaria_superior": 0.0386, "superior": 0.0447},
+    "tenis_mesa": {"secundaria_o_inferior": 0.0127, "secundaria_superior": 0.0445, "superior": 0.0432},
+    "triatlon": {"secundaria_o_inferior": 0.0008, "secundaria_superior": 0.0073, "superior": 0.0045},
+    "vela": {"secundaria_o_inferior": 0.0034, "secundaria_superior": 0.0036, "superior": 0.0074},
+    "voleibol": {"secundaria_o_inferior": 0.0259, "secundaria_superior": 0.0379, "superior": 0.0208},
+    "yoga_pilates": {"secundaria_o_inferior": 0.1051, "secundaria_superior": 0.1786, "superior": 0.2516},
+}
+
 
 # Reparto por nacionalidad (española vs. extranjera), INE -- Censo Anual de
 # Población a 1 de enero de 2025, mismo corte temporal que
@@ -842,10 +1389,10 @@ NATIONALITY_DISTRIBUTION = {
 #     incapacidad permanente, otras situaciones -- ~23%): jubilado 0.234,
 #     estudiante 0.082, otro_inactivo 0.094.
 SITUACION_LABORAL_DISTRIBUTION = {
-    "activo": 0.531,
+    "activo": 0.534,
     "parado": 0.059,
-    "jubilado": 0.234,
-    "estudiante": 0.082,
+    "jubilado": 0.232,
+    "estudiante": 0.081,
     "otro_inactivo": 0.094,
 }
 
@@ -872,11 +1419,11 @@ SITUACION_LABORAL_DISTRIBUTION = {
 # completo. Corre `python scripts/update_ine_reference.py` para comparar
 # estos valores contra el INE.
 HOUSEHOLD_TYPE_DISTRIBUTION = {
-    "unipersonal": 0.257,
-    "pareja_sin_hijos": 0.232,
-    "pareja_con_hijos": 0.334,
-    "monoparental": 0.100,
-    "otro": 0.077,
+    "unipersonal": 0.261,
+    "pareja_sin_hijos": 0.209,
+    "pareja_con_hijos": 0.331,
+    "monoparental": 0.104,
+    "otro": 0.096,
 }
 
 # Lengua materna/habitual cooficial, CONDICIONADA a la comunidad autónoma
@@ -909,3 +1456,49 @@ LANGUAGE_BY_CCAA = {
     "navarra": {"euskera": 0.146, "castellano_u_otra": 0.854},
 }
 
+
+# Referencias contextuales para rasgos físicos (añadidos manualmente, ver
+# ADR-34). A diferencia del resto de tablas de este fichero, esto NO sale
+# del INE (el INE no recoge pigmentación) -- son las proporciones
+# AUTODECLARADAS por cuestionario (no las predichas por HIrisPlex-S, que
+# tienen mucha menor precisión, especialmente en piel, ver el propio
+# artículo) en un estudio de fenotipado forense sobre población española:
+#
+#   Navarro-López, B.; Baeta, M.; Suárez-Ulloa, V.; Martos-Fernández, R.;
+#   Moreno-López, O.; Martínez-Jarreta, B.; Jiménez, S.; Olalde, I.;
+#   de Pancorbo, M.M. "Exploring Eye, Hair, and Skin Pigmentation in a
+#   Spanish Population: Insights from Hirisplex-S Predictions".
+#   Genes 2024, 15(10), 1330. DOI: 10.3390/genes15101330
+#
+# Muestra de 412 individuos de la población española (universidades,
+# centros de FP e institutos de País Vasco, Zaragoza, Alicante y Granada,
+# con minoría de otras regiones). Categorías simplificadas a las que el
+# propio estudio respalda con datos (se han excluido "muy claro" y
+# "negro-oscuro" en piel por tener 0% de representación en la muestra):
+#
+# Ojos (n=378, sección 3.2.1, HIrisPlex-S: azul/intermedio/marrón):
+#   marron 68.78%, intermedio 22.75%, azul 8.47%
+EYE_COLOR_DISTRIBUTION = {
+    'marron': 0.6878,
+    'intermedio': 0.2275,
+    'azul': 0.0847,
+}
+
+# Pelo (n=380, sección 3.2.2, HIrisPlex-S: rubio/pelirrojo/castaño/negro):
+#   castano 64.47%, negro 25.53%, rubio 9.74%, pelirrojo 0.26%
+HAIR_COLOR_DISTRIBUTION = {
+    'castano': 0.6447,
+    'negro': 0.2553,
+    'rubio': 0.0974,
+    'pelirrojo': 0.0026,
+}
+
+# Piel (n=408, sección 3.2.3, HIrisPlex-S de 5 categorías colapsado a 3:
+#   claro=pale, medio=intermediate, oscuro=dark; muy_pale y dark-black sin
+#   representación en la muestra, 0%):
+#   claro 53.43%, medio 39.71%, oscuro 6.86%
+SKIN_TONE_DISTRIBUTION = {
+    'claro': 0.5343,
+    'medio': 0.3971,
+    'oscuro': 0.0686,
+}

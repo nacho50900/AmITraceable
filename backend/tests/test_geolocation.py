@@ -105,7 +105,6 @@ def reset_module_globals(monkeypatch):
     monkeypatch.setattr(geolocation, "_device", "cpu")
     monkeypatch.setattr(geolocation, "_igpu_worker_device_index", None)
     monkeypatch.setattr(geolocation, "_igpu_worker_failed", False)
-    yield
 
 
 def _install_fake_index(monkeypatch, meta_df: pd.DataFrame, search_indices, search_similarities=None):
@@ -261,6 +260,39 @@ class TestEstimateLocationFromImage:
         _install_fake_embedding(monkeypatch)
 
         assert geolocation.estimate_location_from_image(_FakeImage(), k=4) is not None
+
+    def test_marks_non_representative_when_confidence_is_too_low_even_with_low_spread(self, monkeypatch):
+        """Segundo criterio independiente de `representative=False` (ver
+        `_MIN_CONFIDENCE_FOR_REPRESENTATIVE`): aunque los vecinos estén
+        geográficamente CERCA entre sí (spread bajo), si la provincia
+        "ganadora" solo se lleva un 20% de los votos (5 provincias
+        distintas repartidas casi a partes iguales entre 10 vecinos), esa
+        "victoria" no es significativa. No debe confundirse con el
+        criterio de dispersión geográfica, que aquí NO se dispara."""
+        meta = pd.DataFrame(
+            {
+                "id": [str(i) for i in range(10)],
+                # Todos los vecinos casi en el mismo punto: spread muy bajo.
+                "lat": [40.0 + i * 0.001 for i in range(10)],
+                "lon": [-3.7 + i * 0.001 for i in range(10)],
+                # 5 provincias con 2 votos cada una: la ganadora empata a 2/10 = 0.20.
+                "region": [
+                    "Madrid", "Madrid",
+                    "Toledo", "Toledo",
+                    "Avila", "Avila",
+                    "Segovia", "Segovia",
+                    "Guadalajara", "Guadalajara",
+                ],
+            }
+        )
+        _install_fake_index(monkeypatch, meta, search_indices=list(range(10)))
+        _install_fake_embedding(monkeypatch)
+
+        result = geolocation.estimate_location_from_image(_FakeImage(), k=10)
+
+        assert result is not None
+        assert result.confidence == 0.2
+        assert result.representative is False
 
     def test_uses_exif_gps_directly_without_calling_the_model(self, monkeypatch):
         """Si la foto trae GPS real en el EXIF, se usa directamente (la
@@ -630,7 +662,9 @@ class TestEstimateLocationsForPosts:
         monkeypatch.setattr(geolocation.settings, "enable_scene_analysis", True)
         monkeypatch.setattr(geolocation, "estimate_location_from_image", lambda image, k=15: None)
 
-        codes = VisualDescriptionCodes(personas="una", aficion="baloncesto", texto_visible=None)
+        codes = VisualDescriptionCodes(
+            personas="una", aficion="baloncesto", texto_visible=None, matricula=None, indicio_pareja=True
+        )
 
         def _fake_scene_analysis(image):
             return ([], False, "texto en español sin usar aquí", None, codes)
@@ -912,8 +946,8 @@ class TestEstimateLocationsForPosts:
         """Regresión: `estimate_location_from_image` es síncrona y hace
         trabajo de CPU real (la pasada del modelo) -- llamarla directamente
         bloquearía el hilo único del event loop mientras dura, impidiendo
-        que CUALQUIER otra tarea (incluida la llamada a Mistral que corre
-        en paralelo, ver analysis_router._build_report) avance mientras
+        que CUALQUIER otra tarea (incluida la llamada al modelo de IA local
+        que corre en paralelo, ver analysis_router._build_report) avance mientras
         tanto. Se simula con un `time.sleep` (bloqueante de verdad, a
         diferencia de `asyncio.sleep`) dentro de la función "de modelo", y
         se comprueba que otra tarea concurrente sí progresa durante ese
@@ -963,12 +997,22 @@ class TestEstimateLocationsForPosts:
     async def test_multiple_photos_are_analyzed_concurrently_not_one_at_a_time(self, monkeypatch, respx_mock):
         """Regresión: con `Settings.photo_analysis_concurrency >= 2`, la foto
         2 debe empezar a analizarse con los modelos SIN esperar a que la
-        foto 1 termine del todo -- si no, el tiempo total sería la suma de
-        ambas (procesamiento estrictamente secuencial), en vez de
-        aproximarse al tiempo de la más lenta (procesamiento solapado).
-        Se simula con dos pasadas de modelo bloqueantes de la misma
-        duración y se comprueba que el tiempo total es sensiblemente menor
-        que la suma de las dos, no solo mayor que la de una sola."""
+        foto 1 termine del todo -- si no, las dos llamadas bloqueantes se
+        ejecutarían una detrás de otra (secuencial), en vez de solaparse en
+        el tiempo (concurrente).
+
+        Se comprueba el SOLAPAMIENTO REAL entre los intervalos [inicio,
+        fin] de las dos llamadas -- NO un umbral de tiempo total transcurrido
+        (ver historial de este test: `assert elapsed < _SLEEP * 1.5` daba
+        falsos negativos repetidos en Windows, con overhead real medido de
+        hasta ~1s solo por arrancar el `ThreadPoolExecutor` por defecto de
+        `asyncio.to_thread` -- 5x el propio `_SLEEP` simulado, muy por
+        encima de cualquier margen razonable). Comparar el solapamiento de
+        intervalos es la propiedad que en realidad importa (¿se solapan
+        las dos ejecuciones?) y es inmune a cuánto tarde ese arranque en
+        una máquina/SO concretos, a diferencia de un tiempo total
+        absoluto."""
+        import threading
         import time
         import httpx
 
@@ -991,24 +1035,33 @@ class TestEstimateLocationsForPosts:
         respx_mock.get("https://cdn.fake/2.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
 
         _SLEEP = 0.2
+        intervals: list[tuple[float, float]] = []
+        intervals_lock = threading.Lock()
 
         def _blocking_estimate(image, k=15):
+            call_start = time.monotonic()
             time.sleep(_SLEEP)  # bloqueante de verdad -- simula la pasada del modelo
+            call_end = time.monotonic()
+            with intervals_lock:
+                intervals.append((call_start, call_end))
             return geolocation.ImageLocationEstimate(
                 province="Madrid", confidence=0.9, k_neighbors=15, mean_similarity=0.8
             )
 
         monkeypatch.setattr(geolocation, "estimate_location_from_image", _blocking_estimate)
 
-        start = time.monotonic()
         outcome = await geolocation.estimate_locations_for_posts(posts)
-        elapsed = time.monotonic() - start
 
         assert len(outcome.results) == 2
-        # Secuencial habría tardado >= 2 * _SLEEP; solapado, sensiblemente
-        # menos -- el margen (1.5x en vez de 2x) deja hueco para el propio
-        # overhead de hilos/red sin que el test sea inestable.
-        assert elapsed < _SLEEP * 1.5
+        assert len(intervals) == 2
+        (start_a, end_a), (start_b, end_b) = intervals
+        # Solapan si el inicio más tardío queda por delante del final más
+        # temprano -- cierto en cualquier orden de finalización, y no
+        # depende de cuánto haya tardado cada llamada en arrancar.
+        assert max(start_a, start_b) < min(end_a, end_b), (
+            f"Las dos llamadas no se solaparon en el tiempo (ejecución secuencial, "
+            f"no concurrente): {intervals}"
+        )
 
     @pytest.mark.asyncio
     async def test_dinov2_of_next_photo_does_not_wait_for_moondream2_of_previous_photo(self, monkeypatch, respx_mock):
@@ -1260,6 +1313,94 @@ class TestEstimateLocationsForPosts:
 
         assert outcome.index_available is False
         assert outcome.results == []
+
+    @pytest.mark.asyncio
+    async def test_collage_detected_skips_both_models_but_progress_still_advances(self, monkeypatch, respx_mock):
+        """Ver ADR-41 / app/vision/collage_detection.py: una foto
+        detectada como probable collage no debe llegar a llamar a NINGUNO
+        de los dos modelos (ni estimate_location_from_image, ni
+        analyze_image_content) -- se comprueba forzando que ambos
+        lancen si se llaman, no solo comprobando que el resultado final
+        está vacío (eso también pasaría si el modelo real simplemente no
+        encontrara nada, un caso distinto). El progreso, en cambio, debe
+        seguir avanzando en las dos pistas igual que con cualquier otra
+        foto, para que la barra de carga llegue al 100%."""
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        monkeypatch.setattr(geolocation.settings, "enable_scene_analysis", True)
+        monkeypatch.setattr(geolocation, "detect_collage", lambda image: True)
+
+        def _fail_if_called(*args, **kwargs):
+            raise AssertionError("no debería llamarse: la foto se detectó como collage")
+
+        monkeypatch.setattr(geolocation, "estimate_location_from_image", _fail_if_called)
+        monkeypatch.setattr(geolocation, "analyze_image_content", _fail_if_called)
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/collage.jpg"], permalink="https://ig/1")]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/collage.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        progress_events = []
+
+        async def on_progress(stage, counts):
+            progress_events.append((stage, counts))
+
+        outcome = await geolocation.estimate_locations_for_posts(posts, progress_callback=on_progress)
+
+        assert outcome.results == []
+        assert outcome.visual_inferences == []
+        assert outcome.visual_descriptions == {}
+        assert outcome.general_descriptions == {}
+        assert outcome.partner_signal_permalinks == set()
+
+        geo_events = [c for stage, c in progress_events if c["track"] == "geolocalizacion"]
+        fotos_events = [c for stage, c in progress_events if c["track"] == "fotos"]
+        assert [c["photos_analyzed"] for c in geo_events] == [1]
+        assert [c["photos_analyzed"] for c in fotos_events] == [1]
+
+    @pytest.mark.asyncio
+    async def test_photo_not_detected_as_collage_is_analyzed_normally(self, monkeypatch, respx_mock):
+        """Complemento del test anterior: con detect_collage devolviendo
+        False (caso normal, mockeado aquí para no depender del heurístico
+        real sobre el jpeg mínimo de prueba), la foto SÍ llega a los dos
+        modelos -- confirma que la integración no rompe el camino
+        habitual cuando no hay collage."""
+        import httpx
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        monkeypatch.setattr(geolocation, "detect_collage", lambda image: False)
+        monkeypatch.setattr(
+            geolocation,
+            "estimate_location_from_image",
+            lambda image, k=15: geolocation.ImageLocationEstimate(
+                province="Madrid", confidence=0.7, k_neighbors=15, mean_similarity=0.6
+            ),
+        )
+
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/normal.jpg"], permalink="https://ig/1")]
+
+        tiny_jpeg = bytes.fromhex(
+            "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202030202"
+            "020304030304050805050404050a070706080c0a0c0c0b0a0b0b0d0e12100d0e110e"
+            "0b0b1016101113141515150c0f171816141812141514ffc9000b0800010001010111"
+            "00ffcc00060010100501ffda0008010100003f00d2cf20ffd9"
+        )
+        respx_mock.get("https://cdn.fake/normal.jpg").mock(return_value=httpx.Response(200, content=tiny_jpeg))
+
+        outcome = await geolocation.estimate_locations_for_posts(posts)
+
+        assert len(outcome.results) == 1
+        assert outcome.results[0][1].province == "Madrid"
+
 
 class TestSelectDinov2Device:
     """Tests de _select_dinov2_device() -- ahora solo decide el

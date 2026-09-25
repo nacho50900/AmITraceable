@@ -6,7 +6,9 @@ si el INE ha publicado cifras más recientes que las de
 
 CÓMO USARLO:
     python scripts/update_ine_reference.py            # solo compara, no escribe nada
-    python scripts/update_ine_reference.py --apply     # además, aplica PROVINCE_POPULATION
+    python scripts/update_ine_reference.py --apply     # aplica PROVINCE_POPULATION, MUNICIPALITY_POPULATION,
+                                                          # SEX_DISTRIBUTION, EDUCATION_LEVEL_DISTRIBUTION,
+                                                          # NATIONALITY_DISTRIBUTION y MARITAL_STATUS_DISTRIBUTION/BY_SEX
     python scripts/update_ine_reference.py --apply --yes  # sin pedir confirmación por teclado
     python scripts/update_ine_reference.py --apply --force-tasa-paro   # aplica SITUACION_LABORAL_DISTRIBUTION
                                                                         # aunque la tasa de paro parezca implausible
@@ -15,46 +17,54 @@ CÓMO USARLO:
     python scripts/update_ine_reference.py --apply --force-hogar       # aplica HOUSEHOLD_TYPE_DISTRIBUTION aunque la
                                                                         # suma de categorías parezca implausible
 
-NOTA (encontrada en esta misma sesión, no corregida a propósito -- fuera
-del alcance de lo pedido): el párrafo siguiente, sobre qué toca `--apply`,
-está desactualizado frente al comportamiento real de `main()` más abajo
--- NATIONALITY_DISTRIBUTION, MARITAL_STATUS_DISTRIBUTION/BY_SEX y
-SITUACION_LABORAL_DISTRIBUTION SÍ se aplican con `--apply` hoy (esta
-última con la guarda de `--force-tasa-paro`), no solo PROVINCE_POPULATION.
-Revisar y corregir este docstring es trabajo aparte.
-
 Por defecto (sin `--apply`) imprime, por cada tabla soportada, el valor
 actual en el código frente al valor recién descargado del INE, y si
 difieren. NO SOBREESCRIBE `ine_reference.py`.
 
-`--apply` SÍ escribe en `ine_reference.py`, pero ÚNICAMENTE la tabla
-PROVINCE_POPULATION (la única de las cuatro ya verificada de extremo a
-extremo contra la API real, con las 49 provincias casando correctamente
--- ver el histórico de ejecuciones más abajo). Actualiza también su fecha
-en `_LAST_VERIFIED` a hoy. Antes de escribir, imprime cada cambio
-concreto (clave, valor antiguo, valor nuevo) y pide confirmación por
-teclado, salvo que se pase `--yes` (pensado para automatizarlo en un cron
-o GitHub Action en el futuro, no para el uso normal).
+`--apply` SÍ escribe en `ine_reference.py`, para las tablas
+PROVINCE_POPULATION, MUNICIPALITY_POPULATION, SEX_DISTRIBUTION,
+EDUCATION_LEVEL_DISTRIBUTION, NATIONALITY_DISTRIBUTION y
+MARITAL_STATUS_DISTRIBUTION/MARITAL_STATUS_BY_SEX (esta última con la
+guarda de `--force-tasa-paro` cuando aplica a SITUACION_LABORAL_DISTRIBUTION,
+ver más abajo). Actualiza también su fecha en `_LAST_VERIFIED` a hoy.
+Antes de escribir, imprime cada cambio concreto (clave, valor antiguo,
+valor nuevo) y pide confirmación por teclado, salvo que se pase `--yes`
+(pensado para automatizarlo en un cron o GitHub Action en el futuro, no
+para el uso normal).
 
-MARITAL_STATUS_DISTRIBUTION, NATIONALITY_DISTRIBUTION y
-SITUACION_LABORAL_DISTRIBUTION quedan DELIBERADAMENTE fuera de `--apply`,
-aunque sus IDs de tabla ya están confirmados: sus valores en
-`ine_reference.py` no son un volcado directo del INE, tienen razonamiento
-a mano en los comentarios (ver p. ej. MARITAL_STATUS_DISTRIBUTION, que
-combina dos encuestas distintas, o SITUACION_LABORAL_DISTRIBUTION, que
-usa una base de cálculo distinta a la tasa cruda de la EPA) que este
-script todavía no sabe recalcular -- aplicarlas sin ese paso de
-normalización antes introduciría un dato mal derivado en una herramienta
-que depende precisamente de la precisión de estos números. Automatizar
-esas tres es el siguiente paso pendiente, no algo ya resuelto aquí.
+(NOTA DE HISTORIAL, dejada a propósito: en una sesión anterior este
+mismo párrafo decía que --apply escribía "ÚNICAMENTE PROVINCE_POPULATION",
+desactualizado ya entonces frente al comportamiento real de `main()` --
+se corrige aquí de una vez, junto con la ampliación de esta sesión a
+MUNICIPALITY_POPULATION/SEX_DISTRIBUTION/EDUCATION_LEVEL_DISTRIBUTION,
+en vez de dejar crecer la lista de tablas nuevas sobre un docstring que
+ya se sabía incorrecto.)
+
+SITUACION_LABORAL_DISTRIBUTION SÍ se aplica con `--apply` (con la guarda
+de `--force-tasa-paro`), pero OCCUPATION_DISTRIBUTION y
+HOUSEHOLD_TYPE_DISTRIBUTION quedan DELIBERADAMENTE fuera salvo que se
+pase su propio `--force-*`: sus valores en `ine_reference.py` no son un
+volcado directo del INE, tienen razonamiento a mano en los comentarios
+que este script todavía no sabe recalcular del todo -- aplicarlos sin
+ese paso de normalización antes introduciría un dato mal derivado en una
+herramienta que depende precisamente de la precisión de estos números.
+
+SPORT_PRACTICE_DISTRIBUTION (+ sus 3 desgloses) y RAMA_ESTUDIOS_DISTRIBUTION
+quedan FUERA de este script por completo, no solo de `--apply`: su fuente
+real es el Ministerio de Educación/Deportes o de Ciencia/Universidades,
+no una tabla Tempus3 del INE (mismo tipo de fuente que STUDIES_DISTRIBUTION,
+que ya se delega a `update_studies_distribution.py`) -- ver el aviso que
+imprime `main()` para cada una. Automatizarlas seguiría el patrón de ese
+otro script (descarga de fichero del Ministerio), no el de este fichero.
 
 LIMITACIÓN IMPORTANTE, para que quede documentada y no se asuma más
 cobertura de la que hay: la API del INE (Tempus3, servicios.ine.es) exige
 conocer el ID numérico exacto de cada tabla (o, en el caso de tablas
 PC-Axis, su ruta exacta -- ver más abajo). Se han localizado por
-búsqueda web IDs/rutas candidatas para las siete tablas con fuente
-periódica conocida (población por provincia, estado civil, nacionalidad,
-tasas EPA, ocupación CNO-11, tipo de hogar ECH).
+búsqueda web IDs/rutas candidatas para las nueve tablas con fuente
+periódica conocida (población por provincia, población por municipio,
+reparto por sexo, estado civil, nacionalidad, tasas EPA, ocupación
+CNO-11, tipo de hogar ECH, nivel de formación EPA).
 
 BUG CORREGIDO (sesión posterior, a petición explícita de Nacho: "resuelve
 y busca por el bug de SITUACION_LABORAL_DISTRIBUTION"): la tasa de paro
@@ -397,6 +407,54 @@ _TABLA_OCUPACION_CNO11 = 65134
 # script con cuidado la primera vez que lo corras con esta tabla.
 _TABLA_HOGAR_TIPO = "t20/p274/serie/prov/p01/l0/01013.px"
 
+# --- Tablas añadidas en esta sesión (petición explícita de Nacho: "he
+# añadido nuevas tablas [a ine_reference.py] desde que hice este script,
+# quiero actualizarlo") -- las tres son candidatas SIN VERIFICAR contra
+# la API real (mismo motivo de siempre: sin acceso de red a
+# servicios.ine.es desde este entorno de trabajo), localizadas por
+# búsqueda web con el mismo método que las tablas anteriores (título
+# exacto + ficha de datos.gob.es con su "Identificador API").
+#
+# Deliberadamente NO se han añadido aquí SPORT_PRACTICE_DISTRIBUTION (+
+# sus 3 desgloses) ni RAMA_ESTUDIOS_DISTRIBUTION: ambas se citan en
+# ine_reference.py como fuente del MINISTERIO de Educación/Deportes o de
+# Ciencia/Universidades (Encuesta de Hábitos Deportivos, EEU), no de una
+# tabla Tempus3 del INE -- mismo tipo de fuente que STUDIES_DISTRIBUTION,
+# que ya se delega a `update_studies_distribution.py` (ficheros .xlsx
+# descargados del portal del Ministerio, no la API del INE). Añadirlas
+# aquí sería mezclar dos mecanismos de descarga distintos en el mismo
+# script sin necesidad; si en el futuro se quiere automatizar alguna de
+# esas dos, el patrón a seguir es el de `update_studies_distribution.py`,
+# no el de este fichero. RELIGION_DISTRIBUTION, ZODIAC_DISTRIBUTION,
+# SEXUAL_ORIENTATION_DISTRIBUTION, EYE/HAIR/SKIN_TONE_DISTRIBUTION
+# tampoco se tocan: su propio comentario en ine_reference.py ya deja
+# explícito que NO son cifras oficiales del INE (contextuales, de CIS/
+# comunidades religiosas/papers, o directamente uniformes), así que no
+# hay nada que "actualizar contra el INE" en ellas.
+
+# "Nivel de formación de la población adulta por grupos de edad.
+# CNED-2014" -- confirmada por su ficha en datos.gob.es
+# (https://datos.gob.es/es/catalogo/ea0010587-nivel-de-formacion-de-la-poblacion-adulta-por-grupos-de-edad-cned-2014-myh-identificador-api-12726),
+# que da el "Identificador API: 12726" tal cual y describe la tabla como
+# "Anual. Nacional. Mujeres y Hombres en España", con dimensiones que
+# incluyen (nombres truncados en la ficha) "Agrupaciones nivele[s...]"
+# (el nivel de formación) y "Educación secundari[a...]" -- coincide con
+# los 3 tramos que ya usa EDUCATION_LEVEL_DISTRIBUTION en ine_reference.py
+# (secundaria_o_inferior / secundaria_superior / superior), que cita esta
+# misma fuente ("INE/EPA... indicador 'Nivel de formación de la población
+# adulta'") en su comentario.
+_TABLA_NIVEL_FORMACION_EPA = 12726
+
+# "Cifras oficiales del Padrón por municipio. DPOP" -- confirmada por su
+# ficha en datos.gob.es
+# (https://datos.gob.es/en/catalogo/ea0042823-cifras-oficiales-del-padron-por-municipio-dpop-identificador-api-29005),
+# "Identificador API: 29005". Mismo tipo de tabla (Tempus3, geo por
+# MetaData) que _TABLA_POBLACION_PROVINCIAS, pero a nivel de MUNICIPIO en
+# vez de provincia/CCAA -- por eso es candidata para MUNICIPALITY_POPULATION,
+# no solo para PROVINCE_POPULATION (que ya usa la tabla 67988, distinta).
+_TABLA_POBLACION_MUNICIPIOS = 29005
+
+
 
 # El INE usa el nombre OFICIAL bilingüe actual para las provincias con
 # lengua cooficial (y alfabetiza poniendo el artículo detrás de una coma,
@@ -424,6 +482,31 @@ _INE_TO_CANONICAL_PROVINCE = {
     "rioja, la": "la rioja",
     "valencia/valencia": "valencia",
 }
+
+# Alias equivalente a _INE_TO_CANONICAL_PROVINCE, pero para
+# fetch_municipality_population. Dos entradas añadidas tras la SEGUNDA
+# ejecución real (Vicen): de los 24 municipios conocidos, "pamplona" y
+# "vitoria" fueron los únicos que no casaron ("no vino en la respuesta
+# del INE") -- son justo los dos con nombre oficial bilingüe/compuesto
+# (Pamplona/Iruña, Vitoria-Gasteiz), mismo tipo de caso que
+# _INE_TO_CANONICAL_PROVINCE ya resuelve para provincias como "Alicante/
+# Alacant". SIN CONFIRMAR todavía el formato EXACTO que usa el INE para
+# estos dos municipios en concreto (a diferencia de las provincias, que
+# ya se verificaron una por una) -- se cubren varias variantes plausibles
+# (orden castellano/co-oficial, co-oficial/castellano, con barra o con
+# guion) porque tener una entrada de más no hace daño (si no coincide
+# ningún `Nombre` real con esa clave, simplemente no se usa). Si en la
+# próxima ejecución real siguen sin casar, hace falta el `Nombre` real
+# tal cual lo devuelve la tabla 29005 para estos dos, no seguir
+# adivinando variantes a ciegas.
+_INE_TO_CANONICAL_MUNICIPALITY: dict[str, str] = {
+    "pamplona/iruna": "pamplona",
+    "iruna/pamplona": "pamplona",
+    "vitoria-gasteiz": "vitoria",
+    "vitoria/gasteiz": "vitoria",
+    "gasteiz/vitoria": "vitoria",
+}
+
 
 
 def _fetch_series(table_id: int | str) -> list[dict]:
@@ -704,7 +787,18 @@ def _latest_valor_por_nombre(series: list[dict]) -> dict[str, float]:
 # MetaData que no sea una de estas 4 es, por descarte, la variable
 # geográfica (nacional/CCAA/provincia), sin necesidad de asumir un nombre
 # fijo para ella (ver por qué en el docstring de la función).
-_NON_GEO_METADATA_VARS = {"Sexo", "Nacionalidad", "Totales de edad", "Tipo de dato"}
+_NON_GEO_METADATA_VARS = {"Sexo", "Nacionalidad", "Totales de edad", "Tipo de dato", "Tamaño de los municipios"}
+# "Tamaño de los municipios" añadida tras la primera ejecución real de
+# fetch_municipality_population (tabla 29005, Vicen): esa tabla trae esta
+# dimensión adicional (valor "Total habitantes" en el ejemplo real, ver
+# docstring de esa función más abajo) que fetch_population_by_province/
+# fetch_sex_distribution no tienen -- sin excluirla, el filtro "debe
+# haber exactamente 1 variable geográfica" encontraba 2 (Municipios +
+# esta) y descartaba las ~24.414 series completas, devolviendo un dict
+# vacío (síntoma real visto: "MUNICIPALITY_POPULATION... ine=(no vino en
+# la respuesta del INE)" en las 24 claves conocidas, todas). Añadirla
+# aquí es inofensivo para las otras tablas: si una serie no tiene esa
+# variable en su MetaData, tenerla en el set de exclusión no cambia nada.
 
 
 def fetch_population_by_province() -> dict[str, int]:
@@ -1080,6 +1174,251 @@ def fetch_household_type() -> dict[str, float]:
     series = _fetch_series(_TABLA_HOGAR_TIPO)
     result = _latest_valor_por_nombre(series)
     _warn_if_empty(_TABLA_HOGAR_TIPO, series, result)
+    return result
+
+
+def fetch_sex_distribution() -> dict[str, float]:
+    """Deriva SEX_DISTRIBUTION reutilizando la MISMA tabla 67988 que ya
+    usa `fetch_population_by_province` (_TABLA_POBLACION_PROVINCIAS,
+    población por CCAA/provincia y sexo) -- NO hace falta un ID de tabla
+    nuevo para esto. En vez de quedarse solo con Sexo=="Total" (lo que
+    hace esa otra función), aquí se leen ADEMÁS las filas Sexo="Hombres"/
+    "Mujeres" del agregado nacional, y se devuelven como proporción
+    sobre el total nacional.
+
+    CANDIDATO SIN VERIFICAR contra la API real (mismo motivo de siempre:
+    sin acceso de red a servicios.ine.es en este entorno) -- se asume
+    que la categoría de "Sexo" usa literalmente los textos "Hombres" y
+    "Mujeres" en el MetaData, con el mismo castellano llano que ya
+    confirmó la ejecución real para "Total"/"Todas las edades"/"Dato
+    base" en las otras 3 dimensiones de esta misma tabla (ver docstring
+    de `fetch_population_by_province`). Si la ejecución real muestra
+    otro texto (p. ej. "Varones" en vez de "Hombres"), ajustar aquí --
+    no hace falta tocar `fetch_population_by_province`, son funciones
+    independientes aunque comparten tabla."""
+    series = _fetch_series(_TABLA_POBLACION_PROVINCIAS)
+    total = hombres = mujeres = None
+    for serie in series:
+        metadata = serie.get("MetaData", [])
+        datos = serie.get("Data", [])
+        if not datos or not metadata:
+            continue
+
+        by_variable = {m.get("T3_Variable"): m.get("Nombre") for m in metadata}
+        if by_variable.get("Nacionalidad") != "Total":
+            continue
+        if by_variable.get("Totales de edad") != "Todas las edades":
+            continue
+        if by_variable.get("Tipo de dato") != "Dato base":
+            continue
+
+        geo_entries = [m for m in metadata if m.get("T3_Variable") not in _NON_GEO_METADATA_VARS]
+        if len(geo_entries) != 1:
+            continue
+        territorio = (geo_entries[0].get("Nombre") or "").strip()
+        if territorio != "Total Nacional":
+            continue  # solo el agregado nacional -- no una provincia/CCAA concreta
+
+        valor = _valor_mas_reciente(datos)
+        if valor is None:
+            continue
+        sexo = by_variable.get("Sexo")
+        if sexo == "Total":
+            total = valor
+        elif sexo == "Hombres":
+            hombres = valor
+        elif sexo == "Mujeres":
+            mujeres = valor
+
+    if total is None or hombres is None or mujeres is None:
+        print(
+            "  AVISO (SEX_DISTRIBUTION): no se encontraron las 3 filas nacionales "
+            "necesarias (Sexo=Total/Hombres/Mujeres) dentro de la tabla "
+            f"{_TABLA_POBLACION_PROVINCIAS} -- revisa si 'Hombres'/'Mujeres' usan otro "
+            "texto en el MetaData real (p. ej. 'Varones')."
+        )
+        return {}
+    return {"hombre": round(hombres / total, 3), "mujer": round(mujeres / total, 3)}
+
+
+# Fragmentos de texto (en minúsculas, sin tildes) que identifican cada
+# uno de los 3 tramos de EDUCATION_LEVEL_DISTRIBUTION dentro del
+# `Nombre` de una serie de la tabla 12726 -- CONFIRMADOS contra la
+# primera ejecución real (Vicen): el texto real es "...primera etapa..."
+# / "...segunda etapa..." / "...Educación superior..." tal cual, en
+# palabras completas -- NO "1ª etapa"/"2ª etapa" como se había asumido
+# sin verificar (esa era la abreviatura del comentario de
+# EDUCATION_LEVEL_DISTRIBUTION en ine_reference.py, no el texto literal
+# de esta tabla).
+_NIVEL_FORMACION_TO_APP_CATEGORY: list[tuple[str, str]] = [
+    ("primera etapa", "secundaria_o_inferior"),
+    ("segunda etapa", "secundaria_superior"),
+    ("superior", "superior"),
+]
+
+
+def fetch_education_level() -> dict[str, float]:
+    """Tabla 12726 (ver _TABLA_NIVEL_FORMACION_EPA más arriba) --
+    CONFIRMADA en la primera ejecución real (Vicen): cada serie se
+    identifica por su `Nombre` de texto libre, tal como se había
+    asumido (vía `_latest_valor_por_nombre`, mismo patrón que
+    fetch_marital_status/fetch_nationality/fetch_household_type).
+
+    AJUSTE sobre lo asumido originalmente: NO existe una fila agregada
+    de "ambos sexos" en esta tabla -- cada fila es de un único sexo
+    ("Hombres" o "Mujeres"), p. ej. 'De 25 a 64 años. Hombres. Total
+    Nacional. Porcentaje. Educación secundaria primera etapa.
+    Eurostat. ' -> 38.3. Por eso `_normalize_education_level` ya NO
+    filtra buscando "ambos sexos" (nunca aparece, se descartaba todo) --
+    en su lugar COMBINA las filas de Hombres y Mujeres ponderando por
+    SEX_DISTRIBUTION, la misma técnica que ya usa el comentario de
+    EDUCATION_LEVEL_DISTRIBUTION en ine_reference.py ("Combinado
+    ponderando por SEX_DISTRIBUTION") para explicar cómo se calcularon
+    a mano los valores actuales -- los números reales de esta tabla,
+    combinados así, dan 0.350/0.229/0.421 para el tramo 25-64 años,
+    prácticamente idénticos a los 0.3505/0.229/0.4205 ya en el código
+    (pequeña diferencia por ser una vintage de EPA más reciente).
+
+    Devuelve el `Nombre` -> valor crudo (%), SIN normalizar todavía a
+    las 3 claves de la app -- ver `_normalize_education_level` para eso."""
+    series = _fetch_series(_TABLA_NIVEL_FORMACION_EPA)
+    result = _latest_valor_por_nombre(series)
+    _warn_if_empty(_TABLA_NIVEL_FORMACION_EPA, series, result)
+    return result
+
+
+def _normalize_education_level(raw: dict[str, float], sex_distribution: dict[str, float]) -> dict[str, float] | None:
+    """Mapea los `Nombre` crudos de `fetch_education_level` a las 3
+    claves de EDUCATION_LEVEL_DISTRIBUTION: filtra al tramo "De 25 a 64
+    años" (la tabla también trae 25-34/35-44/45-54/55-64 por separado) y
+    al agregado "Total Nacional" (la tabla también trae desglose por
+    CCAA), y luego COMBINA las filas de Hombres/Mujeres de ese tramo
+    ponderando por `sex_distribution` -- ver el AJUSTE documentado en el
+    docstring de `fetch_education_level` sobre por qué no hay una fila
+    ya agregada de "ambos sexos" que se pudiera usar directamente.
+
+    `sex_distribution` se recibe como parámetro (no se importa
+    `ine_reference.SEX_DISTRIBUTION` directamente) para poder usar el
+    valor recién descargado en la MISMA ejecución (`fetch_sex_distribution`),
+    más fresco que el que hubiera en el código -- mismo motivo por el
+    que main() encadena estas dos llamadas en ese orden."""
+    valores_hombres: dict[str, float] = {}
+    valores_mujeres: dict[str, float] = {}
+    for nombre, valor in raw.items():
+        nombre_norm = ine_reference._strip_accents(nombre).lower()
+        if "de 25 a 64" not in nombre_norm:
+            continue  # solo el tramo estándar de adultos que usa EDUCATION_LEVEL_DISTRIBUTION
+        if "total nacional" not in nombre_norm:
+            continue  # descarta el desglose por CCAA -- solo interesa el agregado nacional
+
+        if "hombres" in nombre_norm:
+            destino = valores_hombres
+        elif "mujeres" in nombre_norm:
+            destino = valores_mujeres
+        else:
+            continue  # fila de un sexo no reconocido -- no debería pasar según el formato real ya confirmado
+
+        for fragmento, categoria in _NIVEL_FORMACION_TO_APP_CATEGORY:
+            if fragmento in nombre_norm:
+                destino[categoria] = valor
+                break
+
+    if not valores_hombres or not valores_mujeres:
+        return None  # falta un sexo entero -- no se puede ponderar, mejor no devolver un resultado a medias
+
+    peso_hombre = sex_distribution.get("hombre")
+    peso_mujer = sex_distribution.get("mujer")
+    if peso_hombre is None or peso_mujer is None:
+        return None
+
+    result: dict[str, float] = {}
+    for _fragmento, categoria in _NIVEL_FORMACION_TO_APP_CATEGORY:
+        if categoria not in valores_hombres or categoria not in valores_mujeres:
+            continue
+        combinado_pct = valores_hombres[categoria] * peso_hombre + valores_mujeres[categoria] * peso_mujer
+        result[categoria] = round(combinado_pct / 100, 4)  # el INE da %, la app usa proporción 0-1 (4 decimales, mismo formato que el código actual)
+
+    if not result:
+        return None
+    return result
+
+
+
+def fetch_municipality_population() -> dict[str, int]:
+    """Tabla 29005 (ver _TABLA_POBLACION_MUNICIPIOS más arriba) --
+    CONFIRMADA en la primera ejecución real (Vicen): la tabla existe y
+    responde, con 24.414 series para las combinaciones de municipio x
+    sexo x "Tamaño de los municipios" x tipo de dato. Mismo patrón de
+    parseo por `MetaData` que `fetch_population_by_province` (variable
+    geográfica identificada por descarte con `_NON_GEO_METADATA_VARS`,
+    no por un nombre de variable fijo) -- pero aquí la variable
+    geográfica es el MUNICIPIO, no la provincia/CCAA.
+
+    AJUSTADO tras esa misma ejecución real: la tabla trae una dimensión
+    extra que no tienen las de provincia/sexo, "Tamaño de los
+    municipios" (valor real visto: "Total habitantes") -- sin excluirla
+    de `_NON_GEO_METADATA_VARS`, el filtro de "1 sola variable
+    geográfica" encontraba 2 y descartaba TODO (0 municipios devueltos,
+    los 24 ya conocidos salían como "no vino en la respuesta del INE").
+    Ya está añadida a `_NON_GEO_METADATA_VARS`; aquí además se filtra
+    explícitamente por su valor ("Total habitantes"), por si la tabla
+    también trae series desglosadas por tramo de tamaño de municipio (p.
+    ej. "Menos de 1.000 habitantes") que NO se quieren mezclar con el
+    total real del municipio.
+
+    A diferencia de `fetch_population_by_province`, esta SOLO devuelve
+    los municipios que ya existen como clave en MUNICIPALITY_POPULATION
+    (ine_reference.py) -- esa tabla tiene miles de series (~8.000
+    municipios españoles) y su propio comentario ya dice "amplía según
+    necesites": añadir municipios nuevos es una decisión manual de
+    Nacho, no algo que este script deba imponer por su cuenta
+    ejecutándose sin supervisión.
+
+    LIMITACIÓN sin confirmar todavía: dado el volumen de esta tabla, una
+    sola petición con nult=1 puede tardar más que el timeout de 30s que
+    ya usa `_fetch_series` (compartido con tablas mucho más pequeñas) --
+    si la ejecución real da timeout, subir el timeout AQUÍ (con una
+    petición propia en vez de `_fetch_series`) antes de asumir que el ID
+    de tabla está mal."""
+    result: dict[str, int] = {}
+    claves_conocidas = set(ine_reference.MUNICIPALITY_POPULATION.keys())
+    series = _fetch_series(_TABLA_POBLACION_MUNICIPIOS)
+    for serie in series:
+        metadata = serie.get("MetaData", [])
+        datos = serie.get("Data", [])
+        if not datos or not metadata:
+            continue
+
+        by_variable = {m.get("T3_Variable"): m.get("Nombre") for m in metadata}
+        if by_variable.get("Sexo") != "Total":
+            continue
+        if by_variable.get("Tamaño de los municipios") != "Total habitantes":
+            continue  # descarta series por tramo de tamaño -- solo interesa el total real del municipio
+
+        geo_entries = [m for m in metadata if m.get("T3_Variable") not in _NON_GEO_METADATA_VARS]
+        if len(geo_entries) != 1:
+            continue
+        municipio = (geo_entries[0].get("Nombre") or "").strip()
+        if not municipio:
+            continue
+
+        clave = ine_reference._strip_accents(municipio).lower()
+        # Mismo tipo de alias que _INE_TO_CANONICAL_PROVINCE (nombre
+        # oficial bilingüe del INE vs. clave tradicional castellana ya
+        # usada en el código) -- vacío por ahora porque no se ha podido
+        # confirmar contra la API real qué municipios concretos de
+        # MUNICIPALITY_POPULATION lo necesitarían; si la ejecución real
+        # muestra municipios conocidos que no casan (p. ej. "Lleida" vs
+        # "lerida"), añadir el alias aquí, mismo patrón que esa otra tabla.
+        clave = _INE_TO_CANONICAL_MUNICIPALITY.get(clave, clave)
+        if clave not in claves_conocidas:
+            continue  # municipio no curado a mano en MUNICIPALITY_POPULATION -- se ignora a propósito, ver docstring
+
+        valor = _valor_mas_reciente(datos)
+        if valor is not None:
+            result[clave] = int(valor)
+
+    _warn_if_empty(_TABLA_POBLACION_MUNICIPIOS, series, result)
     return result
 
 
@@ -1735,6 +2074,101 @@ def _apply_nationality(normalized: dict[str, float], *, auto_confirm: bool) -> b
     return _confirm_and_write(changes, "NATIONALITY_DISTRIBUTION", lines, auto_confirm=auto_confirm)
 
 
+def _apply_sex_distribution(normalized: dict[str, float], *, auto_confirm: bool) -> bool:
+    lines = _INE_REFERENCE_PATH.read_text(encoding="utf-8").splitlines(keepends=True)
+    block = _locate_block(lines, lambda line: line.startswith("SEX_DISTRIBUTION = {"))
+    if block is None:
+        print("ERROR: no se encontró 'SEX_DISTRIBUTION = { ... }' -- no se ha tocado nada.")
+        return False
+    start, end = block
+    changes = _apply_float_block(lines, start, end, normalized)
+    if changes:
+        _update_last_verified(lines, "SEX_DISTRIBUTION")
+    return _confirm_and_write(changes, "SEX_DISTRIBUTION", lines, auto_confirm=auto_confirm)
+
+
+def _apply_education_level(normalized: dict[str, float], *, auto_confirm: bool) -> bool:
+    lines = _INE_REFERENCE_PATH.read_text(encoding="utf-8").splitlines(keepends=True)
+    block = _locate_block(lines, lambda line: line.startswith("EDUCATION_LEVEL_DISTRIBUTION = {"))
+    if block is None:
+        print("ERROR: no se encontró 'EDUCATION_LEVEL_DISTRIBUTION = { ... }' -- no se ha tocado nada.")
+        return False
+    start, end = block
+    # ndigits=4 (no el 3 por defecto): EDUCATION_LEVEL_DISTRIBUTION ya usa
+    # 4 decimales en el código (0.3505, 0.229, 0.4205) -- 3 dígitos
+    # redondearía y mostraría un "cambio" falso en cada ejecución aunque
+    # el INE no haya publicado nada nuevo.
+    changes = _apply_float_block(lines, start, end, normalized, ndigits=4)
+    if changes:
+        _update_last_verified(lines, "EDUCATION_LEVEL_DISTRIBUTION")
+    return _confirm_and_write(changes, "EDUCATION_LEVEL_DISTRIBUTION", lines, auto_confirm=auto_confirm)
+
+
+def _apply_municipality_population(fetched: dict[str, int], *, auto_confirm: bool) -> bool:
+    """Mismo enfoque que `_apply_province_population` (edita solo las
+    líneas `"clave": 1_234_567,` cuyo VALOR cambia, sin reordenar ni
+    reformatear el resto del bloque) -- reutiliza `_PROVINCE_LINE_RE`/
+    `_format_int_literal`, que a pesar del nombre no son específicos de
+    PROVINCE_POPULATION, sirven igual para cualquier bloque de claves
+    entre comillas con valor entero. Se ha preferido no generalizar
+    `_apply_province_population` en un único helper compartido en esta
+    misma sesión, para no arriesgar el comportamiento ya verificado de
+    esa función con una tabla que todavía es un candidato sin probar."""
+    lines = _INE_REFERENCE_PATH.read_text(encoding="utf-8").splitlines(keepends=True)
+
+    try:
+        start = next(i for i, line in enumerate(lines) if line.startswith("MUNICIPALITY_POPULATION = {"))
+        end = next(i for i in range(start + 1, len(lines)) if lines[i].rstrip("\n") == "}")
+    except StopIteration:
+        print("ERROR: no se encontró el bloque 'MUNICIPALITY_POPULATION = { ... }' en el fichero -- "
+              "¿ha cambiado el formato? Revisa a mano, no se ha tocado nada.")
+        return False
+
+    changes: list[tuple[int, str, str, str]] = []
+    for i in range(start + 1, end):
+        m = _PROVINCE_LINE_RE.match(lines[i].rstrip("\n"))
+        if not m:
+            continue
+
+        raw_key = m.group("key")
+        if not raw_key.startswith('"'):
+            continue  # MUNICIPALITY_POPULATION no usa identificadores como clave (a diferencia de PROVINCE_POPULATION/_CCAA_LA_RIOJA) -- se ignora, no debería pasar
+        clave = raw_key.strip('"')
+
+        nuevo_valor = fetched.get(clave)
+        if nuevo_valor is None:
+            continue  # este municipio no vino en la respuesta -- se deja el valor actual, no se borra
+
+        valor_actual = int(m.group("value").replace("_", ""))
+        if valor_actual == int(nuevo_valor):
+            continue
+
+        nueva_linea = (
+            f"{m.group('indent')}{raw_key}: {_format_int_literal(int(nuevo_valor))},{m.group('rest')}\n"
+        )
+        changes.append((i, clave, m.group("value"), _format_int_literal(int(nuevo_valor))))
+        lines[i] = nueva_linea
+
+    if not changes:
+        print("MUNICIPALITY_POPULATION: sin cambios que aplicar (ya coincide con el INE).")
+        return False
+
+    print(f"\nSe van a aplicar {len(changes)} cambios en MUNICIPALITY_POPULATION:")
+    for _i, clave, viejo, nuevo in changes:
+        print(f"  {clave}: {viejo} -> {nuevo}")
+
+    if not auto_confirm:
+        respuesta = input("\n¿Aplicar estos cambios de MUNICIPALITY_POPULATION a ine_reference.py? [s/N]: ").strip().lower()
+        if respuesta not in ("s", "si", "sí", "y", "yes"):
+            print("Cancelado -- no se ha escrito nada.")
+            return False
+
+    _update_last_verified(lines, "MUNICIPALITY_POPULATION")
+    _INE_REFERENCE_PATH.write_text("".join(lines), encoding="utf-8")
+    print(f"Escrito en {_INE_REFERENCE_PATH} -- revisa el diff con git antes de hacer commit.")
+    return True
+
+
 def _apply_marital_status(normalized: dict[str, float], *, auto_confirm: bool) -> bool:
     lines = _INE_REFERENCE_PATH.read_text(encoding="utf-8").splitlines(keepends=True)
     block = _locate_block(lines, lambda line: line.startswith("MARITAL_STATUS_DISTRIBUTION = {"))
@@ -1887,6 +2321,62 @@ def main() -> None:
     except httpx.HTTPError as e:
         print(f"ERROR al descargar población por provincia: {e}")
         _registrar("PROVINCE_POPULATION", "FALLO", f"error de descarga (HTTP): {e}")
+
+    try:
+        municipality_data = fetch_municipality_population()
+        _compare("MUNICIPALITY_POPULATION", ine_reference.MUNICIPALITY_POPULATION, municipality_data)
+        if args.apply:
+            escrito = _apply_municipality_population(municipality_data, auto_confirm=args.yes)
+            _registrar("MUNICIPALITY_POPULATION", "actualizada" if escrito else "sin cambios", "descarga y mapeo OK")
+        else:
+            _registrar("MUNICIPALITY_POPULATION", "comparada (sin --apply)", "descarga y mapeo OK")
+    except httpx.HTTPError as e:
+        print(f"ERROR al descargar población por municipio: {e}")
+        _registrar("MUNICIPALITY_POPULATION", "FALLO", f"error de descarga (HTTP): {e}")
+
+    sex_data: dict[str, float] = {}  # por si fetch_sex_distribution() lanza antes de asignar -- educacion_normalized necesita un valor con el que hacer fallback
+    try:
+        sex_data = fetch_sex_distribution()
+        if not sex_data:
+            _registrar("SEX_DISTRIBUTION", "FALLO", "fallo de mapeo -- no se encontraron las 3 filas nacionales esperadas (Total/Hombres/Mujeres)")
+        else:
+            _compare("SEX_DISTRIBUTION", ine_reference.SEX_DISTRIBUTION, sex_data)
+            if args.apply:
+                escrito = _apply_sex_distribution(sex_data, auto_confirm=args.yes)
+                _registrar("SEX_DISTRIBUTION", "actualizada" if escrito else "sin cambios", "descarga y mapeo OK")
+            else:
+                _registrar("SEX_DISTRIBUTION", "comparada (sin --apply)", "descarga y mapeo OK")
+    except httpx.HTTPError as e:
+        print(f"ERROR al descargar reparto por sexo: {e}")
+        _registrar("SEX_DISTRIBUTION", "FALLO", f"error de descarga (HTTP): {e}")
+
+    try:
+        educacion_raw = fetch_education_level()
+        # Usa el sexo recién descargado en ESTA misma ejecución si lo hay
+        # (más fresco); si SEX_DISTRIBUTION falló o vino vacío, cae al
+        # valor ya en el código en vez de no poder combinar nada.
+        sex_para_educacion = sex_data if sex_data else ine_reference.SEX_DISTRIBUTION
+        educacion_normalized = _normalize_education_level(educacion_raw, sex_para_educacion)
+        if educacion_normalized is None:
+            print(
+                "\n=== EDUCATION_LEVEL_DISTRIBUTION ===\n"
+                "  No se encontraron filas de Hombres Y Mujeres reconocibles para el "
+                "tramo 'De 25 a 64 años' / 'Total Nacional' -- revisa el formato real "
+                "con fetch_education_level() antes de ajustar el parseo de "
+                "_normalize_education_level()."
+            )
+            _mostrar_ejemplos_nombres(educacion_raw)
+            _registrar("EDUCATION_LEVEL_DISTRIBUTION", "FALLO", "fallo de mapeo -- formato de 'Nombre' no reconocido (¿estructura del INE cambiada?)")
+        else:
+            _compare("EDUCATION_LEVEL_DISTRIBUTION", ine_reference.EDUCATION_LEVEL_DISTRIBUTION, educacion_normalized)
+            if args.apply:
+                escrito = _apply_education_level(educacion_normalized, auto_confirm=args.yes)
+                _registrar("EDUCATION_LEVEL_DISTRIBUTION", "actualizada" if escrito else "sin cambios", "descarga y mapeo OK")
+            else:
+                _registrar("EDUCATION_LEVEL_DISTRIBUTION", "comparada (sin --apply)", "descarga y mapeo OK")
+    except httpx.HTTPError as e:
+        print(f"ERROR al descargar nivel de formación: {e}")
+        _registrar("EDUCATION_LEVEL_DISTRIBUTION", "FALLO", f"error de descarga (HTTP): {e}")
 
     try:
         marital_raw = fetch_marital_status()
@@ -2117,6 +2607,28 @@ def main() -> None:
     )
     _registrar("LANGUAGE_BY_CCAA", "sin fuente automática", "ECEPOV es puntual, sin equivalente anual conocido -- ver README")
 
+    print(
+        "\nSPORT_PRACTICE_DISTRIBUTION / SPORT_PRACTICE_BY_SEX / "
+        "SPORT_PRACTICE_BY_AGE_BAND / SPORT_PRACTICE_BY_EDUCATION_LEVEL: fuente "
+        "del Ministerio de Educación/Deportes (Encuesta de Hábitos Deportivos), "
+        "no del INE -- este script solo cubre tablas Tempus3 del INE. Revisar a "
+        "mano si hay una edición más reciente en estadisticas.deportes.gob.es."
+    )
+    for _tabla in (
+        "SPORT_PRACTICE_DISTRIBUTION",
+        "SPORT_PRACTICE_BY_SEX",
+        "SPORT_PRACTICE_BY_AGE_BAND",
+        "SPORT_PRACTICE_BY_EDUCATION_LEVEL",
+    ):
+        _registrar(_tabla, "sin fuente automática", "Ministerio de Educación/Deportes (CSD), no Tempus3 del INE -- ver README")
+
+    print(
+        "\nRAMA_ESTUDIOS_DISTRIBUTION: fuente del Ministerio de Ciencia/Universidades "
+        "(EEU), no del INE -- mismo tipo de fuente que STUDIES_DISTRIBUTION. Revisar a "
+        "mano, o extender update_studies_distribution.py si se automatiza."
+    )
+    _registrar("RAMA_ESTUDIOS_DISTRIBUTION", "sin fuente automática", "Ministerio de Ciencia/Universidades, no Tempus3 del INE -- ver README")
+
     # --- Tabla resumen final ---
     ancho_tabla = max(len(t) for t, _, _ in resultados)
     ancho_estado = max(len(e) for _, e, _ in resultados)
@@ -2124,12 +2636,25 @@ def main() -> None:
     print("RESUMEN")
     print("=" * 78)
     for tabla, estado, detalle in resultados:
-        marca = "✅" if estado in ("actualizada", "sin cambios") else "⚠️ " if estado in ("no aplicada", "omitida", "sin fuente automática") or estado.startswith("comparada") else "❌"
+        # "comparada (sin --apply)" significa que la descarga y el mapeo
+        # fueron bien -- lo único que falta es que el usuario pase
+        # --apply, no es un problema del propio dato. Nacho pidió
+        # explícitamente que esto cuente como éxito (check verde), no
+        # como aviso (triángulo amarillo) -- el amarillo se reserva para
+        # los estados que sí necesitan que alguien decida algo a mano
+        # ("no aplicada" por un aviso de plausibilidad que pide
+        # --force-*, "omitida" por --no-studies, "sin fuente automática").
+        if estado in ("actualizada", "sin cambios") or estado.startswith("comparada"):
+            marca = "✅"
+        elif estado in ("no aplicada", "omitida", "sin fuente automática"):
+            marca = "⚠️ "
+        else:
+            marca = "❌"
         print(f"{marca} {tabla.ljust(ancho_tabla)}  {estado.ljust(ancho_estado)}  {detalle}")
     print("=" * 78)
     n_fallo = sum(1 for _, e, _ in resultados if e == "FALLO")
-    n_ok = sum(1 for _, e, _ in resultados if e in ("actualizada", "sin cambios"))
-    print(f"{n_ok}/{len(resultados)} tablas OK, {n_fallo} con fallo real, el resto sin --apply/sin fuente/bloqueadas por un aviso de plausibilidad.")
+    n_ok = sum(1 for _, e, _ in resultados if e in ("actualizada", "sin cambios") or e.startswith("comparada"))
+    print(f"{n_ok}/{len(resultados)} tablas OK (descarga y mapeo correctos, con o sin --apply), {n_fallo} con fallo real, el resto necesita revisión manual (--force-*, --no-studies, o sin fuente automática).")
 
 
 if __name__ == "__main__":

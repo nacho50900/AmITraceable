@@ -29,13 +29,15 @@ from app.log.translation_log import log_translation_run
 from app.analysis_timing import run_with_timer, timed_stage
 from app.config import settings
 from app.instagram_client import InstagramClient
-from app.models.schemas import ExposureReport, SocialProfile, TranslateDescriptionsRequest
+from app.models.schemas import ExposureReport, RecalculateRequest, SocialProfile, TranslateDescriptionsRequest
 from app.nlp.attribute_inference import infer_attributes
 from app.nlp.fingerprint import build_fingerprint
 from app.progress import ProgressCallback, emit_progress
 from app.reddit_client import RedditClient
 from app.report.generator import generate_report
 from app.scoring.privacy_score import compute_score
+from app.scoring.k_anonymity import _apply_proportion, final_remaining_population, PopulationNarrowingStep
+from app.data.ine_reference import EYE_COLOR_DISTRIBUTION, HAIR_COLOR_DISTRIBUTION, SKIN_TONE_DISTRIBUTION, TOTAL_POPULATION_ES
 from app import stages
 
 router = APIRouter(prefix="/api", tags=["analysis"])
@@ -112,16 +114,37 @@ async def _build_report(
                 profile.posts, avatar_url=profile.avatar_url, progress_callback=progress_callback
             )
         )
-        # `asyncio.create_task` solo PROGRAMA la tarea -- no le cede el
-        # control de verdad. El resto de este bloque (build_fingerprint,
-        # infer_attributes, compute_score) es código SÍNCRONO que no hace
-        # ningún `await` real, así que sin este `sleep(0)` el event loop no
-        # tendría ninguna oportunidad de arrancar la tarea de fotos hasta
-        # que este bloque síncrono termine del todo -- el análisis de
-        # imágenes "empezaría en paralelo" solo de nombre, no en la
-        # práctica. Este yield explícito le da a la tarea su primer turno
-        # real (arranca la descarga de la primera foto) antes de seguir.
-        await asyncio.sleep(0)
+
+    # Igual criterio que geolocation_task arriba, pero SIN depender de la
+    # plataforma (funciona sobre cualquier profile.username) ni de fotos:
+    # comprobar el username en ~5000 sitios (ver ADR-44/ADR-48,
+    # app/osint/username_correlation.py) tarda del orden de minutos, así
+    # que se lanza YA, en paralelo con el resto del pipeline, en vez de
+    # esperar a que todo lo demás termine para empezar. Se recoge más
+    # adelante dentro de generate_report (parámetro
+    # `username_correlation_task`), igual que geolocation_task.
+    #
+    # Detrás de `settings.enable_username_correlation` (False por
+    # defecto, ver app/config.py) -- ni siquiera se importa el módulo si
+    # está desactivado, mismo criterio que `enable_scene_analysis`.
+    username_correlation_task: asyncio.Task | None = None
+    if settings.enable_username_correlation:
+        from app.osint.username_correlation import check_username_across_sites
+
+        username_correlation_task = asyncio.create_task(
+            check_username_across_sites(profile.username, progress_callback=progress_callback)
+        )
+
+    # `asyncio.create_task` solo PROGRAMA las tareas de arriba -- no les
+    # cede el control de verdad. El resto de este bloque (build_fingerprint,
+    # infer_attributes, compute_score) es código SÍNCRONO que no hace
+    # ningún `await` real, así que sin este `sleep(0)` el event loop no
+    # tendría ninguna oportunidad de arrancarlas hasta que este bloque
+    # síncrono termine del todo -- "empezarían en paralelo" solo de
+    # nombre, no en la práctica. Este yield explícito les da su primer
+    # turno real (arranca la descarga de la primera foto / la primera
+    # petición HTTP de la comprobación de cuentas) antes de seguir.
+    await asyncio.sleep(0)
 
     async with run_with_timer() as timer:
         if fetch_seconds is not None:
@@ -153,6 +176,7 @@ async def _build_report(
             full_name=profile.full_name,
             avatar_url=profile.avatar_url,
             geolocation_task=geolocation_task,
+            username_correlation_task=username_correlation_task,
         )
 
         total_seconds = time.monotonic() - pipeline_start + (fetch_seconds or 0.0)
@@ -176,7 +200,7 @@ async def _build_report(
             n_comments=n_comments,
             n_media_items=n_media_items,
             n_photos=n_photos,
-            ai_enabled=bool(settings.mistral_api_key),
+            ai_enabled=settings.ai_key_configured,
             scene_analysis_enabled=settings.enable_scene_analysis,
             geolocation_available=report.geolocation_available,
             total_seconds=total_seconds,
@@ -289,6 +313,94 @@ async def translate_descriptions(request: Annotated[TranslateDescriptionsRequest
             pass
 
     return {"translations": translations}
+
+
+@router.post("/analyze/recalculate", response_model=ExposureReport)
+async def recalculate_report(request: Annotated[RecalculateRequest, Body(...)]):
+    """
+    Recalcula el informe de exposición añadiendo los rasgos físicos manuales proporcionados.
+    Actualiza `population_narrowing` multiplicando las proporciones en cadena y
+    recalcula el `inferable_data_risk` dentro del score de privacidad.
+
+    NOTA: esta ruta estática DEBE registrarse antes que `/analyze/{platform}`
+    (justo debajo) -- FastAPI/Starlette resuelve las rutas en el orden en que
+    se registran, así que si `/analyze/{platform}` fuera antes, capturaría
+    "recalculate" como valor del parámetro `platform` y esta ruta nunca se
+    llegaría a ejecutar (404 "Plataforma no soportada: recalculate").
+    """
+    from app.models.schemas import InferredAttribute
+
+    report = request.report
+    manual_attributes = request.manual_attributes
+
+    if not manual_attributes:
+        return report
+
+    # 1. Añadir a inferred_attributes
+    new_inferred = []
+    for attr in manual_attributes:
+        new_inferred.append(InferredAttribute(
+            category=attr.category,
+            value=attr.value,
+            confidence=1.0,  # Autodeclaración manual es 100% fiable
+            evidence=[],
+        ))
+    report.inferred_attributes.extend(new_inferred)
+
+    # 2. Recalcular score (sólo inferable_data_risk se ve afectado)
+    weighted = sum(a.confidence for a in report.inferred_attributes)
+    inferable_data_risk = min((weighted / 6) * 100, 100.0)
+
+    old_score = report.privacy_score
+    overall = (
+        old_score.geolocation_risk * 0.35
+        + old_score.identity_consistency_risk * 0.0
+        + inferable_data_risk * 0.45
+        + old_score.deanonymization_ease * 0.20
+    )
+    report.privacy_score.inferable_data_risk = round(inferable_data_risk, 1)
+    report.privacy_score.overall_score = round(overall, 1)
+
+    # 3. Recalcular estrechamiento de población
+    steps = report.population_narrowing
+    last_remaining = final_remaining_population(steps)
+    remaining = float(last_remaining) if last_remaining is not None else float(TOTAL_POPULATION_ES)
+
+    for attr in manual_attributes:
+        proportion = None
+        label = ""
+        if attr.category == "color_ojos":
+            proportion = EYE_COLOR_DISTRIBUTION.get(attr.value)
+            label = f"Color de ojos: {attr.value.title()}"
+        elif attr.category == "color_pelo":
+            proportion = HAIR_COLOR_DISTRIBUTION.get(attr.value)
+            label = f"Color de pelo: {attr.value.title()}"
+        elif attr.category == "color_piel":
+            proportion = SKIN_TONE_DISTRIBUTION.get(attr.value)
+            label = f"Color de piel: {attr.value.title()}"
+
+        remaining, step = _apply_proportion(
+            remaining,
+            proportion,
+            label,
+            attr.category,
+            [],
+            source="manual",
+            note="Rasgo físico añadido manualmente. Proporción estimada contextualmente.",
+            note_code=None,
+            value_raw=attr.value,
+        )
+        if step:
+            steps.append(step)
+
+    report.population_narrowing = steps
+    report.remaining_population_all_traits = final_remaining_population(steps)
+    report.remaining_population_all_traits_proportion = (
+        report.remaining_population_all_traits / TOTAL_POPULATION_ES
+        if report.remaining_population_all_traits is not None else None
+    )
+
+    return report
 
 
 @router.post(

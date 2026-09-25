@@ -21,7 +21,7 @@ describe('Landing', () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: false });
 
     const { container } = render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter>
         <Landing />
       </MemoryRouter>,
     );
@@ -47,7 +47,7 @@ describe('Landing', () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: false });
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter>
         <Landing />
       </MemoryRouter>,
     );
@@ -67,7 +67,7 @@ describe('Landing', () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: false });
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter>
         <Landing />
       </MemoryRouter>,
     );
@@ -83,7 +83,7 @@ describe('Landing', () => {
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: false });
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter>
         <Landing />
       </MemoryRouter>,
     );

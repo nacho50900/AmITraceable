@@ -3,10 +3,24 @@ from datetime import datetime, timezone
 import pytest
 
 from app import stages
+from app.config import settings
 from app.models.schemas import InferredAttribute, PrivacyScore, SocialPost, WritingFingerprint
 from app.report import generator
 from app.report.generator import _build_recommendations, generate_report
 from app.vision import geolocation
+
+
+@pytest.fixture(autouse=True)
+def enable_ai_analysis(monkeypatch):
+    """Varios tests de este archivo activan la IA y mockean
+    `generator.extract_demographics_with_ai` directamente (sin pasar por
+    el modelo real) -- pero `_apply_ai_findings` en generator.py comprueba
+    `settings.ai_key_configured`, que desde el cambio a Qwen3.5-4B local
+    exige `enable_ai_analysis=True` y un `qwen_gguf_repo_id` no vacío (ver
+    app/config.py) en vez de una API key de proveedor -- mismo criterio
+    que en tests/test_ai_analysis.py y tests/test_ai_attribute_extraction.py."""
+    monkeypatch.setattr(settings, "enable_ai_analysis", True)
+    monkeypatch.setattr(settings, "qwen_gguf_repo_id", "fake/repo")
 
 
 def _post(i: int = 1, platform="reddit", media_urls=None, post_type="post", permalink: str | None = None, text: str | None = None) -> SocialPost:
@@ -177,6 +191,93 @@ class TestGenerateReportPlatformBranching:
         assert points_by_link["https://ig/carousel?img_index=1"].visual_description_general == "a person at a beach"
         assert points_by_link["https://ig/carousel?img_index=2"].visual_description == "Personas en la foto: varias"
         assert points_by_link["https://ig/carousel?img_index=2"].visual_description_general == "two people at a restaurant"
+
+    @pytest.mark.asyncio
+    async def test_carousel_photos_get_their_own_visual_description_codes_by_photo_link(self, monkeypatch):
+        """ADR-30: visual_description_codes se busca por photo_link, EXACTAMENTE
+        igual que visual_description/visual_description_general (test de
+        arriba) -- mismo bug de carrusel posible si se buscara por
+        permalink en su lugar. También comprueba la conversión del
+        dataclass interno de scene_analysis.py al modelo Pydantic de
+        schemas.py (_to_visual_description_codes_schema)."""
+        from app.vision.scene_analysis import VisualDescriptionCodes as InternalCodes
+
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[
+                    (
+                        "https://ig/carousel",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.5, k_neighbors=15, mean_similarity=0.6,
+                            photo_link="https://ig/carousel?img_index=1",
+                        ),
+                    ),
+                    (
+                        "https://ig/carousel",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.5, k_neighbors=15, mean_similarity=0.6,
+                            photo_link="https://ig/carousel?img_index=2",
+                        ),
+                    ),
+                ],
+                visual_description_codes={
+                    "https://ig/carousel?img_index=1": InternalCodes(
+                        personas="una", aficion="playa", texto_visible=None, matricula=None, indicio_pareja=False
+                    ),
+                    "https://ig/carousel?img_index=2": InternalCodes(
+                        personas="varias", aficion=None, texto_visible="Restaurante Los Olivos",
+                        matricula=None, indicio_pareja=True
+                    ),
+                },
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+
+        report = await generate_report(
+            "instagram", "user",
+            [_post(platform="instagram", permalink="https://ig/carousel", media_urls=["https://cdn/1.jpg", "https://cdn/2.jpg"])],
+            _fingerprint(), [], _score(),
+        )
+
+        points_by_link = {p.permalink: p for p in report.image_location_points}
+        codes_1 = points_by_link["https://ig/carousel?img_index=1"].visual_description_codes
+        codes_2 = points_by_link["https://ig/carousel?img_index=2"].visual_description_codes
+        assert codes_1 is not None and codes_1.personas == "una" and codes_1.aficion == "playa"
+        assert codes_1.indicio_pareja is False
+        assert codes_2 is not None and codes_2.personas == "varias" and codes_2.texto_visible == "Restaurante Los Olivos"
+        assert codes_2.indicio_pareja is True
+
+    @pytest.mark.asyncio
+    async def test_visual_description_codes_none_when_absent(self, monkeypatch):
+        """Sin codes para una foto (modelo no disponible, fallo...),
+        visual_description_codes debe salir None -- no reventar ni dejar
+        un objeto vacío que el frontend interprete como "sí hay señales"."""
+
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[
+                    (
+                        "https://ig/1",
+                        geolocation.ImageLocationEstimate(
+                            province="Madrid", confidence=0.5, k_neighbors=15, mean_similarity=0.6,
+                            photo_link="https://ig/1",
+                        ),
+                    ),
+                ],
+                visual_description_codes={},
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+
+        report = await generate_report(
+            "instagram", "user",
+            [_post(platform="instagram", permalink="https://ig/1", media_urls=["https://cdn/1.jpg"])],
+            _fingerprint(), [], _score(),
+        )
+
+        assert report.image_location_points[0].visual_description_codes is None
 
     @pytest.mark.asyncio
     async def test_image_location_points_include_the_post_publication_date(self, monkeypatch):
@@ -814,6 +915,48 @@ class TestGenerateReportProgress:
         assert len(report.image_location_points) == 1
 
 
+class TestUsernameCorrelationReachesTheReport:
+    """`generate_report` recoge `username_correlation_task` (ver ADR-44/
+    ADR-48, app/osint/username_correlation.py) igual que geolocation_task
+    -- ver TestGenerateReportProgress arriba para el mismo patrón."""
+
+    @pytest.mark.asyncio
+    async def test_related_accounts_is_none_without_the_task(self, monkeypatch):
+        async def _no_images(*args, **kwargs):
+            return geolocation.GeolocationOutcome(index_available=False, results=[])
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _no_images)
+
+        report = await generate_report("reddit", "user", [_post()], _fingerprint(), [], _score())
+
+        assert report.related_accounts is None
+
+    @pytest.mark.asyncio
+    async def test_related_accounts_keeps_only_found_sites(self, monkeypatch):
+        import asyncio
+
+        from app.osint.username_correlation import UsernameSiteResult
+
+        async def _fake_check():
+            return [
+                UsernameSiteResult(site="GitHub", url="https://github.com/user", exists=True),
+                UsernameSiteResult(site="GitLab", url="https://gitlab.com/user", exists=False),
+                UsernameSiteResult(site="SitioCaido", url="https://sitiocaido.test/user", exists=None),
+                UsernameSiteResult(site="Keybase", url="https://keybase.io/user", exists=True),
+            ]
+
+        task = asyncio.create_task(_fake_check())
+        report = await generate_report(
+            "reddit", "user", [_post()], _fingerprint(), [], _score(),
+            username_correlation_task=task,
+        )
+
+        assert report.related_accounts is not None
+        assert report.related_accounts.total_sites_checked == 4
+        assert {m.site for m in report.related_accounts.matches} == {"GitHub", "Keybase"}
+        assert all(m.exists is True for m in report.related_accounts.matches)
+
+
 class TestBuildRecommendations:
     def test_high_geolocation_risk_produces_specific_recommendation(self):
         recs = _build_recommendations(_fingerprint(), [], _score(geolocation_risk=31))
@@ -869,7 +1012,6 @@ class TestSoftInferencesReachTheReport:
         from app.config import settings
         from app.nlp.demographic_extraction import DemographicFindings
 
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
 
         async def _fake_ai_extraction(posts, username, full_name=None, bio=None):
             findings = DemographicFindings()
@@ -899,10 +1041,10 @@ class TestSoftInferencesReachTheReport:
         assert "pareja" in soft.value.lower()
 
     @pytest.mark.asyncio
-    async def test_without_mistral_api_key_no_soft_inferences_are_added(self, monkeypatch):
+    async def test_without_ai_analysis_enabled_no_soft_inferences_are_added(self, monkeypatch):
         from app.config import settings
 
-        monkeypatch.setattr(settings, "mistral_api_key", None)
+        monkeypatch.setattr(settings, "enable_ai_analysis", False)
 
         report = await generate_report(
             "instagram", "user", [_post(platform="instagram")], _fingerprint(), [], _score(),
@@ -919,7 +1061,6 @@ class TestSoftInferencesReachTheReport:
         from app.config import settings
         from app.nlp.demographic_extraction import DemographicFindings
 
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
 
         async def _fake_ai_extraction(posts, username, full_name=None, bio=None):
             return DemographicFindings(
@@ -1015,7 +1156,6 @@ class TestVisualAnalysisReachesTheReport:
         from app.config import settings
         from app.nlp.demographic_extraction import DemographicFindings
 
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
 
         async def _fake_ai_extraction(posts, username, full_name=None, bio=None):
             return DemographicFindings(

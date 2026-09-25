@@ -104,7 +104,7 @@ class PrivacyScore(BaseModel):
 
 class PopulationEstimate(BaseModel):
     attribute_label: str  # p.ej. "Sexo: mujer", "Vive en municipio: Leon"
-    category: str  # sexo | edad | ubicacion | estudios | ocupacion | universidad | empresa
+    category: str  # sexo | edad | ubicacion | estudios | nivel_estudios | rama_estudios | ocupacion | universidad | empresa
     remaining_population: int | None  # None si no estimable con las tablas actuales
     risk_level: str  # bajo | medio | alto | critico | no_estimable
     evidence: list[str]
@@ -155,12 +155,24 @@ class VisualDescriptionCodes(BaseModel):
     español de `visual_description` -- `personas` (cerrado: "una"/
     "varias") vía i18n propio del frontend, `aficion` (semi-libre) vía
     `/analyze/translate-descriptions` solo si la UI no está en español, y
-    `texto_visible` NUNCA se traduce (es texto literal leído de la foto)."""
+    `texto_visible`/`matricula` NUNCA se traducen (texto literal leído de
+    la foto -- `matricula` además ya viene validada por formato, ver
+    `_parse_matricula` en scene_analysis.py, así que solo llega aquí si
+    tiene forma de matrícula española real). `edificio_emblematico`
+    (añadido después) TAMPOCO se traduce nunca -- es un nombre propio,
+    no vocabulario cerrado ni frase semi-libre -- y, a diferencia de
+    `matricula`, no tiene validación de formato posible: solo llega
+    hasta aquí filtrado por `_EDIFICIO_EMBLEMATICO_INVALID_VALUES`
+    (ruido genérico obvio), no confirmado como un lugar real -- esa
+    confirmación (vía el modelo de IA local) vive en app/vision/landmark_resolution.py,
+    fuera de este módulo."""
 
     personas: str | None = None
     aficion: str | None = None
     texto_visible: str | None = None
+    matricula: str | None = None
     indicio_pareja: bool = False
+    edificio_emblematico: str | None = None
 
 
 class ImageLocationPoint(BaseModel):
@@ -202,7 +214,7 @@ class ImageLocationPoint(BaseModel):
     # bloquea el resto del análisis).
     #
     # Al formar parte de este modelo, se incluye automáticamente en el JSON
-    # completo del informe que ai_analysis.py le manda a Mistral para las
+    # completo del informe que ai_analysis.py le manda al modelo de IA local para las
     # conclusiones finales -- sin necesitar ningún cambio ahí.
     visual_description: str | None = None
     # Descripción GENERAL de la escena (campo DESCRIPCION del prompt de
@@ -218,10 +230,36 @@ class ImageLocationPoint(BaseModel):
     # Mismas señales que `visual_description`, pero SIN formatear a texto
     # en español -- ver VisualDescriptionCodes arriba y ADR-30.
     # `visual_description` (arriba) se mantiene intacto y sin tocar: sigue
-    # siendo lo que ve Mistral en app/ai_analysis.py y lo que se muestra
+    # siendo lo que ve el modelo de IA local en app/ai_analysis.py y lo que se muestra
     # en la vista de detalle en español. Este campo es ADITIVO, pensado
     # solo para que el frontend pueda traducir sin depender de ese texto.
     visual_description_codes: VisualDescriptionCodes | None = None
+
+
+class UsernameSiteMatch(BaseModel):
+    """Resultado de comprobar el username en UN sitio (ver
+    app/osint/username_correlation.py::UsernameSiteResult -- mismos campos,
+    version Pydantic para poder devolverse en JSON)."""
+
+    site: str
+    url: str
+    # None = no se pudo determinar (timeout, bloqueo anti-bot, codigo de
+    # estado inesperado) -- distinto de False ("se comprobo y no existe").
+    exists: bool | None
+
+
+class UsernameCorrelationSummary(BaseModel):
+    """Resumen embebido en ExposureReport.related_accounts (ver ADR-44 y
+    ADR-48 en 09_architecture_decisions.adoc). `matches` SOLO incluye los
+    sitios con `exists=True` -- de los ~5000 sitios comprobados, la
+    inmensa mayoria son "no existe" y no aportan nada que mostrar; el
+    informe no es el sitio para una lista de 5000 negativos. Si se quiere
+    el detalle completo (incluidos los `None` no concluyentes), ese es el
+    trabajo de `POST /api/username-correlation` (app/osint_router.py),
+    que sigue existiendo aparte para uso independiente/interactivo."""
+
+    total_sites_checked: int
+    matches: list[UsernameSiteMatch]
 
 
 class ExposureReport(BaseModel):
@@ -267,6 +305,12 @@ class ExposureReport(BaseModel):
     # expone), para identificar visualmente de quién es el informe en el
     # título del dashboard. Solo la URL -- ver nota en SocialProfile.
     avatar_url: str | None = None
+    # Cuentas con el MISMO username encontradas en otros sitios (ver
+    # ADR-44/ADR-48, app/osint/username_correlation.py) -- solo existencia
+    # de cuenta, nunca contenido de esas cuentas. None si la comprobación
+    # no llegó a ejecutarse (p. ej. tests que llaman a generate_report
+    # directamente sin pasar username_correlation_task).
+    related_accounts: UsernameCorrelationSummary | None = None
 
 
 class TranslateDescriptionsRequest(BaseModel):
@@ -278,3 +322,31 @@ class TranslateDescriptionsRequest(BaseModel):
     traducir al idioma pedido por query param `lang`."""
 
     texts: list[str]
+
+
+class ManualAttribute(BaseModel):
+    category: str
+    value: str
+
+
+class RecalculateRequest(BaseModel):
+    report: ExposureReport
+    manual_attributes: list[ManualAttribute]
+
+
+class UsernameCorrelationRequest(BaseModel):
+    """Cuerpo de `POST /api/username-correlation` (ver app/osint_router.py)."""
+
+    username: str
+
+
+class UsernameCorrelationReport(BaseModel):
+    """Respuesta de `POST /api/username-correlation`. `matches` solo
+    contiene existencia de cuenta por sitio -- nunca contenido de esas
+    cuentas (bio, avatar, publicaciones), ver docstring de
+    app/osint/username_correlation.py sobre el alcance deliberadamente
+    acotado."""
+
+    username: str
+    matches: list[UsernameSiteMatch]
+    checked_at: datetime

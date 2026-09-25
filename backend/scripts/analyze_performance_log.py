@@ -135,6 +135,29 @@ def load_log(path: Path = _LOG_PATH) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = pd.NA
 
+    # `moondream_model_variant` (ver scene_analysis.get_model_variant()):
+    # ausente en líneas grabadas antes de este campo. A diferencia de las
+    # columnas de _NUMERIC_COLS_DEFAULT_NA, aquí SÍ se puede rellenar con
+    # certeza para las líneas ANTIGUAS (mismo criterio `era` de arriba,
+    # que ya distingue esto de forma fiable): antes de que este campo
+    # existiera, el único modelo que este proyecto cargaba era
+    # "vikhyatk/moondream2" (bf16) -- el backend GGUF/llama.cpp se
+    # introdujo junto con este mismo campo, así que ninguna línea antigua
+    # puede ser del GGUF por construcción.
+    #
+    # IMPORTANTE: no se puede rellenar así sin más para TODAS las filas
+    # con valor nulo -- a diferencia de las columnas numéricas de arriba,
+    # este campo puede ser `None` de forma LEGÍTIMA en líneas NUEVAS
+    # (`enable_scene_analysis=False`, Moondream nunca se cargó ese
+    # análisis -- ver `get_model_variant()`), y un relleno ciego
+    # etiquetaría esas líneas como bf16 sin haberse cargado modelo
+    # ninguno. Por eso el relleno se limita a `era == "antiguo"`.
+    if "moondream_model_variant" not in df.columns:
+        df["moondream_model_variant"] = pd.NA
+    old_and_missing = (df["era"] == "antiguo") & df["moondream_model_variant"].isna()
+    if old_and_missing.any():
+        df.loc[old_and_missing, "moondream_model_variant"] = "vikhyatk/moondream2"
+
     return df
 
 
@@ -208,8 +231,17 @@ def summarize(df: pd.DataFrame) -> pd.DataFrame:
             "threads_per_inference",
             "enable_scene_analysis",
             "igpu_offload_used",
+            # Separa bf16 (vikhyatk/moondream2) del backend GGUF/llama.cpp
+            # actual -- ver scene_analysis.get_model_variant() y el
+            # comentario de load_log() sobre por qué sin esto ambas
+            # variantes se mezclarían en la misma fila pese a no ser
+            # comparables directamente (era justo lo que pasaba antes de
+            # este cambio: media_moondream_seg mezclando ambos backends
+            # sin ninguna columna que lo delatara).
+            "moondream_model_variant",
         ],
         as_index=False,
+        dropna=False,
     ).agg(
         analisis=("total_photos", "count"),
         fotos_totales=("total_photos", "sum"),

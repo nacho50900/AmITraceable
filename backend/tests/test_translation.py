@@ -28,7 +28,6 @@ def reset_translation_caches(monkeypatch):
     monkeypatch.setattr(translation, "_translators", {})
     monkeypatch.setattr(translation, "_source_tokenizers", {})
     monkeypatch.setattr(translation, "_target_tokenizers", {})
-    yield
 
 
 def _make_fake_model_dir(tmp_path, direction: str):

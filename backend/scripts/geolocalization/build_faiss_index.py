@@ -5,11 +5,11 @@ vecinos más cercanos (reverse image search geográfico).
 
 Uso:
     pip install torch transformers faiss-cpu pillow tqdm pandas numpy
-    python build_faiss_index.py --images ../data/osv5m_spain
+    python build_faiss_index.py --images ../../data/osv5m_spain
 
 Salida:
-    ../data/osv5m_spain/index.faiss       (índice FAISS)
-    ../data/osv5m_spain/index_meta.csv    (mismo orden que el índice: id, lat, lon, city, region)
+    ../../data/osv5m_spain/index.faiss       (índice FAISS)
+    ../../data/osv5m_spain/index_meta.csv    (mismo orden que el índice: id, lat, lon, city, region)
 
 Nota: usa ViT-S/14 (la versión más pequeña de DINOv2, ~340MB) para que sea
 viable en CPU. Si tienes GPU con CUDA, este script la detecta y usa
@@ -104,7 +104,7 @@ def _normalize_columns(metadata: pd.DataFrame) -> pd.DataFrame:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--images", default="../data/osv5m_spain")
+    parser.add_argument("--images", default="../../data/osv5m_spain")
     args = parser.parse_args()
 
     base_dir = Path(args.images)

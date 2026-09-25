@@ -83,7 +83,8 @@ backend/app/
 │   ├── attribute_inference.py      - Inferencia de atributos por comunidad/hashtag
 │   ├── demographic_extraction.py   - Declaraciones explícitas en texto (edad, sexo,
 │   │                                  ubicación -- municipio/provincia/comunidad autónoma --,
-│   │                                  estudios, ocupación, universidad, empresa), por regex
+│   │                                  estudios, nivel de estudios, práctica deportiva,
+│   │                                  ocupación, universidad, empresa), por regex
 │   ├── ai_attribute_extraction.py  - Lo mismo, vía IA (Mistral, opcional) -- complementa
 │   │                                  a la regex, nunca la sustituye; también marca fotos
 │   │                                  "de viaje" (ver travel_detection.py)
@@ -200,6 +201,28 @@ del mismo análisis:
   principal: recibe un `ExposureReport` ya generado y lo reenvía a
   `ai_analysis.py`. Se dispara automáticamente desde el frontend en
   cuanto el informe está listo, sin acción explícita del usuario.
+* `POST /api/analyze/recalculate` -- recibe un `ExposureReport` ya
+  generado más una lista de `ManualAttribute` (rasgos físicos que la
+  ley de protección de datos impide inferir automáticamente: color de
+  ojos/pelo/piel -- ver ADR-34 y `PopulationNarrowingTable.tsx` en la
+  vista de `webapp` más abajo) y devuelve el mismo informe con esos
+  rasgos añadidos a `inferred_attributes`, el `population_narrowing`
+  encadenado con las nuevas proporciones (`data/ine_reference.py`:
+  `EYE_COLOR_DISTRIBUTION`, `HAIR_COLOR_DISTRIBUTION`,
+  `SKIN_TONE_DISTRIBUTION`) y `privacy_score.inferable_data_risk`/
+  `overall_score` recalculados. Reutiliza `_apply_proportion` y
+  `final_remaining_population` de `scoring/k_anonymity.py`, la misma
+  lógica que usa el pipeline automático -- evita duplicar las tablas
+  del INE ni el cálculo de k-anonimato en el frontend.
++
+IMPORTANT: esta ruta está registrada **antes** que
+`POST /api/analyze/{platform}` en el código fuente. FastAPI/Starlette
+resuelve las rutas en el orden de registro: si `{platform}` fuera
+antes, capturaría el literal `"recalculate"` como valor de ese
+parámetro y la ruta de recalculo nunca se alcanzaría (404 encubierto,
+"Plataforma no soportada: recalculate"). Cualquier ruta estática nueva
+bajo `/analyze/` debe declararse antes que la ruta paramétrica por el
+mismo motivo.
 
 Interfaces::
 Ver arriba. Todos documentados con sus posibles códigos de respuesta en
@@ -256,6 +279,45 @@ rellenan `ai_attribute_extraction.py` (razonamiento simbólico sobre
 texto) o `report/generator.py` (señal de pareja detectada en fotos, ver
 `vision/scene_analysis.py`) -- este módulo solo define el campo para que
 ambos tengan un sitio común donde escribirlo.
+
+`practica_deportiva` (41 modalidades, `_SPORT_PRACTICE_RE`) exige una
+frase-ancla de PRÁCTICA en primera persona ("juego al...", "hago...",
+"practico...") -- una simple mención del deporte ("vi el partido de
+fútbol") no cuenta, es mucho más frecuente en redes sociales que una
+autodeclaración real y colaría un falso positivo. Cuando la frase-ancla
+de una modalidad es literalmente un PREFIJO de la de otra ("tenis"
+dentro de "tenis de mesa", "fútbol" dentro de "fútbol sala", "esquí"
+dentro de "esquí náutico"), el orden de alternancia del regex importa:
+la más específica va siempre primero, o la más genérica capturaría el
+match antes de llegar a probar la correcta.
+
+`nivel_estudios` (superior / secundaria_superior / secundaria_o_inferior,
+clasificación CNED-2014/ISCED del INE) es DISTINTO de `estudios` (la
+carrera universitaria concreta, más abajo): exige haber COMPLETADO ese
+nivel ("tengo el bachillerato", no "estoy estudiando bachillerato"), y
+se infiere automáticamente como `superior` si `estudios` ya detectó una
+carrera nombrada, sin necesitar su propia frase-ancla. Los Ciclos
+Formativos de FP son el caso delicado: un Grado SUPERIOR cuenta como
+`superior` (nivel 5 en la clasificación del INE, igual que la
+universidad), mientras que un Grado MEDIO cae en
+`secundaria_superior` -- de ahí que las frases-ancla exijan
+"superior"/"medio" explícito en vez de un "ciclo formativo" genérico
+sin cualificar.
+
+`rama_estudios` (Ciencias Sociales y Jurídicas / Ingeniería y
+Arquitectura / Ciencias de la Salud / Artes y Humanidades / Ciencias,
+clasificación oficial del RD 1393/2007) es DISTINTO de ambos: ni el
+nivel alcanzado ni la carrera concreta, sino la categoría amplia a la
+que pertenece esa carrera (ver ADR-40). Se infiere automáticamente vía
+`STUDIES_TO_RAMA` cuando `estudios` ya detectó una de las 14 carreras
+con proporción propia, pero también tiene su propio vocabulario
+AMPLIADO (~25 carreras más: sociología, filología, física...) que
+reutiliza la misma frase-ancla que `estudios` (`_STUDY_VERB_RE`) contra
+un diccionario más amplio, para cubrir carreras que `estudios` no tiene
+registradas individualmente. Cuando una carrera queda contenida como
+substring de otra ("quimica" dentro de "ingenieria quimica", "historia"
+dentro de "historia del arte"), aplica la misma regla de orden que
+`_SPORT_PRACTICE_RE`: la más específica se comprueba primero.
 
 Ubicación::
 `backend/app/nlp/demographic_extraction.py`.
@@ -362,9 +424,10 @@ población en España comparte esa combinación de características (ver
 <<section-concepts>>, "Estimación de k-anonimato sin base de datos
 sintética"). Devuelve una cascada de pasos (`PopulationNarrowingStep`)
 con la población restante, nivel de riesgo, fuente (texto / imagen / ia
-/ ia_nombre / ia_simbolica) y la proporción ya calculada sobre el total
-de España (para que el frontend pueda representarla visualmente sin
-conocer esa constante). Cada paso incluye además `reduction_percent`
+/ ia_nombre / ia_simbolica / **manual** -- ver más abajo) y la
+proporción ya calculada sobre el total de España (para que el frontend
+pueda representarla visualmente sin conocer esa constante). Cada paso
+incluye además `reduction_percent`
 -- cuánto reduce ESE rasgo concreto la población restante respecto al
 paso anterior de la cadena (no el porcentaje acumulado desde el
 principio) -- que la tabla de estrechamiento de población muestra junto
@@ -386,6 +449,57 @@ se muestra al final del informe ("En España hay X personas que comparten
 tus rasgos"). Se queda con el `remaining_population` del último escalón
 encadenable que sí se pudo estimar, aprovechando que cada escalón ya
 lleva el acumulado de los anteriores.
+
+El paso de `practica_deportiva` (41 modalidades, ver ADR-37) consulta
+OTROS campos de `findings` además del suyo propio (no es el único, ver
+`rama_estudios` más abajo): si ya se conoce sexo, edad o nivel_estudios,
+usa la proporción de esa combinación concreta
+(`SPORT_PRACTICE_BY_SEX`/`BY_AGE_BAND`/`BY_EDUCATION_LEVEL` en
+`ine_reference.py`, tabla 1.22 de la encuesta) en vez de la marginal sin
+distinguir. Prueba las tres en cascada -- sexo > edad > nivel_estudios --
+y usa la PRIMERA que esté disponible y tenga dato para esa combinación
+concreta; nunca combina dos ajustes a la vez (no existe un cruce a
+cuatro bandas simultáneo en la encuesta, solo tres cruces independientes
+de a uno). Un rango de edad declarado que cruza la frontera entre dos
+tramos de la encuesta (`_sport_age_band`) no se puede asignar a ninguno
+sin adivinar, así que cuenta como "no disponible" para ese nivel de la
+cascada.
+
+El paso de `rama_estudios` (ver ADR-40) también consulta otro campo,
+pero al revés que `practica_deportiva`: en vez de AFINAR la proporción
+cuando otro campo ya se conoce, se SALTA por completo si `estudios` ya
+está informado. La razón es que, a diferencia de sexo/edad/estudios
+(variables independientes entre sí que aportan señal adicional cada
+una), "estudia derecho" y "está en la rama Ciencias Sociales y
+Jurídicas" no son hechos independientes -- el segundo es una
+consecuencia exacta del primero. Aplicar la proporción de la rama
+ENCIMA de la proporción de la carrera concreta contaría el mismo hecho
+dos veces. El campo `rama_estudios` se sigue rellenando igualmente
+(para mostrarlo en el resto del pipeline), solo se omite el paso de
+`population_narrowing` cuando sería redundante.
+
+`source="manual"` (ADR-34) es el único caso en que un paso no lo genera
+el pipeline automático de análisis, sino
+`POST /api/analyze/recalculate` a partir de rasgos que el usuario
+introduce a mano en el dashboard (color de ojos/pelo/piel -- protegidos
+por ley y no inferibles automáticamente). Usa las mismas funciones
+`_apply_proportion`/`final_remaining_population` que el resto de la
+cadena, contra tres tablas nuevas de `ine_reference.py`
+(`EYE_COLOR_DISTRIBUTION`, `HAIR_COLOR_DISTRIBUTION`,
+`SKIN_TONE_DISTRIBUTION`) que son estimaciones contextuales, no cifras
+oficiales del INE -- el INE no publica una distribución poblacional de
+estos rasgos.
+
+`AGE_DISTRIBUTION_1Y` (proporción de población por edad exacta, año a
+año, usada por `age_range_proportion`) es DATO REAL del Censo (tabla
+01003 del INE, año 2022), no una interpolación (ADR-36) -- antes se
+derivaba repartiendo uniformemente `AGE_DISTRIBUTION_5Y` dentro de cada
+tramo quinquenal, aproximación que llegó a dar tasas de práctica
+deportiva por encima del 100% al cruzarla con tramos de edad estrechos.
+Ahora la relación entre las dos tablas está invertida: `1Y` es la
+fuente y `AGE_DISTRIBUTION_5Y` se deriva sumando `1Y` dentro de cada
+tramo (`_build_age_distribution_5y_from_1y`), así que nunca pueden
+desincronizarse entre sí.
 
 Ubicación::
 `backend/app/scoring/k_anonymity.py`, tablas en
@@ -617,7 +731,51 @@ y no de algo que la persona haya escrito.
 Ubicación::
 `backend/app/report/generator.py`.
 
-==== `main.py`
+==== `osint_router.py` y `osint/username_correlation.py`
+
+Propósito/Responsabilidad::
+Frente de correlación de cuentas por nombre de usuario (ver ADR-44/
+ADR-48). El endpoint standalone es independiente del pipeline de
+`analysis_router.py` (no depende de sesión OAuth ni de un
+`ExposureReport` ya generado), pero el módulo también se usa DESDE
+dentro del pipeline principal -- ver la integración más abajo.
+
+* `POST /api/username-correlation` -- endpoint standalone. Recibe
+  `{"username": str}`, delega en
+  `username_correlation.check_username_across_sites()` y devuelve
+  `UsernameCorrelationReport` (lista de `UsernameSiteMatch`: sitio, URL,
+  `exists` -- `true`/`false`/`null`, este último cuando no se pudo
+  determinar). 422 si el username está vacío tras `strip()`.
+* `username_correlation.py` es una capa fina sobre la librería `maigret`
+  (dependencia real, `requirements.txt`): carga su base de datos de
+  sitios ya empaquetada (`MaigretDatabase`, ~5000 sitios activos tras
+  excluir tor/i2p/dns) y llama a su función de comprobación de bajo
+  nivel con `is_parsing_enabled=False` e `is_enrich_enabled=False` --
+  nunca se extrae contenido del perfil (bio/avatar/otros IDs) ni se
+  activa su modo "enrich"; la recursión de su CLI no aplica porque se
+  invoca la función de librería directamente, una sola vez (ver ADR-44
+  para el porqué completo). Traduce su enum
+  (`CLAIMED`/`AVAILABLE`/`UNKNOWN`/`ILLEGAL`) a `True`/`False`/`None`/
+  excluido respectivamente.
+* Integración con el pipeline principal (ver ADR-48):
+  `check_username_across_sites()` acepta un `progress_callback` opcional
+  -- un `query_notify` propio (`_CountingQueryNotify`) cuenta los sitios
+  ya comprobados (Maigret lo llama de forma síncrona), sondeado cada
+  segundo por una tarea de fondo que emite el progreso real
+  (`track="correlacion_cuentas"`). `analysis_router._build_report`
+  lanza esta comprobación como tarea en paralelo (mismo patrón que
+  `geolocation_task`) cuando `settings.enable_username_correlation` está
+  activo (`False` por defecto); `report/generator.py::generate_report`
+  la recoge y construye `ExposureReport.related_accounts`
+  (`UsernameCorrelationSummary`, solo sitios con `exists=True`).
+
+Interfaces::
+Ver arriba. Documentado con su código de respuesta 422 en `/docs`
+(OpenAPI).
+
+Ubicación::
+`backend/app/osint_router.py`, `backend/app/osint/username_correlation.py`.
+
 
 Propósito/Responsabilidad::
 Ensambla la app FastAPI (middlewares de sesión y CORS, routers,
@@ -646,6 +804,7 @@ webapp/
 │   ├── components/
 │   │   ├── ScoreBar.tsx                   - Barra de riesgo (0-100) con color semántico
 │   │   ├── HourlyActivityChart.tsx        - Gráfico de actividad horaria (Recharts)
+│   │   ├── ManualTraitsSelector.tsx       - Alta manual de rasgos físicos (ojos/pelo/piel)
 │   │   ├── PopulationNarrowingTable.tsx   - Qué se puede inferir sobre ti, con fuente
 │   │   ├── PopulationPictogram.tsx        - Representación visual (isotype) de esa proporción
 │   │   ├── LocationMap.tsx                - Mapa + lista de ubicaciones estimadas por foto
@@ -673,13 +832,23 @@ Dispara el análisis vía streaming SSE (`api.analyzeStream`, `EventSource`
 nativo) mostrando una pantalla de progreso en vivo con las fases reales
 del pipeline (incluida una confirmación explícita de si se ha recibido
 biografía del perfil y cuántos caracteres, para poder comprobar a simple
-vista que el dato llega -- no solo confiar en el código), y renderiza el
+vista que el dato llega -- no solo confiar en el código). Además de las
+fases generales, hay tres pistas independientes con su propio contador
+`X/Y` (geolocalización de fotos, análisis de contenido de fotos, y
+correlación de cuentas por username -- ver ADR-44/ADR-48 -- cada una en
+su propio `track` del evento SSE, con `key` explícita en su `<li>` para
+evitar que React la confunda con un elemento de la lista de fases
+generales, que crece durante todo el análisis), y renderiza el
 informe completo: score global con desglose, qué se puede inferir sobre
 ti (estrechamiento de población con pictograma visual, con su fuente y
 evidencia, más el número absoluto de personas que comparten TODOS los
 rasgos detectados combinados -- "En España hay X personas que comparten
 tus rasgos", destacado en turquesa, calculado por
-`k_anonymity.py::final_remaining_population()`), mapa/lista de
+`k_anonymity.py::final_remaining_population()`), el selector de rasgos
+físicos manuales (`ManualTraitsSelector.tsx`, justo encima de esta
+sección -- ver más abajo), cuentas relacionadas encontradas por el mismo
+username en otros sitios (`RelatedAccountsList.tsx`, ver más abajo --
+sección entera ausente si `related_accounts` es `null`), mapa/lista de
 ubicaciones estimadas por foto (con un aviso explícito si hubo fotos
 analizadas pero ninguna dio suficiente confianza para estimar la
 comunidad autónoma de residencia -- independiente de si el texto sí dio
@@ -692,8 +861,33 @@ recomendaciones también se retiró de la interfaz (siguen calculándose en
 el backend, pero como insumo de la IA, no como sección visible). Determina
 la plataforma activa por query param (`?platform=reddit|instagram`).
 
+`handleApplyTraits` es el único punto donde el dashboard reemplaza el
+informe completo tras el render inicial: envía los rasgos manuales más
+el informe actual a `POST /api/analyze/recalculate` (ADR-34) y sustituye
+`report` en su estado por la respuesta -- no fusiona campo a campo, para
+no arriesgarse a desincronizar `population_narrowing` del resto del
+informe si el backend cambia su forma en el futuro.
+
 Ubicación::
 `webapp/src/pages/Dashboard.tsx`.
+
+==== `ManualTraitsSelector.tsx`
+
+Propósito/Responsabilidad::
+Formulario plegable (colapsado por defecto tras un botón) con un
+`<select>` por rasgo (color de ojos, de pelo, tono de piel -- listas
+cerradas de opciones, coordinadas con las claves de
+`EYE_COLOR_DISTRIBUTION`/`HAIR_COLOR_DISTRIBUTION`/
+`SKIN_TONE_DISTRIBUTION` en `backend/app/data/ine_reference.py`; un
+valor fuera de esas listas no rompe la petición, pero el backend lo
+marca como `no_estimable` -- ver ADR-34) que la ley de protección de
+datos impide inferir automáticamente. Al enviar, delega en
+`onApplyTraits` (implementado por `Dashboard.tsx`) sin conocer ni
+llamar a la API directamente -- es un componente de presentación puro,
+igual que `PopulationNarrowingTable.tsx`.
+
+Ubicación::
+`webapp/src/components/ManualTraitsSelector.tsx`.
 
 ==== `PopulationNarrowingTable.tsx`
 
@@ -702,12 +896,34 @@ Muestra, en forma de tarjetas apiladas (una por atributo detectado, no
 una tabla clásica -- para dejar sitio al pictograma grande), la cascada
 de estrechamiento de población (k-anonimato): información detectada,
 representación visual de cuánta gente la comparte, nivel de riesgo, y la
-fuente (texto autodeclarado, imagen, IA sobre texto, o estimación por
+fuente (texto autodeclarado, imagen, IA sobre texto, estimación por
 nombre público de la cuenta -- estas dos últimas con aviso explícito de
-menor fiabilidad).
+menor fiabilidad--, o **manual**: los pasos añadidos vía
+`ManualTraitsSelector.tsx`/`POST /api/analyze/recalculate` (ADR-34) se
+distinguen con una insignia de color propio (morado) en vez del color
+semántico habitual por nivel de riesgo, para dejar claro de un vistazo
+que ese dato lo introdujo el propio usuario y no lo infirió el sistema.
 
 Ubicación::
 `webapp/src/components/PopulationNarrowingTable.tsx`.
+
+==== `RelatedAccountsList.tsx`
+
+Propósito/Responsabilidad::
+Pinta `ExposureReport.related_accounts` (ver ADR-44/ADR-48,
+`app/osint/username_correlation.py`): un aviso con el total de sitios
+comprobados y, si los hay, un enlace por cada sitio donde se encontró
+una cuenta con el mismo username (`exists=true` únicamente -- nunca se
+recibe del backend, y por tanto nunca se muestra, contenido de esas
+cuentas). `related_accounts` es `null` cuando
+`settings.enable_username_correlation` está desactivado en el servidor
+(por defecto) o la comprobación no llegó a ejecutarse -- en ese caso el
+componente no pinta nada (`return null`), y `Dashboard.tsx` ni siquiera
+renderiza la `<section>` que lo envuelve, mismo criterio que el resto de
+secciones opcionales del informe.
+
+Ubicación::
+`webapp/src/components/RelatedAccountsList.tsx`.
 
 ==== `PopulationPictogram.tsx`
 

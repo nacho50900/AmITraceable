@@ -79,6 +79,10 @@
       "analyzingVerb": "Analyzing photos",
       "analyzedDone": "Photos analyzed"
     },
+    "accounts": {
+      "checkingVerb": "Checking related accounts",
+      "checkedDone": "Related accounts checked"
+    },
     "errorPrefix": "Couldn't generate the report: {{error}}",
     "cancelAnalysis": "Cancel analysis",
     "backToStart": "Back to start",
@@ -131,13 +135,20 @@
       "orientacion_sexual_categoria_especial": "Special category of data (GDPR Art. 9): only calculated because the person explicitly self-declared it in public, never by indirect inference. The proportion used is a contextual estimate for Spain (CIS/observatories), not an official INE census figure.",
       "religion_categoria_especial": "Special category of data (GDPR Art. 9): only calculated because the person explicitly self-declared it or indicated it with an unambiguous symbol/emoji in public, never by indirect inference. The proportion used is a contextual estimate for Spain (CIS and community sources), not an official INE census figure -- Spain does not collect religious affiliation in its census.",
       "signo_zodiacal_note": "The distribution is uniform (~8.33% per sign, one twelfth of the year) because birth dates are spread almost uniformly across the year -- it isn't a made-up figure: it directly reveals a real ~30-day birth window, even though the astrological belief itself has no scientific basis.",
-      "practica_deportiva_no_particion": "Marginal proportion from the Spanish Sports Habits Survey (Encuesta de Hábitos Deportivos en España) -- not a partition: the survey allows multiple answers, a person can practice several sports at once, so this data point alone doesn't mean it's the ONLY sport they practice."
+      "practica_deportiva_no_particion": "Marginal proportion from the Spanish Sports Habits Survey (Encuesta de Hábitos Deportivos en España) -- not a partition: the survey allows multiple answers, a person can practice several sports at once, so this data point alone doesn't mean it's the ONLY sport they practice.",
+      "practica_deportiva_ajustada_por_sexo": "Marginal proportion from the Spanish Sports Habits Survey (Encuesta de Hábitos Deportivos en España) -- not a partition: the survey allows multiple answers, a person can practice several sports at once, so this data point alone doesn't mean it's the ONLY sport they practice. Since sex is also known, the exact proportion for that specific combination is used (sport practice conditioned on sex, same survey), instead of approximating by multiplying independent proportions.",
+      "practica_deportiva_ajustada_por_edad": "Marginal proportion from the Spanish Sports Habits Survey (Encuesta de Hábitos Deportivos en España) -- not a partition: the survey allows multiple answers, a person can practice several sports at once, so this data point alone doesn't mean it's the ONLY sport they practice. Since age is also known, the exact proportion for that specific combination is used (sport practice conditioned on age band, same survey), instead of approximating by multiplying independent proportions.",
+      "practica_deportiva_ajustada_por_estudios": "Marginal proportion from the Spanish Sports Habits Survey (Encuesta de Hábitos Deportivos en España) -- not a partition: the survey allows multiple answers, a person can practice several sports at once, so this data point alone doesn't mean it's the ONLY sport they practice. Since education level is also known, the exact proportion for that specific combination is used (sport practice conditioned on education level, same survey), instead of approximating by multiplying independent proportions.",
+      "nivel_estudios_aproximacion_25_64": "Approximation: the official figure (INE/EPA) covers the population aged 25 to 64, not the whole adult population.",
+      "rama_estudios_aproximacion_matriculacion": "Proportion of university enrollment by field of study (mixes different academic years for public and private universities) -- doesn't cover the whole adult population that ever studied that field, only an approximation based on recent enrollment."
     },
     "attribute": {
       "sexo": "Sex: {{value}}",
       "edad": "Age: {{value}} years old",
       "estado_civil": "{{value}}",
       "estudios": "Studied: {{value}}",
+      "nivel_estudios": "Education level: {{value}}",
+      "rama_estudios": "Field of study: {{value}}",
       "ocupacion": "Occupation: {{value}}",
       "nacionalidad": "Nationality: {{value}}",
       "situacion_laboral": "Employment status: {{value}}",
@@ -151,7 +162,18 @@
       "orientacion_sexual": "Sexual orientation: {{value}}",
       "religion": "Religion: {{value}}",
       "signo_zodiacal": "Zodiac sign: {{value}}",
-      "practica_deportiva": "Sport practiced: {{value}}"
+      "practica_deportiva": "Sport practiced: {{value}}",
+      "color_ojos": "Eye color: {{value}}",
+      "color_pelo": "Hair color: {{value}}",
+      "color_piel": "Skin tone: {{value}}"
+    },
+    "inferredCategory": {
+      "ubicacion": "Location",
+      "ocupacion": "Occupation",
+      "rutina": "Routine",
+      "aficion": "Hobby",
+      "texto_visible": "Text visible in photo",
+      "matricula": "Vehicle license plate"
     },
     "attributeValue": {
       "sexo": {
@@ -204,6 +226,18 @@
         "economia": "Economics",
         "veterinaria": "Veterinary Science"
       },
+      "nivel_estudios": {
+        "superior": "higher education",
+        "secundaria_superior": "upper secondary education (bachillerato or mid-level vocational training)",
+        "secundaria_o_inferior": "lower secondary education or below (ESO, primary school)"
+      },
+      "rama_estudios": {
+        "ciencias_sociales_juridicas": "Social and Legal Sciences",
+        "ingenieria_arquitectura": "Engineering and Architecture",
+        "ciencias_salud": "Health Sciences",
+        "artes_humanidades": "Arts and Humanities",
+        "ciencias": "Sciences"
+      },
       "ocupacion": {
         "docente": "Teacher",
         "sanitario": "Healthcare worker",
@@ -252,14 +286,77 @@
       "practica_deportiva": {
         "senderismo": "Hiking / mountaineering",
         "ciclismo": "Cycling",
+        "gimnasia_intensa": "High-intensity fitness classes (aerobics/step/spinning)",
         "natacion": "Swimming",
-        "running": "Running / athletics",
+        "yoga_pilates": "Yoga / pilates",
+        "running": "Running / jogging",
         "musculacion": "Weight training / gym",
         "padel": "Padel",
         "futbol": "Football",
+        "futbol_sala": "Futsal",
         "baloncesto": "Basketball",
-        "tenis": "Tennis"
+        "tenis": "Tennis",
+        "golf": "Golf",
+        "baile_fitness": "Dance fitness (zumba)",
+        "tenis_mesa": "Table tennis",
+        "atletismo": "Athletics / track and field",
+        "esqui": "Skiing / snowboarding",
+        "voleibol": "Volleyball",
+        "boxeo": "Boxing",
+        "submarinismo": "Scuba diving",
+        "pesca": "Fishing",
+        "patinaje": "Skating",
+        "petanca": "Petanque / bowls",
+        "artes_marciales": "Martial arts",
+        "piraguismo_remo": "Kayaking / rowing",
+        "badminton": "Badminton",
+        "pelota_vasca": "Basque pelota",
+        "caza": "Hunting",
+        "motociclismo": "Motorcycling",
+        "surf": "Surfing",
+        "automovilismo": "Motor racing",
+        "vela": "Sailing",
+        "hipica": "Equestrian",
+        "balonmano": "Handball",
+        "triatlon": "Triathlon",
+        "rugby": "Rugby",
+        "lucha_defensa_personal": "Wrestling / self-defense",
+        "esqui_nautico": "Water skiing",
+        "squash": "Squash",
+        "aeronautica": "Aeronautical sports",
+        "ajedrez": "Chess"
+      },
+      "color_ojos": {
+        "marron": "Brown",
+        "intermedio": "Intermediate",
+        "azul": "Blue"
+      },
+      "color_pelo": {
+        "castano": "Brown",
+        "negro": "Black",
+        "rubio": "Blond",
+        "pelirrojo": "Red"
+      },
+      "color_piel": {
+        "claro": "Light",
+        "medio": "Medium",
+        "oscuro": "Dark"
       }
+    },
+    "manualTraits": {
+      "openButton": "Add visible physical traits (eyes, hair, skin...)",
+      "panelTitle": "Add visible physical traits",
+      "description": "This data can't be inferred automatically due to legal restrictions (GDPR), but if it's evident in your photos or profile, it will significantly narrow down how many people share your exposure.",
+      "fields": {
+        "eyeColor": "Eye color",
+        "hairColor": "Hair color",
+        "skinColor": "Skin tone"
+      },
+      "placeholder": "Select an option...",
+      "clearButton": "Clear and close",
+      "applyButton": "Apply and recalculate",
+      "closeAriaLabel": "Close",
+      "recalculateError": "Error recalculating"
     }
   },
   "components": {
@@ -300,7 +397,8 @@
         "ia": "AI (text)",
         "ia_nombre": "AI (name)",
         "ia_simbolica": "AI (symbolic)",
-        "ia_estimada": "AI (estimated)"
+        "ia_estimada": "AI (estimated)",
+        "manual": "Manual"
       },
       "sourceTitle": {
         "texto": "Detected in text you wrote yourself",
@@ -308,7 +406,8 @@
         "ia": "Detected by an AI model in text/bio that you wrote yourself",
         "ia_nombre": "Estimated from the cultural convention of your account's public name, not from something you wrote -- lower reliability",
         "ia_simbolica": "Inferred by AI from symbolic or indirect content (emojis, dates, recurring mentions...), not from an explicit self-declaration -- lower reliability",
-        "ia_estimada": "Estimated by AI from indirect clues in the text, not from an explicit self-declaration -- lower reliability"
+        "ia_estimada": "Estimated by AI from indirect clues in the text, not from an explicit self-declaration -- lower reliability",
+        "manual": "Physical trait you added manually (self-declaration, legal basis Art. 9.2.a GDPR), not automatically inferred"
       },
       "combinedSummaryPrefix": "In Spain there are",
       "combinedSummarySuffix": "people who share your traits (all the ones detected, combined at once: sex, age, location, education, occupation, marital status -- whichever could be estimated).",
@@ -316,10 +415,37 @@
       "footnoteImage": " Rows marked with 📷 come from a visual analysis of your photos, not from something you wrote — they're less reliable than a text self-declaration.",
       "footnoteNameGuess": " Rows marked with 🤖 (name) are an estimate from your account's public name, not something you declared — reliability is lower."
     },
+    "inferredAttributes": {
+      "title": "Attributes inferred without statistical correlation",
+      "subtitle": "These don't feed into the population estimate above because they don't map to any official INE table, but that doesn't make them harmless: they can still compromise your privacy or that of other people who appear in your photos.",
+      "evidenceCount": "Detected in {{count}} post(s).",
+      "dgt": {
+        "title": "ℹ️ Official DGT (Spanish traffic authority) lookup",
+        "freeIntro": "With this plate, anyone can request the DGT's free reduced report (Sede Electrónica or the miDGT app), which already includes:",
+        "freeItem1": "Date of first registration in Spain (how old the vehicle is)",
+        "freeItem2": "Make, model, vehicle type and fuel",
+        "freeItem3": "Current administrative status (active, deregistered or temporarily deregistered)",
+        "freeItem4": "Issues that would block transfer or circulation of the vehicle",
+        "freeItem5": "Pending recall notices",
+        "paidIntro": "By paying fee 4.1 (€8.67), the full report additionally adds:",
+        "paidItem1": "Owner identification",
+        "paidItem2": "Municipality where the vehicle is registered",
+        "paidItem3": "Full inspection (ITV) history and mileage",
+        "paidItem4": "Number of previous owners",
+        "paidItem5": "Liens (seizures, impoundments, retention of title...)",
+        "paidItem6": "Full technical data and EuroNCAP score",
+        "closingNote": "In other words: posting a photo where the plate is readable already lets anyone check the vehicle's age and status for free, and for €8.67 also find out who owns it and where they live."
+      }
+    },
+    "relatedAccounts": {
+      "title": "Related accounts found",
+      "subtitle": "Your username was checked against {{total}} other sites (existence check only -- the content of those accounts is never accessed).",
+      "noMatches": "No account with this same username was found on the sites checked."
+    },
     "populationPictogram": {
       "compactAriaLabel": "Approximately {{percent}} of the population: 1 in every {{ratio}} people",
       "gridAriaLabel": "Approximately {{percent}} of the population shares this trait ({{population}} people)",
-      "compactLabel": "1 in every {{ratio}}"
+      "compactLabel": "in {{ratio}}"
     },
     "locationMap": {
       "unknownDate": "unknown date",

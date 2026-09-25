@@ -112,6 +112,19 @@ describe('PopulationNarrowingTable', () => {
     expect(screen.getByText(/🤖 IA \(simbólico\)/)).toBeInTheDocument();
   });
 
+  test('fuente "manual" (rasgo físico autodeclarado, ver ADR-34) muestra el icono, etiqueta y clase distintiva', () => {
+    const { container } = renderTable([
+      makeStep({ source: 'manual', category: 'color_ojos', value_raw: 'azul', attribute_label: 'Color de ojos: Azul' }),
+    ]);
+    expect(screen.getByText(/👤 Manual/)).toBeInTheDocument();
+    expect(container.querySelector('.source-badge--manual')).toBeInTheDocument();
+  });
+
+  test('fuente "manual": el title del badge explica que es autodeclaración, no inferencia automática', () => {
+    renderTable([makeStep({ source: 'manual', category: 'color_ojos', value_raw: 'azul' })]);
+    expect(screen.getByTitle(/autodeclaración/)).toBeInTheDocument();
+  });
+
   test('sin filas de fuente "imagen": la nota final NO menciona las fotos', () => {
     renderTable([makeStep({ source: 'texto' })]);
     expect(screen.queryByText(/análisis visual de tus fotos/)).not.toBeInTheDocument();

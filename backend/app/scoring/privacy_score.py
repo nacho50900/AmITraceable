@@ -24,6 +24,14 @@ _WEIGHTS = {
     "deanonymization_ease": 0.20,
 }
 
+# Nº de posts/comentarios a partir del cual se confía plenamente en la
+# concentración horaria y la riqueza de vocabulario como señales de
+# fingerprinting de estilo (ver docstring de _score_deanonymization_ease).
+# Deliberadamente más bajo que el umbral de saturación de `volume_factor`
+# (200): estas dos estadísticas concretas dejan de ser puro ruido bastante
+# antes de que haya "suficiente contenido" en términos absolutos.
+_MIN_POSTS_FOR_RELIABLE_STYLE = 20
+
 
 def compute_score(
     posts: list[SocialPost],
@@ -54,8 +62,10 @@ def compute_score(
                                      "requiere correlación multiplataforma, ver trabajo futuro).",
             "inferable_data": "Basado en número y confianza de atributos personales inferidos "
                                "(ubicación, ocupación, rutina).",
-            "deanonymization_ease": "Basado en consistencia temporal de actividad, antigüedad "
-                                     "de la cuenta y volumen de contenido analizable.",
+            "deanonymization_ease": "Basado en volumen de contenido analizable, riqueza de "
+                                     "vocabulario y consistencia temporal de actividad -- estas "
+                                     "dos últimas se ponderan menos cuanto menos contenido haya, "
+                                     "para no tratar una muestra pequeña como una señal fiable.",
         },
     )
 
@@ -84,16 +94,28 @@ def _score_deanonymization_ease(posts: list[SocialPost], fingerprint: WritingFin
     # Más contenido analizable = más fácil de re-identificar por estilo
     volume_factor = min(len(posts) / 200, 1.0)  # saturado a partir de 200 posts/comentarios
 
+    # `distinctiveness_factor` y `concentration` (más abajo) son estadísticas
+    # sobre el CONJUNTO de posts, y con pocos posts son poco fiables -- no
+    # inexistentes, sino RUIDOSAS: con 1 solo post, por ejemplo, el 100% de
+    # "tus posts" cae SIEMPRE en una única hora (`concentration` = 1.0 de
+    # forma matemáticamente segura, sin que eso indique ninguna rutina real)
+    # y la riqueza de vocabulario de un texto corto tiende a salir inflada
+    # simplemente porque hay poca oportunidad de repetir palabras. Se escala
+    # su aportación por la cantidad de contenido disponible, saturando a
+    # partir de `_MIN_POSTS_FOR_RELIABLE_STYLE` -- por debajo de ese umbral,
+    # cuanto menos contenido haya, menos se confía en estas dos señales.
+    sample_confidence = min(len(posts) / _MIN_POSTS_FOR_RELIABLE_STYLE, 1.0)
+
     # Vocabulario muy distintivo (ni demasiado pobre ni genérico) facilita el
     # fingerprinting de estilo de escritura
     richness = fingerprint.vocabulary_richness
     distinctiveness_factor = 1.0 - abs(richness - 0.45) / 0.45 if richness else 0.0
-    distinctiveness_factor = max(0.0, min(distinctiveness_factor, 1.0))
+    distinctiveness_factor = max(0.0, min(distinctiveness_factor, 1.0)) * sample_confidence
 
     # Patrón horario muy concentrado (rutina marcada) facilita inferir zona
     # horaria y hábitos
     hour_values = list(fingerprint.avg_posts_per_hour.values())
-    concentration = max(hour_values) if hour_values else 0.0  # proporción en la hora pico
+    concentration = (max(hour_values) if hour_values else 0.0) * sample_confidence  # proporción en la hora pico
 
     score = (volume_factor * 0.4 + distinctiveness_factor * 0.3 + concentration * 0.3) * 100
     return min(score, 100.0)

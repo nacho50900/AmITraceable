@@ -37,7 +37,7 @@ guardado -- se persiste el progreso tras cada shard que termina.
 
 Uso:
     pip install huggingface_hub pandas pillow tqdm
-    python download_osv5m_world.py --output ../data/osv5m_world --max-disk-gb 35 --workers 6
+    python download_osv5m_world.py --output ../../data/osv5m_world --max-disk-gb 35 --workers 6
 """
 import argparse
 import os
@@ -163,7 +163,7 @@ def _download_and_extract_shard(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", default="../data/osv5m_world")
+    parser.add_argument("--output", default="../../data/osv5m_world")
     parser.add_argument("--max-disk-gb", type=float, default=35.0, help="Tope de disco para las imágenes guardadas")
     parser.add_argument(
         "--splits", nargs="+", default=["train", "test"], choices=["train", "test"],
