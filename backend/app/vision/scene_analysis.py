@@ -762,9 +762,9 @@ def _lazy_load():
     # TEXTO: el `mmproj` de arriba se carga igual en los dos casos, sigue
     # en F16 siempre.
     _quantized = _ensure_quantized_model()
-    _common_kwargs = dict(
-        chat_handler=chat_handler,
-        n_gpu_layers=_n_gpu_layers,
+    _common_kwargs = {
+        "chat_handler": chat_handler,
+        "n_gpu_layers": _n_gpu_layers,
         # 2048, no 4096: confirmado en producción (12/9) que `n_ctx_train`
         # de este modelo es 2048 -- pedir más (probado con 4096) generaba
         # el aviso "possible training context overflow" en el log. Con
@@ -773,7 +773,7 @@ def _lazy_load():
         # 2048, así que no hay motivo real para salirse del contexto de
         # entrenamiento solo por margen -- eso solo compraría degradar la
         # calidad sin necesitarlo.
-        n_ctx=2048,
+        "n_ctx": 2048,
         # verbose=False: antes en True a propósito, para confirmar en el
         # log si el offload a GPU funcionaba de verdad (ver get_device())
         # -- ya confirmado en producción (12/9: "offloaded 25/25 layers
@@ -785,8 +785,8 @@ def _lazy_load():
         # -- confirmado que estas líneas siguen saliendo en producción,
         # 13/9), parece tener su propio control de verbosidad no atado a
         # este flag -- pendiente de investigar si molesta.
-        verbose=False,
-    )
+        "verbose": False,
+    }
     if _quantized is not None:
         _quantized_path, _quant_type = _quantized
         _model = Llama(model_path=_quantized_path, **_common_kwargs)

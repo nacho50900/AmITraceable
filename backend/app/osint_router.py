@@ -24,7 +24,6 @@ router = APIRouter(prefix="/api", tags=["osint"])
 
 @router.post(
     "/username-correlation",
-    response_model=UsernameCorrelationReport,
     responses={422: {"description": "El nombre de usuario no puede estar vacio."}},
 )
 async def username_correlation(payload: UsernameCorrelationRequest) -> UsernameCorrelationReport:

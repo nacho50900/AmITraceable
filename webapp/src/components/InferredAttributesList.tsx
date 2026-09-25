@@ -23,7 +23,7 @@ const KNOWN_CATEGORY_KEYS: Record<string, string> = {
 // "mascota_visible"): "mascota_visible" -> "Mascota visible". Nunca se
 // intenta adivinar significado, solo formatear la clave tal cual llega.
 function fallbackCategoryLabel(category: string): string {
-  const spaced = category.replace(/_/g, ' ');
+  const spaced = category.replaceAll('_', ' ');
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 

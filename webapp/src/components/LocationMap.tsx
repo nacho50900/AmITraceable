@@ -34,9 +34,9 @@ function PhotoLink({
   t,
   onClick,
 }: {
-  point: ImageLocationPoint;
-  t: (key: string, opts?: Record<string, unknown>) => string;
-  onClick?: (e: React.MouseEvent) => void;
+  readonly point: ImageLocationPoint;
+  readonly t: (key: string, opts?: Record<string, unknown>) => string;
+  readonly onClick?: (e: React.MouseEvent) => void;
 }) {
   const label = point.is_profile_picture
     ? t('components.locationMap.profilePictureLabel')
