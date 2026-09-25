@@ -170,4 +170,26 @@ Ordenados de mayor a menor impacto sobre el calendario/alcance del TFG.
   operativa; evaluar como alternativa una máquina con GPU (laboratorio
   de la universidad, instancia cloud puntual) para la demo/evaluación
   del TFG.
+
+| Correlación de cuentas por username (`osint/username_correlation.py`,
+  ver ADR-44/ADR-48) depende por completo de la librería `maigret` de
+  terceros: coste/latencia de un barrido completo (~5000 sitios, del
+  orden de minutos, ahora lanzado en TODO análisis con el flag activo --
+  ver ADR-48) y precisión sujeta a que su base de datos de sitios siga
+  mantenida al día
+| Media
+| Bajo (detrás de `settings.enable_username_correlation`, `False` por
+  defecto -- ningún despliegue paga este coste sin activarlo
+  explícitamente; corre en paralelo con el resto del pipeline, no lo
+  bloquea; resultados `UNKNOWN` en vez de falsos positivos/negativos
+  cuando un sitio cambia o bloquea la petición)
+| Progreso en streaming ya implementado (ADR-48, sondeo cada 1s vía
+  `progress_callback`), así que ya no es trabajo futuro. Actualizar la
+  versión de `maigret` en `requirements.txt` es la vía de mantenimiento
+  de la base de datos de sitios -- no se vendoriza una copia propia (ver
+  ADR-44), así que actualizar la dependencia ya trae los sitios y reglas
+  de detección más recientes de esa comunidad. Si el coste por análisis
+  resulta excesivo en producción, la siguiente palanca sería una opción
+  de "análisis rápido" a nivel de producto (no solo el flag de servidor
+  todo-o-nada que hay hoy).
 |===

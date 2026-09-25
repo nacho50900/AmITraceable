@@ -115,10 +115,17 @@ const PopulationNarrowingTable: React.FC<PopulationNarrowingTableProps> = ({
                     {t(`components.populationNarrowing.risk.${step.risk_level}`)}
                   </span>
                   <span
-                    className="source-badge"
-                    title={t(`components.populationNarrowing.sourceTitle.${step.source}`)}
+                    className={`source-badge${step.source === 'manual' ? ' source-badge--manual' : ''}`}
+                    title={
+                      i18n.exists(`components.populationNarrowing.sourceTitle.${step.source}`)
+                        ? t(`components.populationNarrowing.sourceTitle.${step.source}`)
+                        : t('components.populationNarrowing.sourceTitle.manual')
+                    }
                   >
-                    {SOURCE_ICONS[step.source]} {t(`components.populationNarrowing.source.${step.source}`)}
+                    {SOURCE_ICONS[step.source]}{' '}
+                    {i18n.exists(`components.populationNarrowing.source.${step.source}`)
+                      ? t(`components.populationNarrowing.source.${step.source}`)
+                      : t('components.populationNarrowing.source.manual')}
                   </span>
                 </div>
               </div>
@@ -163,6 +170,7 @@ const SOURCE_ICONS: Record<string, string> = {
   ia_nombre: '🤖',
   ia_simbolica: '🤖',
   ia_estimada: '🤖',
+  manual: '👤',
 };
 
 export default PopulationNarrowingTable;

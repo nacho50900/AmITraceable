@@ -19,7 +19,7 @@ def isolated_log_dir(monkeypatch, tmp_path):
     monkeypatch.setattr(translation_log, "_LOG_DIR", log_dir)
     monkeypatch.setattr(translation_log, "_LOG_PATH", log_dir / "translation_log.jsonl")
     monkeypatch.setattr(translation_log, "_warned_unwritable", False)
-    yield log_dir
+    return log_dir
 
 
 def _read_entries(log_dir):

@@ -1,19 +1,26 @@
 """
-Módulo 8 (nuevo, opcional): pide a un LLM (Mistral AI) que lea el informe
-de exposición YA GENERADO y devuelva conclusiones priorizadas en lenguaje
-natural. No es parte del pipeline de análisis principal -- se dispara bajo
-demanda desde el frontend (botón "Analizar con IA"), con el informe que ya
-está en memoria tras el análisis normal.
+Módulo 8 (nuevo, opcional): pide a un LLM que lea el informe de exposición
+YA GENERADO y devuelva conclusiones priorizadas en lenguaje natural. No es
+parte del pipeline de análisis principal, en el sentido de que es una
+llamada aislada y opcional aparte -- pero SÍ se dispara automáticamente en
+cuanto el informe principal está listo (ver punto 4 más abajo): ya no hay
+ningún botón "Analizar con IA" en el frontend.
 
 Decisiones de diseño (para la memoria):
 
-1. Proveedor: Mistral AI (La Plateforme), empresa francesa. Se eligió
-   frente a alternativas más baratas fuera de la UE (p. ej. DeepSeek) para
-   evitar transferencias internacionales de datos personales fuera del
-   Espacio Económico Europeo (RGPD, Capítulo V, Art. 44-49) -- aquí se
-   están enviando datos personales inferidos de un usuario real (ubicación,
-   ocupación, edad...), así que la jurisdicción del proveedor es relevante,
-   no solo el precio.
+1. Proveedor: Qwen3.5-4B, LOCAL (vía llama-cpp-python, ver
+   app/nlp/ai_client.py) -- sustituye al diseño anterior de Mistral AI /
+   Google Gemini por HTTP (ver historial de ese módulo). El motivo
+   original de elegir un proveedor EUROPEO (Mistral, para evitar
+   transferencias internacionales de datos personales fuera del EEE,
+   RGPD Cap. V Art. 44-49) queda resuelto de raíz con un modelo local: no
+   hay transferencia a NINGÚN tercero, ni europeo ni de fuera, porque el
+   informe (con datos personales inferidos de un usuario real: ubicación,
+   ocupación, edad...) nunca sale del servidor. Trade-off aceptado a
+   cambio: un modelo de 4B parámetros cuantizado razona peor que Mistral
+   Small o Gemini Flash -- sin verificar todavía con casos reales de
+   producción si la calidad del veredicto/conclusiones se resiente (ver
+   app/nlp/ai_client.py para el estado de esa verificación).
 
 2. Sin entrenamiento ni fine-tuning: es una tarea de razonamiento en
    contexto (in-context learning) sobre datos ya estructurados, no una
@@ -22,12 +29,14 @@ Decisiones de diseño (para la memoria):
    JSON se envía como contexto en cada llamada; no hay estado entre
    llamadas ni memoria del modelo entre usuarios.
 
-3. Tier gratuito, sin gasto: se usa el plan gratuito de Mistral (límite de
-   peticiones/minuto + tope mensual de tokens). Si la cuota se agota
-   (respuesta 429) o la API key no está configurada, este módulo NO
-   reintenta ni degrada a otro proveedor de pago -- simplemente devuelve
-   "no disponible ahora mismo", para que nunca se genere gasto no
-   presupuestado ni se rompa el resto de la app.
+3. Sin coste ni cuota: al ser local, no hay tier gratuito que agotar ni
+   límite de peticiones por minuto que gestionar (ver el historial de
+   app/nlp/ai_client.py sobre por qué esto sustituyó al diseño anterior
+   de throttle + reintento en 429 contra Mistral/Gemini) -- el único
+   límite real es el hardware de despliegue (VRAM/tiempo de inferencia).
+   Si el modelo no puede cargarse o ejecutarse (dependencia no instalada,
+   fallo de inferencia), este módulo degrada a "no disponible ahora
+   mismo" sin reintentos ni fallback a un proveedor de pago.
 
 4. Minimización: se envía el informe ya generado (agregados, no el texto
    crudo de los posts). Se dispara automáticamente en cuanto el informe
@@ -45,14 +54,9 @@ Decisiones de diseño (para la memoria):
    señal (barata, determinista, sin depender de que la IA esté disponible
    ese día) ni se duplica con las conclusiones de la IA.
 """
-import json
-
-import httpx
-
 from app.config import settings
 from app.models.schemas import ExposureReport
-
-MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
+from app.nlp.ai_client import AIHTTPError, AIRequestError, call_ai_json
 
 _SYSTEM_PROMPT = (
     "Eres un asistente que ayuda a personas no técnicas a entender su nivel de "
@@ -144,48 +148,42 @@ _LANGUAGE_INSTRUCTIONS = {
 SUPPORTED_LANGUAGES = frozenset({"es", *_LANGUAGE_INSTRUCTIONS.keys()})
 
 
-async def _call_mistral_chat(payload: dict) -> dict:
-    """Llamada HTTP de bajo nivel al endpoint de chat de Mistral, usada
-    por `analyze_report_with_ai()` -- centraliza el manejo de errores
-    (sin API key, cuota agotada, key inválida, fallo de red...) para que
-    no viva repetido si en el futuro se añade otra función que también
-    necesite hablar con Mistral. (Hasta ADR-31 también la usaba
-    `translate_texts()`, eliminada -- ver la nota más abajo, junto a
-    donde vivía esa función.) Lanza `AiAnalysisUnavailable` ante
-    cualquier fallo; el llamador solo se
-    preocupa de construir el payload y parsear
-    `data["choices"][0]["message"]["content"]`."""
-    if not settings.mistral_api_key:
+async def _call_ai_chat(system_prompt: str, user_prompt: str, max_tokens: int) -> dict:
+    """Delegación fina sobre app.nlp.ai_client.call_ai_json (modelo local
+    Qwen3.5-4B, ver ese módulo). Conserva la excepción
+    `AiAnalysisUnavailable` de siempre -- el llamador (analyze_report_with_ai)
+    no cambia."""
+    if not settings.ai_key_configured:
         raise AiAnalysisUnavailable(
-            "El análisis con IA no está configurado en este servidor (falta MISTRAL_API_KEY)."
+            "El análisis con IA no está disponible en este servidor "
+            "(el modelo local no está instalado o configurado)."
         )
-    headers = {"Authorization": f"Bearer {settings.mistral_api_key}"}
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.post(MISTRAL_API_URL, json=payload, headers=headers)
-    except httpx.RequestError as exc:
-        raise AiAnalysisUnavailable(f"No se pudo contactar con el servicio de IA: {exc}") from exc
-
-    if response.status_code == 429:
-        # Cuota del tier gratuito agotada (peticiones/minuto o tope mensual).
-        # NO se reintenta -- eso podría seguir gastando cuota o, en un plan
-        # de pago, generar coste no deseado.
-        raise AiAnalysisUnavailable(
-            "Se ha alcanzado el límite del plan gratuito de IA por ahora. Inténtalo de nuevo más tarde."
+        return await call_ai_json(
+            system_prompt,
+            user_prompt,
+            max_tokens=max_tokens,
+            temperature=0.3,
         )
-    if response.status_code == 401:
-        raise AiAnalysisUnavailable("La clave de API de Mistral no es válida.")
-    if response.status_code >= 400:
-        raise AiAnalysisUnavailable(f"El servicio de IA devolvió un error ({response.status_code}).")
-
-    return response.json()
+    except AIRequestError as exc:
+        raise AiAnalysisUnavailable(f"No se pudo ejecutar el modelo de IA local: {exc}") from exc
+    except AIHTTPError as exc:
+        # A diferencia del diseño anterior (Mistral/Gemini por HTTP), un
+        # modelo local nunca devuelve un status_code real -- AIHTTPError
+        # solo se lanza ahora cuando el modelo SÍ respondió pero su salida
+        # no se pudo interpretar como JSON (ver app/nlp/ai_client.py). Los
+        # antiguos casos 429 (cuota agotada del proveedor) y 401 (key
+        # inválida) ya no existen: no hay proveedor de terceros ni API key
+        # que pueda fallar de esas formas.
+        raise AiAnalysisUnavailable(f"Respuesta inesperada del modelo de IA local: {exc.body}") from exc
 
 
 async def analyze_report_with_ai(report: ExposureReport, lang: str = "es") -> dict:
-    if not settings.mistral_api_key:
+    if not settings.ai_key_configured:
         raise AiAnalysisUnavailable(
-            "El análisis con IA no está configurado en este servidor (falta MISTRAL_API_KEY)."
+            "El análisis con IA no está disponible en este servidor "
+            "(el modelo local no está instalado o configurado)."
         )
 
     # Se manda el informe ya generado (agregados/conclusiones propias de la
@@ -194,31 +192,20 @@ async def analyze_report_with_ai(report: ExposureReport, lang: str = "es") -> di
     report_json = report.model_dump_json(indent=2)
 
     system_prompt = _SYSTEM_PROMPT + _LANGUAGE_INSTRUCTIONS.get(lang, "")
+    user_prompt = (
+        "Aquí tienes el informe de exposición de privacidad:\n"
+        f"<informe>\n{report_json}\n</informe>\n\n"
+        "Dame el veredicto general y tus conclusiones priorizadas."
+    )
 
-    payload = {
-        "model": settings.mistral_model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": (
-                    "Aquí tienes el informe de exposición de privacidad:\n"
-                    f"<informe>\n{report_json}\n</informe>\n\n"
-                    "Dame el veredicto general y tus conclusiones priorizadas."
-                ),
-            },
-        ],
-        "temperature": 0.3,
-        "response_format": {"type": "json_object"},
-        "max_tokens": 600,
-    }
-
-    data = await _call_mistral_chat(payload)
-    try:
-        content = data["choices"][0]["message"]["content"]
-        parsed = json.loads(content)
-    except (KeyError, IndexError, json.JSONDecodeError) as exc:
-        raise AiAnalysisUnavailable("Respuesta inesperada del servicio de IA.") from exc
+    # call_ai_json ya devuelve el `content` parseado como dict (no el
+    # payload crudo de la API) -- a diferencia de antes, aquí ya no hace
+    # falta volver a indexar la respuesta ni llamar json.loads() otra vez;
+    # ai_client.py ya lanza AIHTTPError/AiAnalysisUnavailable si esa forma
+    # no se cumplió.
+    parsed = await _call_ai_chat(system_prompt, user_prompt, max_tokens=600)
+    if not isinstance(parsed, dict):
+        raise AiAnalysisUnavailable("Respuesta inesperada del servicio de IA.")
 
     verdict = parsed.get("veredicto")
     verdict = verdict.strip() if isinstance(verdict, str) else ""

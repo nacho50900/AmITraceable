@@ -138,6 +138,117 @@ class TestStudies:
         assert findings.estudios is None
 
 
+class TestEducationLevel:
+    def test_detects_superior_universitario(self):
+        findings = extract_demographics([_post("Soy universitario y estudio por las tardes")])
+        assert findings.nivel_estudios == "superior"
+
+    def test_detects_superior_master(self):
+        findings = extract_demographics([_post("Tengo un master en finanzas")])
+        assert findings.nivel_estudios == "superior"
+
+    def test_detects_superior_doctorado(self):
+        findings = extract_demographics([_post("Tengo un doctorado en fisica")])
+        assert findings.nivel_estudios == "superior"
+
+    def test_detects_superior_fp_grado_superior(self):
+        """Regresión conceptual: un Ciclo Formativo de Grado SUPERIOR
+        cuenta como 'superior' en la clasificación CNED-2014/ISCED del
+        INE (nivel 5), no como 'secundaria_superior' -- a diferencia del
+        Grado Medio, que sí cae en 'secundaria_superior' (ver test de
+        abajo)."""
+        findings = extract_demographics([_post("Tengo un ciclo formativo de grado superior")])
+        assert findings.nivel_estudios == "superior"
+
+    def test_infers_superior_when_estudios_already_detected(self):
+        """Nombrar una carrera universitaria concreta (ver TestStudies)
+        ya implica nivel 'superior' automáticamente, sin necesidad de una
+        frase-ancla propia de nivel_estudios."""
+        findings = extract_demographics([_post("Estudio Ingenieria Informatica en la universidad")])
+        assert findings.estudios == "ingenieria informatica"
+        assert findings.nivel_estudios == "superior"
+
+    def test_detects_secundaria_superior_bachillerato(self):
+        findings = extract_demographics([_post("Tengo el bachillerato y quiero hacer un grado")])
+        assert findings.nivel_estudios == "secundaria_superior"
+
+    def test_detects_secundaria_superior_fp_grado_medio(self):
+        findings = extract_demographics([_post("Tengo un ciclo formativo de grado medio")])
+        assert findings.nivel_estudios == "secundaria_superior"
+
+    def test_detects_secundaria_o_inferior_eso(self):
+        findings = extract_demographics([_post("Solo tengo la eso, deje de estudiar pronto")])
+        assert findings.nivel_estudios == "secundaria_o_inferior"
+
+    def test_detects_secundaria_o_inferior_sin_estudios(self):
+        findings = extract_demographics([_post("No tengo estudios")])
+        assert findings.nivel_estudios == "secundaria_o_inferior"
+
+    def test_studying_in_progress_is_not_detected(self):
+        """Requiere COMPLETAR el nivel, no solo estar cursándolo --
+        'estoy estudiando en la universidad' no implica que ya lo haya
+        terminado."""
+        findings = extract_demographics([_post("Estoy estudiando en la universidad")])
+        assert findings.nivel_estudios is None
+
+    def test_generic_university_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Me encanta ir a la universidad a ver a mis amigos")])
+        assert findings.nivel_estudios is None
+
+
+class TestFieldOfStudy:
+    def test_infers_rama_from_a_specific_career_in_studies_distribution(self):
+        """Si la carrera concreta ya está en STUDIES_DISTRIBUTION (una de
+        las 14), la rama se infiere vía STUDIES_TO_RAMA sin necesitar su
+        propia frase-ancla."""
+        findings = extract_demographics([_post("Estudio Derecho en la universidad")])
+        assert findings.estudios == "derecho"
+        assert findings.rama_estudios == "ciencias_sociales_juridicas"
+
+    def test_detects_a_career_outside_the_14_via_broader_vocabulary(self):
+        """'Sociologia' no es una de las 14 carreras de STUDIES_DISTRIBUTION,
+        pero sí tiene rama reconocible en el vocabulario ampliado."""
+        findings = extract_demographics([_post("Estudio Sociologia en la universidad")])
+        assert findings.estudios is None
+        assert findings.rama_estudios == "ciencias_sociales_juridicas"
+
+    def test_ingenieria_quimica_is_not_confused_with_quimica(self):
+        """Regresión del mismo tipo que futbol/futbol_sala: 'quimica' es
+        sustring de 'ingenieria quimica' -- debe ganar la entrada más
+        específica (Ingeniería y Arquitectura), no la genérica (Ciencias)."""
+        findings = extract_demographics([_post("Estudio Ingenieria Quimica en la universidad")])
+        assert findings.rama_estudios == "ingenieria_arquitectura"
+
+    def test_quimica_alone_still_detected_as_ciencias(self):
+        findings = extract_demographics([_post("Estudio Quimica en la universidad")])
+        assert findings.rama_estudios == "ciencias"
+
+    def test_historia_del_arte_is_not_confused_with_historia(self):
+        """Mismo tipo de regresión: 'historia' es sustring de 'historia
+        del arte' -- ambas caen en Artes y Humanidades de todos modos,
+        pero deben poder detectarse por separado sin que una rompa la
+        otra."""
+        findings = extract_demographics([_post("Estudio Historia del Arte en la universidad")])
+        assert findings.rama_estudios == "artes_humanidades"
+
+    def test_historia_alone_still_detected(self):
+        findings = extract_demographics([_post("Estudio Historia en la universidad")])
+        assert findings.rama_estudios == "artes_humanidades"
+
+    def test_detects_ciencias_de_la_salud_branch(self):
+        findings = extract_demographics([_post("Estudio Fisioterapia en la universidad")])
+        assert findings.rama_estudios == "ciencias_salud"
+
+    def test_detects_ingenieria_civil(self):
+        findings = extract_demographics([_post("Estudio Ingenieria Civil en la universidad")])
+        assert findings.rama_estudios == "ingenieria_arquitectura"
+
+    def test_unrecognized_field_leaves_rama_none(self):
+        findings = extract_demographics([_post("Estudio jardineria avanzada")])
+        assert findings.estudios is None
+        assert findings.rama_estudios is None
+
+
 class TestOccupation:
     def test_detects_known_occupation_keyword(self):
         findings = extract_demographics([_post("Trabajo como docente en un instituto")])
@@ -405,6 +516,283 @@ class TestSportPractice:
     def test_baloncesto_spectator_mention_is_not_detected(self):
         findings = extract_demographics([_post("Vi el partido de baloncesto anoche")])
         assert findings.practica_deportiva is None
+
+    def test_detects_futbol_sala_practice(self):
+        findings = extract_demographics([_post("Juego al futbol sala en una liga amateur los jueves")])
+        assert findings.practica_deportiva == "futbol_sala"
+
+    def test_detects_futbito_as_futbol_sala(self):
+        findings = extract_demographics([_post("Juego al futbito con mis amigos los viernes")])
+        assert findings.practica_deportiva == "futbol_sala"
+
+    def test_futbol_sala_is_not_confused_with_futbol(self):
+        """Caso motivador: 'futbol' es substring de 'futbol sala', así que
+        el orden de alternancia en _SPORT_PRACTICE_RE importa -- si el
+        grupo 'futbol' se comprobara primero, 'juego al futbol sala'
+        haría match como 'futbol' (con \\b justo antes de 'sala'), nunca
+        llegando a probar la alternativa 'futbol_sala'."""
+        findings = extract_demographics([_post("Juego al futbol sala todos los jueves")])
+        assert findings.practica_deportiva == "futbol_sala"
+        assert findings.practica_deportiva != "futbol"
+
+    def test_futbol_sala_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Vi un torneo de futbol sala este finde")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_golf_practice(self):
+        findings = extract_demographics([_post("Juego al golf todos los fines de semana")])
+        assert findings.practica_deportiva == "golf"
+
+    def test_golf_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Vi el masters de golf en la television")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_yoga_practice(self):
+        findings = extract_demographics([_post("Practico yoga cada manana antes de trabajar")])
+        assert findings.practica_deportiva == "yoga_pilates"
+
+    def test_detects_pilates_as_yoga_pilates(self):
+        findings = extract_demographics([_post("Voy a clases de pilates dos veces por semana")])
+        assert findings.practica_deportiva == "yoga_pilates"
+
+    def test_yoga_generic_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Me encanta el yoga como filosofia de vida")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_spinning_as_gimnasia_intensa(self):
+        findings = extract_demographics([_post("Voy a spinning tres veces por semana")])
+        assert findings.practica_deportiva == "gimnasia_intensa"
+
+    def test_gimnasia_intensa_generic_mention_is_not_detected(self):
+        findings = extract_demographics([_post("La gimnasia intensa quema muchas calorias")])
+        assert findings.practica_deportiva is None
+
+    def test_crossfit_stays_musculacion_not_gimnasia_intensa(self):
+        """'hago crossfit' debe seguir cayendo en 'musculacion' (donde ya
+        estaba antes de añadir 'gimnasia_intensa'), no detectarse dos
+        veces ni cambiar de categoria."""
+        findings = extract_demographics([_post("Hago crossfit en el box de mi barrio")])
+        assert findings.practica_deportiva == "musculacion"
+
+    # --- Ampliación a la tabla completa de la Encuesta de Hábitos
+    # Deportivos en España 2024/25 (tabla 1.21, 41 modalidades) ---
+
+    def test_detects_atletismo_practice(self):
+        findings = extract_demographics([_post("Practico atletismo desde los 12 anos")])
+        assert findings.practica_deportiva == "atletismo"
+
+    def test_atletismo_and_running_are_distinct(self):
+        """Regresión: en un borrador anterior 'practico atletismo' caia en
+        el grupo 'running' -- la encuesta 2024/25 los trata como dos filas
+        separadas (poblaciones muy distintas), asi que deben seguir
+        siendo categorias independientes en el regex."""
+        atletismo = extract_demographics([_post("Practico atletismo desde los 12 anos")])
+        running = extract_demographics([_post("Salgo a correr todas las semanas")])
+        assert atletismo.practica_deportiva == "atletismo"
+        assert running.practica_deportiva == "running"
+
+    def test_detects_tenis_mesa_practice(self):
+        findings = extract_demographics([_post("Juego al tenis de mesa los domingos")])
+        assert findings.practica_deportiva == "tenis_mesa"
+
+    def test_detects_ping_pong_as_tenis_mesa(self):
+        findings = extract_demographics([_post("Juego al ping pong con mis companeros de piso")])
+        assert findings.practica_deportiva == "tenis_mesa"
+
+    def test_tenis_mesa_is_not_confused_with_tenis(self):
+        """Regresión: 'tenis' es prefijo de 'tenis de mesa' -- si el grupo
+        'tenis' se comprobara primero, 'juego al tenis de mesa' haria
+        match como 'tenis' antes de llegar a probar 'tenis_mesa'."""
+        findings = extract_demographics([_post("Juego al tenis de mesa todos los domingos")])
+        assert findings.practica_deportiva == "tenis_mesa"
+        assert findings.practica_deportiva != "tenis"
+
+    def test_detects_esqui_practice(self):
+        findings = extract_demographics([_post("Voy a esquiar todos los inviernos")])
+        assert findings.practica_deportiva == "esqui"
+
+    def test_detects_esqui_nautico_practice(self):
+        findings = extract_demographics([_post("Practico esqui nautico en verano")])
+        assert findings.practica_deportiva == "esqui_nautico"
+
+    def test_esqui_nautico_is_not_confused_with_esqui(self):
+        """Regresión: mismo motivo que futbol/futbol_sala y tenis/tenis_mesa
+        -- 'esqui' es prefijo de 'esqui nautico'."""
+        findings = extract_demographics([_post("Hago esqui nautico en la costa")])
+        assert findings.practica_deportiva == "esqui_nautico"
+        assert findings.practica_deportiva != "esqui"
+
+    def test_esqui_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Me gusta el esqui como deporte de invierno")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_voleibol_practice(self):
+        findings = extract_demographics([_post("Juego al voleibol en el equipo del instituto")])
+        assert findings.practica_deportiva == "voleibol"
+
+    def test_detects_voley_as_voleibol(self):
+        findings = extract_demographics([_post("Juego al voley todos los sabados")])
+        assert findings.practica_deportiva == "voleibol"
+
+    def test_voleibol_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Me encanta ver voleibol playa en verano")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_balonmano_practice(self):
+        findings = extract_demographics([_post("Juego al balonmano en el equipo del barrio")])
+        assert findings.practica_deportiva == "balonmano"
+
+    def test_balonmano_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Vi el partido de balonmano en la tele")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_rugby_practice(self):
+        findings = extract_demographics([_post("Practico rugby los fines de semana")])
+        assert findings.practica_deportiva == "rugby"
+
+    def test_detects_pelota_vasca_practice(self):
+        findings = extract_demographics([_post("Juego al fronton con mi padre")])
+        assert findings.practica_deportiva == "pelota_vasca"
+
+    def test_detects_frontenis_as_pelota_vasca(self):
+        findings = extract_demographics([_post("Practico frontenis desde hace anos")])
+        assert findings.practica_deportiva == "pelota_vasca"
+
+    def test_detects_petanca_practice(self):
+        findings = extract_demographics([_post("Juego a la petanca los domingos")])
+        assert findings.practica_deportiva == "petanca"
+
+    def test_detects_patinaje_practice(self):
+        findings = extract_demographics([_post("Hago patinaje artistico desde nina")])
+        assert findings.practica_deportiva == "patinaje"
+
+    def test_detects_motociclismo_practice(self):
+        findings = extract_demographics([_post("Practico motociclismo de competicion")])
+        assert findings.practica_deportiva == "motociclismo"
+
+    def test_motociclismo_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Vi la carrera de motoGP este finde")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_automovilismo_practice(self):
+        findings = extract_demographics([_post("Hago rallies desde hace anos")])
+        assert findings.practica_deportiva == "automovilismo"
+
+    def test_automovilismo_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Vi la formula 1 el domingo pasado")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_aeronautica_practice(self):
+        findings = extract_demographics([_post("Practico parapente todos los findes que puedo")])
+        assert findings.practica_deportiva == "aeronautica"
+
+    def test_detects_squash_practice(self):
+        findings = extract_demographics([_post("Juego al squash con un amigo del trabajo")])
+        assert findings.practica_deportiva == "squash"
+
+    def test_detects_badminton_practice(self):
+        findings = extract_demographics([_post("Juego al badminton en el pabellon")])
+        assert findings.practica_deportiva == "badminton"
+
+    def test_detects_surf_practice(self):
+        findings = extract_demographics([_post("Hago surf todos los veranos en la playa")])
+        assert findings.practica_deportiva == "surf"
+
+    def test_detects_vela_practice(self):
+        findings = extract_demographics([_post("Practico vela en el club nautico")])
+        assert findings.practica_deportiva == "vela"
+
+    def test_detects_piraguismo_practice(self):
+        findings = extract_demographics([_post("Hago piraguismo por el rio los fines de semana")])
+        assert findings.practica_deportiva == "piraguismo_remo"
+
+    def test_detects_kayak_as_piraguismo_remo(self):
+        findings = extract_demographics([_post("Practico kayak en el pantano")])
+        assert findings.practica_deportiva == "piraguismo_remo"
+
+    def test_detects_submarinismo_practice(self):
+        findings = extract_demographics([_post("Practico submarinismo en Baleares cada verano")])
+        assert findings.practica_deportiva == "submarinismo"
+
+    def test_detects_buceo_as_submarinismo(self):
+        findings = extract_demographics([_post("Hago buceo desde que me saque el titulo")])
+        assert findings.practica_deportiva == "submarinismo"
+
+    def test_submarinismo_generic_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Vi un documental de submarinismo anoche")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_triatlon_practice(self):
+        findings = extract_demographics([_post("Hago triatlon desde hace dos anos")])
+        assert findings.practica_deportiva == "triatlon"
+
+    def test_detects_boxeo_practice(self):
+        findings = extract_demographics([_post("Practico boxeo tres veces por semana")])
+        assert findings.practica_deportiva == "boxeo"
+
+    def test_boxeo_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Vi la pelea de boxeo de anoche")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_karate_as_artes_marciales(self):
+        findings = extract_demographics([_post("Hago karate desde que era nino")])
+        assert findings.practica_deportiva == "artes_marciales"
+
+    def test_detects_judo_as_artes_marciales(self):
+        findings = extract_demographics([_post("Practico judo en un club cerca de casa")])
+        assert findings.practica_deportiva == "artes_marciales"
+
+    def test_detects_defensa_personal_as_lucha_defensa_personal(self):
+        findings = extract_demographics([_post("Practico defensa personal los martes")])
+        assert findings.practica_deportiva == "lucha_defensa_personal"
+
+    def test_artes_marciales_and_lucha_defensa_personal_are_distinct(self):
+        artes = extract_demographics([_post("Hago karate desde que era nino")])
+        lucha = extract_demographics([_post("Practico defensa personal los martes")])
+        assert artes.practica_deportiva == "artes_marciales"
+        assert lucha.practica_deportiva == "lucha_defensa_personal"
+
+    def test_detects_caza_practice(self):
+        findings = extract_demographics([_post("Voy de caza los fines de semana con mi padre")])
+        assert findings.practica_deportiva == "caza"
+
+    def test_detects_pesca_practice(self):
+        findings = extract_demographics([_post("Salgo a pescar cada domingo por la manana")])
+        assert findings.practica_deportiva == "pesca"
+
+    def test_detects_hipica_practice(self):
+        findings = extract_demographics([_post("Practico hipica desde que era pequena")])
+        assert findings.practica_deportiva == "hipica"
+
+    def test_detects_equitacion_as_hipica(self):
+        findings = extract_demographics([_post("Hago equitacion todos los sabados")])
+        assert findings.practica_deportiva == "hipica"
+
+    def test_hipica_spectator_mention_is_not_detected(self):
+        findings = extract_demographics([_post("Vi las carreras de caballos en la tele")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_ajedrez_practice(self):
+        findings = extract_demographics([_post("Juego al ajedrez en un club todos los jueves")])
+        assert findings.practica_deportiva == "ajedrez"
+
+    def test_ajedrez_generic_mention_is_not_detected(self):
+        findings = extract_demographics([_post("El ajedrez es un deporte muy mental")])
+        assert findings.practica_deportiva is None
+
+    def test_detects_zumba_as_baile_fitness(self):
+        """Regresión: en un borrador anterior 'hago zumba' caia en
+        'gimnasia_intensa' -- la encuesta 2024/25 separa 'gimnasia
+        intensa' de 'otra actividad fisica con musica' en dos filas
+        distintas, y zumba encaja mejor en la segunda."""
+        findings = extract_demographics([_post("Hago zumba los martes y jueves en el polideportivo")])
+        assert findings.practica_deportiva == "baile_fitness"
+
+    def test_baile_fitness_and_gimnasia_intensa_are_distinct(self):
+        baile = extract_demographics([_post("Hago zumba los martes y jueves")])
+        gimnasia = extract_demographics([_post("Voy a spinning tres veces por semana")])
+        assert baile.practica_deportiva == "baile_fitness"
+        assert gimnasia.practica_deportiva == "gimnasia_intensa"
 
     def test_no_match_leaves_none(self):
         findings = extract_demographics([_post("Hoy fui al parque con mi perro")])

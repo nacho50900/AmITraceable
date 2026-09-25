@@ -26,6 +26,7 @@ from app.data.ine_reference import (
     PROVINCE_POPULATION,
     SPORT_PRACTICE_DISTRIBUTION,
     STUDIES_DISTRIBUTION,
+    STUDIES_TO_RAMA,
     resolve_autonomous_community_in_text,
 )
 from app.models.schemas import InferredAttribute, SocialPost
@@ -99,6 +100,30 @@ class DemographicFindings:
     # exclusión que se une con travel_detection.py, no se sobrescribe).
     travel_permalinks: set[str] = field(default_factory=set)
     estudios: str | None = None
+    # Nivel de formación alcanzado (tramos INE/EPA -- CNED-2014): "superior"
+    # (universidad, grado, licenciatura, master, doctorado, FP de grado
+    # superior) | "secundaria_superior" (bachillerato, FP de grado medio) |
+    # "secundaria_o_inferior" (ESO, primaria, sin estudios) | None. DISTINTO
+    # de `estudios` (que es la CARRERA concreta -- "medicina", "derecho" --
+    # solo para quien ya cursa/cursó estudios superiores). Si `estudios` ya
+    # se detectó, `nivel_estudios` se infiere automáticamente como
+    # "superior" sin necesidad de una frase-ancla propia (ver
+    # _try_detect_nivel_estudios) -- nombrar una carrera concreta ya es
+    # evidencia suficiente de haber cursado educación superior.
+    nivel_estudios: str | None = None
+    # Rama de conocimiento oficial (RD 1393/2007): "ciencias_sociales_juridicas"
+    # | "ingenieria_arquitectura" | "ciencias_salud" | "artes_humanidades" |
+    # "ciencias" | None. DISTINTO de `estudios` (la carrera concreta) y de
+    # `nivel_estudios` (el nivel alcanzado) -- esto es la categoría AMPLIA a
+    # la que pertenece la carrera, con vocabulario más amplio que las 14
+    # carreras de STUDIES_DISTRIBUTION (decenas de carreras adicionales que
+    # no tienen proporción propia pero sí rama reconocible). Si `estudios`
+    # ya se detectó, se infiere automáticamente vía STUDIES_TO_RAMA -- pero
+    # SOLO como dato informativo, nunca genera su propio paso de
+    # estrechamiento en ese caso (ver _step_rama_estudios en
+    # k_anonymity.py): la proporción de la rama ya está contenida en la de
+    # la carrera concreta, aplicar ambas contaría el mismo hecho dos veces.
+    rama_estudios: str | None = None
     ocupacion: str | None = None
     universidad: str | None = None
     empresa: str | None = None
@@ -249,6 +274,32 @@ _EMPLOYMENT_ACTIVO_RE = re.compile(
     r"\b(trabajo (?:en|de|para|como)|soy autónomo|soy autónoma|tengo trabajo)\b", re.I
 )
 
+# Nivel de estudios (tramos INE/EPA, ver _try_detect_nivel_estudios para
+# el porqué del orden y de exigir "superior"/"medio" explícito en la FP).
+_NIVEL_ESTUDIOS_SUPERIOR_RE = re.compile(
+    r"\b(soy universitari[oa]|tengo una carrera universitaria|"
+    r"tengo un grado universitario|soy graduad[oa] en|"
+    r"termine la carrera|acabe la carrera|termine la universidad|"
+    r"tengo una licenciatura|soy licenciad[oa]|"
+    r"tengo un master|hice un master|termine un master|"
+    r"tengo un doctorado|soy doctorand[oa]|"
+    r"tengo un ciclo formativo de grado superior|"
+    r"tengo un grado superior de fp|soy tecnico superior|soy tecnica superior)\b",
+    re.I,
+)
+_NIVEL_ESTUDIOS_SECUNDARIA_SUPERIOR_RE = re.compile(
+    r"\b(tengo el bachillerato|termine bachillerato|termine el bachillerato|"
+    r"tengo un ciclo formativo de grado medio|tengo un grado medio de fp|"
+    r"soy tecnico de grado medio|soy tecnica de grado medio|termine la fp)\b",
+    re.I,
+)
+_NIVEL_ESTUDIOS_SECUNDARIA_O_INFERIOR_RE = re.compile(
+    r"\b(solo tengo la eso|tengo la eso|no termine el instituto|"
+    r"solo estudios primarios|no tengo estudios|abandone los estudios|"
+    r"no termine la eso|no termine secundaria)\b",
+    re.I,
+)
+
 # Tipo de hogar: señales que se combinan sobre TODOS los posts (no una
 # regex "ganadora" por post, ver `_detect_household_type`).
 _HOUSEHOLD_ALONE_RE = re.compile(r"\bvivo sol[oa]\b", re.I)
@@ -339,8 +390,6 @@ _RELIGION_TEXT_MAP = {
     "islam": "islam",
     "catolico": "catolicismo",
     "catolica": "catolicismo",
-    "catolico": "catolicismo",
-    "catolica": "catolicismo",
     "cristiano": "cristianismo",
     "cristiana": "cristianismo",
     "budista": "budismo",
@@ -364,6 +413,8 @@ def extract_demographics(posts: list[SocialPost]) -> DemographicFindings:
         _try_detect_sexo(text, post.permalink, findings)
         _try_detect_location(text, post.permalink, findings)
         _try_detect_estudios(text, post.permalink, findings)
+        _try_detect_nivel_estudios(text, post.permalink, findings)
+        _try_detect_rama_estudios(text, post.permalink, findings)
         _try_detect_ocupacion(text, post.permalink, findings)
         _try_detect_practica_deportiva(text, post.permalink, findings)
         _try_detect_universidad(text, post.permalink, findings)
@@ -386,7 +437,7 @@ def _mark_all_detected_as_texto(findings: DemographicFindings) -> None:
     el frontend pueda distinguirlo de lo que venga de geolocation.py."""
     for attr_name in (
         "sexo", "edad", "provincia", "municipio", "comunidad_autonoma",
-        "estudios", "ocupacion", "universidad", "empresa",
+        "estudios", "nivel_estudios", "rama_estudios", "ocupacion", "universidad", "empresa",
         "nacionalidad", "situacion_laboral", "tipo_hogar", "lengua_materna",
         "orientacion_sexual", "signo_zodiacal", "religion",
         "practica_deportiva",
@@ -438,6 +489,129 @@ def _try_detect_estudios(text: str, permalink: str, findings: DemographicFinding
         findings.evidence.setdefault("estudios", []).append(permalink)
 
 
+def _try_detect_nivel_estudios(text: str, permalink: str, findings: DemographicFindings) -> None:
+    """Requiere una autodeclaración de haber CURSADO/COMPLETADO ese nivel
+    (verbos como "tengo...", "termine...", "soy licenciado/a en...") --
+    "estoy estudiando en la universidad" (en curso, no completado) NO
+    cuenta, mismo criterio que practica_deportiva con espectador vs.
+    práctica real: contar aspiraciones o estudios en curso como si ya
+    estuvieran completados sobre-estimaría el nivel real de la persona.
+
+    Orden de comprobación: de mayor a menor nivel. Los ciclos de
+    Formación Profesional son el caso más delicado -- un Ciclo Formativo
+    de Grado Superior (CFGS) cuenta como "superior" en la clasificación
+    CNED-2014/ISCED que usa el INE (nivel 5, no 3-4), mientras que un
+    Ciclo Formativo de Grado Medio (CFGM) y el Bachillerato caen en
+    "secundaria_superior" -- de ahí que las frases-ancla exijan
+    "superior"/"medio" explícito en vez de un "tengo un ciclo formativo"
+    genérico sin cualificar, que sería ambiguo entre los dos niveles."""
+    if findings.nivel_estudios is not None:
+        return
+
+    # Nombrar una carrera universitaria concreta (ver _try_detect_estudios
+    # / STUDIES_DISTRIBUTION) ya implica nivel "superior" sin necesidad de
+    # una frase-ancla propia de nivel_estudios.
+    if findings.estudios is not None:
+        findings.nivel_estudios = "superior"
+        findings.evidence.setdefault("nivel_estudios", []).append(permalink)
+        return
+
+    if _NIVEL_ESTUDIOS_SUPERIOR_RE.search(text):
+        findings.nivel_estudios = "superior"
+    elif _NIVEL_ESTUDIOS_SECUNDARIA_SUPERIOR_RE.search(text):
+        findings.nivel_estudios = "secundaria_superior"
+    elif _NIVEL_ESTUDIOS_SECUNDARIA_O_INFERIOR_RE.search(text):
+        findings.nivel_estudios = "secundaria_o_inferior"
+    else:
+        return
+
+    findings.evidence.setdefault("nivel_estudios", []).append(permalink)
+
+
+# Vocabulario AMPLIADO de rama de conocimiento (RD 1393/2007) -- carreras
+# adicionales que no tienen proporción propia en STUDIES_DISTRIBUTION (14
+# carreras concretas) pero sí una rama reconocible. Reutiliza el mismo
+# `_STUDY_VERB_RE` que _try_detect_estudios (misma frase-ancla de
+# práctica: "estudio...", "estudiante de...", "graduado en...") contra un
+# candidato de texto más amplio, en vez de un regex nuevo.
+#
+# ORDEN: cuando un término es sustring de otro más largo ("quimica"
+# dentro de "ingenieria quimica", "historia" dentro de "historia del
+# arte"), el más específico va SIEMPRE primero -- mismo motivo que el
+# orden de alternancia en _SPORT_PRACTICE_RE (ver ese comentario). Un
+# diccionario normal de Python conserva el orden de inserción (3.7+), así
+# que ese orden es el que determina qué entrada gana en `next()`.
+_RAMA_ESTUDIOS_VOCABULARY: dict[str, str] = {
+    # Ingeniería y Arquitectura -- variantes de "ingenieria X" antes de
+    # cualquier término corto que pudiera ser sustring de una de ellas.
+    "ingenieria de telecomunicaciones": "ingenieria_arquitectura",
+    "ingenieria aeroespacial": "ingenieria_arquitectura",
+    "ingenieria electronica": "ingenieria_arquitectura",
+    "ingenieria mecanica": "ingenieria_arquitectura",
+    "ingenieria quimica": "ingenieria_arquitectura",
+    "ingenieria agronoma": "ingenieria_arquitectura",
+    "ingenieria civil": "ingenieria_arquitectura",
+    # Ciencias Sociales y Jurídicas.
+    "comunicacion audiovisual": "ciencias_sociales_juridicas",
+    "relaciones laborales": "ciencias_sociales_juridicas",
+    "ciencias politicas": "ciencias_sociales_juridicas",
+    "trabajo social": "ciencias_sociales_juridicas",
+    "criminologia": "ciencias_sociales_juridicas",
+    "sociologia": "ciencias_sociales_juridicas",
+    "publicidad": "ciencias_sociales_juridicas",
+    "turismo": "ciencias_sociales_juridicas",
+    # Ciencias de la Salud.
+    "terapia ocupacional": "ciencias_salud",
+    "optica y optometria": "ciencias_salud",
+    "odontologia": "ciencias_salud",
+    "fisioterapia": "ciencias_salud",
+    "logopedia": "ciencias_salud",
+    "podologia": "ciencias_salud",
+    "nutricion": "ciencias_salud",
+    # Artes y Humanidades -- "historia del arte" antes que "historia" a
+    # secas (sustring).
+    "traduccion e interpretacion": "artes_humanidades",
+    "historia del arte": "artes_humanidades",
+    "bellas artes": "artes_humanidades",
+    "humanidades": "artes_humanidades",
+    "filologia": "artes_humanidades",
+    "filosofia": "artes_humanidades",
+    "historia": "artes_humanidades",
+    # Ciencias -- "ingenieria quimica" ya se comprobó arriba, así que
+    # "quimica" a secas aquí solo dispara si NO era esa combinación.
+    "ciencias ambientales": "ciencias",
+    "matematicas": "ciencias",
+    "bioquimica": "ciencias",
+    "geologia": "ciencias",
+    "quimica": "ciencias",
+    "fisica": "ciencias",
+}
+
+
+def _try_detect_rama_estudios(text: str, permalink: str, findings: DemographicFindings) -> None:
+    """SOLO rellena el campo -- NUNCA aplica un paso de estrechamiento
+    propio cuando se infiere desde `estudios` (ver comentario en
+    STUDIES_TO_RAMA y en _step_rama_estudios): la proporción de la rama
+    ya está contenida en la de la carrera concreta."""
+    if findings.rama_estudios is not None:
+        return
+
+    if findings.estudios is not None:
+        findings.rama_estudios = STUDIES_TO_RAMA[findings.estudios]
+        findings.evidence.setdefault("rama_estudios", []).extend(findings.evidence.get("estudios", []))
+        return
+
+    match = _STUDY_VERB_RE.search(text)
+    if not match:
+        return
+
+    candidate = _strip_accents(match.group(1).strip().lower())
+    matched_rama = next((rama for keyword, rama in _RAMA_ESTUDIOS_VOCABULARY.items() if keyword in candidate), None)
+    if matched_rama:
+        findings.rama_estudios = matched_rama
+        findings.evidence.setdefault("rama_estudios", []).append(permalink)
+
+
 def _try_detect_ocupacion(text: str, permalink: str, findings: DemographicFindings) -> None:
     if findings.ocupacion is not None:
         return
@@ -460,12 +634,24 @@ def _try_detect_ocupacion(text: str, permalink: str, findings: DemographicFindin
 # claves de SPORT_PRACTICE_DISTRIBUTION por subcadena. Un grupo con
 # nombre por modalidad (en vez de una tabla de mapeo aparte) para que
 # `match.lastgroup` sea directamente la clave de la modalidad detectada.
+#
+# ORDEN DE ALTERNANCIA: cuando la frase-ancla de una modalidad es
+# literalmente un PREFIJO de la de otra ("tenis" dentro de "tenis de
+# mesa", "futbol" dentro de "futbol sala", "esqui" dentro de "esqui
+# nautico"), la más específica va SIEMPRE primero -- si no, "juego al
+# tenis de mesa" haría match como "tenis" (el \b encaja justo antes del
+# espacio, antes de llegar a probar "tenis_mesa"), sin llegar nunca a la
+# alternativa correcta. Ver test_futbol_sala_is_not_confused_with_futbol
+# para el caso que motivó esta regla.
 _SPORT_PRACTICE_RE = re.compile(
     r"\b(?:"
+    r"(?P<futbol_sala>juego (?:al |a )?futbol sala\b|juego (?:al |a )?futbito\b|"
+    r"practico futbol sala\b|practico futbito\b|entreno (?:al |a )?futbol sala\b)|"
     r"(?P<futbol>juego (?:al |a )?futbol\b|soy futbolista\b|practico futbol\b|entreno (?:al |a )?futbol\b)|"
     r"(?P<running>hago running\b|soy runner\b|salgo a correr\b|"
     r"corro (?:todas las semanas|cada semana|a diario|con regularidad)\b|"
-    r"practico running\b|practico atletismo\b)|"
+    r"practico running\b)|"
+    r"(?P<atletismo>practico atletismo\b|hago atletismo\b|soy atleta\b|entreno atletismo\b)|"
     r"(?P<natacion>hago natacion\b|voy a nadar\b|nado en la piscina\b|"
     r"practico natacion\b|soy nadador\b|soy nadadora\b)|"
     r"(?P<senderismo>hago senderismo\b|voy de senderismo\b|practico montanismo\b|"
@@ -476,9 +662,78 @@ _SPORT_PRACTICE_RE = re.compile(
     r"monto en bici (?:todas las semanas|cada semana|con regularidad)\b|"
     r"practico ciclismo\b|soy ciclista\b)|"
     r"(?P<padel>juego (?:al |a )?padel\b|practico padel\b)|"
+    r"(?P<tenis_mesa>juego (?:al |a )?tenis de mesa\b|practico tenis de mesa\b|"
+    r"juego (?:al |a )?ping pong\b|practico ping pong\b)|"
     r"(?P<tenis>juego (?:al |a )?tenis\b|practico tenis\b)|"
     r"(?P<baloncesto>juego (?:al |a )?baloncesto\b|practico baloncesto\b|"
-    r"soy jugador de baloncesto\b|soy jugadora de baloncesto\b)"
+    r"soy jugador de baloncesto\b|soy jugadora de baloncesto\b)|"
+    r"(?P<balonmano>juego (?:al |a )?balonmano\b|practico balonmano\b|entreno balonmano\b)|"
+    r"(?P<voleibol>juego (?:al |a )?voleibol\b|practico voleibol\b|"
+    r"juego (?:al |a )?voley\b|practico voley\b)|"
+    r"(?P<rugby>juego (?:al |a )?rugby\b|practico rugby\b)|"
+    r"(?P<pelota_vasca>juego (?:al |a )?fronton\b|practico fronton\b|"
+    r"juego (?:al |a )?frontenis\b|practico frontenis\b|"
+    r"juego (?:a la |a )?pelota vasca\b|practico pelota vasca\b)|"
+    r"(?P<petanca>juego a la petanca\b|juego a petanca\b|practico petanca\b)|"
+    r"(?P<patinaje>hago patinaje\b|practico patinaje\b|salgo a patinar\b|voy a patinar\b|"
+    r"hago monopatin\b|practico monopatin\b)|"
+    r"(?P<motociclismo>practico motociclismo\b|hago motocross\b|compito en motocross\b|"
+    r"soy piloto de motociclismo\b)|"
+    r"(?P<automovilismo>practico automovilismo\b|hago rallies\b|compito en rallies\b|"
+    r"soy piloto de carreras\b)|"
+    r"(?P<aeronautica>hago parapente\b|practico parapente\b|hago ala delta\b|"
+    r"practico ala delta\b|hago paracaidismo\b|practico paracaidismo\b)|"
+    r"(?P<squash>juego (?:al |a )?squash\b|practico squash\b)|"
+    r"(?P<badminton>juego (?:al |a )?badminton\b|practico badminton\b)|"
+    r"(?P<golf>juego (?:al |a )?golf\b|practico golf\b|soy golfista\b)|"
+    r"(?P<surf>hago surf\b|practico surf\b|salgo a hacer surf\b|soy surfista\b)|"
+    r"(?P<vela>practico vela\b|hago vela\b|navego en velero\b)|"
+    r"(?P<esqui_nautico>hago esqui nautico\b|practico esqui nautico\b|"
+    r"hago motonautica\b|practico motonautica\b)|"
+    r"(?P<piraguismo_remo>hago piraguismo\b|practico piraguismo\b|hago remo\b|"
+    r"practico remo\b|hago kayak\b|practico kayak\b)|"
+    r"(?P<submarinismo>hago submarinismo\b|practico submarinismo\b|hago buceo\b|"
+    r"practico buceo\b|voy a bucear\b|soy buceador\b|soy buceadora\b)|"
+    r"(?P<esqui>hago esqui\b|practico esqui\b|voy a esquiar\b|"
+    r"hago snowboard\b|practico snowboard\b)|"
+    r"(?P<triatlon>hago triatlon\b|practico triatlon\b|compito en triatlon\b|soy triatleta\b)|"
+    r"(?P<boxeo>hago boxeo\b|practico boxeo\b|entreno boxeo\b|"
+    r"soy boxeador\b|soy boxeadora\b)|"
+    r"(?P<artes_marciales>practico artes marciales\b|hago artes marciales\b|"
+    r"hago karate\b|practico karate\b|hago judo\b|practico judo\b|"
+    r"hago taekwondo\b|practico taekwondo\b|hago kung fu\b|practico kung fu\b)|"
+    r"(?P<lucha_defensa_personal>practico defensa personal\b|hago defensa personal\b|"
+    r"practico lucha libre\b|hago lucha libre\b|practico jiu jitsu\b|hago jiu jitsu\b|"
+    r"practico bjj\b|hago bjj\b)|"
+    r"(?P<caza>voy de caza\b|salgo de caza\b|practico caza\b|"
+    r"soy cazador\b|soy cazadora\b)|"
+    r"(?P<pesca>voy de pesca\b|salgo a pescar\b|practico pesca\b|"
+    r"soy pescador\b|soy pescadora\b)|"
+    r"(?P<hipica>practico hipica\b|hago hipica\b|monto a caballo\b|"
+    r"practico equitacion\b|hago equitacion\b)|"
+    r"(?P<ajedrez>juego (?:al |a )?ajedrez\b|practico ajedrez\b|compito en ajedrez\b)|"
+    # yoga_pilates: aproxima la categoría "gimnasia suave" de la encuesta
+    # (ver nota en ine_reference.py) -- yoga, pilates y tai-chi son las
+    # formas más habituales en que la gente lo declara en primera
+    # persona; "gimnasia de mantenimiento" sin más detalle no tiene una
+    # frase-ancla propia porque es demasiado genérica para distinguirla
+    # de una mención de espectador o de otra actividad.
+    r"(?P<yoga_pilates>hago yoga\b|practico yoga\b|voy a clases de yoga\b|"
+    r"hago pilates\b|practico pilates\b|voy a clases de pilates\b|"
+    r"hago tai chi\b|practico tai chi\b)|"
+    # baile_fitness: aproxima "Otra actividad física con música" de la
+    # encuesta -- zumba es, con diferencia, la forma más habitual de
+    # declarar esta categoría en primera persona.
+    r"(?P<baile_fitness>hago zumba\b|voy a clases de zumba\b|"
+    r"hago baile fitness\b|hago bailoterapia\b)|"
+    # gimnasia_intensa: aproxima la categoría homónima de la encuesta
+    # (aerobic/step/spinning) -- DISTINTA de "baile_fitness" de arriba
+    # (que es la propia encuesta la que las separa en dos filas). "hago
+    # crossfit" queda deliberadamente en el grupo de musculacion de
+    # arriba, no aquí, para no detectar dos veces la misma frase.
+    r"(?P<gimnasia_intensa>hago aerobic\b|hago step\b|"
+    r"hago spinning\b|voy a spinning\b|"
+    r"voy a clases dirigidas de gimnasia\b)"
     r")",
     re.I,
 )

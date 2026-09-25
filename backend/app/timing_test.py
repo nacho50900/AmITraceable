@@ -1,1 +1,0 @@
-docker cp timing_test.py backend:/app/timing_test.py

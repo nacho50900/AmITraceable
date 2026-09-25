@@ -19,35 +19,45 @@ def _fake_image():
     return Image.new("RGB", (10, 10))
 
 
+def _chat_completion_response(text: str) -> dict:
+    """Sobre mínimo con la forma real de lo que devuelve
+    `Llama.create_chat_completion()` -- solo lo que `analyze_image_content`
+    de verdad lee (`response["choices"][0]["message"]["content"]`)."""
+    return {"choices": [{"message": {"content": text}}]}
+
+
 class _FakeModel:
-    """Sustituye a Moondream2 lo justo para analyze_image_content: debe
-    soportar `.encode_image(image)` (reutilizada por las DOS llamadas a
-    `.query()`, ver docstring de analyze_image_content) y `.query(image,
-    pregunta, settings=...)` -> {"answer": str}, distinguiendo la
-    respuesta según cuál de las dos preguntas (_CAPTION_QUERY vs
-    _STRUCTURED_QUERY) se le haga -- igual que hace el modelo real, que
-    responde cosas distintas a cada una."""
+    """Sustituye a Moondream2 (vía `llama-cpp-python`) lo justo para
+    `analyze_image_content`: debe soportar
+    `.create_chat_completion(messages=..., max_tokens=..., temperature=...)`,
+    distinguiendo la respuesta según cuál de las dos preguntas
+    (_CAPTION_QUERY vs _STRUCTURED_QUERY) venga en `messages` -- igual que
+    hace el modelo real, que responde cosas distintas a cada una. No
+    valida el formato exacto del `content` de tipo `image_url` -- eso lo
+    cubre `test_image_is_resized_before_encoding` por separado, mirando el
+    tamaño de la imagen decodificada del data URI."""
 
     def __init__(self, structured_answer: str, caption_answer: str = "una escena sin detalles relevantes"):
         self._structured_answer = structured_answer
         self._caption_answer = caption_answer
 
-    def encode_image(self, image):
-        return image  # no hace falta simular una codificación real para estos tests
+    def reset(self):
+        pass  # no-op: los tests no dependen de que la caché KV se limpie de verdad
 
-    def query(self, image, question, settings=None):
+    def create_chat_completion(self, messages, max_tokens=None, temperature=None):
+        question = messages[0]["content"][1]["text"]
         if question == scene_analysis._CAPTION_QUERY:
-            return {"answer": self._caption_answer}
+            return _chat_completion_response(self._caption_answer)
         if question == scene_analysis._STRUCTURED_QUERY:
-            return {"answer": self._structured_answer}
+            return _chat_completion_response(self._structured_answer)
         raise AssertionError(f"Pregunta inesperada (no es _CAPTION_QUERY ni _STRUCTURED_QUERY): {question!r}")
 
 
 class _RaisingModel:
-    def encode_image(self, image):
-        raise RuntimeError("fallo simulado del modelo")
+    def reset(self):
+        pass
 
-    def query(self, image, question, settings=None):
+    def create_chat_completion(self, messages, max_tokens=None, temperature=None):
         raise RuntimeError("fallo simulado del modelo")
 
 
@@ -55,7 +65,6 @@ class _RaisingModel:
 def reset_module_globals(monkeypatch):
     """Cada test debe partir de _model limpio, igual que geolocation.py."""
     monkeypatch.setattr(scene_analysis, "_model", None)
-    yield
 
 
 def _install_fake_model(monkeypatch, structured_answer: str, caption_answer: str = "una escena sin detalles relevantes"):
@@ -74,7 +83,7 @@ class TestAnalyzeImageContent:
             "PERSONAS: una\nAFICION: Posible fan de baloncesto, aparece jugando\nPAREJA: no",
         )
 
-        inferences, indicio_pareja, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, indicio_pareja, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert len(inferences) == 1
         assert inferences[0].category == "aficion"
@@ -89,7 +98,7 @@ class TestAnalyzeImageContent:
         atribuírselo."""
         _install_fake_model(monkeypatch, "PERSONAS: ninguna\nAFICION: vinilo de música visible\nPAREJA: no")
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert len(inferences) == 1
 
@@ -99,7 +108,7 @@ class TestAnalyzeImageContent:
             "PERSONAS: varias\nAFICION: ninguno\nPAREJA: no\nTEXTO_VISIBLE: Bar Manolo",
         )
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert len(inferences) == 1
         assert inferences[0].category == "texto_visible"
@@ -118,7 +127,7 @@ class TestAnalyzeImageContent:
             "PERSONAS: varias\nAFICION: ninguno\nPAREJA: no\nTEXTO_VISIBLE: Ayuntamiento de Badajoz",
         )
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert len(inferences) == 1
         assert inferences[0].category == "texto_visible"
@@ -128,8 +137,7 @@ class TestAnalyzeImageContent:
             monkeypatch,
             "PERSONAS: una\nAFICION: guitarra\nPAREJA: no\nTEXTO_VISIBLE: Bar Manolo",
         )
-
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         categories = {inferred.category for inferred in inferences}
         assert categories == {"aficion", "texto_visible"}
@@ -140,9 +148,53 @@ class TestAnalyzeImageContent:
             "PERSONAS: varias\nAFICION: ninguno\nPAREJA: no\nTEXTO_VISIBLE: ninguno",
         )
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
+
+    def test_parses_matricula_as_inferred_attribute(self, monkeypatch):
+        _install_fake_model(
+            monkeypatch,
+            "PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no\nTEXTO_VISIBLE: ninguno\nMATRICULA: 1234BCD",
+        )
+
+        inferences, _, _, _, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert len(inferences) == 1
+        assert inferences[0].category == "matricula"
+        assert "1234-BCD" in inferences[0].value
+        assert "lectura automática" in inferences[0].value
+        assert inferences[0].confidence == 0.3
+        assert codes.matricula == "1234-BCD"
+
+    def test_no_matricula_inference_when_format_invalid(self, monkeypatch):
+        """Un valor que no supera la validación de formato de
+        _parse_matricula (ver TestParseMatricula) no debe generar ningún
+        InferredAttribute -- se descarta en silencio, igual que 'ninguna'."""
+        _install_fake_model(
+            monkeypatch,
+            "PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no\nTEXTO_VISIBLE: ninguno\nMATRICULA: XZ-1234-BC",
+        )
+
+        inferences, _, _, _, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert inferences == []
+        assert codes.matricula is None
+
+    def test_texto_visible_and_matricula_can_coexist(self, monkeypatch):
+        """Son dos campos separados a propósito (ver comentario junto a
+        MATRICULA en _STRUCTURED_QUERY) -- una foto puede tener un cartel
+        Y una matrícula visibles a la vez, sin que uno eclipse al otro."""
+        _install_fake_model(
+            monkeypatch,
+            "PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no\n"
+            "TEXTO_VISIBLE: Bar Manolo\nMATRICULA: 1234BCD",
+        )
+
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
+
+        categories = {inferred.category for inferred in inferences}
+        assert categories == {"texto_visible", "matricula"}
 
     def test_discards_aficion_when_several_people_are_similarly_prominent(self, monkeypatch):
         """El caso que motivó este campo: con varias personas de
@@ -154,7 +206,7 @@ class TestAnalyzeImageContent:
             monkeypatch, "PERSONAS: varias\nAFICION: toca la guitarra\nPAREJA: no"
         )
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
 
@@ -164,7 +216,7 @@ class TestAnalyzeImageContent:
         personas es el caso típico para esta señal."""
         _install_fake_model(monkeypatch, "PERSONAS: varias\nAFICION: ninguno\nPAREJA: si")
 
-        inferences, indicio_pareja, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, indicio_pareja, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
         assert indicio_pareja is True
@@ -172,14 +224,14 @@ class TestAnalyzeImageContent:
     def test_unparseable_personas_value_discards_aficion_by_precaution(self, monkeypatch):
         _install_fake_model(monkeypatch, "PERSONAS: no lo sé\nAFICION: toca la guitarra\nPAREJA: no")
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
 
     def test_missing_personas_line_discards_aficion_by_precaution(self, monkeypatch):
         _install_fake_model(monkeypatch, "AFICION: toca la guitarra\nPAREJA: no")
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
 
@@ -187,14 +239,14 @@ class TestAnalyzeImageContent:
     def test_ninguno_variants_produce_no_inference(self, monkeypatch, negative_value):
         _install_fake_model(monkeypatch, f"PERSONAS: una\nAFICION: {negative_value}\nPAREJA: no")
 
-        inferences, _, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, _, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
 
     def test_missing_aficion_line_is_ignored_without_crashing(self, monkeypatch):
         _install_fake_model(monkeypatch, "PERSONAS: una\nPAREJA: no")
 
-        inferences, indicio_pareja, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, indicio_pareja, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -202,7 +254,7 @@ class TestAnalyzeImageContent:
     def test_missing_pareja_line_defaults_to_false(self, monkeypatch):
         _install_fake_model(monkeypatch, "PERSONAS: una\nAFICION: toca la guitarra")
 
-        inferences, indicio_pareja, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, indicio_pareja, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert len(inferences) == 1
         assert indicio_pareja is False
@@ -210,7 +262,7 @@ class TestAnalyzeImageContent:
     def test_completely_unexpected_format_degrades_without_crashing(self, monkeypatch):
         _install_fake_model(monkeypatch, "esto no sigue el formato pedido en absoluto")
 
-        inferences, indicio_pareja, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, indicio_pareja, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -218,7 +270,7 @@ class TestAnalyzeImageContent:
     def test_dependencies_not_installed_returns_empty_without_crashing(self, monkeypatch):
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: False)
 
-        inferences, indicio_pareja, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, indicio_pareja, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -227,7 +279,7 @@ class TestAnalyzeImageContent:
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
         monkeypatch.setattr(scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _RaisingModel()))
 
-        inferences, indicio_pareja, _, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        inferences, indicio_pareja, _, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert inferences == []
         assert indicio_pareja is False
@@ -314,7 +366,7 @@ class TestAnalyzeImageContent:
             caption_answer="a person playing basketball",
         )
 
-        _, _, description, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        _, _, description, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert description == "Personas en la foto: una\nPosible afición o interés: Posible fan de baloncesto"
         # La descripción general (caption) NO se repite dentro de este bloque.
@@ -337,7 +389,7 @@ class TestAnalyzeImageContent:
             caption_answer="una escena cualquiera",
         )
 
-        _, _, description, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        _, _, description, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert description == "Personas en la foto: varias"
         assert "solo puede" not in description
@@ -349,7 +401,7 @@ class TestAnalyzeImageContent:
             caption_answer="una escena cualquiera",
         )
 
-        _, _, description, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        _, _, description, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert description == (
             "Personas en la foto: varias\nIndicio de contexto de pareja: sí\nTexto visible: Bar Manolo"
@@ -358,7 +410,7 @@ class TestAnalyzeImageContent:
     def test_description_is_none_when_dependencies_not_installed(self, monkeypatch):
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: False)
 
-        _, _, description, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        _, _, description, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert description is None
 
@@ -366,7 +418,7 @@ class TestAnalyzeImageContent:
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
         monkeypatch.setattr(scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _RaisingModel()))
 
-        _, _, description, _, _ = scene_analysis.analyze_image_content(_fake_image())
+        _, _, description, _, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert description is None
 
@@ -377,67 +429,110 @@ class TestAnalyzeImageContent:
             caption_answer="4 people happily eating pizza on a terrace",
         )
 
-        _, _, _, descripcion_general, _ = scene_analysis.analyze_image_content(_fake_image())
+        _, _, _, descripcion_general, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert descripcion_general == "4 people happily eating pizza on a terrace"
 
     def test_descripcion_general_is_none_when_dependencies_not_installed(self, monkeypatch):
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: False)
 
-        _, _, _, descripcion_general, _ = scene_analysis.analyze_image_content(_fake_image())
+        _, _, _, descripcion_general, _codes = scene_analysis.analyze_image_content(_fake_image())
 
         assert descripcion_general is None
 
-    def test_encode_image_is_called_once_and_reused_for_both_queries(self, monkeypatch):
-        """Optimización real: sin esto, cada .query() re-codificaría la
-        imagen desde cero -- con dos llamadas (caption + estructurada) por
-        foto, eso duplicaría el coste del encoder de visión. Se comprueba
-        contando las llamadas a encode_image en vez de solo confiar en que
-        "debería" reutilizarse."""
-        encode_calls: list[object] = []
-        query_calls: list[str] = []
+    def test_two_chat_completion_calls_with_the_two_expected_questions(self, monkeypatch):
+        """A diferencia del backend `transformers` de antes (ver
+        historial en scene_analysis.py), `llama-cpp-python` no expone un
+        equivalente directo a "codificar la imagen una vez y reutilizarla
+        para dos preguntas" -- cada `create_chat_completion()` manda la
+        imagen otra vez. Este test YA NO comprueba esa optimización (ya no
+        existe tal cual); comprueba lo que sí debe seguir siendo cierto:
+        exactamente dos llamadas, una por cada pregunta esperada, cada una
+        con una imagen adjunta."""
+        calls: list[str] = []
 
         class _CountingModel:
-            def encode_image(self, image):
-                encode_calls.append(image)
-                return "encoded-sentinel"
+            def reset(self):
+                pass
 
-            def query(self, image, question, settings=None):
-                query_calls.append(question)
-                assert image == "encoded-sentinel"  # debe usar la imagen YA codificada, no la original
+            def create_chat_completion(self, messages, max_tokens=None, temperature=None):
+                content = messages[0]["content"]
+                assert content[0]["type"] == "image_url"  # la imagen va SIEMPRE, en las dos llamadas
+                question = content[1]["text"]
+                calls.append(question)
                 if question == scene_analysis._CAPTION_QUERY:
-                    return {"answer": "una escena cualquiera"}
-                return {"answer": "PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no"}
+                    return _chat_completion_response("una escena cualquiera")
+                return _chat_completion_response("PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no")
 
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
         monkeypatch.setattr(scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _CountingModel()))
 
         scene_analysis.analyze_image_content(_fake_image())
 
-        assert len(encode_calls) == 1
-        assert len(query_calls) == 2
-        assert set(query_calls) == {scene_analysis._CAPTION_QUERY, scene_analysis._STRUCTURED_QUERY}
+        assert len(calls) == 2
+        assert set(calls) == {scene_analysis._CAPTION_QUERY, scene_analysis._STRUCTURED_QUERY}
+
+    def test_reset_called_before_each_chat_completion(self, monkeypatch):
+        """Regresión directa de un crash real en producción (12/9, GTX
+        1650): sin `_model.reset()` antes de cada `create_chat_completion()`
+        independiente, la caché KV interna de `llama.cpp` no se limpiaba
+        sola entre las dos llamadas de esta función, lo que acababa
+        corrompiendo el estado hasta tirar abajo el proceso entero con
+        SIGSEGV (exit 139) -- no un fallo limpio de una sola foto. Se
+        comprueba contando reset() y create_chat_completion() en el orden
+        exacto: reset, llamada, reset, llamada."""
+        events: list[str] = []
+
+        class _OrderCheckingModel:
+            def reset(self):
+                events.append("reset")
+
+            def create_chat_completion(self, messages, max_tokens=None, temperature=None):
+                events.append("call")
+                question = messages[0]["content"][1]["text"]
+                if question == scene_analysis._CAPTION_QUERY:
+                    return _chat_completion_response("una escena cualquiera")
+                return _chat_completion_response("PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no")
+
+        monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
+        monkeypatch.setattr(
+            scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _OrderCheckingModel())
+        )
+
+        scene_analysis.analyze_image_content(_fake_image())
+
+        assert events == ["reset", "call", "reset", "call"]
 
     def test_image_is_resized_before_encoding(self, monkeypatch):
-        """Optimización real (medida en producción, GTX 1650): sin
-        redimensionar antes de encode_image(), Moondream2 troceaba la
-        imagen en 8 crops locales + 1 global = 9 pasadas por el encoder de
-        visión (~33s); redimensionando a que el lado mayor mida
-        _CAPTION_MAX_DIMENSION (378, el crop_size real de esta revisión
-        del modelo, ver esa constante), pasa a 2 pasadas. Se comprueba
-        contando el tamaño de la imagen que de verdad llega a
-        encode_image(), no solo confiando en que 'debería' redimensionarse."""
+        """Optimización real (medida en producción, GTX 1650, con el
+        backend `transformers` de antes -- ver _CAPTION_MAX_DIMENSION
+        sobre por qué SIN VERIFICAR si sigue siendo el tamaño óptimo con
+        el backend `llama.cpp` actual): se comprueba aquí que el
+        redimensionado en sí se sigue aplicando -- decodificando la
+        imagen real del data URI base64 que le llega a
+        `create_chat_completion()`, no solo confiando en que 'debería'
+        redimensionarse."""
+        import base64
+        import io
+
+        from PIL import Image as PILImage
+
         received_sizes: list[tuple[int, int]] = []
 
         class _SizeCheckingModel:
-            def encode_image(self, image):
-                received_sizes.append(image.size)
-                return "encoded-sentinel"
+            def reset(self):
+                pass
 
-            def query(self, image, question, settings=None):
+            def create_chat_completion(self, messages, max_tokens=None, temperature=None):
+                content = messages[0]["content"]
+                data_uri = content[0]["image_url"]["url"]
+                _, b64_data = data_uri.split(",", 1)
+                decoded = PILImage.open(io.BytesIO(base64.b64decode(b64_data)))
+                received_sizes.append(decoded.size)
+                question = content[1]["text"]
                 if question == scene_analysis._CAPTION_QUERY:
-                    return {"answer": "una escena cualquiera"}
-                return {"answer": "PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no"}
+                    return _chat_completion_response("una escena cualquiera")
+                return _chat_completion_response("PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no")
 
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
         monkeypatch.setattr(
@@ -452,9 +547,9 @@ class TestAnalyzeImageContent:
 
         scene_analysis.analyze_image_content(imagen_grande)
 
-        assert len(received_sizes) == 1
-        width, height = received_sizes[0]
-        assert max(width, height) <= scene_analysis._CAPTION_MAX_DIMENSION
+        assert len(received_sizes) == 2  # una por cada create_chat_completion() (ver test de arriba)
+        for width, height in received_sizes:
+            assert max(width, height) <= scene_analysis._CAPTION_MAX_DIMENSION
         # La imagen original (compartida con DINOv2 en geolocation.py, ver
         # docstring de analyze_image_content) NUNCA debe mutarse in-place:
         # solo se redimensiona una copia.
@@ -462,24 +557,82 @@ class TestAnalyzeImageContent:
 
     def test_query_settings_cap_generation_length(self):
         """Red de seguridad frente al bug real que motivó separar los
-        settings por llamada: sin límite, .query() usa max_tokens=768 por
-        defecto (ver docs.moondream.ai/transformers), suficiente para que
-        una respuesta confusa supere el timeout de 30s del pipeline real
+        settings por llamada: sin límite, la generación por defecto de
+        `llama.cpp` puede ser larga, suficiente para que una respuesta
+        confusa supere el timeout de 30s del pipeline real
         (_SCENE_ANALYSIS_TIMEOUT_SECONDS en geolocation.py). Se comprueba
         aquí que los límites siguen existiendo y siguen siendo bajos, para
         que un cambio futuro no los elimine sin darse cuenta."""
         assert scene_analysis._CAPTION_SETTINGS["max_tokens"] < 200
         assert scene_analysis._STRUCTURED_SETTINGS["max_tokens"] < 200
 
-    def test_query_settings_include_variant_key(self):
-        """Bug real descubierto en ejecución (GTX 1650, revisión pinneada
-        del modelo): `encode_image()` en esta revisión hace
-        settings["variant"] SIN .get(), así que cualquier `settings` que
-        pasemos revienta con KeyError si no incluye esta clave. Se
-        comprueba en AMBOS dicts de settings para que un cambio futuro no
-        la elimine de uno de los dos sin darse cuenta."""
-        assert "variant" in scene_analysis._CAPTION_SETTINGS
-        assert "variant" in scene_analysis._STRUCTURED_SETTINGS
+    # test_query_settings_include_variant_key ELIMINADO -- comprobaba un
+    # bug real pero específico de `encode_image()` en el backend
+    # `transformers` de antes (settings["variant"] sin .get(), ver
+    # historial en scene_analysis.py), que ya no se usa en absoluto: el
+    # backend actual (`llama-cpp-python`) recibe `max_tokens`/
+    # `temperature` como kwargs directos, nunca un dict `settings`. La
+    # clave "variant" se queda en _CAPTION_SETTINGS/_STRUCTURED_SETTINGS
+    # por si acaso (ver comentario ahí), pero ya no hay ningún
+    # comportamiento real que este test protegiera.
+
+
+class TestVisualDescriptionCodes:
+    """ADR-30: codes es el 5º valor de analyze_image_content(), pensado
+    para que el frontend traduzca sin depender del texto ya redactado en
+    español de `descripcion_cruda` (el 3er valor, que se mantiene
+    intacto). Aquí solo se comprueba que `codes` refleja fielmente lo que
+    el modelo devolvió -- el parseo en sí (personas/afición/texto
+    visible) ya está cubierto en las clases TestParse* de abajo."""
+
+    def test_codes_mirror_the_parsed_values(self, monkeypatch):
+        _install_fake_model(
+            monkeypatch,
+            "PERSONAS: una\nAFICION: guitarra eléctrica\nPAREJA: no\nTEXTO_VISIBLE: Bar El Rincón",
+        )
+
+        _, _, _, _, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert codes.personas == "una"
+        assert codes.aficion is not None and "guitarra" in codes.aficion.lower()
+        assert codes.texto_visible == "Bar El Rincón"
+        assert codes.indicio_pareja is False
+
+    def test_codes_indicio_pareja_true(self, monkeypatch):
+        _install_fake_model(monkeypatch, "PERSONAS: varias\nAFICION: ninguno\nPAREJA: si")
+
+        _, _, _, _, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert codes.indicio_pareja is True
+
+    def test_codes_personas_never_ninguna(self, monkeypatch):
+        """Mismo filtro que _build_clean_summary aplica al texto en
+        español: 'ninguna' no es señal, así que codes.personas debe salir
+        None, no la cadena 'ninguna' -- para que el frontend nunca tenga
+        que replicar este filtro por su cuenta ni pueda mostrarlo por
+        error si algún día deja de usar _build_clean_summary."""
+        _install_fake_model(monkeypatch, "PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no")
+
+        _, _, _, _, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert codes.personas is None
+
+    def test_codes_none_on_model_unavailable(self, monkeypatch):
+        monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: False)
+
+        *_, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert codes is None
+
+    def test_codes_none_on_model_failure(self, monkeypatch):
+        monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
+        monkeypatch.setattr(
+            scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _RaisingModel())
+        )
+
+        *_, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert codes is None
 
 
 class TestParseDescripcion:
@@ -549,6 +702,66 @@ class TestParseTextoVisible:
         assert scene_analysis._parse_texto_visible("TEXTO_VISIBLE: Calle Mayor 12.") == "Calle Mayor 12"
 
 
+class TestParseMatricula:
+    """_parse_matricula, a diferencia del resto de campos de este módulo,
+    VALIDA por formato antes de aceptar el valor -- ver docstring de la
+    función y el comentario junto a _SPANISH_PLATE_OLD_FORMAT_RE /
+    _SPANISH_PLATE_NEW_FORMAT_RE en scene_analysis.py."""
+
+    def test_valid_new_format_no_separator(self):
+        assert scene_analysis._parse_matricula("MATRICULA: 1234BCD") == "1234-BCD"
+
+    def test_valid_new_format_with_space(self):
+        assert scene_analysis._parse_matricula("MATRICULA: 1234 BCD") == "1234-BCD"
+
+    def test_valid_new_format_with_hyphen(self):
+        assert scene_analysis._parse_matricula("MATRICULA: 1234-BCD") == "1234-BCD"
+
+    def test_valid_old_format_two_letter_province(self):
+        assert scene_analysis._parse_matricula("MATRICULA: AB-1234-CD") == "AB-1234-CD"
+
+    def test_valid_old_format_one_letter_province_no_separator(self):
+        assert scene_analysis._parse_matricula("MATRICULA: M1234AB") == "M-1234-AB"
+
+    def test_old_format_uses_the_historic_alternate_province_codes(self):
+        """GE/OR (códigos antiguos de Girona/Ourense antes del cambio a
+        GI/OU, ver PLATE_PROVINCE_CODE_TO_PROVINCE) deben seguir
+        aceptándose, no solo los códigos vigentes al final del sistema."""
+        assert scene_analysis._parse_matricula("MATRICULA: GE1234AB") == "GE-1234-AB"
+        assert scene_analysis._parse_matricula("MATRICULA: OR1234AB") == "OR-1234-AB"
+
+    def test_missing_line_returns_none(self):
+        assert scene_analysis._parse_matricula("PERSONAS: una\nAFICION: ninguno") is None
+
+    @pytest.mark.parametrize("negative_value", ["ninguna", "Ninguno", "none", "N/A", ""])
+    def test_ninguna_variants_return_none(self, negative_value):
+        assert scene_analysis._parse_matricula(f"MATRICULA: {negative_value}") is None
+
+    def test_invalid_province_code_is_rejected(self):
+        """'XZ' tiene la FORMA de un código de provincia (1-2 letras) pero
+        nunca fue uno real -- debe rechazarse aunque el resto del formato
+        (4 dígitos + 1-2 letras de sufijo) sea correcto."""
+        assert scene_analysis._parse_matricula("MATRICULA: XZ-1234-BC") is None
+
+    def test_forbidden_letter_q_in_new_format_is_rejected(self):
+        assert scene_analysis._parse_matricula("MATRICULA: 1234QAB") is None
+
+    def test_forbidden_vowel_in_new_format_is_rejected(self):
+        assert scene_analysis._parse_matricula("MATRICULA: 1234AAB") is None
+
+    def test_malformed_digit_count_is_rejected(self):
+        assert scene_analysis._parse_matricula("MATRICULA: 123BCD") is None
+
+    def test_free_text_non_plate_answer_is_rejected(self):
+        """Si el modelo 'razona' en vez de responder solo la matrícula
+        (p. ej. explica por qué no puede leerla con claridad), el
+        resultado no tiene forma de matrícula y se descarta -- no se
+        intenta extraer una matrícula de dentro de la frase."""
+        assert scene_analysis._parse_matricula(
+            "MATRICULA: no se distingue con claridad por el ángulo de la foto"
+        ) is None
+
+
 class TestParseAficionRaw:
     """_parse_aficion_raw es la versión SIN la cautela de atribución de
     _parse_inferences (que descarta la señal con varias personas en la
@@ -596,34 +809,44 @@ class TestBuildCleanSummary:
 
     def test_only_personas_when_nothing_else_positive(self):
         summary = scene_analysis._build_clean_summary(
-            personas="varias", aficion_raw=None, indicio_pareja=False, texto_visible=None
+            personas="varias", aficion_raw=None, indicio_pareja=False, texto_visible=None, matricula=None
         )
         assert summary == "Personas en la foto: varias"
 
     def test_includes_aficion_when_positive(self):
         summary = scene_analysis._build_clean_summary(
-            personas="una", aficion_raw="guitarra", indicio_pareja=False, texto_visible=None
+            personas="una", aficion_raw="guitarra", indicio_pareja=False, texto_visible=None, matricula=None
         )
         assert summary == "Personas en la foto: una\nPosible afición o interés: guitarra"
 
     def test_includes_pareja_only_when_true(self):
         summary_true = scene_analysis._build_clean_summary(
-            personas="varias", aficion_raw=None, indicio_pareja=True, texto_visible=None
+            personas="varias", aficion_raw=None, indicio_pareja=True, texto_visible=None, matricula=None
         )
         assert "Indicio de contexto de pareja: sí" in summary_true
 
         summary_false = scene_analysis._build_clean_summary(
-            personas="varias", aficion_raw=None, indicio_pareja=False, texto_visible=None
+            personas="varias", aficion_raw=None, indicio_pareja=False, texto_visible=None, matricula=None
         )
         assert "pareja" not in summary_false.lower()
 
     def test_includes_texto_visible_when_present(self):
         summary = scene_analysis._build_clean_summary(
-            personas="ninguna", aficion_raw=None, indicio_pareja=False, texto_visible="Bar Manolo"
+            personas="ninguna", aficion_raw=None, indicio_pareja=False, texto_visible="Bar Manolo", matricula=None
         )
         # "ninguna" ya no se muestra (ver docstring de _build_clean_summary,
         # tratado igual que el resto de valores negativos por defecto).
         assert summary == "Texto visible: Bar Manolo"
+
+    def test_includes_matricula_when_present(self):
+        """La matrícula SIEMPRE se muestra con el aviso de lectura
+        automática pegado al propio valor, no como nota aparte -- para
+        que sea imposible mostrarla sin ese aviso en ningún punto del
+        pipeline."""
+        summary = scene_analysis._build_clean_summary(
+            personas="ninguna", aficion_raw=None, indicio_pareja=False, texto_visible=None, matricula="M-1234-AB"
+        )
+        assert summary == "Matrícula visible: M-1234-AB (lectura automática, puede contener errores)"
 
     def test_personas_ninguna_is_hidden_like_other_negative_defaults(self):
         """Regresión (Comandante, agosto 2026): 'ninguna' ya no se
@@ -632,29 +855,31 @@ class TestBuildCleanSummary:
         `_STRUCTURED_QUERY` documentado en scene_analysis.py (Moondream2
         copiando el valor de ejemplo del prompt) volviera a aparecer."""
         assert scene_analysis._build_clean_summary(
-            personas="ninguna", aficion_raw=None, indicio_pareja=False, texto_visible=None
+            personas="ninguna", aficion_raw=None, indicio_pareja=False, texto_visible=None, matricula=None
         ) is None
 
     @pytest.mark.parametrize("value", ["una", "varias"])
     def test_personas_una_o_varias_se_siguen_mostrando(self, value):
         summary = scene_analysis._build_clean_summary(
-            personas=value, aficion_raw=None, indicio_pareja=False, texto_visible=None
+            personas=value, aficion_raw=None, indicio_pareja=False, texto_visible=None, matricula=None
         )
         assert summary == f"Personas en la foto: {value}"
 
-    def test_all_four_positive_at_once(self):
+    def test_all_five_positive_at_once(self):
         summary = scene_analysis._build_clean_summary(
-            personas="varias", aficion_raw="baloncesto", indicio_pareja=True, texto_visible="Bar Manolo"
+            personas="varias", aficion_raw="baloncesto", indicio_pareja=True,
+            texto_visible="Bar Manolo", matricula="M-1234-AB",
         )
         assert summary == (
             "Personas en la foto: varias\n"
             "Posible afición o interés: baloncesto\n"
             "Indicio de contexto de pareja: sí\n"
-            "Texto visible: Bar Manolo"
+            "Texto visible: Bar Manolo\n"
+            "Matrícula visible: M-1234-AB (lectura automática, puede contener errores)"
         )
 
     def test_none_when_nothing_at_all(self):
-        assert scene_analysis._build_clean_summary(None, None, False, None) is None
+        assert scene_analysis._build_clean_summary(None, None, False, None, None) is None
 
 
 class TestSceneAnalysisAvailable:
@@ -664,10 +889,101 @@ class TestSceneAnalysisAvailable:
         real_import = builtins.__import__
 
         def _fake_import(name, *args, **kwargs):
-            if name in ("torch", "transformers"):
+            if name == "llama_cpp":
                 raise ImportError(f"{name} no instalado")
             return real_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", _fake_import)
 
         assert scene_analysis._scene_analysis_available() is False
+
+
+class TestParseEdificioEmblematico:
+    def test_extracts_name(self):
+        assert scene_analysis._parse_edificio_emblematico("EDIFICIO_EMBLEMATICO: Torre Eiffel") == "Torre Eiffel"
+
+    def test_strips_whitespace_and_trailing_period(self):
+        assert scene_analysis._parse_edificio_emblematico("EDIFICIO_EMBLEMATICO:   Alhambra de Granada. ") == (
+            "Alhambra de Granada"
+        )
+
+    def test_case_insensitive_key_and_line_isolated_from_other_fields(self):
+        answer = "PERSONAS: una\nedificio_emblematico: Sagrada Familia\nPAREJA: no"
+
+        assert scene_analysis._parse_edificio_emblematico(answer) == "Sagrada Familia"
+
+    def test_none_when_line_missing(self):
+        assert scene_analysis._parse_edificio_emblematico("PERSONAS: una\nPAREJA: no") is None
+
+    @pytest.mark.parametrize("value", ["ninguno", "Ninguna", "none", "N/A", ".", "  "])
+    def test_none_for_explicit_absence(self, value):
+        assert scene_analysis._parse_edificio_emblematico(f"EDIFICIO_EMBLEMATICO: {value}") is None
+
+    @pytest.mark.parametrize("value", ["edificio", "Monumento", "catedral", "castillo", "playa", "ayuntamiento"])
+    def test_none_for_generic_building_types(self, value):
+        """Eco de un tipo de edificio, no un nombre propio: no se gasta una
+        llamada al LLM en resolverlo."""
+        assert scene_analysis._parse_edificio_emblematico(f"EDIFICIO_EMBLEMATICO: {value}") is None
+
+
+class TestEdificioEmblematicoInferenceAndSummary:
+    def test_parse_inferences_adds_low_confidence_candidate(self):
+        inferences = scene_analysis._parse_inferences(
+            "PERSONAS: ninguna\nEDIFICIO_EMBLEMATICO: Torre Eiffel\nPAREJA: no"
+        )
+
+        edificios = [i for i in inferences if i.category == "edificio_emblematico"]
+        assert len(edificios) == 1
+        assert "Torre Eiffel" in edificios[0].value
+        assert "sin confirmar" in edificios[0].value
+        assert edificios[0].confidence == 0.3
+        assert edificios[0].evidence == []
+
+    def test_parse_inferences_skips_generic_building(self):
+        inferences = scene_analysis._parse_inferences("PERSONAS: ninguna\nEDIFICIO_EMBLEMATICO: catedral")
+
+        assert not [i for i in inferences if i.category == "edificio_emblematico"]
+
+    def test_clean_summary_includes_building_line(self):
+        summary = scene_analysis._build_clean_summary(
+            personas="ninguna",
+            aficion_raw=None,
+            indicio_pareja=False,
+            texto_visible=None,
+            matricula=None,
+            edificio_emblematico="Torre Eiffel",
+        )
+
+        assert summary == "Edificio/monumento reconocido: Torre Eiffel (propuesto por IA, sin confirmar)"
+
+
+class TestVisualDescriptionLogging:
+    def test_logs_caption_structured_and_variant_when_flag_enabled(self, monkeypatch):
+        _install_fake_model(monkeypatch, "PERSONAS: ninguna\nAFICION: ninguno", caption_answer="una playa vacía.")
+        monkeypatch.setattr(scene_analysis.settings, "log_visual_descriptions", True)
+        monkeypatch.setattr(scene_analysis, "get_model_variant", lambda: "Moondream2 (Q8_0)")
+        logged = []
+        monkeypatch.setattr(
+            scene_analysis.visual_description_log,
+            "log_visual_description",
+            lambda **kwargs: logged.append(kwargs),
+        )
+
+        scene_analysis.analyze_image_content(_fake_image())
+
+        assert len(logged) == 1
+        assert logged[0]["caption"] == "una playa vacía"
+        assert logged[0]["structured"].startswith("PERSONAS: ninguna")
+        assert logged[0]["model_variant"] == "Moondream2 (Q8_0)"
+        assert len(logged[0]["image_id"]) == 16
+
+    def test_does_not_hash_image_when_flag_disabled(self, monkeypatch):
+        _install_fake_model(monkeypatch, "PERSONAS: ninguna")
+        assert scene_analysis.settings.log_visual_descriptions is False
+        monkeypatch.setattr(
+            scene_analysis.visual_description_log,
+            "image_content_id",
+            lambda image: pytest.fail("no debe hashear la imagen con el log desactivado"),
+        )
+
+        scene_analysis.analyze_image_content(_fake_image())

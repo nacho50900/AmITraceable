@@ -1,5 +1,5 @@
 import i18n from './i18n';
-import type { AnalysisProgressEvent, AuthStatus, ExposureReport, Platform } from './types';
+import type { AnalysisProgressEvent, AuthStatus, ExposureReport, Platform, RecalculateRequest } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
@@ -47,7 +47,33 @@ export const api = {
   analyzeStream: (platform: Platform, onEvent: (event: AnalysisProgressEvent) => void): (() => void) => {
     const source = new EventSource(`${API_URL}/api/analyze/${platform}/stream`, { withCredentials: true });
 
+    // Un corte de conexión breve (wifi inestable, roaming, WSL2 renovando
+    // la red...) NO debe tirar todo el análisis en curso. El EventSource
+    // del navegador ya reintenta la reconexión por sí solo mientras no lo
+    // cerremos nosotros -- y en el backend (ver analyze_stream en
+    // analysis_router.py), el pipeline solo se cancela cuando de verdad
+    // detecta al cliente desconectado, así que basta con NO cerrar la
+    // conexión a la primera y darle un margen para que se recupere sola.
+    // Solo si pasan STREAM_LOST_GRACE_MS sin lograrlo se da la conexión
+    // por perdida de verdad y se avisa al usuario.
+    const STREAM_LOST_GRACE_MS = 10_000;
+    let graceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const cancelPendingStreamLost = () => {
+      if (graceTimer !== null) {
+        clearTimeout(graceTimer);
+        graceTimer = null;
+      }
+    };
+
+    source.onopen = () => {
+      // Reconexión nativa lograda: se cancela el aviso de "conexión
+      // perdida" pendiente, si lo había.
+      cancelPendingStreamLost();
+    };
+
     source.onmessage = (message) => {
+      cancelPendingStreamLost(); // ha llegado algo: la conexión está viva de nuevo
       let parsed: AnalysisProgressEvent;
       try {
         parsed = JSON.parse(message.data);
@@ -64,22 +90,31 @@ export const api = {
       // El navegador dispara este mismo evento tanto ante una caída de red
       // real como, a veces, tras el cierre normal del stream si no
       // llegamos a cerrarlo nosotros primero arriba -- readyState permite
-      // distinguir ambos casos y no duplicar el error.
-      if (source.readyState !== EventSource.CLOSED) {
+      // distinguir ambos casos y no duplicar el error. Mientras reintenta
+      // solo (readyState CONNECTING), no se toca nada más que armar el
+      // aviso de gracia una única vez -- reintentos repetidos durante ese
+      // margen no lo alargan.
+      if (source.readyState === EventSource.CLOSED || graceTimer !== null) return;
+      graceTimer = setTimeout(() => {
+        graceTimer = null;
         onEvent({ done: true, error: i18n.t('api.streamLost') });
-      }
-      source.close();
+        source.close();
+      }, STREAM_LOST_GRACE_MS);
     };
 
-    return () => source.close();
+    return () => {
+      cancelPendingStreamLost();
+      source.close();
+    };
   },
   // Endpoint aislado del pipeline principal: manda el informe YA generado
-  // (que el frontend ya tiene en memoria) para que una IA externa (Mistral,
-  // tier gratuito) dé conclusiones priorizadas. Si no está disponible,
-  // lanza AiSummaryUnavailableError en vez de un Error genérico.
+  // (que el frontend ya tiene en memoria) para que un modelo de IA LOCAL
+  // (Qwen3.5-4B, ver backend/app/nlp/ai_client.py -- nunca sale del
+  // servidor) dé conclusiones priorizadas. Si no está disponible, lanza
+  // AiSummaryUnavailableError en vez de un Error genérico.
   aiSummary: (report: ExposureReport): Promise<{ verdict: string; conclusions: string[] }> =>
     // Se manda el idioma de UI actual (ver src/i18n) como query param, para
-    // que Mistral genere el veredicto/conclusiones DIRECTAMENTE en ese
+    // que el modelo de IA local genere el veredicto/conclusiones DIRECTAMENTE en ese
     // idioma en la misma llamada -- ver docstring de
     // `_LANGUAGE_INSTRUCTIONS` en backend/app/ai_analysis.py sobre por qué
     // no se traduce después en vez de generar directo.
@@ -91,4 +126,10 @@ export const api = {
         body: JSON.stringify(report),
       },
     ),
+  recalculateReport: (req: RecalculateRequest): Promise<ExposureReport> =>
+    request<ExposureReport>('/api/analyze/recalculate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    }),
 };

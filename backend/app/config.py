@@ -93,7 +93,18 @@ def _default_photo_analysis_concurrency() -> int:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # `extra="ignore"`: no todas las variables de entorno de este proyecto
+    # pasan por este modelo -- p. ej. MOONDREAM_QUANT_TYPE se lee
+    # directamente con `os.environ.get()` en app/vision/scene_analysis.py
+    # (ver `_ensure_quantized_model`), aposta, sin modelarla aquí. Sin
+    # `extra="ignore"`, pydantic-settings usa "forbid" por defecto para
+    # BaseSettings: en cuanto el `.env` tenga CUALQUIER variable no
+    # declarada en esta clase -- aunque se use legítimamente en otro
+    # módulo -- `Settings()` revienta al arrancar la app entera (bug real
+    # observado: MOONDREAM_QUANT_TYPE en el `.env` local tumbaba el
+    # arranque, incluida toda la suite de tests, con un
+    # ValidationError que no tenía nada que ver con esa variable en sí).
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     reddit_client_id: str
     reddit_client_secret: str
@@ -115,17 +126,51 @@ class Settings(BaseSettings):
     # "http://localhost:5173" como valor por defecto si esto queda vacío.
     frontend_origin: str | None = None
 
-    # Análisis con IA (opcional): si no se rellena, el botón "Analizar con
-    # IA" del frontend simplemente devuelve "no disponible" en vez de
-    # fallar. Se usa el tier GRATUITO de Mistral AI (La Plateforme) --
-    # proveedor europeo (Francia), evitando transferencias internacionales
-    # de datos personales fuera de la UE (RGPD Cap. V). El tier gratuito
-    # tiene límite de peticiones/minuto y un tope mensual de tokens; al
-    # agotarse, la API devuelve 429 y este módulo lo trata como
-    # "no disponible ahora mismo", sin reintentar (para no arriesgar coste
-    # ni spamear la cuota).
-    mistral_api_key: str | None = None
-    mistral_model: str = "mistral-small-latest"
+    # Análisis con IA (opcional): si el modelo local no está instalado o
+    # no puede cargarse, el análisis por IA simplemente devuelve "no
+    # disponible" en vez de fallar (ver app/nlp/ai_client.py y su
+    # historial: sustituye al diseño anterior de Mistral/Gemini por HTTP).
+    #
+    # enable_ai_analysis: interruptor único para desactivar del todo esta
+    # funcionalidad (p. ej. en un despliegue sin GPU/VRAM suficiente para
+    # cargar NINGÚN modelo de IA generativa) sin tener que desinstalar
+    # `llama-cpp-python` -- los tres módulos que hablan con un LLM
+    # (ai_attribute_extraction.py, ai_analysis.py, landmark_resolution.py)
+    # comprueban esto (vía `ai_key_configured`, nombre heredado de cuando
+    # SÍ hacía falta una API key -- se mantiene para no tocar esos tres
+    # módulos solo por un renombrado cosmético) antes de llamar a
+    # app.nlp.ai_client.call_ai_json().
+    enable_ai_analysis: bool = True
+
+    # Repo de Hugging Face con el GGUF ya cuantizado (Q4_K_M) de
+    # Qwen3.5-4B a usar -- ver app/nlp/ai_client.py: se descarga y cachea
+    # solo, sin cuantización propia. unsloth/Qwen3.5-4B-GGUF es una fuente
+    # de confianza (mismo criterio que se usaría para Moondream2) que ya
+    # publica el fichero cuantizado; alternativas equivalentes si dejase
+    # de estar disponible: bartowski/Qwen_Qwen3.5-4B-GGUF o
+    # lmstudio-community/Qwen3.5-4B-GGUF (ver ADR-49 en
+    # docs/src/09_architecture_decisions.adoc). Con `qwen_gguf_repo_id`
+    # vacío, app/nlp/ai_client.py se comporta igual que si `llama_cpp` no
+    # estuviera instalado: "no disponible", sin excepción que rompa el
+    # resto del pipeline.
+    qwen_gguf_repo_id: str = "unsloth/Qwen3.5-4B-GGUF"
+    qwen_gguf_filename: str = "Qwen3.5-4B-Q4_K_M.gguf"  # nombre EXACTO del fichero .gguf en ese repo, no un glob
+
+    @property
+    def ai_key_configured(self) -> bool:
+        """True si el análisis con IA está activado Y hay un repo GGUF
+        configurado para el modelo local (ver `qwen_gguf_repo_id`) --
+        nombre heredado de cuando esto comprobaba una API key de un
+        proveedor externo (ver historial de app/nlp/ai_client.py); se
+        mantiene tal cual para que ai_attribute_extraction.py,
+        ai_analysis.py y landmark_resolution.py no necesiten ningún
+        cambio. NO comprueba que `llama_cpp` esté instalado de verdad ni
+        que el modelo cargue sin fallos -- eso lo decide
+        app.nlp.ai_client.call_ai_json() en el momento de la llamada
+        (mismo criterio que _scene_analysis_available(), comprobación
+        barata aquí, comprobación real al usar)."""
+        return self.enable_ai_analysis and bool(self.qwen_gguf_repo_id)
+
 
     # Límites de extracción para no machacar las APIs y acotar el volumen de
     # datos procesados (principio de minimización de datos, RGPD).
@@ -173,6 +218,17 @@ class Settings(BaseSettings):
     # igual, activado o no.
     enable_scene_analysis: bool = False
 
+    # Interruptor para el frente de correlación de cuentas por username
+    # (ver ADR-44/ADR-48, app/osint/username_correlation.py). Desactivado
+    # por defecto por DOS motivos: (1) un barrido completo son ~5000
+    # peticiones HTTP a sitios de terceros y tarda del orden de minutos --
+    # no todo despliegue quiere pagar ese coste en cada análisis; (2) sin
+    # esto en False por defecto, la suite de tests (que no mockea esta
+    # llamada globalmente, ver test_analysis_router.py) haría miles de
+    # peticiones de red reales en cada `pytest`. Mismo patrón que
+    # `enable_scene_analysis` justo arriba.
+    enable_username_correlation: bool = False
+
     # Tiempo máximo (segundos) que se deja a Moondream2 analizar UNA foto
     # antes de rendirse y seguir sin descripción para esa foto concreta
     # (ver `_maybe_analyze_content` en app/vision/geolocation.py). El valor
@@ -205,6 +261,19 @@ class Settings(BaseSettings):
     # ninguno de los dos logs escribe nada, sin que el análisis en sí se
     # vea afectado.
     enable_performance_logging: bool = True
+
+    # Log OPCIONAL de las descripciones que genera Moondream2 (ver
+    # app/log/visual_description_log.py para el diseño completo) --
+    # DESACTIVADO por defecto, a diferencia de `enable_performance_logging`
+    # de arriba: ese log es puramente técnico (tiempos, sin contenido de
+    # ninguna foto); este SÍ guarda contenido real extraído de fotos
+    # (personas, indicios de pareja, matrícula, texto visible) -- para un
+    # proyecto sobre exposición de privacidad, no tiene sentido que esto
+    # vaya activado por defecto. Actívalo solo para sesiones de
+    # comparación deliberadas entre variantes del modelo (F16 vs Q8_0 vs
+    # Q4_K_M, mismas fotos de prueba) -- ver el propio docstring del
+    # módulo sobre por qué y cómo tratarlo con cuidado.
+    log_visual_descriptions: bool = False
 
     # Offload de DINOv2 a una GPU "compartida" (integrada en el procesador,
     # vía DirectML) cuando la máquina tiene, ADEMÁS de la GPU dedicada que

@@ -15,6 +15,9 @@ from app.models.schemas import (
     PopulationEstimate,
     PrivacyScore,
     SocialPost,
+    UsernameCorrelationSummary,
+    UsernameSiteMatch,
+    VisualDescriptionCodes,
     WritingFingerprint,
 )
 from app.data.ine_reference import (
@@ -24,10 +27,14 @@ from app.data.ine_reference import (
     TOTAL_POPULATION_ES,
     resolve_autonomous_community,
 )
-from app.nlp.ai_attribute_extraction import extract_demographics_with_ai, merge_findings
+from app.nlp.ai_attribute_extraction import (
+    extract_demographics_with_ai,
+    extract_soft_inferences_from_photos,
+    merge_findings,
+)
 from app.nlp.demographic_extraction import DemographicFindings, extract_demographics
 from app.nlp.travel_detection import detect_travel_permalinks
-from app.progress import ProgressCallback, emit_progress
+from app.progress import ProgressCallback, emit_progress, run_with_heartbeat
 from app.analysis_timing import timed_stage
 from app import stages
 from app.scoring.k_anonymity import estimate_population_narrowing, final_remaining_population
@@ -262,16 +269,28 @@ async def _apply_ai_findings(
     nombre público de la cuenta, que sirve como señal débil de sexo -- de
     forma más flexible. Se ejecuta automáticamente en cada análisis, sin
     ningún botón. Ver docstring de app/nlp/ai_attribute_extraction.py para
-    el razonamiento RGPD. Módulo opcional/best-effort: sin MISTRAL_API_KEY,
-    o si la llamada falla, esto no aporta nada y el informe se sigue
+    el razonamiento RGPD. Módulo opcional/best-effort: sin el modelo de IA
+    local disponible (ver `settings.ai_key_configured`, app/config.py), o
+    si la llamada falla, esto no aporta nada y el informe se sigue
     generando solo con lo detectado por regex (devuelve los mismos
     `demographic_findings`/`travel_permalinks` de entrada, sin tocar, y
     ninguna inferencia blanda)."""
-    if not settings.mistral_api_key:
+    if not settings.ai_key_configured:
         return demographic_findings, travel_permalinks, []
 
     await emit_progress(progress_callback, stages.SEARCHING_AI_SELF_DISCLOSURES)
-    ai_findings = await extract_demographics_with_ai(posts, username=username, full_name=full_name, bio=bio)
+    # run_with_heartbeat en vez de un await directo: esta llamada puede
+    # tardar minutos con el modelo local (carga inicial o inferencia en
+    # una GPU modesta, ver docstring de run_with_heartbeat en
+    # app/progress.py) -- sin re-emitir progreso durante esa espera, el
+    # EventSource del navegador puede dar la conexión por muerta y
+    # reconectar solo, reiniciando TODO el pipeline desde cero (fallo real
+    # visto en producción, 24/9).
+    ai_findings = await run_with_heartbeat(
+        extract_demographics_with_ai(posts, username=username, full_name=full_name, bio=bio),
+        progress_callback,
+        stages.SEARCHING_AI_SELF_DISCLOSURES,
+    )
     soft_inferences = ai_findings.soft_inferences
     demographic_findings = merge_findings(demographic_findings, ai_findings)
     # La IA también señala fotos de viaje/vacaciones en el mismo pase (campo
@@ -293,6 +312,26 @@ def _apply_home_candidate(demographic_findings: DemographicFindings, home_candid
         demographic_findings.source["comunidad_autonoma"] = "imagen"
 
 
+def _to_visual_description_codes_schema(codes) -> VisualDescriptionCodes | None:
+    """Convierte el dataclass `scene_analysis.VisualDescriptionCodes`
+    (interno, ver geolocation.py::GeolocationOutcome.visual_description_codes)
+    al modelo Pydantic homónimo de app/models/schemas.py -- son dos tipos
+    distintos a propósito, para evitar un import circular (scene_analysis.py
+    ya importa de schemas.py para InferredAttribute). None si no había
+    codes para esta foto (modelo no disponible, inferencia falló...),
+    mismo criterio que ya usan visual_description/visual_description_general."""
+    if codes is None:
+        return None
+    return VisualDescriptionCodes(
+        personas=codes.personas,
+        aficion=codes.aficion,
+        texto_visible=codes.texto_visible,
+        matricula=codes.matricula,
+        indicio_pareja=codes.indicio_pareja,
+        edificio_emblematico=codes.edificio_emblematico,
+    )
+
+
 async def _apply_image_geolocation(
     platform: str,
     posts: list[SocialPost],
@@ -301,6 +340,8 @@ async def _apply_image_geolocation(
     geolocation_task: "asyncio.Task | None",
     progress_callback: ProgressCallback | None,
     avatar_url: str | None,
+    username: str,
+    full_name: str | None,
 ) -> tuple[list[ImageLocationPoint], bool, list[InferredAttribute]]:
     """Geolocalización por imagen: solo se usa como ubicación PARA EL
     CÁLCULO DE POBLACIÓN si el texto no dio ya una provincia/municipio/
@@ -320,7 +361,20 @@ async def _apply_image_geolocation(
 
     También devuelve las inferencias de contenido visual (aficiones,
     actividades) para que generate_report las añada a
-    `inferred_attributes`, igual que las inferencias blandas de texto.
+    `inferred_attributes`, igual que las inferencias blandas de texto --
+    incluidas ahora las inferencias por IA sobre el CONJUNTO de
+    descripciones de fotos (ver extract_soft_inferences_from_photos en
+    app/nlp/ai_attribute_extraction.py), añadidas al final de esta
+    función una vez que ya se conocen todas las descripciones.
+
+    La resolución de edificios/monumentos emblemáticos (campo
+    EDIFICIO_EMBLEMATICO -- ver app/vision/landmark_resolution.py) NO
+    ocurre aquí, sino antes, dentro de
+    app/vision/geolocation.py::_process_photo, foto a foto y en paralelo
+    con las demás fotos -- para cuando `geo_outcome.results` llega a esta
+    función, las coordenadas ya vienen resueltas para cualquier foto
+    donde el proveedor de IA activo confirmó el lugar con confianza
+    suficiente, en vez de la estimación por similitud visual de DINOv2.
 
     Módulo opcional/best-effort: si el índice FAISS no está construido (ver
     app/vision/geolocation.py), el segundo valor devuelto (disponibilidad)
@@ -368,6 +422,9 @@ async def _apply_image_geolocation(
             created_utc=post_dates_by_permalink.get(permalink),
             visual_description=geo_outcome.visual_descriptions.get(estimate.photo_link or permalink),
             visual_description_general=geo_outcome.general_descriptions.get(estimate.photo_link or permalink),
+            visual_description_codes=_to_visual_description_codes_schema(
+                geo_outcome.visual_description_codes.get(estimate.photo_link or permalink)
+            ),
             # `permalink` aquí es el de la publicación SINTÉTICA que
             # estimate_locations_for_posts crea para el avatar -- que es
             # literalmente `avatar_url` (ver su docstring) -- así que
@@ -380,6 +437,17 @@ async def _apply_image_geolocation(
         )
         for permalink, estimate in geo_outcome.results
     ]
+
+    # La resolución de edificios emblemáticos YA ocurrió más abajo en el
+    # pipeline, dentro de app/vision/geolocation.py::_process_photo, foto
+    # a foto, en cuanto cada una termina su análisis (no aquí, en un bucle
+    # aparte al final de todas las fotos como en una primera versión de
+    # esta funcionalidad) -- ver ADR-47 y el docstring de `_process_photo`
+    # para el razonamiento completo. `geo_outcome.results` ya trae, para
+    # cada foto con un edificio emblemático confirmado por el proveedor de
+    # IA, las coordenadas resueltas en vez de la estimación de DINOv2 --
+    # este bucle de construcción de `image_location_points` ya las
+    # recibe hechas, no hay nada más que hacer aquí.
 
     has_location = (
         demographic_findings.provincia is not None
@@ -402,6 +470,22 @@ async def _apply_image_geolocation(
         demographic_findings.evidence["estado_civil"] = list(geo_outcome.partner_signal_permalinks)
 
     visual_inferences = [inferred for _, inferred in geo_outcome.visual_inferences]
+
+    # Inferencia de atributos a partir de las descripciones de fotos
+    # (nuevo, ver extract_soft_inferences_from_photos): se llama AQUÍ, no
+    # dentro de _apply_ai_findings, porque necesita las descripciones que
+    # solo existen una vez analizadas las fotos -- _apply_ai_findings
+    # corre ANTES, en paralelo con el análisis de fotos (lo más lento del
+    # pipeline), precisamente para no esperar a esto. Usa la descripción
+    # GENERAL (caption en inglés de Moondream2), no las cuatro/seis líneas
+    # estructuradas -- esas ya generan sus propias InferredAttribute de
+    # forma determinista en scene_analysis.py, esto es un segundo pase
+    # razonando sobre el CONJUNTO de captions con un LLM.
+    visual_inferences.extend(
+        await extract_soft_inferences_from_photos(
+            geo_outcome.general_descriptions, username=username, full_name=full_name
+        )
+    )
 
     return image_location_points, geo_outcome.index_available, visual_inferences
 
@@ -426,6 +510,16 @@ async def generate_report(
     # directamente), se crea aquí mismo como antes -- sin cambio de
     # comportamiento para quien no use este parámetro.
     geolocation_task: "asyncio.Task | None" = None,
+    # Tarea de correlación de cuentas por username (ver ADR-44/ADR-48,
+    # app/osint/username_correlation.py) ya lanzada en segundo plano por
+    # el llamador -- mismo patrón que geolocation_task justo arriba, y
+    # por la misma razón: puede tardar del orden de minutos (~5000
+    # sitios), así que corre en PARALELO con el resto desde el principio
+    # en vez de esperar a que todo lo demás termine. None si no se pasa
+    # (p. ej. tests que llaman a generate_report directamente) -- en ese
+    # caso `related_accounts` queda a None en el informe, sin cambio de
+    # comportamiento para quien no use este parámetro.
+    username_correlation_task: "asyncio.Task | None" = None,
 ) -> ExposureReport:
 
     posts_for_demographics = _posts_with_bio_pseudo_post(platform, posts, bio)
@@ -455,7 +549,15 @@ async def generate_report(
     # de que el paralelismo está funcionando.
     async with timed_stage("espera_geolocalizacion_fotos"):
         image_location_points, geolocation_available, visual_inferences = await _apply_image_geolocation(
-            platform, posts, demographic_findings, travel_permalinks, geolocation_task, progress_callback, avatar_url
+            platform,
+            posts,
+            demographic_findings,
+            travel_permalinks,
+            geolocation_task,
+            progress_callback,
+            avatar_url,
+            username,
+            full_name,
         )
     # Igual que las inferencias blandas de texto: se AÑADEN a lo que ya
     # había (regex + texto por IA), nunca lo sustituyen. Ver
@@ -491,6 +593,26 @@ async def generate_report(
     async with timed_stage("recomendaciones"):
         recommendations = _build_recommendations(fingerprint, inferred_attributes, score)
 
+    # Igual comentario que "espera_geolocalizacion_fotos" más arriba: mide
+    # sobre todo la ESPERA a que termine la tarea lanzada al principio del
+    # pipeline (ver analysis_router._build_report) -- si ya terminó para
+    # cuando se llega aquí, este tramo sale casi a cero.
+    related_accounts: UsernameCorrelationSummary | None = None
+    if username_correlation_task is not None:
+        async with timed_stage("espera_correlacion_username"):
+            site_results = await username_correlation_task
+            related_accounts = UsernameCorrelationSummary(
+                total_sites_checked=len(site_results),
+                # Solo las ENCONTRADAS (exists=True) -- ver docstring de
+                # UsernameCorrelationSummary sobre por qué no tiene sentido
+                # incluir aquí los ~5000 "no existe"/"no concluyente".
+                matches=[
+                    UsernameSiteMatch(site=r.site, url=r.url, exists=r.exists)
+                    for r in site_results
+                    if r.exists is True
+                ],
+            )
+
     return ExposureReport(
         platform=platform,
         username=username,
@@ -508,6 +630,7 @@ async def generate_report(
         image_location_points=image_location_points,
         geolocation_available=geolocation_available,
         avatar_url=avatar_url,
+        related_accounts=related_accounts,
     )
 
 

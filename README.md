@@ -22,6 +22,12 @@ https://github.com/user-attachments/assets/bc91d3e4-bbb0-44b1-be25-00c0aba36d51
 > NLP: spaCy, scikit-learn, DINOv2/FAISS). El servicio `gamey` (Rust) se
 > ha eliminado por no aplicar a este TFG.
 
+
+
+https://github.com/user-attachments/assets/bc91d3e4-bbb0-44b1-be25-00c0aba36d51
+
+
+
 TFG: análisis defensivo de la propia huella digital mediante OSINT e IA. El
 usuario autentica **su propia cuenta** de Reddit y/o Instagram vía OAuth, y
 la herramienta genera un informe con lo que es públicamente inferible sobre
@@ -38,8 +44,8 @@ terceros.
    ocupación, rutina) a partir de en qué comunidades/hashtags participas.
 4. **Detecta declaraciones explícitas** sobre ti mismo en el texto ("tengo
    24 años", "vivo en León", "estudio Medicina"...) combinando regex
-   (rápido, gratuito, determinista) con un modelo de IA (Mistral, opcional)
-   que capta redacciones más libres que la regex no reconoce -- y también
+   (rápido, gratuito, determinista) con un modelo de IA LOCAL (Qwen3.5-4B,
+   opcional) que capta redacciones más libres que la regex no reconoce -- y también
    una estimación (más débil, marcada aparte) de sexo por convención
    cultural del nombre público de la cuenta. A partir de ahí, y de
    distribuciones agregadas del INE, estima **cuánta gente en España
@@ -60,10 +66,10 @@ terceros.
    tomó la foto sino *qué hay* en ella.
 7. Calcula un **score de privacidad** (0-100) con desglose por componente.
 8. Envía automáticamente el informe ya generado (incluidas las
-   recomendaciones por reglas fijas, como insumo) a un modelo de IA
-   (Mistral AI, tier gratuito) para obtener un **veredicto general** de una
-   frase y conclusiones específicas y no obvias -- sin necesidad de pulsar
-   ningún botón.
+   recomendaciones por reglas fijas, como insumo) a un modelo de IA LOCAL
+   (Qwen3.5-4B, sin llamada a ningún tercero) para obtener un **veredicto
+   general** de una frase y conclusiones específicas y no obvias -- sin
+   necesidad de pulsar ningún botón.
 9. Permite **descargar el informe completo en JSON** (portabilidad de
    datos, RGPD Art. 20).
 
@@ -105,13 +111,14 @@ navegador.
   de reverse geolocation citados en los docstrings).
 - El análisis de contenido visual (`backend/app/vision/scene_analysis.py`,
   Moondream2) es igualmente **opcional y best-effort**, y depende de las
-  mismas dependencias pesadas que la geolocalización (mismo
+  mismas condiciones de activación que la geolocalización (mismo
   `requirements-vision.txt`, mismo `ARG WITH_GEOLOCATION` del
-  `Dockerfile`), aunque es arquitectónicamente distinto: no compara
-  similitud contra un índice, sino que "interpreta" cada foto vía VQA. A
-  diferencia del modelo de geolocalización, no se precarga en el arranque
-  del contenedor (ver `lifespan` en `app/main.py`), así que la primera
-  foto que se analiza en cada proceso es más lenta que las siguientes.
+  `Dockerfile`) aunque desde el cambio a `llama-cpp-python`/GGUF ya NO
+  instala las mismas dependencias de Python que la geolocalización (antes
+  sí, ambas usaban `transformers`). Es arquitectónicamente distinto: no
+  compara similitud contra un índice, sino que "interpreta" cada foto vía
+  VQA. Se precarga en el arranque del contenedor igual que el modelo de
+  geolocalización (ver `lifespan` en `app/main.py`).
 - **Exclusión de alcance deliberada: no se hace reconocimiento facial ni se
   clasifican rasgos físicos/étnicos (color de piel, pelo, ojos) de ninguna
   persona que aparezca en las fotos, incluida la propia cuenta analizada.**
@@ -151,10 +158,12 @@ navegador.
   (listas + regex) para mantener el sistema explicable y auditable.
 - El análisis con IA (`backend/app/ai_analysis.py`,
   `backend/app/nlp/ai_attribute_extraction.py`) es **totalmente opcional**:
-  ambos usan la misma `MISTRAL_API_KEY`. Sin ella, el veredicto/conclusiones
-  del dashboard indican que no está disponible, y la detección de
-  atributos se queda solo con lo que encuentren las regex -- el resto de
-  la app funciona igual.
+  ambos usan el mismo modelo local (Qwen3.5-4B, ver
+  `backend/app/nlp/ai_client.py`). Sin `QWEN_GGUF_REPO_ID` configurado (o
+  sin `llama-cpp-python` instalado), el veredicto/conclusiones del
+  dashboard indican que no está disponible, y la detección de atributos se
+  queda solo con lo que encuentren las regex -- el resto de la app
+  funciona igual.
 - La correlación *entre plataformas* (Reddit + Instagram combinados) y el
   componente `identity_consistency_risk` del scoring quedan como
   **trabajo futuro**, documentado explícitamente en
@@ -185,14 +194,14 @@ navegador.
 - `app/nlp/fingerprint.py` — huella de escritura (longitud de frase, vocabulario, emojis, patrón horario, keywords TF-IDF, idioma).
 - `app/nlp/attribute_inference.py` — inferencia explicable de atributos (ubicación, ocupación, rutina) a partir de comunidades/hashtags.
 - `app/nlp/demographic_extraction.py` — extracción de declaraciones explícitas en texto por regex (edad, sexo, ubicación, estudios, ocupación, universidad, empresa).
-- `app/nlp/ai_attribute_extraction.py` — la misma extracción, pero vía IA (Mistral, opcional): capta redacciones libres que la regex no reconoce, y una estimación aparte de sexo por nombre público de la cuenta (marcada con menor fiabilidad). Complementa a la regex, nunca la sustituye.
+- `app/nlp/ai_attribute_extraction.py` — la misma extracción, pero vía IA local (Qwen3.5-4B, opcional): capta redacciones libres que la regex no reconoce, y una estimación aparte de sexo por nombre público de la cuenta (marcada con menor fiabilidad). Complementa a la regex, nunca la sustituye.
 - `app/nlp/travel_detection.py` — detección regex de menciones de "de viaje/vacaciones" en el pie de foto, para excluir esas publicaciones del cálculo de dónde vives habitualmente (ver `report/generator.py`). Complementa (no sustituye) a una detección equivalente vía IA en `ai_attribute_extraction.py`.
 - `app/data/ine_reference.py` — tablas de distribución poblacional (INE) usadas para el estrechamiento de población.
 - `app/scoring/k_anonymity.py` — motor de estimación de k-anonimato (estrechamiento de población en cascada), expone también la proporción ya calculada para el pictograma del frontend.
 - `app/scoring/privacy_score.py` — motor de scoring de privacidad (0-100).
 - `app/vision/geolocation.py` — geolocalización de fotos por similitud visual (DINOv2 + FAISS), opcional. Devuelve todas las estimaciones (con su confianza real) más un flag de si el índice está disponible, para poder distinguir "no hay índice" de "no hay resultados fiables".
-- `app/vision/scene_analysis.py` — análisis del contenido visual de cada foto (Moondream2, modelo de visión-lenguaje local vía `transformers`, ~1.8B parámetros): objetos, actividades, aficiones, señales de relación de pareja. Arquitectónicamente distinto de `geolocation.py` (que compara similitud visual contra un índice sin "entender" la foto). Opcional, mismas dependencias que la geolocalización.
-- `app/ai_analysis.py` — veredicto general + conclusiones sobre el informe vía Mistral AI, opcional; se dispara automáticamente, sin botón, y usa `recommendations` como insumo.
+- `app/vision/scene_analysis.py` — análisis del contenido visual de cada foto (Moondream2, modelo de visión-lenguaje local vía `llama-cpp-python`/GGUF, ~1.4B parámetros de texto): objetos, actividades, aficiones, señales de relación de pareja, matrícula. Arquitectónicamente distinto de `geolocation.py` (que compara similitud visual contra un índice sin "entender" la foto). Opcional, mismo flag de activación que la geolocalización (`WITH_GEOLOCATION`), aunque ya no comparte sus mismas dependencias de Python (ver más abajo).
+- `app/ai_analysis.py` — veredicto general + conclusiones sobre el informe vía IA local (Qwen3.5-4B), opcional; se dispara automáticamente, sin botón, y usa `recommendations` como insumo.
 - `app/progress.py` — callback de progreso compartido, usado por el endpoint de streaming.
 - `app/analysis_router.py` — endpoints de análisis (`/api/analyze/{platform}`, `/api/analyze/{platform}/stream`, `/api/analyze/ai-summary`).
 - `app/report/generator.py` — ensamblado del informe final + recomendaciones (estas últimas ya no se muestran como sección propia en el dashboard, ver más arriba).
@@ -235,21 +244,27 @@ Antes de levantarlo, crea `backend/.env` a partir de `backend/.env.example`
 
 **Análisis de imagen en Docker (geolocalización + contenido visual):** el
 `docker-compose.yml` trae `WITH_GEOLOCATION=true` por defecto, que instala
-`torch`/`faiss`/`transformers`/`timm`/`einops`/`pyvips-binary` en la
-imagen del backend (ver `requirements-vision.txt`, varios cientos de MB
-extra, con la build solo-CPU de PyTorch). Pese al nombre del flag
-(heredado de cuando solo existía geolocalización), esas mismas
-dependencias son las que necesita también el análisis de contenido visual
-(`app/vision/scene_analysis.py`, Moondream2) -- no hay un flag
-independiente para activar solo una de las dos. Sin esto, el backend
-puede tener el índice FAISS perfectamente construido y montado y aun así
-reportar la geolocalización como "no disponible" -- esas librerías hacen
-falta en el análisis, no solo para construir el índice. Si no vas a usar
-ninguna de las dos funciones, ponlo a `false` para una imagen más ligera.
-El modelo de geolocalización se precarga en el arranque del contenedor
-(no en el primer análisis); Moondream2 se carga de forma perezosa en la
-primera foto que lo necesita. La caché de ambos se persiste en
-`backend/data/hf_cache/` para no volver a descargarlos en cada reinicio.
+`torch`/`faiss`/`transformers` (para DINOv2, geolocalización) y
+`llama-cpp-python` compilado con soporte CUDA (para Moondream2, análisis
+de contenido -- ver `requirements-vision.txt` y la etapa `cuda-builder`
+del `Dockerfile`) en la imagen del backend, varios cientos de MB extra.
+Pese al nombre del flag (heredado de cuando solo existía
+geolocalización), esa misma build es la que necesita también el análisis
+de contenido visual (`app/vision/scene_analysis.py`, Moondream2 vía GGUF)
+-- no hay un flag independiente para activar solo una de las dos, aunque
+desde el cambio a `llama-cpp-python` ya NO comparten las mismas
+dependencias de Python (antes sí, ambas usaban `transformers`). Sin esto,
+el backend puede tener el índice FAISS perfectamente construido y montado
+y aun así reportar la geolocalización como "no disponible" -- esas
+librerías hacen falta en el análisis, no solo para construir el índice.
+Si no vas a usar ninguna de las dos funciones, ponlo a `false` para una
+imagen más ligera. Los dos modelos (DINOv2 y Moondream2) se precargan en
+el arranque del contenedor, no en el primer análisis (ver `lifespan` en
+`app/main.py`). La caché de ambos se persiste en `backend/data/hf_cache/`
+para no volver a descargarlos en cada reinicio; Moondream2 además cachea
+ahí su versión cuantizada (ver `MOONDREAM_QUANT_TYPE` en
+`app/vision/scene_analysis.py`) una vez generada, para no recuantizar en
+cada reinicio.
 
 **Offload de DINOv2 a una iGPU (opcional, `--profile igpu`):** en
 máquinas con GPU dedicada + iGPU (Intel/AMD, vía DirectML sobre WSL2),
@@ -257,7 +272,7 @@ máquinas con GPU dedicada + iGPU (Intel/AMD, vía DirectML sobre WSL2),
 `torch-directml` -- deliberadamente en una imagen/`venv` completamente
 aparte del backend, nunca instalado ahí (ver ADR-28 en
 `docs/src/09_architecture_decisions.adoc` para el porqué: mezclarlo con
-el `torch`/`cu121` que ya usa el backend para Moondream2 corrompe ese
+el `torch`/`cu121` que ya usa el backend para DINOv2 corrompe ese
 entorno). Actívalo con `ENABLE_IGPU_OFFLOAD=true` en `backend/.env` **y**
 el perfil `igpu` al arrancar -- ninguno de los dos por separado hace
 nada.
@@ -351,9 +366,9 @@ Ver `backend/.env.example` para la lista completa comentada. Resumen:
 | `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | No | Sin ellas, Instagram devuelve 503 pero Reddit sigue funcionando. App "API setup with Instagram Login" en Meta for Developers |
 | `INSTAGRAM_REDIRECT_URI` | No | Déjala vacía si usas Docker (ver nota de túnel más abajo): se deriva sola del Host de cada petición. Fíjala solo con dominio propio en producción |
 | `FRONTEND_ORIGIN` | No | Déjala vacía si usas Docker: se deriva sola del Host. Fíjala (p. ej. `http://localhost:5173`) solo si sirves frontend y backend en puertos distintos sin Docker |
-| `MISTRAL_API_KEY` | No | Tier gratuito de [Mistral AI](https://console.mistral.ai). Sin ella, la sección "Analizar con IA" del dashboard indica que no está disponible, sin afectar al resto |
-| `MISTRAL_MODEL` | No | Por defecto `mistral-small-latest` |
-| `ENABLE_SCENE_ANALYSIS` | No | `false` por defecto. Activa el análisis de **contenido** visual con Moondream2 (descripción de escena por foto). Afecta exclusivamente a esto: la geolocalización por similitud visual (DINOv2) no lee esta variable y sigue funcionando igual, esté esto activado o no -- probado explícitamente en `test_geolocation.py`. Para que Moondream2 pueda funcionar (con esta variable en `true`) hace falta además `WITH_GEOLOCATION=true` en el build de Docker (mismo build-arg que ya usa DINOv2 para instalar torch/faiss/transformers -- decide si las librerías están instaladas, no si Moondream2 se usa). **Antes de activarla, ver ADR-19 en `docs/`**: en CPU sin GPU necesita ~7.6GB de RAM libres solo para el modelo |
+| `ENABLE_AI_ANALYSIS` | No | `true` por defecto. Desactiva del todo el análisis con IA (veredicto/conclusiones + extracción de atributos, ver `backend/app/nlp/ai_client.py`) sin desinstalar nada |
+| `QWEN_GGUF_REPO_ID`, `QWEN_GGUF_FILENAME` | No | Repo/fichero de Hugging Face con el GGUF de Qwen3.5-4B a cuantizar localmente (Q4_K_M vía llama-cpp-python) -- SIN VALOR POR DEFECTO A PROPÓSITO, hay que confirmarlo contra lo disponible en Hugging Face antes de desplegar (ver `.env.example`). Sin rellenar, la sección "Analizar con IA" del dashboard indica que no está disponible, sin afectar al resto |
+| `ENABLE_SCENE_ANALYSIS` | No | `false` por defecto. Activa el análisis de **contenido** visual con Moondream2 (descripción de escena por foto). Afecta exclusivamente a esto: la geolocalización por similitud visual (DINOv2) no lee esta variable y sigue funcionando igual, esté esto activado o no -- probado explícitamente en `test_geolocation.py`. Para que Moondream2 pueda funcionar (con esta variable en `true`) hace falta además `WITH_GEOLOCATION=true` en el build de Docker (mismo build-arg, aunque desde ADR-43 instala `llama-cpp-python` para Moondream2, no las mismas librerías que DINOv2). **Ver ADR-43 en `docs/`** (sustituye a ADR-19, que documentaba el backend `transformers` anterior): la cifra de RAM/VRAM necesaria depende ahora de si `MOONDREAM_QUANT_TYPE` está cuantizando el modelo o no, no hay un único número fijo como antes |
 
 **Nota sobre Instagram y HTTPS en local:** la API de Instagram (Business
 Login) exige que `redirect_uri` sea HTTPS, incluso en desarrollo. Para
@@ -368,8 +383,36 @@ ngrok http 8080
 
 (requiere cuenta gratuita en https://ngrok.com y `ngrok config add-authtoken <token>` una vez).
 
+**Restringir quién puede entrar (Basic Auth):** el plan gratuito de ngrok
+incluye un dominio propio estable (no cambia en cada reinicio) y
+permite añadir autenticación sin plan de pago, vía **Traffic Policy**.
+Copia `backend/policy.example.yaml` a `backend/policy.yaml` (este
+segundo nombre está en `.gitignore`, nunca se sube) y pon tu
+usuario/contraseña real dentro:
+
+```yaml
+on_http_request:
+  - actions:
+      - type: basic-auth
+        config:
+          realm: "AmITraceable"
+          credentials:
+            - "usuario:contraseña-larga-y-unica"
+```
+
+Y arranca el túnel apuntando a ese archivo:
+
+```bash
+ngrok http 8080 --url=tu-dominio.ngrok-free.app --traffic-policy-file=backend/policy.yaml
+```
+
+Así, quien no tenga esas credenciales ni siquiera llega al backend --
+ngrok rechaza la petición en su propio borde, antes de reenviarla.
+Ver ADR-39 sobre por qué esto (y no dominio propio + Cloudflare) es la
+solución elegida.
+
 <details>
-<summary>Notas importantes sobre ngrok y por qué no usar Cloudflare Quick Tunnel</summary>
+<summary>Notas sobre ngrok y por qué no usar Cloudflare Quick Tunnel</summary>
 
 ⚠️ **No usar `cloudflared tunnel --url ...` (Cloudflare Quick Tunnel)**:
 el edge de `trycloudflare.com` bufferiza por completo las respuestas
@@ -407,8 +450,8 @@ informe, sin errores. Para activarlo:
 cd backend
 pip install -r requirements-vision.txt huggingface_hub pandas tqdm
 
-python scripts/download_osv5m_spain.py --output data/osv5m_spain --max-disk-gb 35
-python scripts/build_faiss_index.py --images data/osv5m_spain
+python scripts/geolocalization/download_osv5m_spain.py --output data/osv5m_spain --max-disk-gb 35
+python scripts/geolocalization/build_faiss_index.py --images data/osv5m_spain
 ```
 
 (`requirements-vision.txt` ya apunta al índice de PyTorch solo-CPU, más

@@ -1,14 +1,53 @@
 from datetime import datetime, timezone
 
-import httpx
 import pytest
 
 from app.config import settings
 from app.models.schemas import SocialPost
+from app.nlp import ai_attribute_extraction
 from app.nlp.ai_attribute_extraction import extract_demographics_with_ai, merge_findings
+from app.nlp.ai_client import AIHTTPError, AIRequestError
 from app.nlp.demographic_extraction import DemographicFindings, extract_demographics
 
-MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
+
+def _ai_returns(value: dict):
+    """`monkeypatch.setattr(ai_attribute_extraction, "call_ai_json", _ai_returns(value))`
+    sustituye la llamada real al modelo local por una que siempre devuelve
+    `value` ya parseado (la forma en la que call_ai_json entrega su
+    resultado desde el cambio a Qwen3.5-4B local -- ya no hay respuesta
+    HTTP que envolver/desenvolver, así que los tests pasan directamente el
+    dict que `call_ai_json` devolvería)."""
+
+    async def fake(*args, **kwargs):
+        return value
+
+    return fake
+
+
+def _ai_raises(exc: Exception):
+    """Mismo mecanismo que `_ai_returns`, pero simulando que `call_ai_json`
+    lanza `exc` (AIRequestError si el modelo local no pudo ejecutarse,
+    AIHTTPError si respondió pero con una forma inesperada -- ver
+    app/nlp/ai_client.py)."""
+
+    async def fake(*args, **kwargs):
+        raise exc
+
+    return fake
+
+
+def _ai_spy(value: dict):
+    """Como `_ai_returns`, pero además acumula en `calls` los argumentos
+    (system_prompt, user_prompt) de cada invocación -- para los pocos
+    tests que necesitan comprobar qué se le mandó al modelo (antes
+    inspeccionaban el cuerpo HTTP real capturado por respx)."""
+    calls: list[tuple[str, str]] = []
+
+    async def fake(system_prompt, user_prompt, *args, **kwargs):
+        calls.append((system_prompt, user_prompt))
+        return value
+
+    return fake, calls
 
 
 def _post(text: str, permalink: str = "https://x/1", i: str = "1") -> SocialPost:
@@ -26,6 +65,12 @@ def _post(text: str, permalink: str = "https://x/1", i: str = "1") -> SocialPost
 
 
 def _mock_content(**fields) -> dict:
+    """Construye el dict ya parseado que `call_ai_json` devolvería tras el
+    cambio a Qwen3.5-4B local -- antes envolvía este contenido en la forma
+    HTTP real de Mistral o Gemini (choices[...]/candidates[...]) porque el
+    mock operaba a nivel de transporte (respx); ahora `call_ai_json` ya
+    hace ese des-envolvido internamente (ver app/nlp/ai_client.py), así
+    que el mock solo necesita el dict final."""
     base = {
         "sexo": None,
         "edad": None,
@@ -40,37 +85,85 @@ def _mock_content(**fields) -> dict:
         "evidence": {},
     }
     base.update(fields)
-    return {"choices": [{"message": {"content": __import__("json").dumps(base)}}]}
+    return base
 
 
 @pytest.fixture(autouse=True)
-def reset_mistral_api_key(monkeypatch):
-    monkeypatch.setattr(settings, "mistral_api_key", None)
-    yield
+def enable_ai_analysis(monkeypatch):
+    """`ai_key_configured` (ver app/config.py) exige tanto
+    `enable_ai_analysis=True` como un `qwen_gguf_repo_id` no vacío -- se
+    fijan aquí los dos explícitamente para que estos tests sean inmunes a
+    que esos valores por defecto cambien en el futuro (mismo criterio que
+    antes con las API keys de Mistral/Gemini). El valor de
+    `qwen_gguf_repo_id` es irrelevante para estos tests: `call_ai_json`
+    está siempre mockeado, nunca llega a intentar cargar un modelo real."""
+    monkeypatch.setattr(settings, "enable_ai_analysis", True)
+    monkeypatch.setattr(settings, "qwen_gguf_repo_id", "fake/repo")
 
 
 class TestNoApiKeyOrEmptyInput:
     @pytest.mark.asyncio
-    async def test_returns_empty_findings_without_api_key(self):
+    async def test_returns_empty_findings_when_ai_analysis_disabled(self, monkeypatch):
+        monkeypatch.setattr(settings, "enable_ai_analysis", False)
         findings = await extract_demographics_with_ai([_post("estudiante de enfermeria")], username="ana")
         assert findings == DemographicFindings()
 
     @pytest.mark.asyncio
-    async def test_returns_empty_findings_when_nothing_to_send(self, monkeypatch):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+    async def test_returns_empty_findings_when_nothing_to_send(self):
         findings = await extract_demographics_with_ai([], username="")
+        assert findings == DemographicFindings()
+
+
+class TestGracefulDegradation:
+    """Prueba el propio mecanismo de llamada y degradación de
+    extract_demographics_with_ai -- ya no hay proveedor/URL que
+    parametrizar (un único backend local, ver app/nlp/ai_client.py): las
+    dos formas de fallo posibles ahora son que el modelo no pueda
+    ejecutarse en absoluto (AIRequestError) o que responda con algo que no
+    se pudo interpretar como JSON (AIHTTPError) -- ver ese módulo."""
+
+    @pytest.mark.asyncio
+    async def test_model_unavailable_returns_empty_findings(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_raises(AIRequestError("llama_cpp no disponible"))
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings == DemographicFindings()
+
+    @pytest.mark.asyncio
+    async def test_malformed_model_output_returns_empty_findings(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction,
+            "call_ai_json",
+            _ai_raises(AIHTTPError(200, "respuesta con forma inesperada: no es JSON")),
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings == DemographicFindings()
+
+    @pytest.mark.asyncio
+    async def test_unexpected_response_shape_returns_empty_findings(self, monkeypatch):
+        """El modelo puede devolver JSON válido pero sin ninguno de los
+        campos esperados (p. ej. si no siguió el formato pedido) -- a
+        diferencia del test anterior, esto no es un fallo de ai_client
+        (el JSON SÍ se parseó bien), es la capa de parseo de este módulo
+        (_to_findings) la que debe degradarse con calma ante campos
+        ausentes."""
+        monkeypatch.setattr(ai_attribute_extraction, "call_ai_json", _ai_returns({"unexpected": "shape"}))
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
         assert findings == DemographicFindings()
 
 
 class TestSuccessfulExtraction:
     @pytest.mark.asyncio
-    async def test_detects_estudios_missed_by_regex_vocabulary(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(estudios="enfermeria", evidence={"estudios": "https://x/1"}),
-            )
+    async def test_detects_estudios_missed_by_regex_vocabulary(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(estudios="enfermeria", evidence={"estudios": "https://x/1"}))
         )
 
         findings = await extract_demographics_with_ai(
@@ -83,12 +176,78 @@ class TestSuccessfulExtraction:
         assert findings.evidence["estudios"] == ["https://x/1"]
 
     @pytest.mark.asyncio
-    async def test_unrecognized_studies_value_is_not_estimated(self, monkeypatch, respx_mock):
+    async def test_ai_infers_nivel_estudios_superior_from_estudios(self, monkeypatch):
+        """Mismo criterio que en demographic_extraction.py: si la IA
+        detecta una carrera concreta pero no declara 'nivel_estudios'
+        explícitamente, se infiere 'superior' igualmente."""
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(estudios="enfermeria", evidence={"estudios": "https://x/1"}))
+        )
+
+        findings = await extract_demographics_with_ai(
+            [_post("Voy a 2o de Enfermeria y no doy abasto", permalink="https://x/1")],
+            username="ana_gz",
+        )
+
+        assert findings.nivel_estudios == "superior"
+        assert findings.source["nivel_estudios"] == "ia"
+        assert findings.evidence["nivel_estudios"] == ["https://x/1"]
+
+    @pytest.mark.asyncio
+    async def test_ai_detects_nivel_estudios_directly(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(nivel_estudios="secundaria_superior"))
+        )
+
+        findings = await extract_demographics_with_ai(
+            [_post("Tengo el bachillerato desde hace un par de años")], username="x"
+        )
+
+        assert findings.nivel_estudios == "secundaria_superior"
+        assert findings.source["nivel_estudios"] == "ia"
+
+    @pytest.mark.asyncio
+    async def test_ai_infers_rama_estudios_from_estudios(self, monkeypatch):
+        """Mismo criterio que nivel_estudios: si la IA detecta una carrera
+        concreta pero no declara 'rama_estudios' explícitamente, se
+        infiere vía STUDIES_TO_RAMA igualmente -- SOLO informativo, no
+        genera paso de estrechamiento propio (ver test_k_anonymity.py)."""
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(estudios="enfermeria", evidence={"estudios": "https://x/1"}))
+        )
+
+        findings = await extract_demographics_with_ai(
+            [_post("Voy a 2o de Enfermeria y no doy abasto", permalink="https://x/1")],
+            username="ana_gz",
+        )
+
+        assert findings.rama_estudios == "ciencias_salud"
+        assert findings.source["rama_estudios"] == "ia"
+        assert findings.evidence["rama_estudios"] == ["https://x/1"]
+
+    @pytest.mark.asyncio
+    async def test_ai_detects_rama_estudios_directly(self, monkeypatch):
+        """La IA puede declarar 'rama_estudios' directamente para una
+        carrera fuera de las 14 de STUDIES_DISTRIBUTION (p. ej.
+        Sociología), sin que 'estudios' se rellene."""
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(rama_estudios="ciencias_sociales_juridicas"))
+        )
+
+        findings = await extract_demographics_with_ai(
+            [_post("Estudio Sociologia en la universidad")], username="x"
+        )
+
+        assert findings.estudios is None
+        assert findings.rama_estudios == "ciencias_sociales_juridicas"
+        assert findings.source["rama_estudios"] == "ia"
+
+    @pytest.mark.asyncio
+    async def test_unrecognized_studies_value_is_not_estimated(self, monkeypatch):
         """El LLM propone un valor libre; si no coincide con ninguna clave del INE,
         no se acepta -- nunca se inventa una categoría no auditable."""
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(estudios="clarinete avanzado"))
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(estudios="clarinete avanzado"))
         )
 
         findings = await extract_demographics_with_ai([_post("toco el clarinete")], username="x")
@@ -96,13 +255,9 @@ class TestSuccessfulExtraction:
         assert findings.estudios is None
 
     @pytest.mark.asyncio
-    async def test_detects_municipio_over_provincia(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(municipio="Leon", provincia="Leon", evidence={"municipio": "https://x/1"}),
-            )
+    async def test_detects_municipio_over_provincia(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(municipio="Leon", provincia="Leon", evidence={"municipio": "https://x/1"}))
         )
 
         findings = await extract_demographics_with_ai([_post("vivo por leon")], username="x")
@@ -112,13 +267,9 @@ class TestSuccessfulExtraction:
         assert findings.source["municipio"] == "ia"
 
     @pytest.mark.asyncio
-    async def test_detects_multi_province_comunidad_autonoma(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(comunidad_autonoma="Canarias", evidence={"comunidad_autonoma": "bio"}),
-            )
+    async def test_detects_multi_province_comunidad_autonoma(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(comunidad_autonoma="Canarias", evidence={"comunidad_autonoma": "bio"}))
         )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="ana", bio="Vivo en Canarias")
@@ -129,10 +280,9 @@ class TestSuccessfulExtraction:
         assert findings.evidence["comunidad_autonoma"] == ["bio"]
 
     @pytest.mark.asyncio
-    async def test_single_province_comunidad_autonoma_resolves_to_province(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(comunidad_autonoma="Región de Murcia"))
+    async def test_single_province_comunidad_autonoma_resolves_to_province(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(comunidad_autonoma="Región de Murcia"))
         )
 
         findings = await extract_demographics_with_ai([_post("Vivo en Murcia")], username="ana")
@@ -141,14 +291,11 @@ class TestSuccessfulExtraction:
         assert findings.comunidad_autonoma is None
 
     @pytest.mark.asyncio
-    async def test_provincia_wins_over_comunidad_autonoma_when_both_present(self, monkeypatch, respx_mock):
+    async def test_provincia_wins_over_comunidad_autonoma_when_both_present(self, monkeypatch):
         """Si el modelo (por error o porque el texto lo permitía) devuelve
         ambos campos, la provincia concreta es más específica y gana."""
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200, json=_mock_content(provincia="Las Palmas", comunidad_autonoma="Canarias")
-            )
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(provincia="Las Palmas", comunidad_autonoma="Canarias"))
         )
 
         findings = await extract_demographics_with_ai([_post("Vivo en Las Palmas, Canarias")], username="ana")
@@ -157,9 +304,10 @@ class TestSuccessfulExtraction:
         assert findings.comunidad_autonoma is None
 
     @pytest.mark.asyncio
-    async def test_edad_out_of_range_is_discarded(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content(edad=200)))
+    async def test_edad_out_of_range_is_discarded(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(edad=200))
+        )
 
         findings = await extract_demographics_with_ai([_post("este puente tiene 200 años")], username="x")
 
@@ -175,13 +323,9 @@ class TestEdadEstimadaPorRango:
     puntual."""
 
     @pytest.mark.asyncio
-    async def test_confianza_suficiente_guarda_el_rango(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(edad_estimada={"edad_min": 25, "edad_max": 30, "confianza": 0.8}),
-            )
+    async def test_confianza_suficiente_guarda_el_rango(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(edad_estimada={"edad_min": 25, "edad_max": 30, "confianza": 0.8}))
         )
 
         findings = await extract_demographics_with_ai(
@@ -197,16 +341,12 @@ class TestEdadEstimadaPorRango:
         assert findings.confidence["edad_rango_max"] == 0.8
 
     @pytest.mark.asyncio
-    async def test_rango_amplio_con_confianza_alta_se_acepta(self, monkeypatch, respx_mock):
+    async def test_rango_amplio_con_confianza_alta_se_acepta(self, monkeypatch):
         """El punto central de este diseño: un rango de 20 años es
         perfectamente válido si con eso el modelo alcanza confianza alta
         -- no hay penalización por el ancho, solo por la confianza."""
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(edad_estimada={"edad_min": 20, "edad_max": 40, "confianza": 0.75}),
-            )
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(edad_estimada={"edad_min": 20, "edad_max": 40, "confianza": 0.75}))
         )
 
         findings = await extract_demographics_with_ai([_post("pista debil cualquiera")], username="x")
@@ -215,19 +355,15 @@ class TestEdadEstimadaPorRango:
         assert findings.edad_rango_max == 40
 
     @pytest.mark.asyncio
-    async def test_confianza_insuficiente_no_anade_nada(self, monkeypatch, respx_mock):
+    async def test_confianza_insuficiente_no_anade_nada(self, monkeypatch):
         """Regresión (Comandante, agosto 2026): antes de este rediseño se
         colaban estimaciones erróneas sobre un valor PUNTUAL con
         confianza "moderada" (p. ej. 30 años estimados para alguien de
         21 real). El umbral (0.7) sigue como red de seguridad adicional
         aunque el ancho del rango ya absorba la mayor parte de la
         incertidumbre."""
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(edad_estimada={"edad_min": 25, "edad_max": 30, "confianza": 0.6}),
-            )
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(edad_estimada={"edad_min": 25, "edad_max": 30, "confianza": 0.6}))
         )
 
         findings = await extract_demographics_with_ai([_post("alguna pista ambigua")], username="x")
@@ -237,13 +373,9 @@ class TestEdadEstimadaPorRango:
         assert "edad_rango_min" not in findings.confidence
 
     @pytest.mark.asyncio
-    async def test_confianza_baja_no_anade_nada(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(edad_estimada={"edad_min": 25, "edad_max": 30, "confianza": 0.3}),
-            )
+    async def test_confianza_baja_no_anade_nada(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(edad_estimada={"edad_min": 25, "edad_max": 30, "confianza": 0.3}))
         )
 
         findings = await extract_demographics_with_ai([_post("texto ambiguo cualquiera")], username="x")
@@ -254,20 +386,16 @@ class TestEdadEstimadaPorRango:
         assert "edad_rango_min" not in findings.confidence
 
     @pytest.mark.asyncio
-    async def test_edad_exacta_declarada_gana_sobre_el_rango(self, monkeypatch, respx_mock):
+    async def test_edad_exacta_declarada_gana_sobre_el_rango(self, monkeypatch):
         """Si el modelo devuelve AMBOS campos (edad exacta Y una estimación
         indirecta), la edad exacta es más precisa y se queda sola -- nunca
         conviven `edad` y `edad_rango_min`/`edad_rango_max` a la vez."""
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(
                     edad=24,
                     edad_estimada={"edad_min": 35, "edad_max": 45, "confianza": 0.9},
                     evidence={"edad": "https://x/1"},
-                ),
-            )
+                ))
         )
 
         findings = await extract_demographics_with_ai([_post("tengo 24 años", permalink="https://x/1")], username="x")
@@ -277,13 +405,9 @@ class TestEdadEstimadaPorRango:
         assert findings.edad_rango_max is None
 
     @pytest.mark.asyncio
-    async def test_edad_min_fuera_de_rango_se_descarta(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(edad_estimada={"edad_min": 5, "edad_max": 30, "confianza": 0.9}),
-            )
+    async def test_edad_min_fuera_de_rango_se_descarta(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(edad_estimada={"edad_min": 5, "edad_max": 30, "confianza": 0.9}))
         )
 
         findings = await extract_demographics_with_ai([_post("texto cualquiera")], username="x")
@@ -291,13 +415,9 @@ class TestEdadEstimadaPorRango:
         assert findings.edad_rango_min is None
 
     @pytest.mark.asyncio
-    async def test_edad_max_fuera_de_rango_se_descarta(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(edad_estimada={"edad_min": 30, "edad_max": 150, "confianza": 0.9}),
-            )
+    async def test_edad_max_fuera_de_rango_se_descarta(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(edad_estimada={"edad_min": 30, "edad_max": 150, "confianza": 0.9}))
         )
 
         findings = await extract_demographics_with_ai([_post("texto cualquiera")], username="x")
@@ -305,13 +425,9 @@ class TestEdadEstimadaPorRango:
         assert findings.edad_rango_min is None
 
     @pytest.mark.asyncio
-    async def test_edad_min_mayor_que_edad_max_se_descarta(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(edad_estimada={"edad_min": 40, "edad_max": 25, "confianza": 0.9}),
-            )
+    async def test_edad_min_mayor_que_edad_max_se_descarta(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(edad_estimada={"edad_min": 40, "edad_max": 25, "confianza": 0.9}))
         )
 
         findings = await extract_demographics_with_ai([_post("texto cualquiera")], username="x")
@@ -320,16 +436,12 @@ class TestEdadEstimadaPorRango:
         assert findings.edad_rango_max is None
 
     @pytest.mark.asyncio
-    async def test_edad_min_igual_a_edad_max_es_valido(self, monkeypatch, respx_mock):
+    async def test_edad_min_igual_a_edad_max_es_valido(self, monkeypatch):
         """Un rango de ancho cero (una única edad) sigue siendo válido --
         significa que el modelo está muy seguro de un año concreto por
         vía indirecta, pero sigue sin ser una autodeclaración explícita."""
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(edad_estimada={"edad_min": 24, "edad_max": 24, "confianza": 0.9}),
-            )
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(edad_estimada={"edad_min": 24, "edad_max": 24, "confianza": 0.9}))
         )
 
         findings = await extract_demographics_with_ai([_post("texto cualquiera")], username="x")
@@ -338,10 +450,9 @@ class TestEdadEstimadaPorRango:
         assert findings.edad_rango_max == 24
 
     @pytest.mark.asyncio
-    async def test_edad_estimada_null_no_anade_nada(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(edad_estimada=None))
+    async def test_edad_estimada_null_no_anade_nada(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(edad_estimada=None))
         )
 
         findings = await extract_demographics_with_ai([_post("texto cualquiera")], username="x")
@@ -350,13 +461,9 @@ class TestEdadEstimadaPorRango:
         assert findings.edad_rango_max is None
 
     @pytest.mark.asyncio
-    async def test_edad_min_no_entero_se_descarta(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(edad_estimada={"edad_min": "veinte", "edad_max": 30, "confianza": 0.9}),
-            )
+    async def test_edad_min_no_entero_se_descarta(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(edad_estimada={"edad_min": "veinte", "edad_max": 30, "confianza": 0.9}))
         )
 
         findings = await extract_demographics_with_ai([_post("texto cualquiera")], username="x")
@@ -365,17 +472,13 @@ class TestEdadEstimadaPorRango:
         assert findings.edad_rango_max is None
 
     @pytest.mark.asyncio
-    async def test_free_text_fields_universidad_empresa(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(
+    async def test_free_text_fields_universidad_empresa(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(
                     universidad="Oviedo",
                     empresa="Indra",
                     evidence={"universidad": "https://x/1", "empresa": "https://x/1"},
-                ),
-            )
+                ))
         )
 
         findings = await extract_demographics_with_ai([_post("estudio en la universidad de Oviedo")], username="x")
@@ -387,13 +490,9 @@ class TestEdadEstimadaPorRango:
 
 class TestSexoPorNombre:
     @pytest.mark.asyncio
-    async def test_explicit_sexo_wins_over_name_guess(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(sexo="hombre", sexo_por_nombre="mujer", evidence={"sexo": "https://x/1"}),
-            )
+    async def test_explicit_sexo_wins_over_name_guess(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(sexo="hombre", sexo_por_nombre="mujer", evidence={"sexo": "https://x/1"}))
         )
 
         findings = await extract_demographics_with_ai([_post("soy hombre")], username="ana", full_name="Ana")
@@ -402,10 +501,9 @@ class TestSexoPorNombre:
         assert findings.source["sexo"] == "ia"
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_name_guess_marked_with_distinct_source(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(sexo_por_nombre="mujer"))
+    async def test_falls_back_to_name_guess_marked_with_distinct_source(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(sexo_por_nombre="mujer"))
         )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="ana_gz", full_name="Ana García")
@@ -415,12 +513,9 @@ class TestSexoPorNombre:
         assert findings.evidence["sexo"] == ["nombre público de la cuenta"]
 
     @pytest.mark.asyncio
-    async def test_detects_travel_photos(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200, json=_mock_content(fotos_de_viaje=["https://x/1", "https://x/2"])
-            )
+    async def test_detects_travel_photos(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(fotos_de_viaje=["https://x/1", "https://x/2"]))
         )
 
         findings = await extract_demographics_with_ai(
@@ -431,68 +526,29 @@ class TestSexoPorNombre:
         assert findings.travel_permalinks == {"https://x/1", "https://x/2"}
 
     @pytest.mark.asyncio
-    async def test_missing_fotos_de_viaje_field_defaults_to_empty_set(self, monkeypatch, respx_mock):
+    async def test_missing_fotos_de_viaje_field_defaults_to_empty_set(self, monkeypatch):
         """Si el LLM no devuelve el campo (o devuelve algo con forma
         inesperada), no debe romper -- se queda como conjunto vacío."""
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content()))
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content())
+        )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="ana")
 
         assert findings.travel_permalinks == set()
 
     @pytest.mark.asyncio
-    async def test_profile_name_and_bio_are_sent_in_prompt(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        route = respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content()))
+    async def test_profile_name_and_bio_are_sent_in_prompt(self, monkeypatch):
+        fake, calls = _ai_spy(_mock_content())
+        monkeypatch.setattr(ai_attribute_extraction, "call_ai_json", fake)
 
         await extract_demographics_with_ai(
             [_post("hola")], username="ana_gz", full_name="Ana García", bio="Enfermera en León"
         )
 
-        sent_body = route.calls[0].request.content.decode()
-        assert "Ana García" in sent_body
-        assert "Enfermera en León" in sent_body
-
-
-class TestGracefulDegradation:
-    @pytest.mark.asyncio
-    async def test_network_error_returns_empty_findings(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(side_effect=httpx.ConnectError("no network"))
-
-        findings = await extract_demographics_with_ai([_post("hola")], username="x")
-
-        assert findings == DemographicFindings()
-
-    @pytest.mark.asyncio
-    async def test_429_returns_empty_findings_without_raising(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(429))
-
-        findings = await extract_demographics_with_ai([_post("hola")], username="x")
-
-        assert findings == DemographicFindings()
-
-    @pytest.mark.asyncio
-    async def test_malformed_json_content_returns_empty_findings(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json={"choices": [{"message": {"content": "no es json"}}]})
-        )
-
-        findings = await extract_demographics_with_ai([_post("hola")], username="x")
-
-        assert findings == DemographicFindings()
-
-    @pytest.mark.asyncio
-    async def test_unexpected_response_shape_returns_empty_findings(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json={"unexpected": "shape"}))
-
-        findings = await extract_demographics_with_ai([_post("hola")], username="x")
-
-        assert findings == DemographicFindings()
+        sent_prompt = calls[0][1]
+        assert "Ana García" in sent_prompt
+        assert "Enfermera en León" in sent_prompt
 
 
 class TestMergeFindings:
@@ -537,12 +593,9 @@ class TestSoftInferences:
     autodeclaración explícita."""
 
     @pytest.mark.asyncio
-    async def test_parses_a_valid_soft_inference(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(
+    async def test_parses_a_valid_soft_inference(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(
                     inferencias_blandas=[
                         {
                             "categoria": "relacion_sentimental",
@@ -551,8 +604,7 @@ class TestSoftInferences:
                             "evidencia": "bio",
                         }
                     ]
-                ),
-            )
+                ))
         )
 
         findings = await extract_demographics_with_ai(
@@ -567,32 +619,12 @@ class TestSoftInferences:
         assert inferred.evidence == ["bio"]
 
     @pytest.mark.asyncio
-    async def test_missing_field_is_empty_list(self, monkeypatch, respx_mock):
+    async def test_missing_field_is_empty_list(self, monkeypatch):
         """Compatibilidad con respuestas de antes de este cambio (o un
         modelo que omita el campo): no debe romper, simplemente no hay
         inferencias blandas."""
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content()))
-
-        findings = await extract_demographics_with_ai([_post("hola")], username="x")
-
-        assert findings.soft_inferences == []
-
-    @pytest.mark.asyncio
-    async def test_entry_without_categoria_or_valor_is_skipped(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(
-                    inferencias_blandas=[
-                        {"categoria": "", "valor": "algo", "confianza": 0.5},
-                        {"categoria": "algo", "valor": "", "confianza": 0.5},
-                        {"valor": "sin categoria", "confianza": 0.5},
-                        "no es ni siquiera un dict",
-                    ]
-                ),
-            )
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content())
         )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
@@ -600,18 +632,31 @@ class TestSoftInferences:
         assert findings.soft_inferences == []
 
     @pytest.mark.asyncio
-    async def test_confidence_out_of_range_is_clamped(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(
+    async def test_entry_without_categoria_or_valor_is_skipped(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(
+                    inferencias_blandas=[
+                        {"categoria": "", "valor": "algo", "confianza": 0.5},
+                        {"categoria": "algo", "valor": "", "confianza": 0.5},
+                        {"valor": "sin categoria", "confianza": 0.5},
+                        "no es ni siquiera un dict",
+                    ]
+                ))
+        )
+
+        findings = await extract_demographics_with_ai([_post("hola")], username="x")
+
+        assert findings.soft_inferences == []
+
+    @pytest.mark.asyncio
+    async def test_confidence_out_of_range_is_clamped(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(
                     inferencias_blandas=[
                         {"categoria": "a", "valor": "va sobre 1.5", "confianza": 1.5},
                         {"categoria": "b", "valor": "va bajo 0", "confianza": -3},
                     ]
-                ),
-            )
+                ))
         )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
@@ -620,15 +665,11 @@ class TestSoftInferences:
         assert findings.soft_inferences[1].confidence == 0.0
 
     @pytest.mark.asyncio
-    async def test_missing_or_invalid_confidence_defaults_to_moderate_value(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(
+    async def test_missing_or_invalid_confidence_defaults_to_moderate_value(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(
                     inferencias_blandas=[{"categoria": "a", "valor": "sin numero de confianza"}]
-                ),
-            )
+                ))
         )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
@@ -636,13 +677,9 @@ class TestSoftInferences:
         assert findings.soft_inferences[0].confidence == 0.5
 
     @pytest.mark.asyncio
-    async def test_missing_evidence_defaults_to_empty_list_not_a_crash(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(inferencias_blandas=[{"categoria": "a", "valor": "sin evidencia"}]),
-            )
+    async def test_missing_evidence_defaults_to_empty_list_not_a_crash(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(inferencias_blandas=[{"categoria": "a", "valor": "sin evidencia"}]))
         )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
@@ -650,11 +687,10 @@ class TestSoftInferences:
         assert findings.soft_inferences[0].evidence == []
 
     @pytest.mark.asyncio
-    async def test_caps_at_five_even_if_model_returns_more(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
+    async def test_caps_at_five_even_if_model_returns_more(self, monkeypatch):
         many = [{"categoria": f"cat{i}", "valor": f"valor{i}", "confianza": 0.5} for i in range(9)]
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(inferencias_blandas=many))
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(inferencias_blandas=many))
         )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
@@ -662,10 +698,9 @@ class TestSoftInferences:
         assert len(findings.soft_inferences) == 5
 
     @pytest.mark.asyncio
-    async def test_not_a_list_is_ignored_without_crashing(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(inferencias_blandas="no es una lista"))
+    async def test_not_a_list_is_ignored_without_crashing(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(inferencias_blandas="no es una lista"))
         )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
@@ -680,13 +715,9 @@ class TestEstadoCivil:
     estimador de k-anonimato -- ver k_anonymity.py."""
 
     @pytest.mark.asyncio
-    async def test_casado_is_parsed_with_ia_simbolica_source(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(estado_civil="casado", evidence={"estado_civil": "bio"}),
-            )
+    async def test_casado_is_parsed_with_ia_simbolica_source(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(estado_civil="casado", evidence={"estado_civil": "bio"}))
         )
 
         findings = await extract_demographics_with_ai(
@@ -702,22 +733,22 @@ class TestEstadoCivil:
 
     @pytest.mark.asyncio
     async def test_con_pareja_and_soltero_and_viudo_and_divorciado_are_parsed_too_not_just_casado(
-        self, monkeypatch, respx_mock
+        self, monkeypatch
     ):
         for value in ("con_pareja", "soltero", "viudo", "divorciado"):
-            respx_mock.post(MISTRAL_URL).mock(
-                return_value=httpx.Response(200, json=_mock_content(estado_civil=value))
+            monkeypatch.setattr(
+                ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(estado_civil=value))
             )
-            monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
 
             findings = await extract_demographics_with_ai([_post("hola")], username="x")
 
             assert findings.estado_civil == value
 
     @pytest.mark.asyncio
-    async def test_missing_field_stays_none(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content()))
+    async def test_missing_field_stays_none(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content())
+        )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
 
@@ -725,10 +756,9 @@ class TestEstadoCivil:
         assert "estado_civil" not in findings.source
 
     @pytest.mark.asyncio
-    async def test_value_outside_the_three_categories_is_ignored_without_crashing(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(estado_civil="tal vez"))
+    async def test_value_outside_the_three_categories_is_ignored_without_crashing(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(estado_civil="tal vez"))
         )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
@@ -758,10 +788,9 @@ class TestGroupBFieldsFromAI:
     cubre). Ver `_set_exact_enum` en ai_attribute_extraction.py."""
 
     @pytest.mark.asyncio
-    async def test_nacionalidad_is_parsed(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(nacionalidad="extranjera"))
+    async def test_nacionalidad_is_parsed(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(nacionalidad="extranjera"))
         )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
@@ -770,10 +799,9 @@ class TestGroupBFieldsFromAI:
         assert findings.source["nacionalidad"] == "ia"
 
     @pytest.mark.asyncio
-    async def test_situacion_laboral_is_parsed(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(situacion_laboral="jubilado"))
+    async def test_situacion_laboral_is_parsed(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(situacion_laboral="jubilado"))
         )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
@@ -781,10 +809,9 @@ class TestGroupBFieldsFromAI:
         assert findings.situacion_laboral == "jubilado"
 
     @pytest.mark.asyncio
-    async def test_tipo_hogar_is_parsed(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(tipo_hogar="monoparental"))
+    async def test_tipo_hogar_is_parsed(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(tipo_hogar="monoparental"))
         )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
@@ -792,10 +819,9 @@ class TestGroupBFieldsFromAI:
         assert findings.tipo_hogar == "monoparental"
 
     @pytest.mark.asyncio
-    async def test_lengua_materna_is_parsed(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(lengua_materna="euskera"))
+    async def test_lengua_materna_is_parsed(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(lengua_materna="euskera"))
         )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
@@ -803,15 +829,11 @@ class TestGroupBFieldsFromAI:
         assert findings.lengua_materna == "euskera"
 
     @pytest.mark.asyncio
-    async def test_value_outside_enum_is_ignored_without_crashing(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json=_mock_content(
+    async def test_value_outside_enum_is_ignored_without_crashing(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(
                     nacionalidad="marciana", situacion_laboral="pirata", tipo_hogar="castillo", lengua_materna="klingon"
-                ),
-            )
+                ))
         )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
@@ -822,9 +844,10 @@ class TestGroupBFieldsFromAI:
         assert findings.lengua_materna is None
 
     @pytest.mark.asyncio
-    async def test_missing_fields_stay_none(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content()))
+    async def test_missing_fields_stay_none(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content())
+        )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
 
@@ -841,10 +864,9 @@ class TestPracticaDeportivaFromAI:
     espectador) que merece su propia clase."""
 
     @pytest.mark.asyncio
-    async def test_valid_value_is_parsed(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(practica_deportiva="senderismo"))
+    async def test_valid_value_is_parsed(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(practica_deportiva="senderismo"))
         )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
@@ -853,24 +875,27 @@ class TestPracticaDeportivaFromAI:
         assert findings.source["practica_deportiva"] == "ia"
 
     @pytest.mark.asyncio
-    async def test_value_outside_enum_is_discarded(self, monkeypatch, respx_mock):
+    async def test_value_outside_enum_is_discarded(self, monkeypatch):
         """Regresión del mismo tipo que orientacion_sexual/religion: si el
         modelo inventa una categoría (p. ej. porque el deporte real no
         está en la lista cerrada), se descarta en vez de guardarse tal
-        cual -- ver _SPORT_PRACTICE_VALUES."""
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(practica_deportiva="balonmano"))
+        cual -- ver _SPORT_PRACTICE_VALUES. "balonmano" ya no sirve como
+        ejemplo de valor fuera del enum (es una modalidad válida desde la
+        ampliación a la encuesta 2024/25 completa), se usa un deporte que
+        realmente no está en ninguna fila de esa encuesta."""
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(practica_deportiva="curling"))
         )
 
-        findings = await extract_demographics_with_ai([_post("juego a balonmano")], username="x")
+        findings = await extract_demographics_with_ai([_post("juego a curling")], username="x")
 
         assert findings.practica_deportiva is None
 
     @pytest.mark.asyncio
-    async def test_missing_field_stays_none(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(return_value=httpx.Response(200, json=_mock_content()))
+    async def test_missing_field_stays_none(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content())
+        )
 
         findings = await extract_demographics_with_ai([_post("hola")], username="x")
 
@@ -887,67 +912,60 @@ class TestOrientacionSexualReligionSignoZodiacal:
     _RELIGION_VALUES / _set_signo_zodiacal)."""
 
     @pytest.mark.asyncio
-    async def test_valid_orientacion_sexual_is_kept(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(orientacion_sexual="bisexual"))
+    async def test_valid_orientacion_sexual_is_kept(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(orientacion_sexual="bisexual"))
         )
         findings = await extract_demographics_with_ai([_post("soy bisexual")], username="x")
         assert findings.orientacion_sexual == "bisexual"
 
     @pytest.mark.asyncio
-    async def test_invalid_orientacion_sexual_is_discarded(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(orientacion_sexual="queer"))
+    async def test_invalid_orientacion_sexual_is_discarded(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(orientacion_sexual="queer"))
         )
         findings = await extract_demographics_with_ai([_post("texto cualquiera")], username="x")
         assert findings.orientacion_sexual is None
 
     @pytest.mark.asyncio
-    async def test_valid_religion_is_kept(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(religion="budismo"))
+    async def test_valid_religion_is_kept(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(religion="budismo"))
         )
         findings = await extract_demographics_with_ai([_post("soy budista")], username="x")
         assert findings.religion == "budismo"
 
     @pytest.mark.asyncio
-    async def test_invalid_religion_is_discarded(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(religion="pastafarismo"))
+    async def test_invalid_religion_is_discarded(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(religion="pastafarismo"))
         )
         findings = await extract_demographics_with_ai([_post("texto cualquiera")], username="x")
         assert findings.religion is None
 
     @pytest.mark.asyncio
-    async def test_signo_zodiacal_is_normalized_to_canonical_format(self, monkeypatch, respx_mock):
+    async def test_signo_zodiacal_is_normalized_to_canonical_format(self, monkeypatch):
         """El modelo puede devolver el rango con capitalización o espacios
         distintos al ejemplo del prompt; debe normalizarse siempre al
         mismo formato canónico que usa la detección por regex/emoji."""
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(signo_zodiacal="Escorpio (23 oct - 21 nov)"))
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(signo_zodiacal="Escorpio (23 oct - 21 nov)"))
         )
         findings = await extract_demographics_with_ai([_post("soy escorpio")], username="x")
         assert findings.signo_zodiacal == "escorpio (23 oct - 21 nov)"
 
     @pytest.mark.asyncio
-    async def test_signo_zodiacal_with_only_the_sign_name_is_normalized(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(signo_zodiacal="Aries"))
+    async def test_signo_zodiacal_with_only_the_sign_name_is_normalized(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(signo_zodiacal="Aries"))
         )
         findings = await extract_demographics_with_ai([_post("soy aries")], username="x")
         assert findings.signo_zodiacal == "aries (21 mar - 19 abr)"
 
     @pytest.mark.asyncio
-    async def test_invalid_signo_zodiacal_is_discarded(self, monkeypatch, respx_mock):
-        monkeypatch.setattr(settings, "mistral_api_key", "fake-key")
-        respx_mock.post(MISTRAL_URL).mock(
-            return_value=httpx.Response(200, json=_mock_content(signo_zodiacal="ofiuco"))
+    async def test_invalid_signo_zodiacal_is_discarded(self, monkeypatch):
+        monkeypatch.setattr(
+            ai_attribute_extraction, "call_ai_json", _ai_returns(_mock_content(signo_zodiacal="ofiuco"))
         )
         findings = await extract_demographics_with_ai([_post("texto cualquiera")], username="x")
         assert findings.signo_zodiacal is None

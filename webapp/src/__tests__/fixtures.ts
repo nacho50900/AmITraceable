@@ -63,6 +63,7 @@ export function makeExposureReport(overrides: Partial<ExposureReport> = {}): Exp
     ],
     geolocation_available: true,
     avatar_url: null,
+    related_accounts: null,
     ...overrides,
   };
 }
