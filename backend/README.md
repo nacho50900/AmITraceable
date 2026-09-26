@@ -144,13 +144,12 @@ scripts/
     ├── download_osv5m_spain.py    # descarga filtrada del dataset OSV-5M (imágenes desde vehículo)
     ├── download_osv5m_world.py    # variante sin filtro de país
     ├── build_faiss_index.py       # construye el índice FAISS a partir de imágenes ya descargadas (OSV-5M)
-    ├── flickr_grid.py             # genera el grid de celdas sobre España, reutilizado por los scripts de abajo
+    ├── spain_grid.py               # genera el grid de celdas sobre España, reutilizado por los scripts de abajo
     ├── image_ingest_common.py     # utilidades compartidas: blur de caras, dedup por perceptual hash, provincia más cercana
     ├── build_commons_index.py     # ingestión de Wikimedia Commons (fotos a pie, en uso -- ver sección propia)
     ├── build_mapillary_index.py   # ingestión de Mapillary (en paralelo a Commons, en uso -- ver sección propia)
     ├── mapillary_grid.py           # sub-tiling por celda para respetar el límite de bbox de Mapillary
     ├── shard_store.py              # persistencia por shards + lock + compilación, compartido Commons/Mapillary
-    ├── build_flickr_index.py      # ingestión de Flickr (implementado, sin usar: requiere Flickr Pro de pago)
     └── merge_faiss_indices.py     # fusiona varios índices (p.ej. OSV-5M + Commons + Mapillary) en uno solo
 
 tests/                         # pytest, ~153 tests, ~95% cobertura
@@ -332,13 +331,17 @@ beneficia a las dos fuentes a la vez.
 
 ### Por qué no Flickr
 
-`build_flickr_index.py` existe y funciona (mismo diseño que el de
-Commons/Mapillary), pero **no está en uso**: Flickr exige desde
-2025/2026 una suscripción Flickr Pro de pago (~75€/año) para poder crear
-una API key, algo que no existía cuando se diseñó el script. Se
-mantiene en el repo por si en el futuro compensa pagar la suscripción
--- en ese caso, pon `FLICKR_API_KEY` en `backend/.env` igual que
-`MAPILLARY_API_KEY` arriba, el script también lo carga automáticamente.
+Se evaluó y se llegó a implementar un script equivalente para Flickr,
+con el mismo diseño que Commons/Mapillary. Se retiró del repo: Flickr
+exige desde 2025/2026 una suscripción Flickr Pro de pago (~75€/año)
+para poder crear una API key, algo que no existía cuando se diseñó el
+script -- ver ADR-9 para el detalle completo de la decisión. Si en el
+futuro compensa pagar la suscripción, el script se puede reconstruir
+siguiendo el mismo patrón que `build_commons_index.py`/
+`build_mapillary_index.py` (ambos comparten `shard_store.py` e
+`image_ingest_common.py`, así que la parte de infraestructura ya está
+hecha -- solo haría falta la integración específica con el API de
+Flickr).
 
 ## Endpoints principales
 

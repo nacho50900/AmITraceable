@@ -1,16 +1,25 @@
 """
 Genera un grid de celdas rectangulares que cubre el territorio español
 (península + Baleares + Canarias + Ceuta/Melilla vía el rectángulo
-peninsular, que ya las incluye) para las consultas paginadas al API de
-Flickr (flickr.photos.search) con el parámetro `bbox`.
+peninsular, que ya las incluye) -- reutilizado por todos los scripts de
+ingestión de fuentes externas (build_commons_index.py,
+build_mapillary_index.py) para que sus celdas sean directamente
+comparables entre fuentes, aunque cada una lo use con un tamaño de
+consulta distinto (Commons consulta la celda entera; Mapillary la
+subdivide en sub-teselas más pequeñas, ver mapillary_grid.py, por su
+límite de bbox más estricto).
+
+(Este fichero se llamó flickr_grid.py hasta que se retiró
+build_flickr_index.py -- no tiene nada específico de Flickr, siempre fue
+el grid genérico de España; se renombró para que el nombre no confunda.)
 
 Se usan dos rectángulos base (península+Baleares, y Canarias por
 separado) en vez de uno solo: un único bbox que cubra ambos incluiría una
 franja enorme de océano, Francia, Portugal y Marruecos en medio, gastando
 cuota de API en celdas que no pueden tener ninguna foto española.
 
-Uso como librería (lo usa build_flickr_index.py):
-    from flickr_grid import generate_spain_grid
+Uso como librería:
+    from spain_grid import generate_spain_grid
     cells = generate_spain_grid(cell_km=10)
 """
 import math
@@ -27,8 +36,11 @@ class GridCell:
 
     @property
     def bbox_str(self) -> str:
-        # Formato exigido por flickr.photos.search:
-        # bbox=minimum_longitude,minimum_latitude,maximum_longitude,maximum_latitude
+        # Orden estándar de bbox en geo-APIs (min_lon,min_lat,max_lon,max_lat)
+        # -- usado por Flickr y por buena parte de APIs georreferenciadas.
+        # Sin uso actual (Commons usa gscoord+gsradius, Mapillary genera su
+        # propio bbox por sub-tesela en mapillary_grid.py) -- se deja por si
+        # una fuente futura lo necesita en este formato.
         return f"{self.min_lon:.6f},{self.min_lat:.6f},{self.max_lon:.6f},{self.max_lat:.6f}"
 
     @property

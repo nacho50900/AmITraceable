@@ -1,5 +1,5 @@
 """
-Genera, para una celda del grid de España (flickr_grid.GridCell, ~10km de
+Genera, para una celda del grid de España (spain_grid.GridCell, ~10km de
 lado), las sub-teselas necesarias para consultar el API de Mapillary sin
 violar su restricción de bbox: desde el 16 de enero de 2026, las
 consultas a /images deben ser ESTRICTAMENTE menores de 0.01 grados
@@ -8,7 +8,7 @@ cuadrados (formalizado, no una recomendación) -- eso son solo
 una celda del grid (100km²). Una celda de 10km necesita del orden de
 100-110 sub-teselas para cubrirse entera.
 
-Se reutiliza el mismo grid de 10km (flickr_grid.py) como nivel EXTERIOR
+Se reutiliza el mismo grid de 10km (spain_grid.py) como nivel EXTERIOR
 en vez de generar un grid de Mapillary completamente aparte, para que la
 cobertura de Mapillary sea comparable celda a celda con la de Commons
 (mismos límites geográficos, misma numeración de celdas) -- útil para
@@ -16,7 +16,7 @@ comparar densidad entre fuentes más adelante.
 """
 import math
 
-from flickr_grid import GridCell
+from spain_grid import GridCell
 
 # Un poco por debajo de 0.01 para quedar con margen bajo el límite
 # "estrictamente menor que" que impone Mapillary, sin apurar al límite
@@ -55,7 +55,7 @@ def generate_sub_tiles(cell: GridCell) -> list[tuple[float, float, float, float]
 if __name__ == "__main__":
     # Comprobación rápida sin red: cuántas sub-teselas salen por celda a
     # distinta latitud, y el total nacional aproximado.
-    from flickr_grid import generate_spain_grid
+    from spain_grid import generate_spain_grid
 
     cells = generate_spain_grid(cell_km=10.0)
     sample = cells[len(cells) // 2]

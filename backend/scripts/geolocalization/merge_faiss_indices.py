@@ -1,19 +1,20 @@
 """
 Combina varios índices FAISS (cada uno en su propia carpeta, con
-index.faiss + index_meta.csv -- p.ej. data/osv5m_spain/ y
-data/flickr_spain/) en un único índice final.
+index.faiss + index_meta.csv -- p.ej. data/osv5m_spain/, data/commons_spain/
+y data/mapillary_spain/) en un único índice final.
 
-Por qué un script aparte en vez de que build_flickr_index.py escriba
-directamente sobre data/osv5m_spain/: mantener cada fuente en su propia
+Por qué un script aparte en vez de que cada script de ingestión escriba
+directamente sobre un índice compartido: mantener cada fuente en su propia
 carpeta permite reconstruir el índice combinado sin volver a descargar ni
 re-blurear nada si cambias qué fuentes incluir (p.ej. si más adelante
-subes el umbral de accuracy de Flickr y solo quieres rehacer esa parte) --
-mismo principio que ya sigue scripts/recover_metadata.py: separar "datos
-crudos ya obtenidos" de "índice derivado, siempre regenerable".
+subes el umbral de aceptación de alguna fuente y solo quieres rehacer esa
+parte) -- mismo principio que ya sigue scripts/recover_metadata.py:
+separar "datos crudos ya obtenidos" de "índice derivado, siempre
+regenerable".
 
 Uso:
     python merge_faiss_indices.py \
-        --sources ../../data/osv5m_spain ../../data/flickr_spain \
+        --sources ../../data/osv5m_spain ../../data/commons_spain ../../data/mapillary_spain \
         --output ../../data/spain_combined
 
 Tras ejecutarlo, apunta _INDEX_DIR en app/vision/geolocation.py a
@@ -39,7 +40,7 @@ def _load_source(source_dir: Path) -> tuple[np.ndarray, pd.DataFrame]:
     meta = pd.read_csv(meta_path)
 
     if embeddings_path.exists():
-        # Fuentes como build_flickr_index.py guardan los vectores en crudo
+        # Fuentes como build_commons_index.py/build_mapillary_index.py guardan los vectores en crudo
         # aparte del índice; no hace falta reconstruirlos.
         vectors = np.load(embeddings_path)
     else:

@@ -71,7 +71,7 @@ load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 sys.path.insert(0, str(Path(__file__).parent))
 from build_faiss_index import MODEL_NAME, embed_image, load_model  # noqa: E402
-from flickr_grid import GridCell, generate_spain_grid  # noqa: E402
+from spain_grid import GridCell, generate_spain_grid  # noqa: E402
 from image_ingest_common import blur_faces, ensure_yunet_model, is_near_duplicate, nearest_province, sort_cells_by_proximity  # noqa: E402
 from mapillary_grid import generate_sub_tiles  # noqa: E402
 import shard_store  # noqa: E402

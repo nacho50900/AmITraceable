@@ -1,7 +1,7 @@
 """
 Utilidades compartidas por los distintos scripts de ingestión de fuentes
-externas de fotos geolocalizadas (build_flickr_index.py,
-build_commons_index.py, y las que se añadan después). Factorizado aparte
+externas de fotos geolocalizadas (build_commons_index.py,
+build_mapillary_index.py, y las que se añadan después). Factorizado aparte
 para no duplicar esta lógica en cada script -- si algún día cambias el
 umbral de pixelado o el detector de caras, se cambia en un solo sitio.
 """

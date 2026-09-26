@@ -2,32 +2,35 @@
 Construye (o amplía) un índice FAISS a partir de fotos de Wikimedia
 Commons con coordenadas dentro de España, tomadas a pie por personas
 (a diferencia de OSV-5M / Mapillary / KartaView, que son fotos desde
-vehículo) -- mismo objetivo que build_flickr_index.py: reducir el domain
-gap frente a las fotos de Instagram que analiza app/vision/geolocation.py.
+vehículo) -- reduce el domain gap frente a las fotos de Instagram que
+analiza app/vision/geolocation.py.
 
-POR QUÉ COMMONS EN VEZ DE FLICKR (decisión para la memoria del TFG):
-Flickr cambió su política en 2025/2026 -- crear una API key ahora requiere
-una suscripción Flickr Pro de pago (antes era gratuita). El API de
-Wikimedia Commons (action=query&list=geosearch) es público, sin API key,
-sin coste, y sin límite de tasa agresivo -- solo pide un User-Agent
-identificable (ver _USER_AGENT más abajo, exigido por la política de la
-Wikimedia Foundation: https://foundation.wikimedia.org/wiki/Policy:Wikimedia_User-Agent_policy).
+POR QUÉ COMMONS EN VEZ DE FLICKR (decisión para la memoria del TFG, ver
+también ADR-9): Flickr cambió su política en 2025/2026 -- crear una API
+key ahora requiere una suscripción Flickr Pro de pago (antes era
+gratuita). Se llegó a implementar un script equivalente para Flickr
+(retirado del repo tras confirmar que no era viable sin esa
+suscripción). El API de Wikimedia Commons (action=query&list=geosearch)
+es público, sin API key, sin coste, y sin límite de tasa agresivo --
+solo pide un User-Agent identificable (ver _USER_AGENT más abajo,
+exigido por la política de la Wikimedia Foundation:
+https://foundation.wikimedia.org/wiki/Policy:Wikimedia_User-Agent_policy).
 
-MISMO diseño de muestreo que build_flickr_index.py (ver ese docstring para
-el razonamiento completo): sin mínimo forzado por celda, techo
+Diseño de muestreo: sin mínimo forzado por celda, techo
 (--cap-per-cell) para que un monumento no entierre al resto del índice,
 dedup por perceptual hash dentro de cada celda, blur de caras SOLO (sin
-persistir ninguna imagen a disco).
+persistir ninguna imagen a disco). Mismo diseño reutilizado en
+build_mapillary_index.py.
 
-Diferencia práctica con Flickr: Commons no expone un campo de "accuracy"
-del geotag como Flickr -- en cambio, casi toda foto en Commons con
-coordenadas las tiene puestas a mano por quien subió el archivo (via la
-plantilla {{Location}}), lo cual en la práctica suele ser más fiable que
-un geotag EXIF automático de Flickr, pero no hay un número que filtrar.
-Como filtro de calidad indirecto, aquí se descartan resultados que no son
-fotografías reales (mapas, logos, diagramas, escaneos) por tipo MIME y
-tamaño mínimo -- no es perfecto (algunos mapas/carteles se cuelan), pero
-es la señal disponible sin analizar el contenido de cada imagen.
+Commons no expone un campo de "accuracy" del geotag como sí tenía
+Flickr -- en cambio, casi toda foto en Commons con coordenadas las tiene
+puestas a mano por quien subió el archivo (vía la plantilla
+{{Location}}), lo cual en la práctica suele ser fiable, pero no hay un
+número que filtrar. Como filtro de calidad indirecto, aquí se descartan
+resultados que no son fotografías reales (mapas, logos, diagramas,
+escaneos) por tipo MIME y tamaño mínimo -- no es perfecto (algunos
+mapas/carteles se cuelan), pero es la señal disponible sin analizar el
+contenido de cada imagen.
 
 Uso:
     pip install httpx opencv-python imagehash pandas numpy faiss-cpu \
@@ -35,12 +38,11 @@ Uso:
     python build_commons_index.py --output ../../data/commons_spain --cell-km 10 \
         --cap-per-cell 400
 
-Salida (en --output): igual formato que build_flickr_index.py
-    (embeddings.npy, index.faiss, index_meta.csv, _completed_cells.txt,
-    _cell_stats.csv) -- combínalo con las demás fuentes usando
-    scripts/merge_faiss_indices.py.
+Salida (en --output): embeddings.npy/index.faiss/index_meta.csv por
+shards (ver shard_store.py), _completed_cells.txt, _cell_stats.csv --
+combínalo con las demás fuentes usando scripts/merge_faiss_indices.py.
 
-Resumible con Ctrl+C igual que build_flickr_index.py.
+Resumible con Ctrl+C (guarda el progreso al momento).
 """
 import argparse
 import io
@@ -61,7 +63,7 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent))
 from build_faiss_index import MODEL_NAME, embed_image, load_model  # noqa: E402
-from flickr_grid import GridCell, generate_spain_grid  # noqa: E402
+from spain_grid import GridCell, generate_spain_grid  # noqa: E402
 from image_ingest_common import (  # noqa: E402
     blur_faces,
     ensure_yunet_model,
@@ -69,6 +71,7 @@ from image_ingest_common import (  # noqa: E402
     nearest_province,
     sort_cells_by_proximity,
 )
+import shard_store  # noqa: E402
 
 import faiss  # noqa: E402
 import torch  # noqa: E402
@@ -406,197 +409,6 @@ def _process_cell(
     return embeddings, meta_rows, diagnostics
 
 
-def _load_existing_state(output_dir: Path):
-    """Carga solo lo que hace falta mantener en memoria durante TODA la
-    ejecución: known_ids (para el dedup al reabrir celdas), cuántas fotos
-    hay ya en total (para los informes), qué celdas están completadas, y
-    las estadísticas por celda (una fila por celda -- acotado por el
-    tamaño del grid, no por el número de fotos).
-
-    A propósito, NO devuelve los embeddings ni las filas de metadata
-    completas para que el llamador las guarde en memoria durante toda la
-    ejecución -- eso es justo lo que causó un
-    `numpy._core._exceptions._ArrayMemoryError` real tras varias horas
-    seguidas de ejecución: la lista de embeddings en memoria no paraba de
-    crecer durante toda la vida del proceso (varios días), hasta que no
-    quedó hueco ni para una imagen de 68MB. Los embeddings/metadata en
-    disco se releen solo brevemente dentro de cada `_persist_state()`
-    para fusionarlos con el lote nuevo, y se sueltan justo después -- ver
-    ese docstring.
-    """
-    embeddings_path = output_dir / "embeddings.npy"
-    meta_path = output_dir / "index_meta.csv"
-    completed_path = output_dir / "_completed_cells.txt"
-    stats_path = output_dir / "_cell_stats.csv"
-
-    known_ids: set[str] = set()
-    total_photos = 0
-    if meta_path.exists():
-        meta_df = pd.read_csv(meta_path)
-        total_photos = len(meta_df)
-        if "id" in meta_df.columns:
-            known_ids = set(meta_df["id"])
-        del meta_df
-
-    # Comprobación de consistencia (ver también _persist_state):
-    # embeddings.npy e index_meta.csv deben tener el mismo número de
-    # filas. Se usa mmap_mode="r" para consultar solo shape[0] (el número
-    # de filas) sin cargar el array completo en memoria -- este chequeo
-    # de arranque no debería, por sí mismo, competir por la misma memoria
-    # que se acaba de liberar con el cambio de arriba.
-    n_embeddings = 0
-    if embeddings_path.exists():
-        embeddings_mmap = np.load(embeddings_path, mmap_mode="r")
-        n_embeddings = embeddings_mmap.shape[0]
-        del embeddings_mmap
-
-    if n_embeddings != total_photos:
-        print(f"Error: embeddings.npy tiene {n_embeddings} vectores pero index_meta.csv tiene "
-              f"{total_photos} filas -- no coinciden.")
-        print("Seguir así arriesga desalinear qué vector corresponde a qué foto en el índice final.")
-        print(f"Revisa manualmente {output_dir} antes de continuar (lo más seguro, si no hay forma de saber "
-              f"cuál de los dos ficheros es el bueno, es borrar la carpeta entera y volver a empezar).")
-        sys.exit(1)
-
-    completed = set(completed_path.read_text().splitlines()) if completed_path.exists() else set()
-    cell_stats = pd.read_csv(stats_path).to_dict("records") if stats_path.exists() else []
-
-    if completed:
-        print(f"Reanudando: {len(completed)} celdas y {total_photos} fotos ya procesadas.")
-
-    return known_ids, total_photos, completed, cell_stats
-
-
-def _persist_state(output_dir: Path, new_embeddings: list, new_meta_rows: list, completed: set, cell_stats: list) -> None:
-    """Fusiona NEW_EMBEDDINGS/NEW_META_ROWS -- SOLO el lote acumulado
-    desde el último flush, NO todo el historial de la ejecución -- con lo
-    que ya hay en disco, y escribe el resultado combinado.
-
-    Este cambio (de "recibe todo el historial acumulado" a "recibe solo
-    el lote nuevo, y fusiona aquí con lo persistido") es lo que permite
-    que _run() vacíe sus listas en memoria después de cada flush, en vez
-    de mantener en RAM los embeddings de TODAS las fotos aceptadas
-    durante una ejecución de varios días. El lote en memoria en un
-    momento dado queda acotado por
-    `--flush-every-cells * --cap-per-cell` (unas pocas decenas de miles
-    como mucho), no por el total final del índice (hasta ~1.22M
-    proyectados). El coste es releer lo ya persistido en cada flush --
-    aceptable porque los flushes son cada bastantes celdas
-    (`--flush-every-cells`), no por cada foto individual; y solo durante
-    ese momento puntual, no de forma continua.
-
-    Escritura atómica: cada fichero final se escribe primero a una ruta
-    temporal en el mismo directorio, y todos los renombrados
-    (`os.replace`, atómico por fichero en el mismo volumen tanto en
-    Windows como en POSIX) se hacen SEGUIDOS al terminar, una vez que los
-    temporales ya están completos en disco -- no intercalados con el
-    trabajo de construirlos. Esto no hace la operación atómica como GRUPO
-    (no hay forma portable de renombrar varios ficheros a la vez en una
-    única operación), pero reduce al mínimo posible la ventana en la que
-    una interrupción podría dejar unos ficheros con la versión nueva y
-    otros con la vieja. Motivo original del cambio a atómico: una
-    escritura directa con `to_csv()` sobre el fichero final, interrumpida
-    a mitad, dejó `index_meta.csv` completamente vacío en un caso real --
-    ver la comprobación de consistencia en `_load_existing_state`.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    pid_suffix = f".tmp{os.getpid()}"
-    pending_renames: list[tuple[Path, Path]] = []
-
-    embeddings_path = output_dir / "embeddings.npy"
-    meta_path = output_dir / "index_meta.csv"
-
-    if new_embeddings or embeddings_path.exists():
-        if new_embeddings:
-            new_matrix = np.vstack(new_embeddings).astype("float32")
-            if embeddings_path.exists():
-                with open(embeddings_path, "rb") as f:
-                    existing_matrix = np.load(f)
-                combined_matrix = np.concatenate([existing_matrix, new_matrix], axis=0)
-                del existing_matrix
-            else:
-                combined_matrix = new_matrix
-            del new_matrix
-        else:
-            with open(embeddings_path, "rb") as f:
-                combined_matrix = np.load(f)
-
-        emb_tmp = output_dir / f"embeddings.npy{pid_suffix}"
-        with open(emb_tmp, "wb") as f:
-            np.save(f, combined_matrix)
-        pending_renames.append((emb_tmp, embeddings_path))
-
-        dimension = combined_matrix.shape[1]
-        index = faiss.IndexFlatIP(dimension)
-        index.add(combined_matrix)
-        index_tmp = output_dir / f"index.faiss{pid_suffix}"
-        faiss.write_index(index, str(index_tmp))
-        pending_renames.append((index_tmp, output_dir / "index.faiss"))
-        del combined_matrix, index
-
-    if new_meta_rows or meta_path.exists():
-        new_df = pd.DataFrame(new_meta_rows)
-        if meta_path.exists():
-            existing_df = pd.read_csv(meta_path)
-            combined_df = pd.concat([existing_df, new_df], ignore_index=True) if len(new_df) else existing_df
-            del existing_df
-        else:
-            combined_df = new_df
-
-        meta_tmp = output_dir / f"index_meta.csv{pid_suffix}"
-        combined_df.to_csv(meta_tmp, index=False)
-        pending_renames.append((meta_tmp, meta_path))
-        del combined_df, new_df
-
-    completed_tmp = output_dir / f"_completed_cells.txt{pid_suffix}"
-    completed_tmp.write_text("\n".join(sorted(completed)))
-    pending_renames.append((completed_tmp, output_dir / "_completed_cells.txt"))
-
-    stats_tmp = output_dir / f"_cell_stats.csv{pid_suffix}"
-    pd.DataFrame(cell_stats).to_csv(stats_tmp, index=False)
-    pending_renames.append((stats_tmp, output_dir / "_cell_stats.csv"))
-
-    # Todos los temporales están completos en disco -- ahora sí, los
-    # renombrados seguidos, sin nada más de por medio.
-    for tmp_path, final_path in pending_renames:
-        os.replace(tmp_path, final_path)
-
-
-def _acquire_lock(output_dir: Path) -> Path:
-    """Evita que dos instancias del script corran a la vez sobre el mismo
-    --output. Sin esto, dos procesos escribiendo index_meta.csv/
-    embeddings.npy al mismo tiempo pueden pisarse -- visto en un caso
-    real: una segunda ejecución lanzada por accidente sobre la misma
-    carpeta leyó index_meta.csv justo cuando la primera lo tenía truncado
-    a medio escribir, y crasheó con `pandas.errors.EmptyDataError`.
-
-    No detecta automáticamente si el proceso dueño del lock sigue vivo
-    (complicaría el script para un caso de uso de TFG en un único
-    equipo) -- si el lock queda huérfano tras un corte de luz o un kill
-    -9, hay que borrar el fichero .lock a mano. El mensaje de error dice
-    esto explícitamente para que no haga falta adivinarlo.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = output_dir / ".lock"
-    if lock_path.exists():
-        owner = lock_path.read_text().strip()
-        print(f"Error: ya existe {lock_path} (creado por el proceso PID {owner}).")
-        print(f"Esto significa que ya hay OTRA ejecución de este script usando --output {output_dir}.")
-        print("Lanzar dos instancias a la vez sobre la misma carpeta corrompe index_meta.csv/embeddings.npy")
-        print("(dos escrituras simultáneas se pisan entre sí).")
-        print(f"Si estás seguro de que NO hay ninguna otra instancia corriendo (p.ej. el lock quedó huérfano")
-        print(f"tras un cierre inesperado), borra {lock_path} a mano y vuelve a intentarlo.")
-        sys.exit(1)
-    lock_path.write_text(str(os.getpid()))
-    return lock_path
-
-
-def _release_lock(lock_path: Path) -> None:
-    try:
-        lock_path.unlink(missing_ok=True)
-    except Exception:
-        pass
-
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -618,6 +430,10 @@ def main() -> None:
                               "de lanzar la ejecucion completa sobre las ~11700 celdas -- una muestra cerca de una sola ciudad "
                               "(--near) no es representativa del pais entero (zonas rurales rinden mucho menos). Incompatible con --near.")
     parser.add_argument("--seed", type=int, default=42, help="Semilla para --sample-cells, para que la muestra sea reproducible")
+    parser.add_argument("--compile", action="store_true",
+                         help="No procesa celdas: combina el fichero antiguo (si existe) + todos los shards de --output en un "
+                              "único embeddings.npy/index.faiss/index_meta.csv, listo para merge_faiss_indices.py o para la app. "
+                              "Lánzalo cuando quieras usar el índice, no hace falta esperar a terminar todas las celdas.")
     args = parser.parse_args()
 
     if args.near and args.sample_cells:
@@ -625,11 +441,16 @@ def main() -> None:
         sys.exit(1)
 
     output_dir = Path(args.output)
-    lock_path = _acquire_lock(output_dir)
+
+    if args.compile:
+        shard_store.compile_shards(output_dir)
+        return
+
+    lock_path = shard_store.acquire_lock(output_dir)
     try:
         _run(args, output_dir)
     finally:
-        _release_lock(lock_path)
+        shard_store.release_lock(lock_path)
 
 
 def _run(args: argparse.Namespace, output_dir: Path) -> None:
@@ -641,8 +462,9 @@ def _run(args: argparse.Namespace, output_dir: Path) -> None:
         str(ensure_yunet_model()), "", (320, 320), score_threshold=0.6, nms_threshold=0.3, top_k=5000
     )
 
-    known_ids, total_photos, completed, cell_stats = _load_existing_state(output_dir)
+    known_ids, total_photos, completed, cell_stats = shard_store.load_existing_state(output_dir)
     photos_at_start = total_photos
+    next_shard_index = shard_store.next_shard_index(output_dir / shard_store.SHARDS_SUBDIR)
 
     all_cells = generate_spain_grid(cell_km=args.cell_km)
     pending_cells = [c for c in all_cells if c.id not in completed]
@@ -659,9 +481,10 @@ def _run(args: argparse.Namespace, output_dir: Path) -> None:
     print(f"{len(all_cells)} celdas en el grid ({len(pending_cells)} pendientes en esta ejecucion).")
 
     # Buffers de SOLO lo acumulado desde el último flush -- NO todo el
-    # historial de la ejecución (ver _persist_state). Se vacían tras cada
-    # flush para que la memoria del proceso no crezca sin límite durante
-    # una ejecución de varios días.
+    # historial de la ejecución. Se vacían tras cada flush para que la
+    # memoria del proceso no crezca sin límite durante una ejecución de
+    # varios días -- ver _persist_new_shard: cada flush escribe un shard
+    # PROPIO, sin releer ni recombinar nada de lo ya persistido.
     since_flush_embeddings: list = []
     since_flush_meta: list = []
 
@@ -675,8 +498,11 @@ def _run(args: argparse.Namespace, output_dir: Path) -> None:
     n_duplicates_skipped = 0
 
     def _flush() -> None:
-        nonlocal since_flush_embeddings, since_flush_meta
-        _persist_state(output_dir, since_flush_embeddings, since_flush_meta, completed, cell_stats)
+        nonlocal since_flush_embeddings, since_flush_meta, next_shard_index
+        shard_store.persist_new_shard(output_dir, next_shard_index, since_flush_embeddings, since_flush_meta)
+        if since_flush_meta:
+            next_shard_index += 1
+        shard_store.persist_progress(output_dir, completed, cell_stats)
         since_flush_embeddings = []
         since_flush_meta = []
 
