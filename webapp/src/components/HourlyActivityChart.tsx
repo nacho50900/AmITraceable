@@ -3,7 +3,7 @@ import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recha
 import { useTranslation } from 'react-i18next';
 
 interface HourlyActivityChartProps {
-  hourlyData: Record<string, number>;
+  readonly hourlyData: Record<string, number>;
 }
 
 interface ChartPoint {

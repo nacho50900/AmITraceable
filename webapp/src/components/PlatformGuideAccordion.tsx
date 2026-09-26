@@ -24,7 +24,7 @@ const GUIDE_ITEMS: GuideItem[] = [
 ];
 
 interface Props {
-  activePlatform?: string;
+  readonly activePlatform?: string;
 }
 
 const PlatformGuideAccordion: React.FC<Props> = ({ activePlatform }) => {

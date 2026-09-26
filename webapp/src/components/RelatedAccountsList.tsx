@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { UsernameCorrelationSummary } from '../types';
 
 interface RelatedAccountsListProps {
-  relatedAccounts: UsernameCorrelationSummary | null;
+  readonly relatedAccounts: UsernameCorrelationSummary | null;
 }
 
 // `related_accounts` es null cuando la comprobación está desactivada en

@@ -4,7 +4,7 @@ import { AiSummaryUnavailableError, api } from '../api';
 import type { ExposureReport } from '../types';
 
 interface AiSummaryCardProps {
-  report: ExposureReport;
+  readonly report: ExposureReport;
 }
 
 type Status = 'loading' | 'success' | 'empty' | 'unavailable' | 'error';

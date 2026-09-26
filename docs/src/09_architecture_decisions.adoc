@@ -385,6 +385,70 @@ a los proveedores anteriores, y si el hardware de referencia (GTX 1650,
 4GB) soporta Moondream2 y Qwen3.5-4B cargados a la vez sin degradar el
 resto del pipeline.
 
+*Actualización (24/9)*: dos de los puntos anteriores quedaron resueltos
+por trabajo posterior. `qwen_gguf_repo_id`/`qwen_gguf_filename` (dejados
+vacíos arriba) se confirmaron como `unsloth/Qwen3.5-4B-GGUF` /
+`Qwen3.5-4B-Q4_K_M.gguf` -- un GGUF YA cuantizado publicado por una fuente
+de confianza, así que el punto de "cuantizar un modelo BASE de ~9GB
+localmente" (mencionado en Consecuencias) no aplica: no hace falta
+cuantizar nada en este servidor, solo descargar el `.gguf` ya cuantizado
+(~2.7GB). El riesgo de contención de VRAM con Moondream2 quedó resuelto
+de raíz, no medido -- ver ADR-50: Moondream2 desapareció del todo, ya no
+hay dos modelos compitiendo por VRAM.
+
+==== ADR-50: Unificación del análisis visual (Moondream2 → Qwen3.5-4B compartido)
+
+*Contexto*: tras ADR-49, `app/nlp/ai_client.py` ya cargaba Qwen3.5-4B
+localmente para razonamiento de texto, pero `app/vision/scene_analysis.py`
+seguía usando Moondream2 aparte para analizar el CONTENIDO de las fotos
+(personas, aficiones, matrículas, edificios emblemáticos...) -- dos
+modelos cargados a la vez, con el riesgo de contención de VRAM que ADR-49
+dejó sin resolver. En ese momento, `llama-cpp-python` no tenía soporte
+oficial para la parte de visión de la familia Qwen3.x, solo forks no
+oficiales (JamePeng) -- de ahí que ADR-49 dejase Moondream2 tal cual.
+
+*Qué cambió desde ADR-49*: `llama.cpp` incorporó soporte mainline para
+Qwen3-VL/Qwen3.5 vía su mecanismo `mtmd`, y `llama-cpp-python` añadió un
+`MTMDChatHandler` GENÉRICO -- lee la plantilla de chat embebida en el
+propio GGUF en vez de necesitar una clase dedicada por modelo. Qwen3.5
+usa además una arquitectura multimodal "early fusion" nativa, distinta de
+la de Qwen3-VL -- soportada igualmente por ese mecanismo genérico.
+`unsloth/Qwen3.5-4B-GGUF` (el mismo repo de ADR-49) publica también el
+proyector de visión correspondiente (`mmproj-BF16.gguf`).
+
+*Decisión*: `app/nlp/ai_client.py` pasa a cargar TAMBIÉN el proyector de
+visión (`chat_handler=MTMDChatHandler.from_pretrained(...)`,
+`settings.qwen_mmproj_filename`) sobre el MISMO `_model` que ya usaba
+para texto -- un solo modelo multimodal en memoria en vez de dos.
+`app/vision/scene_analysis.py` deja de cargar ningún modelo propio:
+`_lazy_load()` pasa a ser una delegación fina en
+`ai_client.ensure_loaded()`/`get_model()`/`get_lock()`/`get_device()`/
+`get_model_variant()`. El PROMPTING y el PARSEO de respuesta
+(`_CAPTION_QUERY`/`_STRUCTURED_QUERY`, todas las `_parse_*()`) se dejan
+DELIBERADAMENTE intactos en esta pasada -- son prompts de texto libre
+pensados para las limitaciones de Moondream2, y probablemente sería mejor
+unificarlos en una única llamada JSON (mismo patrón que
+`app/nlp/ai_client.py` ya usa para texto) -- pero es un rediseño de
+prompts aparte, anotado como mejora futura, no parte de esta decisión.
+
+*Justificación*: la VRAM es el recurso más escaso del despliegue de
+referencia (GTX 1650, 4GB) -- Moondream2 (Q8_0, ~1.8GB) + Qwen3.5-4B de
+texto (Q4_K_M, ~2.7GB) a la vez ya rondaba el límite sin margen para KV
+cache. Un solo modelo multimodal compartido (~2.7GB en total) elimina el
+problema de raíz en vez de mitigarlo.
+
+*Consecuencias*: (+) elimina el riesgo de contención de VRAM que ADR-49
+dejó sin resolver; (+) `scene_analysis.py` se simplifica: desaparece toda
+la cuantización local propia de Moondream2, ya no hace falta compilar
+`llama-quantize` para este modelo (pendiente revisar si el Dockerfile aún
+lo necesita para algo más, ver nota en `requirements-vision.txt`); (-)
+**sin verificar en GPU real todavía**: ni que `MTMDChatHandler` cargue
+este GGUF sin crash en la GTX 1650 de referencia, ni el tiempo de
+inferencia por foto frente a Moondream2 -- el interruptor de vuelta atrás
+es dejar `qwen_mmproj_filename` vacío (app/config.py), sin tocar código;
+(-) **calidad de extracción sin verificar**: los prompts diseñados para
+Moondream2 no se han comprobado con las respuestas de Qwen3.5-4B.
+
 [[adr-cat-privacidad-etica-y-rgpd]]
 === Privacidad, ética y RGPD
 

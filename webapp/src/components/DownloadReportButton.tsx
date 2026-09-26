@@ -4,7 +4,7 @@ import type { ExposureReport } from '../types';
 import { downloadReportAsJson } from '../utils/reportToJson';
 
 interface DownloadReportButtonProps {
-  report: ExposureReport;
+  readonly report: ExposureReport;
 }
 
 const DownloadReportButton: React.FC<DownloadReportButtonProps> = ({ report }) => {

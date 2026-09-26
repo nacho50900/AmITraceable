@@ -4,13 +4,13 @@ import { useTranslation } from 'react-i18next';
 interface PopulationPictogramProps {
   /** Fracción 0-1 (remaining_population / población total de España), ya
    * calculada en el backend -- ver app/scoring/k_anonymity.py. */
-  proportion: number | null;
-  remainingPopulation: number | null;
+  readonly proportion: number | null;
+  readonly remainingPopulation: number | null;
   /** 'large' para un bloque visual destacado (una fila por atributo, ver
    * PopulationNarrowingTable): monigotes grandes de verdad cuando hay
    * pocos (p.ej. 250px+ para un 50%, que son solo 2). 'small' para usos
    * más compactos con muchos monigotes. */
-  size?: 'small' | 'large';
+  readonly size?: 'small' | 'large';
 }
 
 // Si tocaría dibujar más de este número de monigotes para representar la

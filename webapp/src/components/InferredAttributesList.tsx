@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { InferredAttribute } from '../types';
 
 interface InferredAttributesListProps {
-  attributes: InferredAttribute[];
+  readonly attributes: InferredAttribute[];
 }
 
 // Categorías conocidas con etiqueta traducida -- las que llegan de la IA

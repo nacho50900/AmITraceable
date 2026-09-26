@@ -2,16 +2,22 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 interface ScoreBarProps {
-  label: string;
-  value: number;
-  tooltip?: string;
+  readonly label: string;
+  readonly value: number;
+  readonly tooltip?: string;
 }
 
 function riskLabel(value: number, t: (key: string) => string): { text: string; color: string } {
   if (value < 25) return { text: t('components.scoreBar.low'), color: '#3aa657' };
   if (value < 55) return { text: t('components.scoreBar.medium'), color: '#d6a51c' };
   if (value < 80) return { text: t('components.scoreBar.high'), color: '#e0792f' };
-  return { text: t('components.scoreBar.veryHigh'), color: '#d3403a' };
+  // #d3403a (el rojo usado como FONDO en PopulationNarrowingTable.tsx,
+  // con texto blanco encima -- 4.60:1, cumple) da solo 3.75:1 como TEXTO
+  // directo sobre --bg-card, por debajo del 4.5:1 exigido a texto de
+  // este tamaño -- ver revisión de diseño. #e3504a es el mismo rojo
+  // aclarado lo justo para llegar a 4.53:1 sin cambiar de familia de
+  // color ni de percepción ("rojo = muy alto").
+  return { text: t('components.scoreBar.veryHigh'), color: '#e3504a' };
 }
 
 const ScoreBar: React.FC<ScoreBarProps> = ({ label, value, tooltip }) => {

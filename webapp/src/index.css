@@ -4,7 +4,16 @@
   --border: #262d3a;
   --text: #e4e7ec;
   --text-dim: #8b94a3;
-  --accent: #5b6cf0;
+  --accent: #5869ed;
+  /* Mismo tono que --accent, pero AS TEXT sobre fondo oscuro (enlaces,
+     estados activos) en vez de como fondo de botón -- --accent solo
+     (#5869ed) sirve de fondo con texto blanco encima (4.51:1, ver
+     revisión de diseño), pero como TEXTO sobre --bg/--bg-card se queda
+     corto (4.16-4.54:1, insuficiente en --bg-card). Un único tono no
+     puede cumplir 4.5:1 en las dos direcciones a la vez (más claro
+     ayuda como texto, perjudica como fondo con texto blanco), de ahí
+     los dos tokens en vez de uno solo. */
+  --accent-text: #6576fa;
   --turquoise: #2dd4bf;
   --mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
   --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -60,7 +69,9 @@ body {
   gap: 8px;
   border-radius: 999px;
   padding: 6px 16px;
-  height: 36px;
+  /* 44px, no 36px: mínimo táctil por defecto de HIG (ver revisión de
+     diseño) -- el pill sigue igual de estrecho, solo gana alto. */
+  height: 44px;
   width: 100%;
   white-space: nowrap;
   transition: background 0.15s ease, border-color 0.15s ease;
@@ -137,7 +148,7 @@ body {
 
 .language-switcher-menu-item--active {
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* --- Guía "archivador" por plataforma (Landing, debajo del carrusel) --- */
@@ -523,8 +534,12 @@ body {
 
 .carousel-arrow {
   flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
+  /* 44px, no 36px: mínimo táctil por defecto de HIG para un control
+     icon-only en móvil (36px quedaba entre el mínimo de 28 y el
+     recomendado de 44 -- ver revisión de diseño). El glifo (›/‹) se
+     queda en 20px, solo crece la caja clicable/el círculo de fondo. */
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   border: 1px solid var(--border);
   background: var(--bg-card);
@@ -677,17 +692,26 @@ body {
 }
 
 .carousel-dot {
-  width: 8px;
-  height: 8px;
+  /* Punto visible de 8px, pero caja de impacto (hit area) de 28px --
+     mínimo táctil de HIG para controles pequeños (ver revisión de
+     diseño); antes la caja clicable era literalmente los mismos 8px que
+     el punto. `background-clip: content-box` + `padding: 10px` (con
+     `box-sizing: border-box` global, ver arriba) deja el color solo en
+     el recuadro central de 28-10*2=8px, mientras que toda la caja de
+     28x28 sigue siendo clicable. */
+  width: 28px;
+  height: 28px;
+  padding: 10px;
+  background: var(--border);
+  background-clip: content-box;
   border-radius: 50%;
   border: none;
-  background: var(--border);
   cursor: pointer;
-  padding: 0;
 }
 
 .carousel-dot--active {
   background: var(--accent);
+  background-clip: content-box;
   transform: scale(1.3);
 }
 
@@ -791,7 +815,10 @@ body {
 }
 
 .score-row-tooltip {
-  color: #6b7280;
+  /* #6b7280 daba 3.57:1 sobre --bg-card, por debajo de 4.5:1 (texto de
+     14px) -- ver revisión de diseño. #7c8391 es el mismo gris aclarado
+     lo justo para llegar a 4.53:1. */
+  color: #7c8391;
   cursor: help;
 }
 
@@ -836,7 +863,7 @@ body {
 }
 
 .evidence a {
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 12px;
   text-decoration: none;
 }
@@ -1121,7 +1148,7 @@ body {
   background: rgba(91, 108, 240, 0.1);
   border: 1px solid rgba(91, 108, 240, 0.35);
   border-radius: 8px;
-  color: var(--accent);
+  color: var(--accent-text);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
@@ -1335,7 +1362,7 @@ body {
 }
 
 .image-location-list a {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: none;
 }
 
@@ -1444,7 +1471,7 @@ body {
 }
 
 .image-location-details > summary:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* Altura máxima con scroll cuando hay muchas fotos no representativas --

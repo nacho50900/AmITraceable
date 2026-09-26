@@ -4,13 +4,13 @@ import type { PopulationEstimate } from '../types';
 import PopulationPictogram from './PopulationPictogram';
 
 interface PopulationNarrowingTableProps {
-  steps: PopulationEstimate[];
+  readonly steps: PopulationEstimate[];
   // El ÚNICO pictograma grande de esta sección resume TODOS los rasgos
   // combinados (no cada fila por separado, como antes) -- ver
   // scoring/k_anonymity.py::final_remaining_population(). null si no se
   // pudo estimar ningún rasgo encadenable.
-  remainingPopulationAllTraits: number | null;
-  remainingPopulationAllTraitsProportion: number | null;
+  readonly remainingPopulationAllTraits: number | null;
+  readonly remainingPopulationAllTraitsProportion: number | null;
 }
 
 const RISK_COLORS: Record<string, string> = {

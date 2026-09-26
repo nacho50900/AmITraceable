@@ -4,9 +4,9 @@ import { FiUserCheck, FiX } from 'react-icons/fi';
 import type { ManualAttribute } from '../types';
 
 interface Props {
-  onApplyTraits: (traits: ManualAttribute[]) => void;
-  isOpen: boolean;
-  setIsOpen: (open: boolean) => void;
+  readonly onApplyTraits: (traits: ManualAttribute[]) => void;
+  readonly isOpen: boolean;
+  readonly setIsOpen: (open: boolean) => void;
 }
 
 // Categorías y valores respaldados por datos reales y citados (ver
