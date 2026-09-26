@@ -156,6 +156,21 @@ class Settings(BaseSettings):
     qwen_gguf_repo_id: str = "unsloth/Qwen3.5-4B-GGUF"
     qwen_gguf_filename: str = "Qwen3.5-4B-Q4_K_M.gguf"  # nombre EXACTO del fichero .gguf en ese repo, no un glob
 
+    # Fichero del proyector de visión (`mmproj`, mismo repo de arriba) --
+    # ver ADR-50 en docs/src/09_architecture_decisions.adoc: unifica
+    # análisis visual (antes Moondream2, app/vision/scene_analysis.py) y
+    # de texto (este módulo) en el MISMO modelo cargado una sola vez, para
+    # no pagar la VRAM de dos modelos distintos a la vez. Qwen3.5 usa una
+    # arquitectura "early fusion" nativa (distinta de la de Qwen3-VL, ver
+    # ese ADR) -- CONFIRMAR el nombre exacto de este fichero en
+    # huggingface.co/unsloth/Qwen3.5-4B-GGUF antes de desplegar, puede no
+    # coincidir exactamente con el valor de abajo según cómo esté
+    # publicado en el momento. Vacío = sin visión unificada: el modelo
+    # cargado por este módulo se queda solo de texto (comportamiento
+    # anterior a ADR-50) y `app/vision/scene_analysis.py` degrada a "no
+    # disponible" en vez de intentar usarlo para imágenes.
+    qwen_mmproj_filename: str = "mmproj-BF16.gguf"
+
     @property
     def ai_key_configured(self) -> bool:
         """True si el análisis con IA está activado Y hay un repo GGUF

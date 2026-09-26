@@ -203,7 +203,7 @@ async def _lifespan(app: FastAPI):
         from app.vision.scene_analysis import _scene_analysis_available
 
         if _scene_analysis_available():
-            logger.info("Precargando modelo de analisis de contenido (Moondream2)...")
+            logger.info("Precargando modelo de analisis de contenido (Qwen3.5-4B)...")
             # try/except AÑADIDO: `_lazy_load_scene_analysis()` ahora mismo
             # incluye el "Intento nº7" (carga en GPU, ver scene_analysis.py)
             # que está bien razonado pero SIN VERIFICAR contra el modelo
@@ -218,7 +218,7 @@ async def _lifespan(app: FastAPI):
                 await asyncio.to_thread(_lazy_load_scene_analysis)
             except Exception:
                 logger.exception(
-                    "Fallo al cargar Moondream2 -- el analisis de contenido se "
+                    "Fallo al cargar el modelo de analisis de contenido -- el analisis de contenido se "
                     "saltara silenciosamente en cada foto (geolocalizacion y el "
                     "resto de la app siguen funcionando con normalidad). Traceback "
                     "completo arriba -- si es el 'Intento nº7' (GPU) fallando, "

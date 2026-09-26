@@ -24,47 +24,49 @@ DIRECTAMENTE ya cuantizado desde Hugging Face vía
 cuantiza nada en este servidor: `unsloth/Qwen3.5-4B-GGUF` ya publica un
 `Qwen3.5-4B-Q4_K_M.gguf` listo para usar (unsloth es una fuente de
 confianza habitual para GGUF cuantizados, mismo criterio que si se usara
-para Moondream2). Solo se usa la parte de TEXTO del modelo (Qwen3.5-4B es
-multimodal, pero la carga de la parte de visión requiere un chat handler
-de llama-cpp-python que, a fecha de este cambio, solo existe en forks no
-oficiales -- ver ADR-49 en docs/src/09_architecture_decisions.adoc sobre
-por qué NO se ha tocado app/vision/scene_analysis.py/Moondream2 en este
-mismo cambio) -- Q4_K_M en vez de Q8_0 (el que usa Moondream2) porque aquí
-SÍ hay presión real de VRAM: 4.5B parámetros en Q8_0 (~4.5GB) no caben en
-los 4GB de la GTX 1650 de despliegue; en Q4_K_M (~2.7GB, tamaño real del
-fichero de unsloth) el modelo deja margen para el KV cache.
+para Moondream2). Q4_K_M en vez de Q8_0 (el que usaba Moondream2) porque
+aquí SÍ hay presión real de VRAM: 4.5B parámetros en Q8_0 (~4.5GB) no
+caben en los 4GB de la GTX 1650 de despliegue; en Q4_K_M (~2.7GB, tamaño
+real del fichero de unsloth) el modelo deja margen para el KV cache.
+
+DESDE ADR-50: este módulo TAMBIÉN carga el proyector de visión (`mmproj`,
+ver `settings.qwen_mmproj_filename`) y es quien de verdad hace el
+análisis visual de fotos -- `app/vision/scene_analysis.py` (antes
+Moondream2) ya NO carga ningún modelo propio, reutiliza este mismo
+`_model` a través de `get_model()`/`get_lock()`/`ensure_loaded()` más
+abajo. Un solo modelo multimodal (~2.7GB) sustituye a los dos que había
+antes (Moondream2 ~1.8GB + este módulo solo-texto ~2.7GB) -- el ahorro de
+VRAM que motivó el cambio. Backend: `MTMDChatHandler`, el handler
+GENÉRICO de `llama-cpp-python` (lee la plantilla de chat embebida en el
+propio GGUF, no hace falta un handler específico por modelo) -- a
+diferencia de la generación anterior de modelos de visión de Qwen
+(Qwen3-VL), que sí necesitaba un handler dedicado (`Qwen3VLChatHandler`,
+solo en forks no oficiales, ver ADR-49 histórico): Qwen3.5 usa una
+arquitectura "early fusion" nativa distinta, soportada en `llama.cpp`
+mainline vía `mtmd` sin necesitar ese fork. SIN VERIFICAR EN GPU REAL
+todavía (mismo motivo de siempre en este historial: sin GPU en el entorno
+donde se escribió esto) -- si `MTMDChatHandler` no carga bien este GGUF
+en la práctica, `qwen_mmproj_filename` se puede dejar vacío para volver
+al comportamiento anterior (solo texto, sin visión unificada) sin tocar
+código, y `app/vision/scene_analysis.py` degrada solo a "no disponible".
 
 (Versión anterior de este módulo: cuantizaba un GGUF F16/BF16 propio con
-`llama-quantize`, mismo patrón que `scene_analysis._ensure_quantized_model()`
--- se simplificó porque un Q4_K_M ya publicado hace ese paso innecesario:
-menos dependencias, menos descarga -2.7GB en vez de ~9GB en F16- y menos
-puntos de fallo. Si `unsloth/Qwen3.5-4B-GGUF` dejase de estar disponible o
-cambiase de nombre de fichero, hay alternativas equivalentes en
-`bartowski/Qwen_Qwen3.5-4B-GGUF` y `lmstudio-community/Qwen3.5-4B-GGUF`.)
-
-RIESGO SIN VERIFICAR, IMPORTANTE: este modelo y Moondream2
-(scene_analysis.py) pueden necesitar estar cargados en GPU
-SIMULTÁNEAMENTE -- landmark_resolution.py llama a este módulo durante el
-mismo pase de análisis de fotos en el que scene_analysis.py ya tiene
-Moondream2 cargado. Moondream2 (Q8_0) + este modelo (Q4_K_M) sumados
-rondan ya 4-5GB solo en pesos, sin contar KV cache de ninguno de los dos
--- muy probablemente NO quepan a la vez en 4GB de VRAM. Sin GPU en el
-entorno donde se escribió este cambio, no se ha podido medir el
-comportamiento real (¿OOM directo? ¿llama.cpp degrada solo a CPU para uno
-de los dos sin avisar?). Antes de dar esto por cerrado, medir en la GTX
-1650 real si ambos modelos conviven o hace falta serializar su uso
-(cargar/descargar según se necesite, con el coste de latencia que eso
-añade) o mover uno de los dos a CPU explícitamente.
+`llama-quantize`, mismo patrón que usaba `scene_analysis.py` para
+Moondream2 -- se simplificó porque un Q4_K_M ya publicado hace ese paso
+innecesario: menos dependencias, menos descarga -2.7GB en vez de ~9GB en
+F16- y menos puntos de fallo. Si `unsloth/Qwen3.5-4B-GGUF` dejase de estar
+disponible o cambiase de nombre de fichero, hay alternativas equivalentes
+en `bartowski/Qwen_Qwen3.5-4B-GGUF` y `lmstudio-community/Qwen3.5-4B-GGUF`.)
 
 Repo/fichero GGUF configurables vía `settings.qwen_gguf_repo_id`/
-`qwen_gguf_filename` (ver app/config.py, valores por defecto ya
-apuntando a `unsloth/Qwen3.5-4B-GGUF`) -- por si en el futuro conviene
-cambiar de cuantización (Q5_K_M/Q6_K si sobra VRAM, Q3_K_M si hace falta
-apretar más) sin tocar código. Con `qwen_gguf_repo_id` vacío,
-`_qwen_available()` devuelve False y este módulo se comporta exactamente
-igual que si `llama_cpp` no estuviera instalado -- "no disponible", sin
-excepción que rompa el resto del pipeline (mismo criterio best-effort que
-scene_analysis.py).
+`qwen_gguf_filename`/`qwen_mmproj_filename` (ver app/config.py, valores
+por defecto ya apuntando a `unsloth/Qwen3.5-4B-GGUF`) -- por si en el
+futuro conviene cambiar de cuantización (Q5_K_M/Q6_K si sobra VRAM,
+Q3_K_M si hace falta apretar más) sin tocar código. Con `qwen_gguf_repo_id`
+vacío, `_qwen_available()` devuelve False y este módulo se comporta
+exactamente igual que si `llama_cpp` no estuviera instalado -- "no
+disponible", sin excepción que rompa el resto del pipeline (mismo
+criterio best-effort que scene_analysis.py).
 """
 import asyncio
 import json
@@ -79,6 +81,7 @@ logger = logging.getLogger(__name__)
 _model = None
 _model_lock = threading.Lock()
 _loaded_model_name: str | None = None
+_actual_device: str | None = None
 
 
 class AIHTTPError(Exception):
@@ -106,10 +109,63 @@ class AIRequestError(Exception):
 
 
 def get_model_variant() -> str | None:
-    """Igual que `scene_analysis.get_model_variant()` -- para el log de
-    rendimiento (ver app/log/performance_log.py). `None` si el modelo
-    todavía no se ha cargado en este proceso."""
+    """Igual que antes de ADR-50 (`scene_analysis.get_model_variant()`
+    delega en esto ahora, en vez de tener su propio Moondream2 cargado) --
+    para el log de rendimiento (ver app/log/performance_log.py). `None` si
+    el modelo todavía no se ha cargado en este proceso."""
     return _loaded_model_name
+
+
+def get_device() -> str | None:
+    """Dispositivo en el que se PIDIÓ offload de capas (`n_gpu_layers`) en
+    la última carga -- "cuda" o "cpu", `None` si no se ha cargado
+    todavía. Mismo matiz que tenía `scene_analysis.get_device()`: esto es
+    lo que se PIDIÓ, no una confirmación real de que `llama.cpp` lo
+    consiguiera -- ver el historial de ese módulo (ya obsoleto para
+    visión, mantenido por su valor histórico) sobre por qué no se puede
+    confirmar con certeza desde aquí sin `verbose=True`."""
+    return _actual_device
+
+
+def get_model():
+    """El objeto `Llama` ya cargado (o `None` si aún no se cargó) --
+    expuesto para que `app/vision/scene_analysis.py` pueda hacer sus
+    propias llamadas a `create_chat_completion()` con contenido de imagen
+    (ver `ensure_loaded()` y `get_lock()`, los tres se usan siempre
+    juntos: cargar, obtener el lock, obtener el modelo)."""
+    return _model
+
+
+def get_lock() -> threading.Lock:
+    """El mismo `Lock` que usa `call_ai_json()` internamente -- `Llama` no
+    tolera llamadas concurrentes desde varios hilos sobre el mismo objeto
+    (confirmado en producción con Moondream2, mismo motivo aplica aquí:
+    un único modelo compartido significa una única cola real, tanto para
+    llamadas de texto (ai_attribute_extraction.py, ai_analysis.py,
+    landmark_resolution.py) como de imagen (scene_analysis.py) -- ANTES
+    de ADR-50 cada modelo tenía su propio lock independiente y podían
+    correr en paralelo; ahora comparten uno solo, así que una llamada de
+    imagen y una de texto NUNCA se solapan entre sí. Trade-off aceptado a
+    cambio del ahorro de VRAM de un solo modelo -- SIN MEDIR el impacto
+    real en tiempo total del pipeline."""
+    return _model_lock
+
+
+def ensure_loaded() -> None:
+    """Wrapper público de `_lazy_load()` para que otros módulos
+    (`scene_analysis.py`) puedan forzar la carga sin depender de un
+    nombre "privado" -- no hace nada si ya está cargado, igual que
+    `_lazy_load()`."""
+    _lazy_load()
+
+
+def vision_available() -> bool:
+    """Como `_qwen_available()`, pero exige ADEMÁS que
+    `qwen_mmproj_filename` esté configurado -- usado por
+    `scene_analysis._scene_analysis_available()`. Con `qwen_mmproj_filename`
+    vacío (ver app/config.py), este módulo sigue sirviendo texto con
+    normalidad, solo el análisis visual queda "no disponible"."""
+    return _qwen_available() and bool(settings.qwen_mmproj_filename)
 
 
 def _qwen_available() -> bool:
@@ -125,20 +181,22 @@ def _qwen_available() -> bool:
 
 
 def _lazy_load():
-    """Carga perezosa de Qwen3.5-4B (solo texto) vía llama-cpp-python --
-    no hace nada si ya está cargado. `Llama.from_pretrained()` descarga el
-    GGUF de `settings.qwen_gguf_repo_id`/`qwen_gguf_filename` (ya
-    cuantizado, ver docstring del módulo) y lo cachea en
-    `~/.cache/huggingface/hub` la primera vez -- las siguientes cargas son
-    solo lectura de disco. Mismo criterio de detección de GPU que
-    scene_analysis._lazy_load() (n_gpu_layers=-1 si hay CUDA, si no 0) --
-    ver el RIESGO SIN VERIFICAR del docstring del módulo sobre la
-    contención de VRAM con Moondream2 si ambos piden GPU a la vez.
+    """Carga perezosa de Qwen3.5-4B vía llama-cpp-python -- no hace nada
+    si ya está cargado. `Llama.from_pretrained()` descarga el GGUF de
+    `settings.qwen_gguf_repo_id`/`qwen_gguf_filename` (ya cuantizado, ver
+    docstring del módulo) y lo cachea en `~/.cache/huggingface/hub` la
+    primera vez -- las siguientes cargas son solo lectura de disco.
 
-    A diferencia de Moondream2, NO se pasa `chat_handler` -- este cliente
-    solo hace llamadas de texto (sin imagen), así que no hace falta cargar
-    ningún `mmproj`/vision encoder."""
-    global _model, _loaded_model_name
+    Desde ADR-50, si `settings.qwen_mmproj_filename` está configurado (por
+    defecto sí, ver app/config.py) también se carga el proyector de
+    visión (`MTMDChatHandler`, handler GENÉRICO de llama-cpp-python que
+    lee la plantilla de chat embebida en el GGUF -- no hace falta un
+    handler específico para Qwen3.5, ver docstring del módulo) y el
+    modelo resultante sirve TANTO llamadas de texto (`call_ai_json`) como
+    de imagen (`app/vision/scene_analysis.py`, vía `get_model()`). Con
+    `qwen_mmproj_filename` vacío, se carga solo texto (comportamiento
+    anterior a ADR-50)."""
+    global _model, _loaded_model_name, _actual_device
     if _model is not None:
         return
 
@@ -147,11 +205,12 @@ def _lazy_load():
     import torch
 
     n_gpu_layers = -1 if torch.cuda.is_available() else 0
+    _actual_device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    _model = Llama.from_pretrained(
-        repo_id=settings.qwen_gguf_repo_id,
-        filename=settings.qwen_gguf_filename,
-        n_gpu_layers=n_gpu_layers,
+    kwargs = {
+        "repo_id": settings.qwen_gguf_repo_id,
+        "filename": settings.qwen_gguf_filename,
+        "n_gpu_layers": n_gpu_layers,
         # BUG real, confirmado en producción (24/9): 4096 (el valor
         # original de este módulo) es demasiado pequeño -- un informe
         # completo (ai_analysis.py le manda el JSON entero del informe,
@@ -169,10 +228,21 @@ def _lazy_load():
         # GQA -- que Qwen3.5 usa -- el coste por token es bajo, pero SIN
         # MEDIR en la GTX 1650 real cuánto ocupa en la práctica a este
         # tamaño de contexto).
-        n_ctx=int(os.environ.get("QWEN_N_CTX", "32768")),
-        verbose=False,
-    )
-    _loaded_model_name = f"Qwen3.5-4B ({settings.qwen_gguf_filename})"
+        "n_ctx": int(os.environ.get("QWEN_N_CTX", "32768")),
+        "verbose": False,
+    }
+    variant_suffix = f" ({settings.qwen_gguf_filename})"
+    if settings.qwen_mmproj_filename:
+        from llama_cpp.llama_chat_format import MTMDChatHandler
+
+        kwargs["chat_handler"] = MTMDChatHandler.from_pretrained(
+            repo_id=settings.qwen_gguf_repo_id,
+            filename=settings.qwen_mmproj_filename,
+        )
+        variant_suffix = f" ({settings.qwen_gguf_filename}, con visión)"
+
+    _model = Llama.from_pretrained(**kwargs)
+    _loaded_model_name = "Qwen3.5-4B" + variant_suffix
     logger.info(
         "Qwen3.5-4B cargado: model=%s n_gpu_layers=%s (revisar el log nativo de llama.cpp "
         "arriba para confirmar si el offload a GPU funcionó de verdad)",

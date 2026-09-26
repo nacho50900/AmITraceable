@@ -83,11 +83,19 @@ faiss-cpu>=1.8,<2.0
 # ONNX comunitario -- los tres bloqueados por motivos distintos, ninguno
 # arreglable con solo cambiar una versión de paquete).
 
-# llama-cpp-python: backend actual de Moondream2 (GGUF, ver _GGUF_REPO_ID
-# en scene_analysis.py) Y, desde el cambio a Qwen3.5-4B local, TAMBIEN de
-# app/nlp/ai_client.py (extraccion de atributos, veredicto final,
-# resolucion de nombres de monumento -- antes HTTP a Mistral/Gemini, sin
-# ninguna dependencia pesada; ver ADR-49). CAMBIO DE COMPORTAMIENTO
+# llama-cpp-python: backend actual (GGUF) de app/nlp/ai_client.py --
+# extraccion de atributos, veredicto final, resolucion de nombres de
+# monumento (antes HTTP a Mistral/Gemini, ver ADR-49) Y, desde ADR-50,
+# TAMBIEN del analisis visual de fotos en app/vision/scene_analysis.py
+# (antes Moondream2, ya obsoleto para ese proposito). Un unico modelo
+# compartido (Qwen3.5-4B, con o sin el proyector de vision segun
+# `settings.qwen_mmproj_filename`) cubre ambos usos. PENDIENTE DE
+# REVISAR: la etapa de compilacion de `llama-quantize` mas abajo en el
+# Dockerfile se anadio para cuantizar Moondream2 EN ESTE SERVIDOR -- ni
+# ai_client.py ni scene_analysis.py cuantizan nada localmente ya (ambos
+# descargan GGUF YA cuantizados de Hugging Face), asi que esa etapa
+# podria ser eliminable; no se ha tocado el Dockerfile por no poder
+# verificar el build completo desde este entorno. CAMBIO DE COMPORTAMIENTO
 # IMPORTANTE: un despliegue "solo Reddit" o "Instagram sin
 # geolocalizacion" (WITH_GEOLOCATION sin activar, ver Dockerfile) que
 # antes SI tenia analisis con IA (con solo una API key de Mistral/Gemini,

@@ -21,19 +21,43 @@ def reset_module_globals(monkeypatch):
     """Cada test parte sin modelo cargado y sin variante registrada."""
     monkeypatch.setattr(ai_client, "_model", None)
     monkeypatch.setattr(ai_client, "_loaded_model_name", None)
+    monkeypatch.setattr(ai_client, "_actual_device", None)
 
 
 @pytest.fixture
 def configured_model(monkeypatch):
     monkeypatch.setattr(settings, "qwen_gguf_repo_id", "fake/repo")
     monkeypatch.setattr(settings, "qwen_gguf_filename", "fake-model.gguf")
+    # Vacío a propósito: mismo comportamiento que antes de ADR-49bis
+    # (solo texto) para no acoplar TODOS los tests existentes de este
+    # fixture a la carga del chat_handler de visión -- ver
+    # `configured_model_with_vision` más abajo para ese caso.
+    monkeypatch.setattr(settings, "qwen_mmproj_filename", "")
+
+
+@pytest.fixture
+def configured_model_with_vision(configured_model, monkeypatch):
+    monkeypatch.setattr(settings, "qwen_mmproj_filename", "fake-mmproj.gguf")
 
 
 @pytest.fixture
 def fake_llama_cpp(monkeypatch):
     """Módulo `llama_cpp` falso: `Llama.from_pretrained(...)` registra los
-    kwargs con los que se le llamó."""
-    calls = {"from_pretrained": []}
+    kwargs con los que se le llamó. Incluye también un submódulo
+    `llama_cpp.llama_chat_format` falso con un `MTMDChatHandler.from_pretrained`
+    que registra sus propios kwargs -- necesario desde ADR-49bis, la carga
+    con visión importa ese submódulo (real solo cuando `llama_cpp` está
+    de verdad instalado, ver requirements-vision.txt)."""
+    calls = {"from_pretrained": [], "mtmd_from_pretrained": []}
+
+    class FakeChatHandler:
+        pass
+
+    class FakeMTMDChatHandler:
+        @classmethod
+        def from_pretrained(cls, **kwargs):
+            calls["mtmd_from_pretrained"].append(kwargs)
+            return FakeChatHandler()
 
     class FakeLlama:
         @classmethod
@@ -43,7 +67,11 @@ def fake_llama_cpp(monkeypatch):
 
     module = types.ModuleType("llama_cpp")
     module.Llama = FakeLlama
+    chat_format_module = types.ModuleType("llama_cpp.llama_chat_format")
+    chat_format_module.MTMDChatHandler = FakeMTMDChatHandler
+    module.llama_chat_format = chat_format_module
     monkeypatch.setitem(sys.modules, "llama_cpp", module)
+    monkeypatch.setitem(sys.modules, "llama_cpp.llama_chat_format", chat_format_module)
     return calls
 
 
@@ -150,6 +178,79 @@ class TestLazyLoad:
         ai_client._lazy_load()
 
         assert len(fake_llama_cpp["from_pretrained"]) == 1
+
+
+class TestLazyLoadWithVision:
+    """ADR-49bis: con `qwen_mmproj_filename` configurado (el valor por
+    defecto real, ver app/config.py), `_lazy_load()` también carga el
+    proyector de visión y lo pasa como `chat_handler` -- el mismo `_model`
+    sirve entonces tanto llamadas de texto como de imagen (ver
+    `app/vision/scene_analysis.py`, que reutiliza este módulo en vez de
+    cargar su propio modelo)."""
+
+    def test_loads_chat_handler_when_mmproj_configured(
+        self, configured_model_with_vision, monkeypatch, fake_llama_cpp
+    ):
+        _fake_torch(monkeypatch, cuda=True)
+
+        ai_client._lazy_load()
+
+        mtmd_kwargs = fake_llama_cpp["mtmd_from_pretrained"][0]
+        assert mtmd_kwargs["repo_id"] == "fake/repo"
+        assert mtmd_kwargs["filename"] == "fake-mmproj.gguf"
+        llama_kwargs = fake_llama_cpp["from_pretrained"][0]
+        assert "chat_handler" in llama_kwargs
+        assert "visión" in ai_client.get_model_variant()
+
+    def test_no_chat_handler_when_mmproj_empty(self, configured_model, monkeypatch, fake_llama_cpp):
+        """`configured_model` deja `qwen_mmproj_filename` vacío a propósito
+        -- comportamiento anterior a ADR-49bis, solo texto."""
+        _fake_torch(monkeypatch, cuda=True)
+
+        ai_client._lazy_load()
+
+        assert fake_llama_cpp["mtmd_from_pretrained"] == []
+        assert "chat_handler" not in fake_llama_cpp["from_pretrained"][0]
+
+
+class TestGetDevice:
+    def test_none_before_loading(self):
+        assert ai_client.get_device() is None
+
+    def test_returns_requested_device_after_loading(self, configured_model, monkeypatch, fake_llama_cpp):
+        _fake_torch(monkeypatch, cuda=True)
+
+        ai_client._lazy_load()
+
+        assert ai_client.get_device() == "cuda"
+
+
+class TestSharedAccessors:
+    """`get_model()`/`get_lock()`/`ensure_loaded()`/`vision_available()`:
+    la interfaz pública que usa `app/vision/scene_analysis.py` desde
+    ADR-49bis en vez de mantener su propio modelo/lock/carga."""
+
+    def test_get_model_returns_loaded_instance(self, configured_model, monkeypatch, fake_llama_cpp):
+        _fake_torch(monkeypatch, cuda=False)
+
+        ai_client.ensure_loaded()
+
+        assert ai_client.get_model() is not None
+
+    def test_get_lock_is_the_same_object_used_internally(self):
+        assert ai_client.get_lock() is ai_client._model_lock
+
+    def test_vision_available_false_without_mmproj(self, configured_model, fake_llama_cpp):
+        assert ai_client.vision_available() is False
+
+    def test_vision_available_true_with_mmproj(self, configured_model_with_vision, fake_llama_cpp):
+        assert ai_client.vision_available() is True
+
+    def test_vision_available_false_without_repo(self, monkeypatch):
+        monkeypatch.setattr(settings, "qwen_gguf_repo_id", "")
+        monkeypatch.setattr(settings, "qwen_mmproj_filename", "algo.gguf")
+
+        assert ai_client.vision_available() is False
 
 
 class _FakeModel:

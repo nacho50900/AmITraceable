@@ -137,5 +137,5 @@ class TestLifespanSceneAnalysisLoadFailure:
                 assert client.get("/").status_code == 200
 
         failing_load.assert_called_once()
-        assert "Fallo al cargar Moondream2" in caplog.text
+        assert "Fallo al cargar el modelo de analisis de contenido" in caplog.text
         assert any(r.exc_info for r in caplog.records)  # traceback completo

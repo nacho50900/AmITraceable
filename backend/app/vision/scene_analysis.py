@@ -83,7 +83,6 @@ import io
 import logging
 import os
 import re
-import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -93,25 +92,11 @@ from app.config import settings
 from app.data.ine_reference import PLATE_PROVINCE_CODE_TO_PROVINCE
 from app.log import visual_description_log
 from app.models.schemas import InferredAttribute
+from app.nlp import ai_client
 
 logger = logging.getLogger(__name__)
 
 _GGUF_REPO_ID = "ggml-org/moondream2-20250414-GGUF"
-_GGUF_TEXT_MODEL_FILENAME = "*text-model*"  # match único en el repo: moondream2-text-model-f16_ct-vicuna.gguf
-# Nombre EXACTO (no el glob de arriba): `huggingface_hub.hf_hub_download()`
-# (usado por `_ensure_quantized_model()` para descargar el F16 y
-# cuantizarlo) no admite comodines como sí hace `Llama.from_pretrained()`
-# -- necesita el nombre de fichero literal.
-_GGUF_TEXT_MODEL_FILENAME_EXACT = "moondream2-text-model-f16_ct-vicuna.gguf"
-
-# Tipo de cuantización por defecto para _ensure_quantized_model() --
-# sobreescribible con la variable de entorno MOONDREAM_QUANT_TYPE (ver
-# esa función) sin tocar código ni reconstruir la imagen, p. ej. para
-# probar Q4_K_M en vez de Q8_0. Q8_0 confirmado en producción (17/9):
-# ~1.7x más rápido que F16, en línea con benchmarks públicos de
-# llama.cpp -- buen punto de partida por defecto.
-_DEFAULT_QUANT_TYPE = "Q8_0"
-_GGUF_MMPROJ_FILENAME = "*mmproj*"  # match único en el repo: moondream2-mmproj-f16-20250414.gguf
 # HISTORIAL DE ESTE CAMBIO (11-13/9, ver conversación con Claude -- se deja
 # aquí porque cada intento anterior parecía razonable a priori y solo se
 # descartó con evidencia real, no vale la pena repetirlos sin releer esto):
@@ -241,32 +226,27 @@ class VisualDescriptionCodes:
 _model = None
 
 # Lock REAL de threading (no asyncio.Lock) que serializa TODO acceso a
-# `_model`. Bug real confirmado en producción (13/9, GTX 1650): el
-# pipeline de geolocation.py procesa varias fotos a la vez
-# (`asyncio.Semaphore(actual_concurrency)`, puede ser > 1 -- ver
-# `Settings.photo_analysis_concurrency`), cada una en su propio hilo real
-# vía `asyncio.to_thread(analyze_image_content, image)`. Sin este lock,
-# varios hilos podían llamar a `_model.reset()` / `_model.create_chat_completion()`
-# A LA VEZ sobre el MISMO objeto `Llama` -- que no está pensado para eso
-# (a diferencia de cómo se comportaba el modelo de `transformers` de
-# antes, que toleraba esto sin problema visible). El resultado no era un
-# error limpio: era corrupción de estado que acababa tirando abajo el
-# proceso ENTERO con SIGSEGV (exit 139) tras varias fotos, no solo
-# fallando la foto en cuestión.
-_model_lock = threading.Lock()
+# `_model` -- bug real confirmado en producción (13/9, GTX 1650, ver
+# historial de este módulo). DESDE ADR-50, `_model` y este lock YA NO son
+# propios de este módulo: son el mismo objeto compartido con
+# `app/nlp/ai_client.py` (`ai_client.get_model()`/`ai_client.get_lock()`),
+# que ahora es quien de verdad carga Qwen3.5-4B (con visión, ver
+# `ai_client._lazy_load()`) -- un solo modelo multimodal en vez de dos
+# (Moondream2 + el Qwen3.5-4B solo-texto que ya usaba ai_client.py), ese
+# es el ahorro de VRAM que motivó el cambio. `_lazy_load()` de aquí abajo
+# se queda como una fina delegación: sigue existiendo con este nombre
+# (y `_model`/`get_device()`/`get_model_variant()` también) para no
+# romper la extensa batería de tests de este módulo, que mockean estos
+# nombres directamente sin preocuparse de dónde viene el modelo de verdad.
+_model_lock = ai_client.get_lock()
 
-# Dispositivo en el que se pidió offload de capas a `_lazy_load()`
-# ("cuda" o "cpu") -- a diferencia de la versión `transformers` de antes,
-# `llama.cpp` no expone un `next(_model.parameters()).device` equivalente
-# (el modelo no es un `nn.Module` de PyTorch), así que esto ya NO es un
-# valor "confirmado" leído tras la carga, es el valor SOLICITADO vía
-# `n_gpu_layers` -- ver `get_device()` para el matiz importante de que
-# esto puede no reflejar si el offload a GPU realmente funcionó.
+# Dispositivo en el que se pidió offload de capas -- copiado desde
+# `ai_client.get_device()` en `_lazy_load()` (ver ese módulo para el
+# matiz de que es lo PEDIDO, no una confirmación de que funcionase).
 _actual_device: str | None = None
 
-# Nombre del modelo TAL CUAL quedó cargado (copia de `_GGUF_REPO_ID` en el
-# momento de `_lazy_load()`, no el valor actual del módulo) -- ver
-# `get_model_variant()` sobre por qué es una copia y no una relectura.
+# Nombre del modelo TAL CUAL quedó cargado -- copiado desde
+# `ai_client.get_model_variant()` en `_lazy_load()`.
 _loaded_model_name: str | None = None
 
 _CAPTION_QUERY = (
@@ -560,257 +540,57 @@ _SPANISH_PLATE_OLD_FORMAT_RE = re.compile(
 
 
 def get_device() -> str | None:
-    """Dispositivo en el que se PIDIÓ offload de capas a `_lazy_load()`
-    ("cuda" o "cpu"), o `None` si `_lazy_load()` no se ha llamado todavía
-    (modelo no cargado -- p. ej. `enable_scene_analysis` desactivado, o
-    análisis sin ninguna foto procesada aún). Pensado para el logging de
-    rendimiento (ver app/log/performance_log.py).
-
-    IMPORTANTE, distinto a como funcionaba con `transformers` (ver
-    docstring de `_actual_device` más arriba): esto es lo que se PIDIÓ vía
-    `n_gpu_layers`, no una confirmación leída del modelo ya cargado --
-    `llama.cpp` no lanza excepción si el offload a GPU falla parcialmente,
-    solo lo indica en su log nativo, que con `verbose=False` (el valor por
-    defecto ahora, ver `_lazy_load()`) no se ve. Ya se confirmó una vez en
-    producción (12/9: "offloaded 25/25 layers to GPU") con `verbose=True`
-    temporalmente -- si alguna vez hay que volver a confirmarlo (p. ej.
-    tras cambiar de GPU), poner `verbose=True` otra vez ahí antes de
-    fiarse solo de este campo."""
+    """Delegación fina en `ai_client.get_device()` desde ADR-50 -- este
+    módulo ya no carga su propio modelo, ver comentario junto a
+    `_model_lock` más arriba. Se mantiene esta función (y `_actual_device`,
+    actualizado en `_lazy_load()`) para no romper los tests existentes
+    que la llaman directamente, y porque conceptualmente sigue siendo
+    "el dispositivo de ESTE módulo" aunque el modelo esté compartido."""
     return _actual_device
 
 
 def get_model_variant() -> str | None:
-    """`_GGUF_REPO_ID` tal cual, o `None` si el modelo no se ha cargado
-    todavía en este proceso (mismo criterio que `get_device()`).
-
-    Existe para el log de rendimiento (ver app/log/performance_log.py):
-    sin este campo, entradas de distintos backends/modelos probados (bf16
-    `transformers`, 4-bit `torchao`, ahora GGUF `llama.cpp`, ver
-    historial junto a `_GGUF_REPO_ID`) quedarían mezcladas en el mismo
-    `.jsonl` sin forma de separarlas para comparar.
-
-    Devuelve el nombre TAL CUAL quedó cargado en `_lazy_load()`, no el
-    valor actual del módulo `_GGUF_REPO_ID` -- mismo motivo que
-    `get_device()` usa `_actual_device` y no una relectura en caliente: si
-    el proceso lleva tiempo vivo y se cambia el código sin reiniciar (no
-    debería pasar en producción, pero sí durante desarrollo local), el
-    modelo ya cargado en memoria sigue siendo el de antes."""
+    """Delegación fina en `ai_client.get_model_variant()`, mismo criterio
+    que `get_device()` -- ver ese comentario."""
     return _loaded_model_name
 
 
 def _scene_analysis_available() -> bool:
-    """Comprobación barata (sin cargar el modelo) de si este módulo puede
-    funcionar: dependencia opcional instalada. No hay ningún índice ni
-    fichero que comprobar (a diferencia de geolocation.py), el modelo se
-    descarga solo la primera vez vía el caché de Hugging Face (a través de
-    `Llama.from_pretrained()`, que usa `huggingface_hub` por debajo igual
-    que `transformers`).
-
-    Desde el cambio a `llama-cpp-python` (ver la nota junto a
-    `_GGUF_REPO_ID`), la única dependencia propia de este módulo es
-    `llama_cpp` -- ya NO se necesitan `timm`/`einops` (eran del código
-    remoto `trust_remote_code=True` de la versión `transformers`,
-    eliminada en este cambio) ni `torchao` (de la versión 4-bit intentada
-    antes, también descartada). `torch`/`transformers` los sigue
-    necesitando este proceso igualmente, pero solo para DINOv2
-    (geolocation.py) -- este módulo ya no los importa para nada."""
-    try:
-        import llama_cpp  # noqa: F401
-    except ImportError:
-        return False
-    return True
-
-
-def _ensure_quantized_model() -> tuple[str, str] | None:
-    """Devuelve `(ruta_local, tipo)` de una versión cuantizada del modelo de
-    TEXTO de Moondream2 (no del `mmproj`/vision encoder -- ese se queda
-    en F16 siempre, este repo no tiene una variante cuantizada de esa
-    parte, ver historial junto a `_GGUF_REPO_ID` sobre por qué el ahorro
-    esperado NO es simplemente "la mitad de tiempo"), cuantizando una
-    única vez POR TIPO y cacheando el resultado en disco -- o `None` si
-    no se pudo (sin `llama-quantize` disponible, o cualquier fallo
-    durante el proceso), en cuyo caso `_lazy_load()` cae a descargar/usar
-    el F16 de siempre vía `Llama.from_pretrained()`. Nunca lanza --
-    best-effort, igual que el resto de este módulo (ver
-    `analyze_image_content`): que esta optimización falle no debe impedir
-    que Moondream2 cargue en absoluto, solo que cargue sin cuantizar.
-
-    Tipo configurable con la variable de entorno `MOONDREAM_QUANT_TYPE`
-    (por defecto Q8_0, ver `_DEFAULT_QUANT_TYPE`) -- cualquier tipo que
-    acepte `llama-quantize` vale (Q4_K_M, Q5_K_M, etc., ver su propio
-    `--help`; Q4_K_M recomendado sobre Q4_0 a pelo si se prueba 4 bits,
-    mejor calidad para un tamaño similar según la propia tabla de
-    `--help`). El nombre del fichero cacheado incluye el tipo, así que
-    cambiar de `MOONDREAM_QUANT_TYPE` entre reinicios no pisa ni obliga a
-    borrar la cuantización anterior -- conviven varias a la vez en disco,
-    cada una cuantizada solo una vez.
-
-    SIN VERIFICAR TODAVÍA (mismo motivo que el resto de cambios de hoy:
-    sin GPU en el entorno donde se escribió esto) -- en particular, que
-    `llama-quantize` exista de verdad en el PATH depende de que la etapa
-    `cuda-builder` del Dockerfile lo haya conseguido compilar, lo cual es
-    en sí mismo best-effort ahí (ver ese fichero) por la misma razón: dos
-    supuestos sin confirmar sobre el layout del código fuente vendorizado
-    de `llama-cpp-python`."""
-    import shutil
-    import subprocess
-
-    quantize_bin = shutil.which("llama-quantize")
-    if quantize_bin is None:
-        logger.info(
-            "llama-quantize no está en el PATH -- Moondream2 cargará en F16 sin cuantizar "
-            "(ver Dockerfile, etapa cuda-builder, sobre por qué esto puede faltar)"
-        )
-        return None
-
-    quant_type = os.environ.get("MOONDREAM_QUANT_TYPE", _DEFAULT_QUANT_TYPE).strip().upper()
-
-    # Bajo el mismo volumen persistente que ya montáis para la caché de
-    # Hugging Face (ver docker-compose.yml, `./backend/data/hf_cache:/root/.cache/huggingface`)
-    # -- así el resultado sobrevive a un reinicio del contenedor y esto
-    # solo se paga una vez de verdad por tipo, no en cada arranque.
-    quantized_dir = Path("/root/.cache/huggingface/moondream2-quantized")
-    quantized_path = quantized_dir / f"moondream2-text-model-{quant_type.lower()}.gguf"
-    if quantized_path.exists():
-        return str(quantized_path), quant_type
-
-    try:
-        from huggingface_hub import hf_hub_download
-
-        logger.info("Cuantizando Moondream2 a %s por primera vez (puede tardar varios minutos)...", quant_type)
-        f16_path = hf_hub_download(repo_id=_GGUF_REPO_ID, filename=_GGUF_TEXT_MODEL_FILENAME_EXACT)
-
-        quantized_dir.mkdir(parents=True, exist_ok=True)
-        # Escribir a un fichero .tmp y renombrar al final SOLO si
-        # `llama-quantize` termina bien: evita que una ejecución anterior
-        # interrumpida a medias (p. ej. el contenedor parado sin querer
-        # durante la cuantización) deje un .gguf incompleto que
-        # `quantized_path.exists()` diera por bueno en el siguiente
-        # arranque sin serlo.
-        tmp_output = quantized_dir / f"moondream2-text-model-{quant_type.lower()}.gguf.tmp"
-        result = subprocess.run(
-            [quantize_bin, f16_path, str(tmp_output), quant_type],
-            capture_output=True,
-            text=True,
-            timeout=900,
-        )
-        if result.returncode != 0:
-            logger.warning(
-                "llama-quantize terminó con código %s -- Moondream2 cargará en F16 sin cuantizar. stderr: %s",
-                result.returncode,
-                result.stderr[-2000:],
-            )
-            return None
-        tmp_output.rename(quantized_path)
-        logger.info("Moondream2 cuantizado a %s correctamente: %s", quant_type, quantized_path)
-        return str(quantized_path), quant_type
-    except Exception as exc:
-        logger.warning(
-            "Fallo cuantizando Moondream2 a %s (%s): %s -- cargará en F16 sin cuantizar",
-            quant_type,
-            type(exc).__name__,
-            exc,
-        )
-        return None
+    """Desde ADR-50, delega en `ai_client.vision_available()`: además de
+    la comprobación de siempre (¿está instalado `llama_cpp`?), ahora
+    también exige que `settings.qwen_mmproj_filename` esté configurado
+    (ver app/config.py) -- sin proyector de visión, el modelo compartido
+    sigue funcionando para TEXTO (ai_attribute_extraction.py,
+    ai_analysis.py, landmark_resolution.py) pero no puede analizar
+    imágenes, así que este módulo debe reportarse como "no disponible"
+    igual que si `llama_cpp` faltase del todo."""
+    return ai_client.vision_available()
 
 
 def _lazy_load():
-    """Carga perezosa de Moondream2 vía `llama-cpp-python` (GGUF, ver
-    `_GGUF_REPO_ID` y su historial de por qué se llegó aquí) -- no hace
-    nada si ya está cargado (`_model is not None`).
+    """Delegación fina en `ai_client.ensure_loaded()` desde ADR-50 -- ya
+    NO carga Moondream2 ni ningún modelo propio: pide a `ai_client` que
+    cargue (o reutilice, si ya está cargado) el ÚNICO modelo compartido
+    (Qwen3.5-4B con visión, ver `ai_client._lazy_load()`) y copia sus
+    referencias a las variables de este módulo
+    (`_model`/`_actual_device`/`_loaded_model_name`) -- así
+    `analyze_image_content()` de más abajo no necesita cambiar nada de
+    cómo usa `_model`, y los tests existentes (que mockean `_lazy_load`
+    y `_model` de ESTE módulo directamente) siguen funcionando sin
+    tocarlos.
 
-    A diferencia de la versión `transformers` anterior, aquí NO hay
-    parcheo de dtype que hacer -- los pesos GGUF ya vienen en el formato
-    final (F16 en este repo) y `llama.cpp` no tiene el problema de
-    "el kwarg no llega a los pesos reales" que sí tenía el código remoto
-    de `transformers` (ver el historial junto a `_GGUF_REPO_ID`, intento
-    1). Por eso esta función es mucho más corta que antes -- no es que se
-    haya simplificado de más, es que la mayoría de la complejidad de antes
-    era específica de problemas de ESE backend concreto.
-
-    `n_gpu_layers=-1` pide que TODAS las capas se offloadeen a GPU. Si no
-    hay GPU disponible (`ENABLE_IGPU_OFFLOAD`/GPU no detectada, ver
-    app/main.py), `llama.cpp` debería caer solo a CPU sin excepción -- si
-    en la práctica no es así, ver la nota de `get_device()` sobre por qué
-    este código no puede confirmarlo con certeza desde aquí."""
+    No hace nada si `_model` ya está asignado -- mismo criterio de
+    siempre, aunque ahora la carga "de verdad" la controla
+    `ai_client._lazy_load()` (que tiene su propio `if _model is not None:
+    return`, así que llamar a esto varias veces desde varios módulos
+    nunca recarga el modelo dos veces)."""
     global _model, _actual_device, _loaded_model_name
     if _model is not None:
         return
-
-    from llama_cpp import Llama
-    from llama_cpp.llama_chat_format import MoondreamChatHandler
-
-    # Detección de GPU: MISMO criterio que ya usaba la versión anterior
-    # (ver `app.main`, "GPU detectada" en el log de arranque) -- ese log
-    # ya viene de comprobar `torch.cuda.is_available()` antes de llegar
-    # aquí, así que no hace falta duplicar la comprobación con otra
-    # librería; simplemente se pide offload total y se confía en que
-    # `llama.cpp` decida bien si no hay GPU.
-    import torch
-
-    _requested_device = "cuda" if torch.cuda.is_available() else "cpu"
-    _n_gpu_layers = -1 if _requested_device == "cuda" else 0
-
-    chat_handler = MoondreamChatHandler.from_pretrained(
-        repo_id=_GGUF_REPO_ID,
-        filename=_GGUF_MMPROJ_FILENAME,
-    )
-
-    # Cuantizar (tipo configurable con MOONDREAM_QUANT_TYPE, por defecto
-    # Q8_0 -- ver _ensure_quantized_model() para el porqué y las
-    # condiciones -- nunca lanza, best-effort). SOLO afecta al modelo de
-    # TEXTO: el `mmproj` de arriba se carga igual en los dos casos, sigue
-    # en F16 siempre.
-    _quantized = _ensure_quantized_model()
-    _common_kwargs = {
-        "chat_handler": chat_handler,
-        "n_gpu_layers": _n_gpu_layers,
-        # 2048, no 4096: confirmado en producción (12/9) que `n_ctx_train`
-        # de este modelo es 2048 -- pedir más (probado con 4096) generaba
-        # el aviso "possible training context overflow" en el log. Con
-        # los dos prompts de este módulo (image embedding, ~729 tokens,
-        # + _CAPTION_QUERY/_STRUCTURED_QUERY) cabe de sobra dentro de
-        # 2048, así que no hay motivo real para salirse del contexto de
-        # entrenamiento solo por margen -- eso solo compraría degradar la
-        # calidad sin necesitarlo.
-        "n_ctx": 2048,
-        # verbose=False: antes en True a propósito, para confirmar en el
-        # log si el offload a GPU funcionaba de verdad (ver get_device())
-        # -- ya confirmado en producción (12/9: "offloaded 25/25 layers
-        # to GPU"), así que ya no compensa el ruido que mete por foto
-        # (líneas de "create_tensor", "clip_model_loader", "CUDA Graph id
-        # N reused" -- decenas por imagen). SIN VERIFICAR: `verbose=False`
-        # no parece silenciar el logging nativo del componente
-        # clip/multimodal (encoding image slice, clip_encode, add_media
-        # -- confirmado que estas líneas siguen saliendo en producción,
-        # 13/9), parece tener su propio control de verbosidad no atado a
-        # este flag -- pendiente de investigar si molesta.
-        "verbose": False,
-    }
-    if _quantized is not None:
-        _quantized_path, _quant_type = _quantized
-        _model = Llama(model_path=_quantized_path, **_common_kwargs)
-        _variant_suffix = f" ({_quant_type}, texto cuantizado)"
-    else:
-        _model = Llama.from_pretrained(
-            repo_id=_GGUF_REPO_ID,
-            filename=_GGUF_TEXT_MODEL_FILENAME,
-            **_common_kwargs,
-        )
-        _variant_suffix = " (F16)"
-    _actual_device = _requested_device
-    # El sufijo (Q8_0 vs F16) queda en el propio nombre guardado -- así
-    # `get_model_variant()` (y por tanto el log de rendimiento, ver
-    # app/log/performance_log.py) separa las dos variantes sin tener que
-    # añadir otro campo nuevo solo para esto.
-    _loaded_model_name = _GGUF_REPO_ID + _variant_suffix
-    logger.info(
-        "Moondream2 cargado: model=%s n_gpu_layers=%s (dispositivo solicitado=%s; revisar el log nativo de llama.cpp arriba para confirmar si el offload a GPU funcionó de verdad, ver get_device())",
-        _loaded_model_name,
-        _n_gpu_layers,
-        _requested_device,
-    )
-
+    ai_client.ensure_loaded()
+    _model = ai_client.get_model()
+    _actual_device = ai_client.get_device()
+    _loaded_model_name = ai_client.get_model_variant()
 
 
 def analyze_image_content(
