@@ -100,7 +100,7 @@ function isAccountsTrackDone(counts: Record<string, unknown>): boolean {
 }
 
 const Dashboard: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [platform] = useState<Platform>(readPlatform);
   const [report, setReport] = useState<ExposureReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -259,6 +259,97 @@ const Dashboard: React.FC = () => {
   // fotograma. Como todos leen el mismo reloj en el mismo instante, es
   // imposible que se desincronicen entre sí, sin importar cuándo entró
   // cada uno en el DOM.
+  // Los captions generales de las fotos (`visual_description_general`)
+  // llegan del backend SIEMPRE en inglés -- decisión deliberada de
+  // app/vision/scene_analysis.py (`_CAPTION_QUERY`), ver el comentario
+  // junto a esa constante: Moondream2 (y ahora Qwen3.5-4B, ver ADR-50)
+  // es más fiable preguntando en inglés que generando una frase libre en
+  // español. Eso significa que el idioma NATIVO del proyecto (español,
+  // UI por defecto) es precisamente el que necesita traducción, no al
+  // revés -- así que este efecto traduce nada más llegar el informe si
+  // el idioma de la UI es "es", no solo cuando el usuario cambia a
+  // inglés. Traducción vía CTranslate2 local (backend/app/nlp/translation.py,
+  // ADR-30/31) -- deliberadamente NO con Qwen/un LLM para esto, ver esas
+  // ADRs: un motor de traducción dedicado es más fiable y no compite por
+  // el mismo modelo compartido.
+  //
+  // `originalGeneralDescriptionsRef` guarda los captions ORIGINALES (en
+  // inglés) la primera vez que se ve CADA informe -- así, si el usuario
+  // cambia de idioma varias veces, siempre se traduce a partir del
+  // original, nunca de una traducción ya traducida (lo que degradaría la
+  // calidad y además rompería la asunción de `source_language_for()` en
+  // el backend, que asume una única dirección fija por idioma destino).
+  const originalGeneralDescriptionsRef = useRef<{ username: string; texts: (string | null)[] } | null>(null);
+  const translatedIntoLangRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!report) return;
+
+    if (originalGeneralDescriptionsRef.current?.username !== report.username) {
+      originalGeneralDescriptionsRef.current = {
+        username: report.username,
+        texts: report.image_location_points.map((p) => p.visual_description_general),
+      };
+      translatedIntoLangRef.current = 'en'; // idioma real de los captions tal como los da el backend
+    }
+
+    const currentLang = i18n.language?.split('-')[0] === 'en' ? 'en' : 'es';
+    if (translatedIntoLangRef.current === currentLang) return;
+
+    const originals = originalGeneralDescriptionsRef.current.texts;
+    const toTranslate = originals
+      .map((text, idx) => ({ text, idx }))
+      .filter((entry): entry is { text: string; idx: number } => !!entry.text);
+
+    if (toTranslate.length === 0) {
+      translatedIntoLangRef.current = currentLang;
+      return;
+    }
+
+    if (currentLang === 'en') {
+      // Ya están en su idioma original -- se restauran sin llamar al
+      // backend, no hace falta "traducir" inglés a inglés.
+      setReport((prev) => {
+        if (!prev || prev.username !== report.username) return prev;
+        const points = prev.image_location_points.map((p, idx) => ({
+          ...p,
+          visual_description_general: originals[idx] ?? p.visual_description_general,
+        }));
+        return { ...prev, image_location_points: points };
+      });
+      translatedIntoLangRef.current = 'en';
+      return;
+    }
+
+    let cancelled = false;
+    api
+      .translateDescriptions(
+        toTranslate.map((entry) => entry.text),
+        currentLang,
+      )
+      .then(({ translations }) => {
+        if (cancelled) return;
+        setReport((prev) => {
+          if (!prev || prev.username !== report.username) return prev;
+          const points = [...prev.image_location_points];
+          toTranslate.forEach((entry, i) => {
+            points[entry.idx] = { ...points[entry.idx], visual_description_general: translations[i] };
+          });
+          return { ...prev, image_location_points: points };
+        });
+        translatedIntoLangRef.current = currentLang;
+      })
+      .catch(() => {
+        // Best-effort, igual que el propio endpoint (ver api.ts): si
+        // falla la llamada, los captions se quedan en el idioma que ya
+        // estuvieran mostrando -- nunca rompe el resto del dashboard.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [report, i18n.language]);
+
   useEffect(() => {
     if (!loading) return;
     const start = performance.now();

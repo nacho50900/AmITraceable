@@ -158,6 +158,20 @@ describe('api', () => {
     expect(JSON.parse(options.body)).toEqual(report);
   });
 
+  test('translateDescriptions hace POST a /api/analyze/translate-descriptions con textos y lang', async () => {
+    const fetchMock = mockFetchOnce(200, { translations: ['un texto', 'otro texto'] });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await api.translateDescriptions(['a text', 'another text'], 'es');
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toContain('/api/analyze/translate-descriptions');
+    expect(url).toContain('lang=es');
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual({ texts: ['a text', 'another text'] });
+    expect(result).toEqual({ translations: ['un texto', 'otro texto'] });
+  });
+
   describe('analyzeStream', () => {
     test('abre un EventSource con withCredentials hacia /api/analyze/{platform}/stream', () => {
       vi.stubGlobal('EventSource', FakeEventSource);

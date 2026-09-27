@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import i18n from 'i18next';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { api } from '../api';
@@ -38,6 +39,11 @@ vi.mock('../api', async () => {
       // resolver para que no interfiera con las aserciones del Dashboard.
       aiSummary: vi.fn(() => new Promise(() => {})),
       recalculateReport: vi.fn(),
+      // Mismo criterio que aiSummary: se dispara solo en cuanto hay
+      // informe (ver el nuevo useEffect de traducción de captions en
+      // Dashboard.tsx), así que se deja sin resolver para no interferir
+      // con las aserciones de estos tests.
+      translateDescriptions: vi.fn(() => new Promise(() => {})),
     },
   };
 });
@@ -87,6 +93,7 @@ describe('Dashboard', () => {
     vi.mocked(api.logout).mockReset();
     vi.mocked(api.recalculateReport).mockReset();
     mockNavigate.mockReset();
+    void i18n.changeLanguage('es'); // por si un test anterior lo dejó en 'en'
   });
 
   afterEach(() => {
@@ -583,6 +590,84 @@ describe('Dashboard', () => {
     expect(
       screen.queryByText(/El índice de confianza del análisis de las imágenes no es suficiente/),
     ).not.toBeInTheDocument();
+  });
+
+  describe('traducción de los captions de fotos (visual_description_general)', () => {
+    // Los captions llegan del backend SIEMPRE en inglés (ver
+    // app/vision/scene_analysis.py, _CAPTION_QUERY) -- así que incluso con
+    // el idioma por defecto ('es') hace falta traducirlos, no solo al
+    // cambiar a inglés.
+    test('traduce el caption al español nada más llegar el informe (idioma por defecto)', async () => {
+      vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+      vi.mocked(api.translateDescriptions).mockResolvedValueOnce({ translations: ['una persona toca la guitarra'] });
+      mockStream([
+        {
+          done: true,
+          report: makeExposureReport({
+            image_location_points: [
+              {
+                permalink: 'https://instagram.com/p/1',
+                province: 'Madrid',
+                confidence: 0.6,
+                lat: 40.41,
+                lon: -3.7,
+                representative: true,
+                created_utc: '2024-06-15T10:00:00Z',
+                visual_description: null,
+                visual_description_general: 'a person playing guitar',
+              },
+            ],
+          }),
+        },
+      ]);
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(api.translateDescriptions).toHaveBeenCalledWith(['a person playing guitar'], 'es');
+      });
+      await waitFor(() => {
+        expect(screen.getAllByText('una persona toca la guitarra').length).toBeGreaterThan(0);
+      });
+    });
+
+    test('restaura el caption original en inglés al cambiar el idioma a inglés, sin llamar al backend', async () => {
+      vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+      vi.mocked(api.translateDescriptions).mockResolvedValueOnce({ translations: ['una persona toca la guitarra'] });
+      mockStream([
+        {
+          done: true,
+          report: makeExposureReport({
+            image_location_points: [
+              {
+                permalink: 'https://instagram.com/p/1',
+                province: 'Madrid',
+                confidence: 0.6,
+                lat: 40.41,
+                lon: -3.7,
+                representative: true,
+                created_utc: '2024-06-15T10:00:00Z',
+                visual_description: null,
+                visual_description_general: 'a person playing guitar',
+              },
+            ],
+          }),
+        },
+      ]);
+      renderDashboard();
+      await waitFor(() => {
+        expect(screen.getAllByText('una persona toca la guitarra').length).toBeGreaterThan(0);
+      });
+      vi.mocked(api.translateDescriptions).mockClear();
+
+      await act(async () => {
+        await i18n.changeLanguage('en');
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByText('a person playing guitar').length).toBeGreaterThan(0);
+      });
+      expect(api.translateDescriptions).not.toHaveBeenCalled();
+    });
   });
 
   test('muestra el número de personas que comparten los rasgos combinados', async () => {

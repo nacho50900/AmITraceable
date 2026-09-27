@@ -132,4 +132,19 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req),
     }),
+  // Endpoint LOCAL (CTranslate2, ver backend/app/nlp/translation.py y
+  // ADR-30/31 -- deliberadamente NO Qwen/un LLM para esto, ver esas ADRs)
+  // que traduce descripciones/aficiones ya generadas por el análisis
+  // visual. A diferencia de `aiSummary`, nunca lanza un error "visible":
+  // el backend siempre responde 200 con `translations`, devolviendo los
+  // textos ORIGINALES sin cambios si el modelo de traducción no está
+  // disponible o algo falla -- así que aquí tampoco hace falta un catch
+  // especial, un fallo de red se trata igual que cualquier otro error de
+  // `request()`.
+  translateDescriptions: (texts: string[], lang: string): Promise<{ translations: string[] }> =>
+    request<{ translations: string[] }>(`/api/analyze/translate-descriptions?lang=${encodeURIComponent(lang)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ texts }),
+    }),
 };
