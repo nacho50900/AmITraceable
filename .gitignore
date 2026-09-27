@@ -43,3 +43,5 @@ backend/scripts/.cache_studies/
 
 # Log cache of Wikicommons downloads (regenerable, no versionado)
 backend/scripts/geolocalization/commons_ingest.log
+
+brag-output/
