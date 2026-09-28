@@ -5,6 +5,7 @@ import { SiInstagram, SiReddit, SiX } from 'react-icons/si';
 import { api } from '../api';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import PlatformGuideAccordion from '../components/PlatformGuideAccordion';
+import { PlatformPickerSkeleton } from '../components/Skeleton';
 import type { Platform } from '../types';
 
 interface PlatformCardData {
@@ -159,7 +160,7 @@ const Landing: React.FC = () => {
   const activeCard = PLATFORM_CARDS[activeIndex];
 
   return (
-    <div className="page landing">
+    <div className="page landing" aria-busy={checking}>
       <LanguageSwitcher />
       <h1 className="brand-title">AmITraceable</h1>
       <p className="subtitle">{t('landing.subtitle')}</p>
@@ -173,6 +174,8 @@ const Landing: React.FC = () => {
           <li>{t('landing.consent.revoke')}</li>
         </ul>
       </div>
+
+      {checking && <PlatformPickerSkeleton />}
 
       {!checking && (
         <div className="platform-picker">

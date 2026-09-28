@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AiSummaryUnavailableError, api } from '../api';
+import { SkeletonText } from './Skeleton';
 import type { ExposureReport } from '../types';
 
 interface AiSummaryCardProps {
@@ -49,7 +50,12 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
     <section className="card ai-summary-card">
       <h2>{t('components.aiSummary.title')}</h2>
 
-      {status === 'loading' && <p className="note">{t('components.aiSummary.loading')}</p>}
+      {status === 'loading' && (
+        <>
+          <p className="note">{t('components.aiSummary.loading')}</p>
+          <SkeletonText lines={3} />
+        </>
+      )}
 
       {status === 'success' && (
         <>

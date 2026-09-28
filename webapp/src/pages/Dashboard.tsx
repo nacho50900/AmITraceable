@@ -8,6 +8,7 @@ import DownloadReportButton from '../components/DownloadReportButton';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import LocationMap from '../components/LocationMap';
 import PopulationNarrowingTable from '../components/PopulationNarrowingTable';
+import { DashboardSkeleton } from '../components/Skeleton';
 import InferredAttributesList from '../components/InferredAttributesList';
 import RelatedAccountsList from '../components/RelatedAccountsList';
 import ScoreBar from '../components/ScoreBar';
@@ -407,7 +408,7 @@ const Dashboard: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="page">
+      <div className="page" aria-busy="true">
         <div className="progress-screen" ref={progressScreenRef}>
           <p className="progress-heading">
             <span className="spinner" aria-hidden="true" />
@@ -484,6 +485,7 @@ const Dashboard: React.FC = () => {
             </button>
           </div>
         </div>
+        <DashboardSkeleton />
       </div>
     );
   }
