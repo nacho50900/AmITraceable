@@ -80,7 +80,12 @@ import torch  # noqa: E402
 
 _MAPILLARY_API_URL = "https://graph.mapillary.com/images"
 _USER_AGENT = "AmITraceable-TFG-ImageIngest/1.0 (https://github.com/nacho50900/AmITraceable)"
-_FIELDS = "id,captured_at,on_foot,geometry,computed_geometry,thumb_1024_url"
+_FIELDS = "id,captured_at,on_foot,geometry,computed_geometry,thumb_1024_url,thumb_2048_url"
+# Orden de preferencia: la API de Mapillary omite a veces alguna de estas claves
+# (imagen aún sin procesar, retirada, etc.), así que no se puede asumir que
+# thumb_1024_url exista siempre. 256px queda por debajo de _MIN_DIMENSION_PX y
+# se descartaría igualmente, por eso no se usa como respaldo.
+_THUMB_KEYS = ("thumb_1024_url", "thumb_2048_url")
 
 _ACCEPTED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 _MIN_DIMENSION_PX = 400
@@ -163,6 +168,28 @@ def _download_bytes(client: httpx.Client, url: str, max_retries: int = 5) -> tup
     return None, "http_429_reintentos_agotados"
 
 
+def _pick_thumb_url(photo: dict) -> str | None:
+    for key in _THUMB_KEYS:
+        url = photo.get(key)
+        if url:
+            return url
+    return None
+
+
+def _safe_download(client: httpx.Client, photo: dict) -> tuple[bytes | None, str | None]:
+    """Envoltorio de _download_bytes que nunca lanza: si la foto no trae URL de
+    miniatura, o algo inesperado falla en un hilo del pool, devuelve
+    (None, motivo) para contarlo como fallo_descarga en vez de abortar toda la
+    ejecucion (un KeyError dentro de pool.map tiraba abajo 10+ horas de proceso)."""
+    url = _pick_thumb_url(photo)
+    if not url:
+        return None, "sin_thumb_url"
+    try:
+        return _download_bytes(client, url)
+    except Exception as e:
+        return None, f"otro:{type(e).__name__}:{e}"
+
+
 def _extract_lat_lon(photo: dict) -> tuple[float, float] | None:
     # computed_geometry (corregida por el pipeline de Structure-from-Motion
     # de Mapillary) es más fiable que geometry (GPS crudo del dispositivo)
@@ -236,7 +263,7 @@ def _process_cell(
         i += _DOWNLOAD_BATCH
 
         with ThreadPoolExecutor(max_workers=3) as pool:
-            downloaded = list(pool.map(lambda p: _download_bytes(client, p["thumb_1024_url"]), batch))
+            downloaded = list(pool.map(lambda p: _safe_download(client, p), batch))
 
         for photo, (image_bytes, error) in zip(batch, downloaded):
             if len(meta_rows) >= cap:
