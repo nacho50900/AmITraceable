@@ -72,6 +72,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import threading
 
 from app.config import settings
@@ -251,14 +252,46 @@ def _lazy_load():
     )
 
 
-def _call_ai_json_sync(system_prompt: str, user_prompt: str, max_tokens: int, temperature: float) -> dict:
-    with _model_lock:
-        _lazy_load()
+def _call_ai_json_sync(
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int,
+    temperature: float,
+    lock_timeout: float | None = None,
+) -> dict:
+    # BUG real, confirmado en producción (28/9): con `lock_timeout=None`
+    # (comportamiento de siempre, el que usan ai_attribute_extraction.py y
+    # landmark_resolution.py, donde SÍ hay que esperar lo que haga falta
+    # porque el resultado es parte del informe principal), una llamada
+    # puede quedar en cola detrás de TODO el análisis de fotos pendiente
+    # (un solo `_model_lock` compartido desde ADR-50, ver su docstring) --
+    # en un perfil con muchas fotos, cada una tarda 7-16s solo en
+    # codificar el slice de imagen (más generación), así que la cola
+    # puede superar varios MINUTOS. Para `ai_analysis.py` (la llamada
+    # automática de "conclusiones", aislada y opcional, ver su docstring)
+    # eso es peor que inútil: el navegador/proxy (ngrok en despliegue de
+    # desarrollo) cierra la conexión del cliente mucho antes de que le
+    # llegue nada (confirmado en el mismo log: 499 -- cliente ya se había
+    # ido -- mientras esta llamada seguía esperando el lock), así que el
+    # usuario ve "no disponible" sin ningún detalle real. Con
+    # `lock_timeout` puesto, en vez de esperar indefinidamente se falla
+    # RÁPIDO con un motivo honesto en cuanto se agota la espera, para que
+    # el 503 le llegue al frontend mientras el cliente todavía sigue ahí.
+    if lock_timeout is None:
+        _model_lock.acquire()
+    elif not _model_lock.acquire(timeout=lock_timeout):
+        raise AIRequestError(
+            f"El modelo de IA local está ocupado (probablemente analizando fotos de este "
+            f"perfil todavía) y no quedó libre en los {lock_timeout:.0f}s de espera máxima "
+            "para esta llamada -- puedes reintentarlo en un momento."
+        )
+    try:
         # reset() antes de cada llamada: mismo motivo que Moondream2 en
         # scene_analysis.py -- evita que el KV cache de una llamada
         # anterior contamine esta, con el lock ya protegiendo contra
         # accesos concurrentes desde varias corrutinas (ver
         # `call_ai_json`, envuelto en asyncio.to_thread).
+        _lazy_load()
         _model.reset()
         response = _model.create_chat_completion(
             messages=[
@@ -269,8 +302,36 @@ def _call_ai_json_sync(system_prompt: str, user_prompt: str, max_tokens: int, te
             temperature=temperature,
             response_format={"type": "json_object"},
         )
+    finally:
+        _model_lock.release()
     content = response["choices"][0]["message"]["content"]
-    return json.loads(content)
+    return json.loads(_strip_thinking_block(content))
+
+
+# BUG real, confirmado en producción (28/9, ver log de esa fecha): Qwen3.5
+# es un modelo HÍBRIDO de razonamiento -- antepone un bloque literal
+# `<think>...</think>` (vacío o no) a su respuesta de verdad, INCLUSO con
+# `response_format={"type": "json_object"}` puesto (visto tal cual en el
+# log, en una llamada de ai_analysis.py con ese response_format activo):
+# el `MTMDChatHandler` genérico de llama-cpp-python que se usa desde
+# ADR-50 no aplica ninguna gramática que lo impida. Sin retirar ese bloque
+# antes de `json.loads()`, la respuesta entera deja de empezar por "{" y
+# CUALQUIER llamada de este módulo (ai_attribute_extraction.py,
+# ai_analysis.py, landmark_resolution.py) acaba en AIHTTPError -- aunque
+# el modelo haya razonado bien y generado un JSON perfecto justo después
+# del cierre `</think>`. Se retira solo el PRIMER bloque, con máxima no
+# voraz (`.*?`), y solo si aparece al principio (permitiendo espacio en
+# blanco antes) -- un modelo bien instruido no debería razonar sobre nada
+# después de la respuesta, así que un segundo `<think>` más adelante (si
+# lo hubiera) se deja tal cual en vez de arriesgarse a comerse contenido
+# real con una regex demasiado permisiva.
+_THINKING_BLOCK_RE = re.compile(r"^\s*<think>.*?</think>\s*", re.DOTALL)
+
+
+def _strip_thinking_block(content: str) -> str:
+    if not isinstance(content, str):
+        return content
+    return _THINKING_BLOCK_RE.sub("", content, count=1)
 
 
 async def call_ai_json(
@@ -279,12 +340,24 @@ async def call_ai_json(
     *,
     max_tokens: int = 1000,
     temperature: float = 0.0,
+    lock_timeout: float | None = None,
 ) -> dict:
     """Pide al modelo local respuesta JSON y devuelve el contenido ya
     parseado (dict).
 
     No comprueba `settings.ai_key_configured` -- eso sigue siendo
     responsabilidad de cada llamador, igual que antes.
+
+    `lock_timeout` (segundos, None por defecto = esperar indefinidamente,
+    comportamiento de siempre): tiempo máximo a esperar por el
+    `_model_lock` compartido antes de rendirse con AIRequestError en vez
+    de seguir en cola -- ver el comentario junto a `_call_ai_json_sync`
+    para el bug real que motivó esto. Los llamadores que forman parte del
+    informe principal (ai_attribute_extraction.py, landmark_resolution.py)
+    no lo usan: ahí SÍ conviene esperar lo que haga falta. `ai_analysis.py`
+    (llamada aislada y opcional, disparada automáticamente) sí lo usa,
+    para fallar rápido con un motivo claro en vez de dejar que el cliente
+    se rinda primero sin explicación.
 
     Es una llamada SÍNCRONA y con trabajo real de CPU/GPU por debajo
     (`Llama.create_chat_completion`), a diferencia del diseño anterior por
@@ -293,10 +366,11 @@ async def call_ai_json(
     loop mientras el modelo genera; los tres llamadores no necesitan
     saber este detalle, ya reciben una función `async def` como antes.
 
-    Lanza AIRequestError si el modelo no está disponible o la inferencia
-    falla, o AIHTTPError si respondió pero no se pudo interpretar como
-    JSON -- nunca devuelve un dict vacío ni None, así el llamador decide
-    explícitamente cómo degradar."""
+    Lanza AIRequestError si el modelo no está disponible, la espera del
+    lock agota `lock_timeout`, o la inferencia falla, o AIHTTPError si
+    respondió pero no se pudo interpretar como JSON -- nunca devuelve un
+    dict vacío ni None, así el llamador decide explícitamente cómo
+    degradar."""
     if not _qwen_available():
         raise AIRequestError(
             "El modelo de IA local no está disponible (llama-cpp-python no instalado, o "
@@ -304,7 +378,9 @@ async def call_ai_json(
         )
 
     try:
-        return await asyncio.to_thread(_call_ai_json_sync, system_prompt, user_prompt, max_tokens, temperature)
+        return await asyncio.to_thread(
+            _call_ai_json_sync, system_prompt, user_prompt, max_tokens, temperature, lock_timeout
+        )
     except (AIHTTPError, AIRequestError):
         raise
     except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:

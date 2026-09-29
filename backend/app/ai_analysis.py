@@ -148,6 +148,27 @@ _LANGUAGE_INSTRUCTIONS = {
 SUPPORTED_LANGUAGES = frozenset({"es", *_LANGUAGE_INSTRUCTIONS.keys()})
 
 
+# Tiempo máximo (segundos) que la llamada automática de conclusiones
+# espera por el `_model_lock` compartido con el análisis de fotos (ver
+# app/nlp/ai_client.py::call_ai_json) antes de rendirse con un 503 propio
+# en vez de quedar en cola. Bug real, confirmado en producción (28/9): sin
+# este límite, la llamada podía esperar varios MINUTOS detrás de la cola
+# de fotos pendientes (7-16s solo de codificación por foto, un solo lock
+# compartido desde ADR-50) -- tiempo de sobra para que el navegador/proxy
+# (ngrok en despliegue de desarrollo) cerrara la conexión del cliente
+# antes de que le llegara nada (499, "cliente ya se había ido", visto tal
+# cual en el log de esa fecha). 25s es un compromiso: suficiente para el
+# caso normal (esta llamada se dispara DESPUÉS de que el informe -- fotos
+# incluidas -- ya esté completo, así que el lock normalmente está libre;
+# solo hay contienda real si hay OTRO análisis en curso al mismo tiempo),
+# pero corto para que, si de verdad hay contienda, el usuario reciba un
+# motivo claro con tiempo de sobra antes de que el cliente se rinda por su
+# cuenta. `ai_attribute_extraction.py`/`landmark_resolution.py` NO usan
+# este límite -- ahí sí conviene esperar lo que haga falta, porque el
+# resultado es parte del informe principal, no una llamada aislada.
+_AI_SUMMARY_LOCK_TIMEOUT_SECONDS = 25.0
+
+
 async def _call_ai_chat(system_prompt: str, user_prompt: str, max_tokens: int) -> dict:
     """Delegación fina sobre app.nlp.ai_client.call_ai_json (modelo local
     Qwen3.5-4B, ver ese módulo). Conserva la excepción
@@ -165,6 +186,7 @@ async def _call_ai_chat(system_prompt: str, user_prompt: str, max_tokens: int) -
             user_prompt,
             max_tokens=max_tokens,
             temperature=0.3,
+            lock_timeout=_AI_SUMMARY_LOCK_TIMEOUT_SECONDS,
         )
     except AIRequestError as exc:
         raise AiAnalysisUnavailable(f"No se pudo ejecutar el modelo de IA local: {exc}") from exc

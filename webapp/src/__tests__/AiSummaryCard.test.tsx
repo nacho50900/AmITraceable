@@ -75,14 +75,33 @@ describe('AiSummaryCard', () => {
     });
   });
 
-  test('no disponible (503): muestra el mensaje del error sin botón de reintento', async () => {
+  test('no disponible (503): muestra el mensaje y permite reintentar', async () => {
     vi.mocked(api.aiSummary).mockRejectedValue(new AiSummaryUnavailableError('Cuota agotada por hoy.'));
     render(<AiSummaryCard report={makeExposureReport()} />);
 
     await waitFor(() => {
       expect(screen.getByText(/Cuota agotada por hoy\./)).toBeInTheDocument();
     });
-    expect(screen.queryByRole('button', { name: 'Reintentar' })).not.toBeInTheDocument();
+    // Antes de este fix no había botón aquí: un 503 por el modelo ocupado
+    // (ver lock_timeout en app/nlp/ai_client.py) dejaba al usuario sin
+    // forma de reintentar sin recargar la página entera.
+    expect(screen.getByRole('button', { name: 'Reintentar' })).toBeInTheDocument();
+  });
+
+  test('reintentar tras "no disponible" vuelve a llamar a la API y puede tener éxito', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.aiSummary)
+      .mockRejectedValueOnce(new AiSummaryUnavailableError('El modelo está ocupado.'))
+      .mockResolvedValueOnce({ verdict: '', conclusions: ['Conclusión tras reintento'] });
+    render(<AiSummaryCard report={makeExposureReport()} />);
+
+    const retryButton = await screen.findByRole('button', { name: 'Reintentar' });
+    await user.click(retryButton);
+
+    await waitFor(() => {
+      expect(screen.getByText('Conclusión tras reintento')).toBeInTheDocument();
+    });
+    expect(api.aiSummary).toHaveBeenCalledTimes(2);
   });
 
   test('error genérico: muestra mensaje de error con botón de reintento', async () => {

@@ -295,6 +295,90 @@ class TestCallAiJsonSync:
         assert ai_client._call_ai_json_sync("s", "u", 10, 0.0) == {}
         assert fake.reset_calls == 1
 
+    def test_strips_leading_thinking_block_before_parsing(self, monkeypatch):
+        """Bug real (28/9): Qwen3.5 antepone <think>...</think> incluso con
+        response_format=json_object -- ver el comentario junto a
+        _strip_thinking_block."""
+        fake = _FakeModel(content='<think>\nrazonando un poco\n</think>\n\n{"veredicto": "ok"}')
+        monkeypatch.setattr(ai_client, "_model", fake)
+
+        assert ai_client._call_ai_json_sync("s", "u", 10, 0.0) == {"veredicto": "ok"}
+
+    def test_strips_empty_thinking_block(self, monkeypatch):
+        """Caso real visto en el log: el bloque puede venir vacío."""
+        fake = _FakeModel(content='<think>\n\n</think>\n\n\n{"a": 1}')
+        monkeypatch.setattr(ai_client, "_model", fake)
+
+        assert ai_client._call_ai_json_sync("s", "u", 10, 0.0) == {"a": 1}
+
+    def test_lock_timeout_none_blocks_until_acquired_same_as_before(self, monkeypatch):
+        """lock_timeout=None (el valor por defecto, y el único que usan
+        ai_attribute_extraction.py/landmark_resolution.py) no cambia el
+        comportamiento de siempre: adquiere el lock sin límite de tiempo."""
+        fake = _FakeModel(content="{}")
+        monkeypatch.setattr(ai_client, "_model", fake)
+
+        assert ai_client._call_ai_json_sync("s", "u", 10, 0.0, lock_timeout=None) == {}
+
+    def test_lock_timeout_raises_request_error_when_lock_held(self, monkeypatch):
+        """Si el lock está ocupado (p. ej. analizando fotos) más tiempo del
+        permitido, se falla rápido con AIRequestError en vez de esperar
+        indefinidamente -- ver el comentario junto a _call_ai_json_sync
+        para el bug real de producción que motivó esto."""
+        ai_client._model_lock.acquire()
+        try:
+            with pytest.raises(AIRequestError, match="ocupado"):
+                ai_client._call_ai_json_sync("s", "u", 10, 0.0, lock_timeout=0.05)
+        finally:
+            ai_client._model_lock.release()
+
+    def test_lock_timeout_succeeds_when_lock_freed_in_time(self, monkeypatch):
+        fake = _FakeModel(content="{}")
+        monkeypatch.setattr(ai_client, "_model", fake)
+
+        assert ai_client._call_ai_json_sync("s", "u", 10, 0.0, lock_timeout=5.0) == {}
+
+    def test_lock_is_always_released_even_if_inference_raises(self, monkeypatch):
+        class _RaisingModel:
+            def reset(self):
+                pass
+
+            def create_chat_completion(self, **kwargs):
+                raise RuntimeError("fallo simulado de inferencia")
+
+        monkeypatch.setattr(ai_client, "_model", _RaisingModel())
+
+        with pytest.raises(RuntimeError):
+            ai_client._call_ai_json_sync("s", "u", 10, 0.0)
+
+        # Si el lock no se hubiera liberado en el `finally`, esta segunda
+        # llamada se quedaría colgada -- lock_timeout corto la delata.
+        fake = _FakeModel(content="{}")
+        monkeypatch.setattr(ai_client, "_model", fake)
+        assert ai_client._call_ai_json_sync("s", "u", 10, 0.0, lock_timeout=1.0) == {}
+
+
+class TestStripThinkingBlock:
+    def test_removes_leading_think_block(self):
+        assert ai_client._strip_thinking_block("<think>algo</think>{\"a\": 1}") == '{"a": 1}'
+
+    def test_removes_multiline_think_block_with_surrounding_whitespace(self):
+        content = "<think>\nrazonando\nen varias líneas\n</think>\n\n{\"a\": 1}"
+        assert ai_client._strip_thinking_block(content) == '{"a": 1}'
+
+    def test_leaves_content_without_think_block_untouched(self):
+        assert ai_client._strip_thinking_block('{"a": 1}') == '{"a": 1}'
+
+    def test_only_strips_the_first_block(self):
+        """Un segundo <think> más adelante (no debería ocurrir con un
+        modelo bien instruido) se deja tal cual -- mejor no arriesgarse a
+        comerse contenido real con una regex más voraz."""
+        content = '<think>uno</think>{"a": "<think>dos</think>"}'
+        assert ai_client._strip_thinking_block(content) == '{"a": "<think>dos</think>"}'
+
+    def test_non_string_content_is_returned_unchanged(self):
+        assert ai_client._strip_thinking_block(None) is None
+
 
 class TestCallAiJson:
     @pytest.mark.asyncio
@@ -309,33 +393,43 @@ class TestCallAiJson:
         monkeypatch.setattr(ai_client, "_qwen_available", lambda: True)
         captured = {}
 
-        def fake_sync(system_prompt, user_prompt, max_tokens, temperature):
+        def fake_sync(system_prompt, user_prompt, max_tokens, temperature, lock_timeout):
             captured.update(
-                system=system_prompt, user=user_prompt, max_tokens=max_tokens, temperature=temperature
+                system=system_prompt,
+                user=user_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                lock_timeout=lock_timeout,
             )
             return {"a": 1}
 
         monkeypatch.setattr(ai_client, "_call_ai_json_sync", fake_sync)
 
-        result = await call_ai_json("sis", "usr", max_tokens=55, temperature=0.3)
+        result = await call_ai_json("sis", "usr", max_tokens=55, temperature=0.3, lock_timeout=12.0)
 
         assert result == {"a": 1}
-        assert captured == {"system": "sis", "user": "usr", "max_tokens": 55, "temperature": 0.3}
+        assert captured == {
+            "system": "sis",
+            "user": "usr",
+            "max_tokens": 55,
+            "temperature": 0.3,
+            "lock_timeout": 12.0,
+        }
 
     @pytest.mark.asyncio
-    async def test_defaults_max_tokens_and_temperature(self, monkeypatch):
+    async def test_defaults_max_tokens_temperature_and_lock_timeout(self, monkeypatch):
         monkeypatch.setattr(ai_client, "_qwen_available", lambda: True)
         captured = {}
 
-        def fake_sync(system_prompt, user_prompt, max_tokens, temperature):
-            captured.update(max_tokens=max_tokens, temperature=temperature)
+        def fake_sync(system_prompt, user_prompt, max_tokens, temperature, lock_timeout):
+            captured.update(max_tokens=max_tokens, temperature=temperature, lock_timeout=lock_timeout)
             return {}
 
         monkeypatch.setattr(ai_client, "_call_ai_json_sync", fake_sync)
 
         await call_ai_json("s", "u")
 
-        assert captured == {"max_tokens": 1000, "temperature": 0.0}
+        assert captured == {"max_tokens": 1000, "temperature": 0.0, "lock_timeout": None}
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
