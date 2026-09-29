@@ -11,6 +11,15 @@ services:
         - WITH_GEOLOCATION=true
     container_name: backend
     image: ghcr.io/nacho50900/amitraceable-backend:latest
+    # Sin esto, un crash del proceso (p. ej. un CUDA_CHECK fatal de
+    # ggml-cuda ante un fallo de VRAM -- ver el comentario de
+    # `deploy.resources` más abajo sobre el presupuesto de 4GB -- que
+    # aborta el proceso en C sin dar ocasión a ningún try/except de
+    # Python) deja el contenedor parado hasta reiniciarlo a mano.
+    # "unless-stopped" lo reinicia solo tras un crash (o tras que
+    # Docker/Windows arranquen), pero no pelea contigo si lo paras tú
+    # explícitamente con `docker compose stop`/`down`.
+    restart: unless-stopped
     ports:
       - "3000:3000"
     env_file:

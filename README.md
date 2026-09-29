@@ -221,8 +221,9 @@ Arranca solo `backend` + `webapp` (servicios sin perfil):
 - Backend API: http://localhost:3000 (docs interactivos en `/docs`)
 
 `prometheus`/`grafana` (perfil `monitoring`) y `dinov2-igpu-worker`
-(perfil `igpu`, ver más abajo) son **opt-in**, no arrancan con el
-comando de arriba a secas:
+(perfil `igpu`, ver más abajo) son opt-in por diseño -- no arrancan con
+el comando de arriba a secas, salvo que actives el perfil correspondiente
+por defecto (ver justo debajo):
 
 ```bash
 docker compose --profile monitoring up --build   # + Grafana/Prometheus
@@ -231,8 +232,18 @@ docker compose --profile igpu up --build         # + worker de iGPU
 docker compose --profile monitoring --profile igpu up --build
 ```
 
+**Activar un perfil por defecto, sin pasar `--profile` cada vez:** copia
+`.env.example` (el de la raíz del repo, junto a este `docker-compose.yml`
+-- distinto de `backend/.env.example`) a `.env` y pon ahí
+`COMPOSE_PROFILES=igpu` (combinable: `COMPOSE_PROFILES=igpu,monitoring`).
+Compose lee ese `.env` de la raíz automáticamente, así que a partir de
+ahí `docker compose up --build` a secas ya arranca también
+`dinov2-igpu-worker` -- sin el `.env` de la raíz (o sin esa variable en
+él), sigue haciendo falta el flag `--profile` explícito. Sirve para
+cualquier perfil, no solo `igpu`.
+
 - Grafana: http://localhost:9091 · Prometheus: http://localhost:9090
-  (solo con `--profile monitoring`)
+  (solo con `--profile monitoring`, activo o no por defecto)
 
 Antes de levantarlo, crea `backend/.env` a partir de `backend/.env.example`
 (ver [variables de entorno](#variables-de-entorno) más abajo).
@@ -269,8 +280,9 @@ aparte del backend, nunca instalado ahí (ver ADR-28 en
 `docs/src/09_architecture_decisions.adoc` para el porqué: mezclarlo con
 el `torch`/`cu121` que ya usa el backend para DINOv2 corrompe ese
 entorno). Actívalo con `ENABLE_IGPU_OFFLOAD=true` en `backend/.env` **y**
-el perfil `igpu` al arrancar -- ninguno de los dos por separado hace
-nada.
+el perfil `igpu` al arrancar (a mano con `--profile igpu`, o por defecto
+con `COMPOSE_PROFILES=igpu` en el `.env` de la raíz -- ver más arriba) --
+ninguno de los dos por separado hace nada.
 
 Construir `backend` + `webapp` + `dinov2-igpu-worker` los tres a la vez
 (cada uno con su propia descarga de `torch`) puede saturar los recursos
