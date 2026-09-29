@@ -30,6 +30,7 @@ from app.data.ine_reference import (
     resolve_autonomous_community_in_text,
 )
 from app.models.schemas import InferredAttribute, SocialPost
+from app.nlp import demographic_patterns as dp
 
 
 def _strip_accents(text: str) -> str:
@@ -234,91 +235,11 @@ class DemographicFindings:
     confidence: dict[str, float] = field(default_factory=dict)
 
 
-_AGE_RE = re.compile(r"\b(?:tengo|con)\s+(\d{1,2})\s+años\b|\b(\d{1,2})\s+años\b", re.I)
-_SEX_MALE_RE = re.compile(r"\b(soy un chico|soy un chaval|soy hombre)\b", re.I)
-_SEX_FEMALE_RE = re.compile(r"\b(soy una chica|soy mujer)\b", re.I)
+# Los patrones de edad, sexo, estudios, ocupación, empresa, nacionalidad,
+# situación laboral, lengua, hogar y religión viven ahora en
+# `demographic_patterns.py` como bancos temáticos (tuplas valor/patrón
+# sobre texto normalizado, con descarte de frases sobre terceros).
 _UNIVERSITY_RE = re.compile(r"\buniversidad de (\w+)", re.I)
-# Nota: se usa [Tt]rabajo (clase de caracteres en la primera letra) en vez
-# de un grupo con flag "(?i:trabajo)", porque ese grupo no contiene ninguna
-# alternancia y Sonar lo marca como "unnecessarily grouped subpattern"
-# (python:regex). Cubre el caso real que nos importa (mayúscula al empezar
-# frase: "Trabajo en Indra..."), aunque ya no cubre variantes en mayúsculas
-# intermedias tipo "TRABAJO" -- caso que no aparece en el uso real de bios
-# de redes sociales y no está cubierto por los tests existentes.
-_COMPANY_RE = re.compile(r"\b[Tt]rabajo (?:en|para)\s+([A-Z][\wÁÉÍÓÚáéíóú]+)")
-_STUDY_VERB_RE = re.compile(r"\b(?:estudio|estudiante de|graduad[oa] en)\s+([a-záéíóúñ ]+)", re.I)
-
-# Nacionalidad. No se intenta cubrir todas las nacionalidades del mundo
-# (inabarcable con regex y fuera del alcance de este MVP): se cubren la
-# autodeclaración explícita ("nacionalidad española/extranjera") y los
-# gentilicios de las nacionalidades más numerosas en España a fecha de
-# escribir esto (ver NATIONALITY_DISTRIBUTION en ine_reference.py) -- si
-# no aparece ninguno de estos patrones, se queda en None (no se asume
-# "española por defecto": eso sería inventar un dato que el usuario no ha
-# declarado).
-_NATIONALITY_ESPANOLA_RE = re.compile(
-    r"\b(soy español|soy española|nacionalidad española|de nacionalidad española)\b", re.I
-)
-_NATIONALITY_EXTRANJERA_RE = re.compile(
-    r"\b(soy extranjero|soy extranjera|nacionalidad extranjera|de nacionalidad extranjera|"
-    r"soy marroqu[ií]|soy colombian[oa]|soy rumano|soy rumana|soy venezolan[oa]|"
-    r"soy peruan[oa]|soy ecuatorian[oa]|soy argentin[oa]|soy bolivian[oa]|soy chin[oa])\b",
-    re.I,
-)
-
-# Situación laboral (distinto de `ocupacion`, que es SECTOR profesional).
-_EMPLOYMENT_PARADO_RE = re.compile(r"\b(estoy en paro|desemplead[oa]|buscando empleo|busco trabajo)\b", re.I)
-_EMPLOYMENT_JUBILADO_RE = re.compile(r"\b(jubilad[oa]|pensionista)\b", re.I)
-_EMPLOYMENT_ESTUDIANTE_RE = re.compile(r"\b(soy estudiante|estudiante a tiempo completo)\b", re.I)
-_EMPLOYMENT_ACTIVO_RE = re.compile(
-    r"\b(trabajo (?:en|de|para|como)|soy autónomo|soy autónoma|tengo trabajo)\b", re.I
-)
-
-# Nivel de estudios (tramos INE/EPA, ver _try_detect_nivel_estudios para
-# el porqué del orden y de exigir "superior"/"medio" explícito en la FP).
-_NIVEL_ESTUDIOS_SUPERIOR_RE = re.compile(
-    r"\b(soy universitari[oa]|tengo una carrera universitaria|"
-    r"tengo un grado universitario|soy graduad[oa] en|"
-    r"termine la carrera|acabe la carrera|termine la universidad|"
-    r"tengo una licenciatura|soy licenciad[oa]|"
-    r"tengo un master|hice un master|termine un master|"
-    r"tengo un doctorado|soy doctorand[oa]|"
-    r"tengo un ciclo formativo de grado superior|"
-    r"tengo un grado superior de fp|soy tecnico superior|soy tecnica superior)\b",
-    re.I,
-)
-_NIVEL_ESTUDIOS_SECUNDARIA_SUPERIOR_RE = re.compile(
-    r"\b(tengo el bachillerato|termine bachillerato|termine el bachillerato|"
-    r"tengo un ciclo formativo de grado medio|tengo un grado medio de fp|"
-    r"soy tecnico de grado medio|soy tecnica de grado medio|termine la fp)\b",
-    re.I,
-)
-_NIVEL_ESTUDIOS_SECUNDARIA_O_INFERIOR_RE = re.compile(
-    r"\b(solo tengo la eso|tengo la eso|no termine el instituto|"
-    r"solo estudios primarios|no tengo estudios|abandone los estudios|"
-    r"no termine la eso|no termine secundaria)\b",
-    re.I,
-)
-
-# Tipo de hogar: señales que se combinan sobre TODOS los posts (no una
-# regex "ganadora" por post, ver `_detect_household_type`).
-_HOUSEHOLD_ALONE_RE = re.compile(r"\bvivo sol[oa]\b", re.I)
-_HOUSEHOLD_WITH_PARTNER_RE = re.compile(
-    r"\bvivo con mi (pareja|novio|novia|marido|mujer|esposo|esposa)\b", re.I
-)
-_HOUSEHOLD_MONOPARENTAL_RE = re.compile(r"\b(madre soltera|padre soltero|familia monoparental)\b", re.I)
-_HOUSEHOLD_CHILDREN_MENTION_RE = re.compile(r"\bmis? hij[oa]s?\b", re.I)
-
-# Lengua materna/habitual cooficial. Igual que con nacionalidad, no se
-# intenta cubrir todo el espectro dialectal (asturiano, aragonés, aranés...
-# -- ver ADR correspondiente si se amplía en el futuro): solo las 4 lenguas
-# cooficiales con tabla de referencia en LANGUAGE_BY_CCAA.
-_LANGUAGE_CATALAN_RE = re.compile(r"\b(mi lengua materna es el catalán|hablo catalán|catalanoparlante)\b", re.I)
-_LANGUAGE_EUSKERA_RE = re.compile(r"\b(mi lengua materna es el euskera|hablo euskera|euskaldun)\b", re.I)
-_LANGUAGE_GALLEGO_RE = re.compile(r"\b(mi lengua materna es el gallego|hablo gallego|galegofalante)\b", re.I)
-_LANGUAGE_VALENCIANO_RE = re.compile(r"\b(mi lengua materna es el valenciano|hablo valenciano)\b", re.I)
-
-
 # Orientación sexual: se cubren las autodeclaraciones explícitas más
 # comunes en bios de redes sociales, incluyendo variantes ortográficas y
 # expresiones frecuentes en textos cortos.
@@ -349,9 +270,11 @@ _ZODIAC_EMOJI_MAP: dict[str, tuple[str, str]] = {
     "\u2653": ("piscis",      "19 feb - 20 mar"),  # ♓
 }
 _ZODIAC_TEXT_MAP: dict[str, str] = {name: f"{name} ({rango})" for name, rango in _ZODIAC_EMOJI_MAP.values()}
+# 'leo' (verbo), 'libra' (unidad), 'cancer' (enfermedad) y 'acuario' (zoo)
+# solo cuentan con frase-ancla ("soy leo", "mi signo es libra"), ver
+# `dp.SIGNO_ANCLADO_RE`; los demás nombres valen sueltos (bios tipo "Aries ♈").
 _ZODIAC_TEXT_RE = re.compile(
-    r"\b(?:soy\s+)?(?:aries|tauro|geminis|cancer|leo|virgo|libra|escorpio|"
-    r"sagitario|capricornio|acuario|piscis)\b",
+    r"\b(?:soy\s+)?(?:aries|tauro|geminis|virgo|escorpio|sagitario|capricornio|piscis)\b",
     re.I,
 )
 
@@ -372,32 +295,6 @@ _RELIGION_EMOJI_MAP: dict[str, str] = {
     "📿": "catolicismo",
     "🕊": "cristianismo",
     "🕊️": "cristianismo",
-}
-_RELIGION_TEXT_RE = re.compile(
-    r"\b(?:soy\s+)?(?:jud[ií]o|jud[ií]a|judio|judia|musulm[aá]n|musulmana|"
-    r"cat[oó]lico|cat[oó]lica|catolico|catolica|cristiano|cristiana|budista|"
-    r"hinduista|ateo|atea|agn[oó]stico|agn[oó]stica|islam|juda[ií]smo)\b",
-    re.I,
-)
-_RELIGION_TEXT_MAP = {
-    "judio": "judaismo",
-    "judia": "judaismo",
-    "judío": "judaismo",
-    "judía": "judaismo",
-    "judaismo": "judaismo",
-    "musulman": "islam",
-    "musulmana": "islam",
-    "islam": "islam",
-    "catolico": "catolicismo",
-    "catolica": "catolicismo",
-    "cristiano": "cristianismo",
-    "cristiana": "cristianismo",
-    "budista": "budismo",
-    "hinduista": "hinduismo",
-    "ateo": "ateismo",
-    "atea": "ateismo",
-    "agnostico": "agnosticismo",
-    "agnostica": "agnosticismo",
 }
 
 
@@ -450,12 +347,8 @@ def _try_detect_edad(text: str, permalink: str, findings: DemographicFindings) -
     if findings.edad is not None:
         return
 
-    match = _AGE_RE.search(text)
-    if not match:
-        return
-
-    age = int(match.group(1) or match.group(2))
-    if 12 <= age <= 100:  # descarta falsos positivos ("100 años de historia")
+    age = dp.edad_autodeclarada(text)
+    if age is not None:
         findings.edad = age
         findings.evidence.setdefault("edad", []).append(permalink)
 
@@ -464,13 +357,11 @@ def _try_detect_sexo(text: str, permalink: str, findings: DemographicFindings) -
     if findings.sexo is not None:
         return
 
-    if _SEX_MALE_RE.search(text):
-        findings.sexo = "hombre"
-    elif _SEX_FEMALE_RE.search(text):
-        findings.sexo = "mujer"
-    else:
+    sexo = dp.sexo_autodeclarado(text)
+    if sexo is None:
         return
 
+    findings.sexo = sexo
     findings.evidence.setdefault("sexo", []).append(permalink)
 
 
@@ -478,13 +369,14 @@ def _try_detect_estudios(text: str, permalink: str, findings: DemographicFinding
     if findings.estudios is not None:
         return
 
-    match = _STUDY_VERB_RE.search(text)
-    if not match:
-        return
-
-    candidate = _strip_accents(match.group(1).strip().lower())
-    matched = next((k for k in STUDIES_DISTRIBUTION if k in candidate), None)
-    if matched:
+    matched = dp.estudios_autodeclarados(text)
+    if matched is None:
+        # Respaldo: la carrera aparece literal (clave de STUDIES_DISTRIBUTION).
+        for candidate in dp.candidatos_estudios(text):
+            matched = next((k for k in STUDIES_DISTRIBUTION if k in candidate), None)
+            if matched:
+                break
+    if matched in STUDIES_DISTRIBUTION:
         findings.estudios = matched
         findings.evidence.setdefault("estudios", []).append(permalink)
 
@@ -516,14 +408,11 @@ def _try_detect_nivel_estudios(text: str, permalink: str, findings: DemographicF
         findings.evidence.setdefault("nivel_estudios", []).append(permalink)
         return
 
-    if _NIVEL_ESTUDIOS_SUPERIOR_RE.search(text):
-        findings.nivel_estudios = "superior"
-    elif _NIVEL_ESTUDIOS_SECUNDARIA_SUPERIOR_RE.search(text):
-        findings.nivel_estudios = "secundaria_superior"
-    elif _NIVEL_ESTUDIOS_SECUNDARIA_O_INFERIOR_RE.search(text):
-        findings.nivel_estudios = "secundaria_o_inferior"
-    else:
+    nivel = dp.nivel_estudios_autodeclarado(text)
+    if nivel is None:
         return
+
+    findings.nivel_estudios = nivel
 
     findings.evidence.setdefault("nivel_estudios", []).append(permalink)
 
@@ -601,24 +490,22 @@ def _try_detect_rama_estudios(text: str, permalink: str, findings: DemographicFi
         findings.evidence.setdefault("rama_estudios", []).extend(findings.evidence.get("estudios", []))
         return
 
-    match = _STUDY_VERB_RE.search(text)
-    if not match:
-        return
-
-    candidate = _strip_accents(match.group(1).strip().lower())
-    matched_rama = next((rama for keyword, rama in _RAMA_ESTUDIOS_VOCABULARY.items() if keyword in candidate), None)
-    if matched_rama:
-        findings.rama_estudios = matched_rama
-        findings.evidence.setdefault("rama_estudios", []).append(permalink)
+    for candidate in dp.candidatos_estudios(text):
+        matched_rama = next(
+            (rama for keyword, rama in _RAMA_ESTUDIOS_VOCABULARY.items() if keyword in candidate), None
+        )
+        if matched_rama:
+            findings.rama_estudios = matched_rama
+            findings.evidence.setdefault("rama_estudios", []).append(permalink)
+            return
 
 
 def _try_detect_ocupacion(text: str, permalink: str, findings: DemographicFindings) -> None:
     if findings.ocupacion is not None:
         return
 
-    lowered = _strip_accents(text.lower())
-    matched = next((k for k in OCCUPATION_DISTRIBUTION if k in lowered), None)
-    if matched:
+    matched = dp.ocupacion_autodeclarada(text)
+    if matched in OCCUPATION_DISTRIBUTION:
         findings.ocupacion = matched
         findings.evidence.setdefault("ocupacion", []).append(permalink)
 
@@ -758,18 +645,23 @@ def _try_detect_universidad(text: str, permalink: str, findings: DemographicFind
         return
 
     match = _UNIVERSITY_RE.search(text)
-    if match:
-        findings.universidad = match.group(1)
+    universidad = match.group(1) if match else dp.universidad_autodeclarada(text)
+    if universidad:
+        findings.universidad = universidad
         findings.evidence.setdefault("universidad", []).append(permalink)
+
+
+# Topónimos que NO son empresa ("trabajo en Madrid").
+_TOPONIMOS_NO_EMPRESA = frozenset(MUNICIPALITY_POPULATION) | frozenset(PROVINCE_POPULATION)
 
 
 def _try_detect_empresa(text: str, permalink: str, findings: DemographicFindings) -> None:
     if findings.empresa is not None:
         return
 
-    match = _COMPANY_RE.search(text)
-    if match:
-        findings.empresa = match.group(1)
+    empresa = dp.empresa_autodeclarada(text, _TOPONIMOS_NO_EMPRESA)
+    if empresa:
+        findings.empresa = empresa
         findings.evidence.setdefault("empresa", []).append(permalink)
 
 
@@ -777,13 +669,11 @@ def _try_detect_nacionalidad(text: str, permalink: str, findings: DemographicFin
     if findings.nacionalidad is not None:
         return
 
-    if _NATIONALITY_ESPANOLA_RE.search(text):
-        findings.nacionalidad = "espanola"
-    elif _NATIONALITY_EXTRANJERA_RE.search(text):
-        findings.nacionalidad = "extranjera"
-    else:
+    nacionalidad = dp.nacionalidad_autodeclarada(text)
+    if nacionalidad is None:
         return
 
+    findings.nacionalidad = nacionalidad
     findings.evidence.setdefault("nacionalidad", []).append(permalink)
 
 
@@ -791,22 +681,14 @@ def _try_detect_situacion_laboral(text: str, permalink: str, findings: Demograph
     if findings.situacion_laboral is not None:
         return
 
-    # Orden deliberado: "parado"/"jubilado"/"estudiante" son más
-    # específicos y menos ambiguos que "activo" (que podría dar un falso
-    # positivo con menciones genéricas al trabajo que no describen la
-    # situación laboral actual de la persona, p.ej. citando el trabajo de
-    # otra persona) -- se comprueban primero.
-    if _EMPLOYMENT_PARADO_RE.search(text):
-        findings.situacion_laboral = "parado"
-    elif _EMPLOYMENT_JUBILADO_RE.search(text):
-        findings.situacion_laboral = "jubilado"
-    elif _EMPLOYMENT_ESTUDIANTE_RE.search(text):
-        findings.situacion_laboral = "estudiante"
-    elif _EMPLOYMENT_ACTIVO_RE.search(text):
-        findings.situacion_laboral = "activo"
-    else:
+    # Orden deliberado (ver `dp.SITUACION_LABORAL`): "parado"/"jubilado"/
+    # "estudiante" son más específicos que "activo", que podría dar un
+    # falso positivo con menciones genéricas al trabajo.
+    situacion = dp.situacion_laboral_autodeclarada(text)
+    if situacion is None:
         return
 
+    findings.situacion_laboral = situacion
     findings.evidence.setdefault("situacion_laboral", []).append(permalink)
 
 
@@ -814,17 +696,11 @@ def _try_detect_lengua_materna(text: str, permalink: str, findings: DemographicF
     if findings.lengua_materna is not None:
         return
 
-    if _LANGUAGE_CATALAN_RE.search(text):
-        findings.lengua_materna = "catalan"
-    elif _LANGUAGE_EUSKERA_RE.search(text):
-        findings.lengua_materna = "euskera"
-    elif _LANGUAGE_GALLEGO_RE.search(text):
-        findings.lengua_materna = "gallego"
-    elif _LANGUAGE_VALENCIANO_RE.search(text):
-        findings.lengua_materna = "valenciano"
-    else:
+    lengua = dp.lengua_materna_autodeclarada(text)
+    if lengua is None:
         return
 
+    findings.lengua_materna = lengua
     findings.evidence.setdefault("lengua_materna", []).append(permalink)
 
 
@@ -839,19 +715,19 @@ def _collect_household_signals(posts: list[SocialPost]) -> tuple[bool, bool, boo
     evidence: list[str] = []
 
     for post in posts:
-        text = post.text or ""
+        text = dp.normalizar(post.text or "")
         if not text:
             continue
-        if _HOUSEHOLD_MONOPARENTAL_RE.search(text):
+        if dp.HOGAR_MONOPARENTAL_RE.search(text):
             monoparental_explicit = True
             evidence.append(post.permalink)
-        if _HOUSEHOLD_ALONE_RE.search(text):
+        if dp.HOGAR_SOLO_RE.search(text):
             lives_alone = True
             evidence.append(post.permalink)
-        if _HOUSEHOLD_WITH_PARTNER_RE.search(text):
+        if dp.HOGAR_CON_PAREJA_RE.search(text):
             lives_with_partner = True
             evidence.append(post.permalink)
-        if _HOUSEHOLD_CHILDREN_MENTION_RE.search(text):
+        if dp.HOGAR_HIJOS_RE.search(text):
             mentions_children = True
             evidence.append(post.permalink)
 
@@ -906,27 +782,28 @@ def _try_detect_location(text: str, permalink: str, findings: DemographicFinding
 
 
 def _match_location(text: str, permalink: str, findings: DemographicFindings) -> None:
-    lowered = _strip_accents(text.lower())
+    for candidate in dp.candidatos_residencia(text):
+        if _resolve_location_candidate(candidate, permalink, findings):
+            return
 
+
+def _resolve_location_candidate(candidate: str, permalink: str, findings: DemographicFindings) -> bool:
+    """True si el candidato (trozo tras 'vivo en', 'resido en', 'me mudé a'...)
+    se resolvió a municipio, provincia o comunidad autónoma. Coincidencia por
+    PALABRA completa: 'leon' no encaja en 'leones'."""
     # Municipio primero (más específico); si hay match, no hace falta
     # comprobar provincia por separado para ese mismo texto.
-    m = re.search(r"\bvivo en ([a-z ]+)", lowered)
-    candidate = m.group(1).strip() if m else None
-
-    if not candidate:
-        return
-
-    muni_match = next((k for k in MUNICIPALITY_POPULATION if k in candidate), None)
+    muni_match = next((k for k in MUNICIPALITY_POPULATION if dp.contiene_toponimo(candidate, k)), None)
     if muni_match:
         findings.municipio = muni_match
         findings.evidence.setdefault("municipio", []).append(permalink)
-        return
+        return True
 
-    prov_match = next((k for k in PROVINCE_POPULATION if k in candidate), None)
+    prov_match = next((k for k in PROVINCE_POPULATION if dp.contiene_toponimo(candidate, k)), None)
     if prov_match:
         findings.provincia = prov_match
         findings.evidence.setdefault("provincia", []).append(permalink)
-        return
+        return True
 
     # Ni municipio ni provincia concreta: puede que haya nombrado una
     # comunidad autónoma COMPLETA (p.ej. "vivo en Canarias", "vivo en
@@ -935,7 +812,7 @@ def _match_location(text: str, permalink: str, findings: DemographicFindings) ->
     # tiene varias, se guarda al nivel de comunidad autónoma.
     ccaa = resolve_autonomous_community_in_text(candidate)
     if ccaa is None:
-        return
+        return False
 
     provinces = AUTONOMOUS_COMMUNITY_PROVINCES[ccaa]
     if len(provinces) == 1:
@@ -944,6 +821,7 @@ def _match_location(text: str, permalink: str, findings: DemographicFindings) ->
     else:
         findings.comunidad_autonoma = ccaa
         findings.evidence.setdefault("comunidad_autonoma", []).append(permalink)
+    return True
 
 
 def _try_detect_orientacion_sexual(text: str, permalink: str, findings: DemographicFindings) -> None:
@@ -954,8 +832,13 @@ def _try_detect_orientacion_sexual(text: str, permalink: str, findings: Demograp
     if findings.orientacion_sexual is not None:
         return
 
-    match = _SEXUALITY_RE.search(text)
-    if not match:
+    # Por cláusula y descartando terceros: "mi novio es gay" no declara la
+    # orientación del autor.
+    match = next(
+        (m for c in dp.clausulas(dp.normalizar(text)) for m in dp.buscar_propios(_SEXUALITY_RE, c)),
+        None,
+    )
+    if match is None:
         return
 
     raw = match.group(0).lower()
@@ -994,7 +877,7 @@ def _try_detect_signo_zodiacal(text: str, permalink: str, findings: DemographicF
             return
 
     normalized_text = _strip_accents(text.lower())
-    match = _ZODIAC_TEXT_RE.search(normalized_text)
+    match = _ZODIAC_TEXT_RE.search(normalized_text) or dp.SIGNO_ANCLADO_RE.search(normalized_text)
     if not match:
         return
 
@@ -1018,13 +901,7 @@ def _try_detect_religion(text: str, permalink: str, findings: DemographicFinding
             findings.evidence.setdefault("religion", []).append(permalink)
             return
 
-    normalized_text = _strip_accents(text.lower())
-    match = _RELIGION_TEXT_RE.search(normalized_text)
-    if not match:
-        return
-
-    raw = match.group(0).strip()
-    religion = _RELIGION_TEXT_MAP.get(raw.split()[-1])
+    religion = dp.religion_autodeclarada(text)
     if religion is None:
         return
 

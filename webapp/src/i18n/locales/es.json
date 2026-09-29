@@ -173,7 +173,15 @@
       "rutina": "Rutina",
       "aficion": "Afición",
       "texto_visible": "Texto visible en foto",
-      "matricula": "Matrícula de vehículo"
+      "matricula": "Matrícula de vehículo",
+      "mascota": "Mascota",
+      "vehiculo": "Vehículo",
+      "vivienda": "Vivienda",
+      "habito": "Hábito",
+      "idiomas": "Idiomas",
+      "ingresos": "Ingresos",
+      "salud": "Salud",
+      "ideologia_politica": "Ideología política"
     },
     "attributeValue": {
       "sexo": {

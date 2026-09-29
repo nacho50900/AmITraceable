@@ -1589,6 +1589,88 @@ existentes para texto, nunca como un campo "duro" de
 `DemographicFindings`), reutilizando la misma clave/forma de JSON para
 parsear con `_parse_soft_inferences` sin duplicar lógica de validación.
 
+==== ADR-51: Bancos temáticos de regex estrictos para las autodeclaraciones demográficas (`demographic_patterns.py`)
+
+
+*Contexto*: las regex de `demographic_extraction.py` eran patrones sueltos
+y de vocabulario reducido: sobre 68 frases realistas (ver
+`tests/test_demographic_patterns.py`) solo detectaban 10 (fallaban
+"terminé la carrera", "soy abogada", "resido en", "tengo veinticuatro
+años", "(24M)", "UNED", "soy ucraniana"...) y a la vez dejaban pasar
+falsos positivos ("Leo mucho" como signo Leo, "anuncio comercial" como
+ocupación, "trabajo en Madrid" como empresa, "mi novio es gay" como
+orientación del autor). El coste de un falso positivo es alto porque
+`merge_findings` (`ai_attribute_extraction.py`) da PRIORIDAD a la regex: la
+IA solo rellena lo que la regex no encontró y nunca la corrige, así que el
+falso positivo llega tal cual al estimador de k-anonimato.
+
+*Decisión*: nuevo `nlp/demographic_patterns.py` con los patrones de edad,
+sexo, ubicación, estudios, nivel de estudios, ocupación, universidad,
+empresa, nacionalidad, situación laboral, lengua, hogar y religión como
+bancos de tuplas `(valor_canónico, patrón)` (`Banco`, `primer_valor`), y
+`demographic_extraction.py` pasa a delegar en ellos. Se mantiene la
+prioridad de la regex sobre la IA y, por eso mismo, los bancos son
+ESTRICTOS, no permisivos:
+
+- Texto normalizado (`normalizar`: minúsculas y sin tildes) para que
+  "terminé"/"termine" o "máster"/"master" se comporten igual.
+- Frase-ancla en primera persona en ocupación ("soy X", "trabajo de X") y
+  religión; se eliminó el respaldo de palabra suelta de ocupación.
+  `SIGNOS_AMBIGUOS` (leo, libra, cáncer, acuario) exige ancla.
+- Descarte de terceros con `es_propio(clausula, inicio)`: una coincidencia
+  no cuenta si "mi madre", "mi jefe"... aparece ANTES en su cláusula. Es
+  posicional (no descarta la cláusula entera) para que "soy mujer casada
+  con mi marido" siga siendo "mujer" y "mi madre es jubilada" no sea
+  "jubilado". Se aplica también a orientación sexual.
+- `clausulas()` separa por " y " salvo en residencia y estudios (para no
+  partir "castilla y leon") y protege los compuestos "treinta_y_cuatro".
+- "No terminé la carrera" ya no cuenta como nivel superior
+  (`_NIVEL_SUPERIOR_NEGADO_RE`) y "grado medio" no cuenta como grado
+  universitario.
+- La ubicación compara topónimos por palabra completa
+  (`contiene_toponimo`: "leon" no encaja en "leones").
+
+Con estos bancos la misma sonda pasa de 10/68 a 68/68 y los 153 tests
+previos de `test_demographic_extraction.py` siguen pasando sin cambios.
+Cambios de comportamiento asumidos: religión y ocupación ya no se
+detectan por palabra suelta (p. ej. "Católica | Madrid" en una bio), y las
+siglas de universidad se guardan con nombre corto ("Oviedo", "Politécnica de
+Madrid"), igual que ya hacía "universidad de X".
+
+==== ADR-52: Señales de estilo de vida por regex, fuera del score y del k-anonimato (`lifestyle_patterns.py`, `text_signals.py`)
+
+
+*Contexto*: hay datos que hacen reconocible a una persona pero no tienen
+tabla INE con la que estrechar población (aficiones, equipo de fútbol,
+mascotas, vivienda, hábitos, rutina, idiomas, salud, ideología), y solo
+los cubría la IA, que no siempre está configurada.
+
+*Decisión*: `nlp/lifestyle_patterns.py` (bancos por tema, mismas
+convenciones que ADR-51: texto normalizado, ancla en primera persona,
+`es_propio`) y `nlp/text_signals.py::infer_lifestyle_attributes()`, que
+agrega por publicación y devuelve `InferredAttribute`. Se llama desde
+`report/generator.py` DESPUÉS de `compute_score` (etapa
+`estilo_de_vida_regex`), así que no altera el score ni el k-anonimato: solo
+enriquece la lista de atributos inferidos que ve el usuario, sumándose a
+las inferencias blandas de la IA. Detalles con su porqué:
+
+- Una mención del tema no basta ("vi un concierto en la tele"): las
+  aficiones exigen ancla de gusto (`_ANCLA_GUSTO`) o práctica directa
+  (`PRACTICA_DIRECTA`); los hashtags valen solo `CONF_ETIQUETA` (0,35).
+- Equipo de fútbol: gana la coincidencia más larga (`_equipo`), para que
+  "socio del Real Oviedo" no caiga en el Madrid por el alias corto "real".
+- La confianza sube con las repeticiones (`_BONUS_POR_REPETICION`) con tope
+  de 0,9: una señal blanda repetida nunca pasa a ser un hecho.
+- Salud, ideología y afiliación sindical (categorías especiales, art. 9
+  RGPD) se incluyen porque el informe solo lo ve el propio usuario y su
+  objetivo es mostrar lo que ya es inferible; llevan la nota `NOTA_ART9` en
+  el valor y confianza `CONF_SENSIBLE`. Se desactivan quitando la
+  llamada a `_sensibles` en `detectar_estilo_de_vida`.
+- Categorías nuevas (`mascota`, `vehiculo`, `vivienda`, `habito`,
+  `idiomas`, `ingresos`, `salud`, `ideologia_politica`) con etiqueta es/en
+  en `InferredAttributesList.tsx` y `inferredCategory`; sin ella el
+  fallback las mostraría sin tildes.
+
 [[adr-cat-analisis-visual-vision-por-computador]]
 === Análisis visual (visión por computador)
 

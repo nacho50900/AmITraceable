@@ -33,6 +33,7 @@ from app.nlp.ai_attribute_extraction import (
     merge_findings,
 )
 from app.nlp.demographic_extraction import DemographicFindings, extract_demographics
+from app.nlp.text_signals import infer_lifestyle_attributes
 from app.nlp.travel_detection import detect_travel_permalinks
 from app.progress import ProgressCallback, emit_progress, run_with_heartbeat
 from app.analysis_timing import timed_stage
@@ -539,6 +540,11 @@ async def generate_report(
     # parámetro `inferred_attributes` sigue siendo el que ya se calculó (y
     # ya alimentó compute_score) en analysis_router._build_report.
     inferred_attributes = [*inferred_attributes, *soft_inferences]
+    # Señales de estilo de vida por regex (aficiones, equipo, mascotas,
+    # vivienda, hábitos...), ver app/nlp/text_signals.py. Se añaden después
+    # del score: no lo alteran.
+    async with timed_stage("estilo_de_vida_regex"):
+        inferred_attributes = [*inferred_attributes, *infer_lifestyle_attributes(posts_for_demographics)]
 
     # Este tramo mide principalmente la ESPERA a que termine la tarea de
     # geolocalización lanzada en segundo plano al principio del pipeline

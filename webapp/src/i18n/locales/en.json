@@ -173,7 +173,15 @@
       "rutina": "Routine",
       "aficion": "Hobby",
       "texto_visible": "Text visible in photo",
-      "matricula": "Vehicle license plate"
+      "matricula": "Vehicle license plate",
+      "mascota": "Pet",
+      "vehiculo": "Vehicle",
+      "vivienda": "Housing",
+      "habito": "Habit",
+      "idiomas": "Languages",
+      "ingresos": "Income",
+      "salud": "Health",
+      "ideologia_politica": "Political ideology"
     },
     "attributeValue": {
       "sexo": {

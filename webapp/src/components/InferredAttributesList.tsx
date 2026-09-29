@@ -17,6 +17,14 @@ const KNOWN_CATEGORY_KEYS: Record<string, string> = {
   aficion: 'aficion',
   texto_visible: 'texto_visible',
   matricula: 'matricula',
+  mascota: 'mascota',
+  vehiculo: 'vehiculo',
+  vivienda: 'vivienda',
+  habito: 'habito',
+  idiomas: 'idiomas',
+  ingresos: 'ingresos',
+  salud: 'salud',
+  ideologia_politica: 'ideologia_politica',
 };
 
 // Fallback para categorías libres devueltas por la IA (p. ej.
