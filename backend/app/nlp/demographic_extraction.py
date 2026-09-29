@@ -18,6 +18,7 @@ el alcance defensivo.
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
 
 from app.data.ine_reference import (
     AUTONOMOUS_COMMUNITY_PROVINCES,
@@ -73,9 +74,14 @@ class DemographicFindings:
     #
     # Solo se calculan si `edad` sigue siendo None (una edad exacta
     # autodeclarada es siempre más precisa y la sustituye por completo,
-    # nunca conviven `edad` y `edad_rango_min`/`edad_rango_max`). NUNCA
-    # los rellena este módulo (regex): aquí solo se detectan
-    # autodeclaraciones literales.
+    # nunca conviven `edad` y `edad_rango_min`/`edad_rango_max`). Los rellena
+    # `ai_attribute_extraction.py` (razonamiento simbólico, source
+    # "ia_estimada") y, desde ADR-54, también este módulo cuando el propio
+    # texto da un AÑO de nacimiento o de graduación ("nací en 1999", "me gradué
+    # en 2019"; source "texto"): es una deducción aritmética sobre un dato
+    # literal, no una interpretación, y con rangos anchos (ver
+    # `demographic_patterns.edad_indirecta`). Una fecha de nacimiento COMPLETA
+    # sí da `edad` exacta.
     edad_rango_min: int | None = None
     edad_rango_max: int | None = None
     provincia: str | None = None
@@ -298,7 +304,8 @@ _RELIGION_EMOJI_MAP: dict[str, str] = {
 }
 
 
-def extract_demographics(posts: list[SocialPost]) -> DemographicFindings:
+def extract_demographics(posts: list[SocialPost], hoy: date | None = None) -> DemographicFindings:
+    """`hoy` solo se inyecta en tests (la edad deducida de un año depende de la fecha)."""
     findings = DemographicFindings()
 
     for post in posts:
@@ -322,10 +329,70 @@ def extract_demographics(posts: list[SocialPost]) -> DemographicFindings:
         _try_detect_orientacion_sexual(text, post.permalink, findings)
         _try_detect_signo_zodiacal(text, post.permalink, findings)
         _try_detect_religion(text, post.permalink, findings)
+        if post.type == "bio":
+            _try_detect_bio(text, post.permalink, findings)
 
     _detect_household_type(posts, findings)
+    _try_detect_edad_indirecta(posts, findings, hoy or datetime.now(timezone.utc).date())
     _mark_all_detected_as_texto(findings)
     return findings
+
+
+def _try_detect_bio(text: str, permalink: str, findings: DemographicFindings) -> None:
+    """La biografía habla del autor por definición: aquí se aceptan
+    fragmentos sin frase-ancla ("Católica | Madrid", "Ingeniera @ Indra",
+    "23 años", "Madre de 2"; ver `dp.bio_atributos`). Solo rellena campos que
+    las reglas normales de las publicaciones no hayan fijado ya."""
+    hallados = dp.bio_atributos(text)
+
+    def poner(campo: str, valor: object) -> None:
+        if valor is not None and getattr(findings, campo) is None:
+            setattr(findings, campo, valor)
+            findings.evidence.setdefault(campo, []).append(permalink)
+
+    if hallados.get("ocupacion") in OCCUPATION_DISTRIBUTION:
+        poner("ocupacion", hallados["ocupacion"])
+    for campo in ("religion", "nivel_estudios", "situacion_laboral", "sexo", "universidad", "edad"):
+        poner(campo, hallados.get(campo))
+    empresa = hallados.get("empresa")
+    if isinstance(empresa, str) and dp.normalizar(empresa) not in _TOPONIMOS_NO_EMPRESA:
+        poner("empresa", empresa)
+
+    for candidato in hallados.get("estudios", []):  # type: ignore[union-attr]
+        carrera = dp.primer_valor(dp.ESTUDIOS_SINONIMOS, candidato) or next(
+            (k for k in STUDIES_DISTRIBUTION if k in candidato), None
+        )
+        if carrera in STUDIES_DISTRIBUTION:
+            poner("estudios", carrera)
+            break
+
+    if findings.provincia is None and findings.municipio is None and findings.comunidad_autonoma is None:
+        for candidato in hallados.get("ubicacion", []):  # type: ignore[union-attr]
+            if _resolve_location_candidate(candidato, permalink, findings):
+                break
+
+
+def _try_detect_edad_indirecta(posts: list[SocialPost], findings: DemographicFindings, hoy: date) -> None:
+    """Edad deducida de una fecha o un año que el autor da sobre sí mismo
+    (ver `dp.edad_indirecta`). Solo si no hay ya una edad exacta declarada."""
+    if findings.edad is not None:
+        return
+
+    resultado = dp.edad_indirecta([p.text for p in posts if p.text], hoy)
+    if resultado is None:
+        return
+
+    evidencias = [p.permalink for p in posts if p.text and dp.edad_indirecta([p.text], hoy) is not None]
+    if resultado.exacta is not None:
+        findings.edad = resultado.exacta
+        findings.evidence.setdefault("edad", []).extend(evidencias)
+        return
+
+    findings.edad_rango_min = resultado.minima
+    findings.edad_rango_max = resultado.maxima
+    findings.evidence.setdefault("edad_rango_min", []).extend(evidencias)
+    findings.source["edad_rango_min"] = "texto"
+    findings.source["edad_rango_max"] = "texto"
 
 
 def _mark_all_detected_as_texto(findings: DemographicFindings) -> None:

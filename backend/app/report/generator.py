@@ -33,7 +33,7 @@ from app.nlp.ai_attribute_extraction import (
     merge_findings,
 )
 from app.nlp.demographic_extraction import DemographicFindings, extract_demographics
-from app.nlp.text_signals import infer_lifestyle_attributes
+from app.nlp.text_signals import infer_exposure_attributes, infer_lifestyle_attributes
 from app.nlp.travel_detection import detect_travel_permalinks
 from app.progress import ProgressCallback, emit_progress, run_with_heartbeat
 from app.analysis_timing import timed_stage
@@ -545,6 +545,11 @@ async def generate_report(
     # del score: no lo alteran.
     async with timed_stage("estilo_de_vida_regex"):
         inferred_attributes = [*inferred_attributes, *infer_lifestyle_attributes(posts_for_demographics)]
+    # Exposición directa (identificadores publicados y contexto: ubicación
+    # detallada, viajes, terceros, menores, relación), ver ADR-53. También
+    # después del score, pero SÍ alimenta `_build_recommendations`.
+    async with timed_stage("exposicion_directa_regex"):
+        inferred_attributes = [*inferred_attributes, *infer_exposure_attributes(posts_for_demographics)]
 
     # Este tramo mide principalmente la ESPERA a que termine la tarea de
     # geolocalización lanzada en segundo plano al principio del pipeline
@@ -640,6 +645,63 @@ async def generate_report(
     )
 
 
+# Recomendaciones por categoría de exposición directa (ver ADR-53): una por
+# categoría presente, en este orden (de más a menos grave).
+_EXPOSURE_RECOMMENDATIONS: tuple[tuple[str, str], ...] = (
+    (
+        "credencial",
+        "Has publicado algo que parece una credencial (clave, token o contraseña). Revócala o "
+        "cámbiala YA en el servicio correspondiente: borrar la publicación no basta si alguien "
+        "ya la copió.",
+    ),
+    (
+        "dato_financiero",
+        "Has publicado datos financieros (IBAN, cuenta o tarjeta). Elimina esas publicaciones y "
+        "avisa a tu banco si son reales: con ellos se pueden intentar domiciliaciones o fraudes.",
+    ),
+    (
+        "documento_identidad",
+        "Has publicado un número de documento oficial (DNI/NIE, pasaporte, Seguridad Social, "
+        "matrícula...). Es un identificador directo: elimínalo de las publicaciones y de la bio.",
+    ),
+    (
+        "contacto_publicado",
+        "Tu correo o teléfono aparece en el texto público. Cualquiera puede asociarlo a tu "
+        "identidad real y a otras cuentas; usa un correo o número dedicado si necesitas publicarlo.",
+    ),
+    (
+        "ubicacion_detallada",
+        "Hay pistas de ubicación más precisas que tu ciudad (dirección, barrio, código postal o "
+        "coordenadas). Evita publicarlas o retrásalas cuando ya no estés allí.",
+    ),
+    (
+        "viaje_futuro",
+        "Anuncias viajes o ausencias de casa con antelación. Publicar las fechas antes de irte "
+        "indica cuándo tu vivienda estará vacía: cuéntalo al volver.",
+    ),
+    (
+        "menor",
+        "Mencionas a menores de tu entorno (nombre, edad o colegio). Su exposición no la han "
+        "decidido ellos: evita datos que permitan identificarlos o localizarlos.",
+    ),
+    (
+        "identificador_tecnico",
+        "Has publicado un identificador técnico (IP, MAC o IMEI) que puede vincular tu "
+        "actividad con tu conexión o tu dispositivo.",
+    ),
+    (
+        "cuenta_externa",
+        "Enlazas otras cuentas tuyas desde esta. Es la vía más fácil para correlacionar tus "
+        "perfiles y reconstruir tu identidad completa.",
+    ),
+)
+
+
+def _recommendations_for_exposure(attributes: list[InferredAttribute]) -> list[str]:
+    presentes = {a.category for a in attributes}
+    return [texto for categoria, texto in _EXPOSURE_RECOMMENDATIONS if categoria in presentes]
+
+
 def _build_recommendations(
     fingerprint: WritingFingerprint,
     attributes: list[InferredAttribute],
@@ -682,6 +744,8 @@ def _build_recommendations(
             "sector de trabajo. Si quieres mantener anonimato, evita detalles muy concretos "
             "de tu día a día laboral en esos foros."
         )
+
+    recs.extend(_recommendations_for_exposure(attributes))
 
     if not recs:
         recs.append(

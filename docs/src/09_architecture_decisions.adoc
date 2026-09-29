@@ -1671,6 +1671,83 @@ las inferencias blandas de la IA. Detalles con su porqué:
   en `InferredAttributesList.tsx` y `inferredCategory`; sin ella el
   fallback las mostraría sin tildes.
 
+==== ADR-53: Exposición directa por regex: identificadores publicados, ubicación detallada, viajes, terceros y menores (`identifier_patterns.py`, `context_patterns.py`)
+
+
+*Contexto*: el informe solo cubría lo INFERIBLE (campos INE, aficiones...).
+No detectaba lo peor: datos que identifican o contactan con la persona sin
+inferir nada (email, teléfono, DNI, IBAN, credenciales, dirección), ni lo que
+facilita un daño físico (anunciar un viaje con fechas deja la casa vacía), ni
+que un post expone a un tercero (hijos con colegio o edad).
+
+*Decisión*: dos módulos con las mismas convenciones que ADR-51 y una
+agregación común en `text_signals.py::infer_exposure_attributes()`, llamada
+desde `report/generator.py` (etapa `exposicion_directa_regex`) DESPUÉS del
+score, como ADR-52. A diferencia de las señales de estilo de vida, esta SÍ
+alimenta `_build_recommendations` (`_EXPOSURE_RECOMMENDATIONS`, una por
+categoría presente y de más a menos grave), porque un dato publicado es
+accionable (borrar, revocar, avisar al banco):
+
+- `identifier_patterns.py`: sin frase-ancla (un DNI lo es aparezca donde
+  aparezca), pero los patrones con dígito de control se VALIDAN
+  (`validar_dni`, `validar_nie`, `validar_cif`, `validar_iban` mod-97,
+  `validar_ccc`, `validar_tarjeta` Luhn, `validar_imei`) y lo que no valida
+  se descarta: una secuencia numérica cualquiera es ruido. Categorías:
+  `contacto_publicado`, `documento_identidad`, `dato_financiero`,
+  `identificador_tecnico`, `cuenta_externa`, `credencial`,
+  `ubicacion_detallada`.
+- El valor que llega al informe va ENMASCARADO (`enmascarar`): el informe se
+  descarga en JSON y se envía a la IA de análisis, y un aviso de "has
+  publicado tu IBAN" no debe reproducirlo. Las credenciales no llevan valor,
+  solo el tipo (`_SIN_VALOR`).
+- `context_patterns.py`: ubicación por barrio o "vivo cerca de", viajes
+  futuros (`_VERBO_VIAJE_RE` + `_FECHA_FUTURA_RE`, y solo si la cláusula no
+  está en pasado, `_PASADO_RE`: "volvimos de Lisboa" no es un aviso),
+  vivienda vacía, terceros y menores. Los nombres propios corren sobre la
+  cláusula ORIGINAL (`dp.clausulas_con_original`) porque solo los distingue
+  la mayúscula, y el informe solo lleva la INICIAL ("Nombra a su pareja
+  (L.)"): se avisa de que se expone a un tercero sin volver a exponerlo.
+- "Mi hijo Pablo" es `tercero`, no `menor`: sin edad, colegio o "bebé/niño"
+  no se sabe si es menor.
+- `relacion` (pareja, boda, divorcio) es una inferencia blanda aparte y NO
+  rellena `DemographicFindings.estado_civil`, que por diseño solo fija la IA
+  simbólica (`source["estado_civil"] = "ia_simbolica"`).
+- Categorías nuevas con etiqueta es/en en `InferredAttributesList.tsx`.
+
+==== ADR-54: Banco de biografía y edad deducida de años (`demographic_patterns.bio_atributos`, `edad_indirecta`)
+
+
+*Contexto*: las frase-ancla en primera persona de ADR-51 dejaban fuera las
+bios, que son fragmentos ("Católica | Madrid", "Ingeniera @ Indra", "23
+años", "Madre de 2") y hablan del autor por definición. Además, la edad solo
+se detectaba si el texto decía "tengo N años", aunque el propio texto diera un
+año de nacimiento o de graduación.
+
+*Decisión*:
+
+- `bio_atributos()` relaja las anclas SOLO para el pseudo-post `type="bio"`
+  (`_try_detect_bio` en `demographic_extraction.py`), fragmento a fragmento
+  (`_fragmentos_bio`, partido por `|`, `·`, `•` o " - "), y solo rellena
+  campos que las reglas normales no hayan fijado. Cuidados: "10 años de
+  experiencia" no es edad (`_BIO_EDAD_RE`), los alias cortos de universidad
+  ("uam") exigen "@" (`_alias_universidad_bio`), y "mi madre es mi heroína"
+  no declara el sexo del autor (`_sexo_propio_en_bio`, el posesivo ya no lo
+  cubre `es_propio` porque la propia coincidencia es el tercero).
+- `edad_indirecta()`: fecha de nacimiento completa -> edad EXACTA (la fecha
+  de hoy es inyectable en tests, `extract_demographics(posts, hoy=...)`); año
+  de nacimiento ("nací en 1999", "soy del 99", "quinta del 95") -> rango de 2
+  años; hitos académicos (graduación, máster, doctorado, selectividad,
+  inicio de carrera, promoción) -> rango ANCHO según la edad típica del hito
+  (`_HITOS_ACADEMICOS`). Varias pistas se intersectan; si se contradicen (p.
+  ej. nacer en 1999 y terminar la carrera en 2010) se descartan todas.
+- Cambio de diseño asumido: `edad_rango_min`/`edad_rango_max` ya no los
+  rellena solo la IA. Una deducción aritmética sobre un año literal no es
+  razonamiento simbólico, y el ancho del rango absorbe la incertidumbre, que
+  es justo lo que motivó el diseño de rango libre (ver comentario en
+  `DemographicFindings`). Se marca con `source["edad_rango_min"] = "texto"` y
+  `k_anonymity._step_edad` usa una nota propia (`EDAD_ESTIMADA_POR_FECHA`,
+  traducida es/en) para no decir que la estimó una IA.
+
 [[adr-cat-analisis-visual-vision-por-computador]]
 === Análisis visual (visión por computador)
 

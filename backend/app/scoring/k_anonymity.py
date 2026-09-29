@@ -346,20 +346,35 @@ def _step_edad(findings: DemographicFindings, remaining: float) -> tuple[float, 
         # `age_range_proportion` (suma AGE_DISTRIBUTION_1Y año a año sobre
         # el rango exacto dado), no un tramo prefijado.
         label = f"Edad aproximada: {findings.edad_rango_min}-{findings.edad_rango_max} años"
+        rango_source = findings.source.get("edad_rango_min", "ia_estimada")
+        if rango_source == "texto":
+            # Deducida por regex de un año literal del texto (ADR-54), no por IA.
+            rango_note = (
+                "Rango de edad deducido de un año que aparece en el propio texto (año de "
+                "nacimiento o de graduación): es aritmética sobre un dato literal, pero un año "
+                "de graduación no fija la edad exacta, así que el rango es más ancho que uno "
+                "de nacimiento."
+            )
+            rango_note_code = note_codes.EDAD_ESTIMADA_POR_FECHA
+        else:
+            rango_note = (
+                "Rango de edad estimado por IA a partir de pistas indirectas del texto "
+                "(años de graduación, curso que menciona estar haciendo, referencias "
+                "generacionales...), no de una autodeclaración explícita: fiabilidad menor. "
+                "El ancho del rango lo decide la propia IA según cuánta certeza tenía -- un "
+                "rango más amplio reduce menos la población, pero es más honesto que fingir "
+                "precisión sobre una pista débil."
+            )
+            rango_note_code = note_codes.EDAD_ESTIMADA_POR_TRAMO
         return _apply_proportion(
             remaining,
             age_range_proportion(findings.edad_rango_min, findings.edad_rango_max),
             label,
             "edad",
             findings.evidence.get("edad_rango_min", []),
-            source=findings.source.get("edad_rango_min", "ia_estimada"),
-            note="Rango de edad estimado por IA a partir de pistas indirectas del texto "
-                 "(años de graduación, curso que menciona estar haciendo, referencias "
-                 "generacionales...), no de una autodeclaración explícita: fiabilidad menor. "
-                 "El ancho del rango lo decide la propia IA según cuánta certeza tenía -- un "
-                 "rango más amplio reduce menos la población, pero es más honesto que fingir "
-                 "precisión sobre una pista débil.",
-            note_code=note_codes.EDAD_ESTIMADA_POR_TRAMO,
+            source=rango_source,
+            note=rango_note,
+            note_code=rango_note_code,
             value_raw=f"{findings.edad_rango_min}-{findings.edad_rango_max}",
             confidence=findings.confidence.get("edad_rango_min"),
         )

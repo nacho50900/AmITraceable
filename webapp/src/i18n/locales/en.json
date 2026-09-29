@@ -123,6 +123,7 @@
       "estado_civil_ia_simbolica_exact_combo": "Inferred by AI from symbolic or indirect content (emojis, dates, recurring mentions...), not from an explicit self-declaration: lower reliability than the rest of the traits on this list. Since sex is also known, the EXACT percentage for that specific combination is used (marital status conditioned on sex, real INE cross-table), not an approximation multiplying independent proportions.",
       "edad_repartida_uniformemente": "Estimated by evenly spreading the INE proportion across five-year brackets among the ages within each bracket (there's no year-by-year table available directly).",
       "edad_estimada_por_tramo": "Age bracket estimated by AI from indirect clues in the text (graduation year, the school/college year they mention being in, generational references...), not from an explicit self-declaration: lower reliability. The INE's five-year population bracket is used instead of an exact year, since this is a less precise estimate than a self-declared age.",
+      "edad_estimada_por_fecha": "Age range deduced from a year that appears in the text itself (birth or graduation year). It is arithmetic on a literal fact, but a graduation year doesn't fix the exact age, so the range is wider than a birth-year one.",
       "location_no_population_data": "There's no reference population data for this municipality/province in the current table.",
       "location_note_base": "Assumes an age/sex distribution similar to the national average (approximation).",
       "location_note_imagen": "Assumes an age/sex distribution similar to the national average (approximation). Location estimated from an image, not from self-declared text: lower reliability than an explicit self-declaration.",
@@ -181,7 +182,18 @@
       "idiomas": "Languages",
       "ingresos": "Income",
       "salud": "Health",
-      "ideologia_politica": "Political ideology"
+      "ideologia_politica": "Political ideology",
+      "contacto_publicado": "Published contact",
+      "documento_identidad": "ID document",
+      "dato_financiero": "Financial data",
+      "identificador_tecnico": "Technical identifier",
+      "cuenta_externa": "Account on another platform",
+      "credencial": "Credential",
+      "ubicacion_detallada": "Detailed location",
+      "viaje_futuro": "Upcoming trip or absence",
+      "tercero": "Third party mentioned",
+      "menor": "Minor mentioned",
+      "relacion": "Relationship"
     },
     "attributeValue": {
       "sexo": {

@@ -59,7 +59,7 @@ def buscar_propios(patron: "re.Pattern[str]", clausula: str):
 
 _TERCERA_PERSONA_RE = re.compile(
     r"\b(?:mi|mis|tu|tus|su|sus|nuestr[oa]s?)\s+(?:(?:querid|viej|joven|ex|difunt|futur)[oa]s?\s+)?"
-    r"(?:padre|madre|padres|abuel[oa]s?|suegr[oa]s?|tio|tia|tios|tias|vecin[oa]s?|amig[oa]s?|hermano|hermana|"
+    r"(?:padre|madre|mama|papa|padres|abuel[oa]s?|suegr[oa]s?|tio|tia|tios|tias|vecin[oa]s?|amig[oa]s?|hermano|hermana|"
     r"hermanos|marido|mujer|esposo|esposa|novio|novia|pareja|jefe|jefa|companer[oa]s?|primo|prima|cunad[oa]|"
     r"yerno|nuera|hij[oa]s?|nieto|nieta|sobrin[oa]s?|ex)\b"
 )
@@ -75,6 +75,27 @@ def clausulas(texto_normalizado: str, separar_por_y: bool = True) -> list[str]:
     protegido = _NUMERO_COMPUESTO_RE.sub(r"\1_y_\2", texto_normalizado)
     separador = _SEPARADOR_CLAUSULAS_RE if separar_por_y else _SEPARADOR_SIN_Y_RE
     return [c.strip() for c in separador.split(protegido) if c.strip()]
+
+
+def clausulas_con_original(texto: str, separar_por_y: bool = True) -> list[tuple[str, str]]:
+    """Pares `(cláusula original, cláusula normalizada)`. La normalización
+    (minúsculas, sin tildes) conserva la longitud del texto salvo en casos
+    raros (ligaduras Unicode), así que los mismos índices sirven para
+    recuperar del original el nombre propio, con mayúscula y tilde, que la
+    regex encontró sobre el normalizado. Si la longitud cambiara, se devuelve
+    el normalizado en ambos lados (nunca se desalinean índices)."""
+    normalizado = normalizar(texto)
+    original = texto if len(normalizado) == len(texto) else normalizado
+    separador = _SEPARADOR_CLAUSULAS_RE if separar_por_y else _SEPARADOR_SIN_Y_RE
+    pares: list[tuple[str, str]] = []
+    inicio = 0
+    for corte in [*separador.finditer(normalizado), None]:
+        fin = corte.start() if corte else len(normalizado)
+        if normalizado[inicio:fin].strip():
+            pares.append((original[inicio:fin].strip(), normalizado[inicio:fin].strip()))
+        if corte:
+            inicio = corte.end()
+    return pares
 
 
 def es_propio(clausula: str, inicio_coincidencia: int) -> bool:
@@ -454,41 +475,42 @@ def _uni(*alias: str) -> str:
 
 
 # Nombre corto coherente con el que ya guarda 'universidad de X' (solo 'X').
-UNIVERSIDADES: Banco = _banco(
-    ("UNED", _uni(r"uned")),
-    ("Oviedo", _uni(r"uniovi")),
-    ("Politécnica de Madrid", _uni(r"upm")),
-    ("Complutense de Madrid", _uni(r"ucm")),
-    ("Autónoma de Madrid", _uni(r"uam")),
-    ("Carlos III de Madrid", _uni(r"uc3m")),
-    ("Rey Juan Carlos", _uni(r"urjc")),
-    ("Alcalá", _uni(r"uah")),
-    ("Politécnica de Valencia", _uni(r"upv")),
-    ("Granada", _uni(r"ugr")),
-    ("Salamanca", _uni(r"usal")),
-    ("Autónoma de Barcelona", _uni(r"uab")),
-    ("Politécnica de Cataluña", _uni(r"upc")),
-    ("Pompeu Fabra", _uni(r"upf")),
-    ("País Vasco", _uni(r"ehu")),
-    ("A Coruña", _uni(r"udc")),
-    ("Vigo", _uni(r"uvigo")),
-    ("Santiago de Compostela", _uni(r"usc")),
-    ("La Laguna", _uni(r"ull")),
-    ("Las Palmas de Gran Canaria", _uni(r"ulpgc")),
-    ("Zaragoza", _uni(r"unizar")),
-    ("Cantabria", _uni(r"unican")),
-    ("Extremadura", _uni(r"unex")),
-    ("Castilla-La Mancha", _uni(r"uclm")),
-    ("Pablo de Olavide", _uni(r"upo")),
-    ("Burgos", _uni(r"ubu")),
-    ("León", _uni(r"unileon")),
-    ("La Rioja", _uni(r"unirioja")),
-    ("Miguel Hernández", _uni(r"umh")),
-    ("Jaume I", _uni(r"uji")),
-    ("Islas Baleares", _uni(r"uib")),
-    ("Lleida", _uni(r"udl")),
-    ("Girona", _uni(r"udg")),
+_ALIAS_UNIVERSIDADES: tuple[tuple[str, str], ...] = (
+    ("UNED", "uned"),
+    ("Oviedo", "uniovi"),
+    ("Politécnica de Madrid", "upm"),
+    ("Complutense de Madrid", "ucm"),
+    ("Autónoma de Madrid", "uam"),
+    ("Carlos III de Madrid", "uc3m"),
+    ("Rey Juan Carlos", "urjc"),
+    ("Alcalá", "uah"),
+    ("Politécnica de Valencia", "upv"),
+    ("Granada", "ugr"),
+    ("Salamanca", "usal"),
+    ("Autónoma de Barcelona", "uab"),
+    ("Politécnica de Cataluña", "upc"),
+    ("Pompeu Fabra", "upf"),
+    ("País Vasco", "ehu"),
+    ("A Coruña", "udc"),
+    ("Vigo", "uvigo"),
+    ("Santiago de Compostela", "usc"),
+    ("La Laguna", "ull"),
+    ("Las Palmas de Gran Canaria", "ulpgc"),
+    ("Zaragoza", "unizar"),
+    ("Cantabria", "unican"),
+    ("Extremadura", "unex"),
+    ("Castilla-La Mancha", "uclm"),
+    ("Pablo de Olavide", "upo"),
+    ("Burgos", "ubu"),
+    ("León", "unileon"),
+    ("La Rioja", "unirioja"),
+    ("Miguel Hernández", "umh"),
+    ("Jaume I", "uji"),
+    ("Islas Baleares", "uib"),
+    ("Lleida", "udl"),
+    ("Girona", "udg"),
 )
+UNIVERSIDADES: Banco = _banco(*((n, _uni(a)) for n, a in _ALIAS_UNIVERSIDADES))
 # "Universidad Complutense de Madrid", "Universidad Politécnica de Valencia":
 # el nombre propio tras 'universidad' cuando NO es 'universidad de X' (ese
 # caso ya lo cubre la regex original). Se aplica sobre el texto ORIGINAL
@@ -726,3 +748,272 @@ SIGNO_ANCLADO_RE = re.compile(
     r"\b(?:soy|mi signo(?: del zodiaco)?(?: es)?|signo(?: de)?|ascendente|del signo|nacid[oa] bajo)\s+(?:de\s+)?"
     r"(?:un |una )?(leo|libra|cancer|acuario)\b"
 )
+
+
+# ---------------------------------------------------------------------------
+# Edad indirecta: fecha/año de nacimiento y años de graduación
+# ---------------------------------------------------------------------------
+# A diferencia de `edad_autodeclarada` ("tengo 24 años"), aquí la edad se
+# DEDUCE de un año: "nací en 1999" (2 edades posibles según el cumpleaños),
+# "me gradué en 2019" (edad típica al graduarse + años transcurridos). Se
+# devuelve una edad EXACTA solo con fecha de nacimiento completa; en el
+# resto, un RANGO. Los rangos de graduación son deliberadamente anchos: la
+# incertidumbre la absorbe el ancho, no una confianza inventada (mismo
+# principio que `ai_attribute_extraction._set_edad_rango`, motivado por un
+# caso real donde una estimación estrecha y equivocada se coló).
+
+from dataclasses import dataclass
+from datetime import date
+
+_MES_A_NUMERO = {
+    "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6, "julio": 7,
+    "agosto": 8, "septiembre": 9, "setiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12,
+}
+_MESES_RE = "|".join(_MES_A_NUMERO)
+_ANIO = r"(19\d{2}|20[0-2]\d)"
+
+_FECHA_NACIMIENTO_RE = re.compile(
+    r"\b(?:naci|nacid[oa]|fecha de nacimiento|cumpleanos|mi cumple)\b[^.\n]{0,30}?"
+    r"(?:(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})|(\d{1,2}) de (" + _MESES_RE + r") de (\d{4}))"
+)
+_ANIO_NACIMIENTO_RE = tuple(
+    re.compile(p)
+    for p in (
+        r"\b(?:naci|soy nacid[oa]|yo naci)\s+(?:en|el)\s+(?:el\s+)?(?:ano\s+)?(19\d{2}|20[01]\d)\b",
+        r"\bsoy del\s+(?:ano\s+)?(\d{2}|19\d{2}|20[01]\d)\b(?!\s*(?:%|euros|km|kg))",
+        r"\bquinta del\s+(\d{2}|19\d{2}|20[01]\d)\b",
+        r"\bi was born (?:in|on)\b[^.\n]{0,15}?\b(19\d{2}|20[01]\d)\b",
+    )
+)
+
+# (patrón, edad mínima y máxima al ocurrir el hito). Grupo 1 = año del hito.
+_HITOS_ACADEMICOS: tuple[tuple["re.Pattern[str]", int, int], ...] = tuple(
+    (re.compile(p), lo, hi)
+    for p, lo, hi in (
+        (
+            r"\b(?:me gradue|me licencie|me diplome|me titule|termine|acabe|finalice)\s+(?:de |en |con |la |el |mi )*"
+            r"(?:carrera|grado|universidad|licenciatura|ingenieria|diplomatura|uni)\b[^.\n]{0,25}?\b(?:en|el|del)?\s*" + _ANIO,
+            21, 27,
+        ),
+        (r"\b(?:me gradue|termine|acabe|finalice|hice|cursee?)\s+(?:el |mi |un )+master\b[^.\n]{0,25}?\b(?:en|el|del)?\s*" + _ANIO, 22, 32),
+        (r"\b(?:defendi|termine|acabe|finalice|hice)\s+(?:la |mi |el )*(?:tesis|doctorado)\b[^.\n]{0,25}?\b(?:en|el|del)?\s*" + _ANIO, 25, 40),
+        (r"\b(?:de|en) la promocion\s+(?:de |del )?" + _ANIO, 17, 27),
+        (r"\bpromocion\s+(?:de |del )?" + _ANIO, 17, 27),
+        (r"\b(?:hice|aprobe|pase|me presente a)\s+(?:la\s+)?(?:selectividad|ebau|pau|evau)\b[^.\n]{0,20}?\b(?:en|el|del)?\s*" + _ANIO, 17, 21),
+        (r"\b(?:termine|acabe|finalice)\s+(?:el\s+)?bachillerato\b[^.\n]{0,20}?\b(?:en|el|del)?\s*" + _ANIO, 17, 19),
+        (
+            r"\b(?:empece|comence|entre en|inicie)\s+(?:la\s+|el\s+|en la\s+)?(?:carrera|uni|universidad|grado)\b[^.\n]{0,20}?\b(?:en|el|del)?\s*" + _ANIO,
+            17, 25,
+        ),
+        (r"\bi graduated(?: from [a-z ]{2,40})? in\s+" + _ANIO, 21, 27),
+    )
+)
+
+_ANCHO_MAXIMO_RANGO = 20
+
+
+@dataclass(frozen=True)
+class EdadIndirecta:
+    exacta: int | None
+    minima: int | None
+    maxima: int | None
+    motivo: str  # p. ej. "fecha de nacimiento", "año de nacimiento", "graduación"
+
+
+def _anio_completo(dos_cifras_o_cuatro: str, hoy: date) -> int | None:
+    """'99' -> 1999, '05' -> 2005, '2001' -> 2001; None si la edad resultante
+    cae fuera de 12-100 (para 'soy del 20' o cosas que no son un año)."""
+    valor = int(dos_cifras_o_cuatro)
+    candidatos = [valor] if valor >= 1000 else [1900 + valor, 2000 + valor]
+    for anio in candidatos:
+        if EDAD_MIN <= hoy.year - anio <= EDAD_MAX:
+            return anio
+    return None
+
+
+def _edad_exacta(nacimiento: date, hoy: date) -> int:
+    return hoy.year - nacimiento.year - ((hoy.month, hoy.day) < (nacimiento.month, nacimiento.day))
+
+
+def _rango_por_anio(anio: int, edad_al_hito: tuple[int, int], hoy: date) -> tuple[int, int] | None:
+    minima = max(hoy.year - anio + edad_al_hito[0] - 1, EDAD_MIN)
+    maxima = min(hoy.year - anio + edad_al_hito[1], EDAD_MAX)
+    return (minima, maxima) if minima <= maxima else None
+
+
+def edad_indirecta(textos: list[str], hoy: date) -> EdadIndirecta | None:
+    """Edad deducida de fechas/años que el autor da sobre sí mismo. Si hay
+    fecha de nacimiento completa, edad exacta; si no, la intersección de
+    todos los rangos encontrados. Contradicciones (intersección vacía) o
+    rangos de más de `_ANCHO_MAXIMO_RANGO` años se descartan: no aportan."""
+    rangos: list[tuple[int, int, str]] = []
+
+    for texto in textos:
+        for clausula in clausulas(normalizar(texto), separar_por_y=False):
+            m = _FECHA_NACIMIENTO_RE.search(clausula)
+            if m and es_propio(clausula, m.start()):
+                try:
+                    if m.group(1):
+                        anio = _anio_completo(m.group(3), hoy)
+                        fecha = date(anio, int(m.group(2)), int(m.group(1))) if anio else None
+                    else:
+                        anio = _anio_completo(m.group(6), hoy)
+                        fecha = date(anio, _MES_A_NUMERO[m.group(5)], int(m.group(4))) if anio else None
+                except ValueError:
+                    fecha = None
+                if fecha is not None and fecha <= hoy:
+                    edad = _edad_exacta(fecha, hoy)
+                    if EDAD_MIN <= edad <= EDAD_MAX:
+                        return EdadIndirecta(edad, None, None, "fecha de nacimiento")
+
+            for patron in _ANIO_NACIMIENTO_RE:
+                for m in buscar_propios(patron, clausula):
+                    anio = _anio_completo(m.group(1), hoy)
+                    rango = _rango_por_anio(anio, (0, 0), hoy) if anio else None
+                    if rango:
+                        rangos.append((*rango, "año de nacimiento"))
+
+            for patron, lo, hi in _HITOS_ACADEMICOS:
+                for m in buscar_propios(patron, clausula):
+                    rango = _rango_por_anio(int(m.group(1)), (lo, hi), hoy)
+                    if rango:
+                        rangos.append((*rango, "graduación"))
+
+    if not rangos:
+        return None
+    minima = max(r[0] for r in rangos)
+    maxima = min(r[1] for r in rangos)
+    if minima > maxima or maxima - minima > _ANCHO_MAXIMO_RANGO:
+        return None
+    motivo = "año de nacimiento" if any(r[2] == "año de nacimiento" for r in rangos) else "graduación"
+    return EdadIndirecta(None, minima, maxima, motivo)
+
+
+# ---------------------------------------------------------------------------
+# Biografía (fragmentos sin frase-ancla)
+# ---------------------------------------------------------------------------
+# Una bio habla del autor POR DEFINICIÓN, así que aquí se relajan las
+# frase-ancla que sí exigen las publicaciones: "Católica | Madrid",
+# "Ingeniera @ Indra", "23 años", "Madre de 2" son declaraciones aunque no
+# lleven "soy". Solo se aplica al pseudo-post de tipo "bio" (ver
+# `report/generator.py::_posts_with_bio_pseudo_post`) y solo rellena campos
+# que las reglas normales no hayan fijado ya (ver `bio_atributos`).
+
+_SEPARADOR_BIO_RE = re.compile(r"[|·•\n]+|\s[-–—/]\s|\s{3,}")
+
+_BIO_RELIGION: Banco = _banco(
+    *((valor, r"\b(?:" + alias + r")\b") for valor, alias in _CREENCIAS)
+)
+
+_BIO_ROLES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("desarrollador de software", (
+        r"programador(?:a)?", r"desarrollador(?:a)?", r"developer", r"dev", r"software engineer",
+        r"ingenier[oa] (?:de|del) software", r"(?:backend|frontend|full ?stack)",
+    )),
+    ("docente", (r"docente", r"profe", r"profesor(?:a)?", r"maestr[oa]", r"catedratic[oa]", r"educador(?:a)?")),
+    ("sanitario", (
+        r"medic[oa]", r"enfermer[oa]", r"fisioterapeuta", r"farmaceutic[oa]", r"matron(?:a)?", r"sanitari[oa]",
+        r"odontolog[oa]", r"dentista", r"tcae",
+    )),
+    ("ingeniero", (r"ingenier[oa]", r"ing\.")),
+    ("abogado", (r"abogad[oa]", r"letrad[oa]", r"procurador(?:a)?")),
+    ("comercial", (r"comercial", r"vendedor(?:a)?", r"dependient[oa]")),
+    ("hosteleria", (r"camarer[oa]", r"cociner[oa]", r"barista", r"chef", r"bartender")),
+    ("administracion publica", (r"funcionari[oa]", r"policia(?: local| nacional)?", r"guardia civil", r"bombero(?:a)?", r"militar")),
+    ("construccion", (r"albanil", r"electricista", r"fontaner[oa]", r"encofrador(?:a)?", r"jefe de obra")),
+    ("transporte", (r"camioner[oa]", r"taxista", r"repartidor(?:a)?", r"piloto", r"azafat[oa]", r"maquinista")),
+)
+_BIO_OCUPACION: Banco = _banco(
+    *((valor, r"(?<![@\w])(?:" + "|".join(roles) + r")(?!\w)") for valor, roles in _BIO_ROLES)
+)
+# Títulos que implican formación superior en España (habilitan `nivel_estudios`).
+_BIO_TITULO_SUPERIOR_RE = re.compile(
+    r"(?<![@\w])(?:phd|msc|mba|doctorand[oa]|doctor(?:a)? en|graduad[oa]|licenciad[oa]|ingenier[oa]|arquitect[oa]|"
+    r"abogad[oa]|medic[oa]|farmaceutic[oa]|dentista|ing\.|lic\.)(?!\w)"
+)
+
+_BIO_EDAD_RE = re.compile(r"(?<![\w+/])(\d{2})\s*(?:anos|yo|y/o)\b(?!\s+(?:de|en|con)\s+\w)")
+_BIO_UBICACION_RE = re.compile(r"📍\s*([^\n|·•,]{2,40})")
+_BIO_EMPRESA_RE = re.compile(r"(?:@\s+|\bat\s+|\bAt\s+)((?:[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ&\-]*)(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ&\-]*){0,2})")
+_BIO_ESTUDIOS_RE = re.compile(r"(?<!\w)(?:grado|carrera|licenciatura|master|doctorado|degree)\s+(?:en|de|in)\s+([a-z ]{3,60})")
+_BIO_SITUACION: Banco = _banco(
+    ("estudiante", r"(?<!\w)(?:estudiante|universitari[oa])(?!\w)"),
+    ("jubilado", r"(?<!\w)(?:jubilad[oa]|prejubilad[oa])(?!\w)"),
+    ("parado", r"(?<!\w)(?:en paro|desemplead[oa]|buscando trabajo|buscando empleo)(?!\w)"),
+    ("activo", r"(?<!\w)(?:autonom[oa]|emprendedor(?:a)?|freelance|empresari[oa]|funcionari[oa])(?!\w)"),
+)
+_BIO_SEXO_MUJER_RE = re.compile(r"(?<!\w)(?:madre|mama|mami|esposa|abuela|chica|chavala)(?!\w)")
+_BIO_SEXO_HOMBRE_RE = re.compile(r"(?<!\w)(?:padre|papa|papi|esposo|marido|abuelo|chico|chaval)(?!\w)")
+
+
+def _alias_universidad_bio(nombre: str, alias: str) -> tuple[str, str]:
+    """Alias largos valen sueltos ('Uniovi'); los cortos ('uam', 'ugr') solo
+    con '@' delante, para no confundirlos con otras palabras."""
+    return (nombre, rf"(?<![\w])@?{alias}(?!\w)" if len(alias) >= 5 else rf"(?<![\w])@{alias}(?!\w)")
+
+
+_POSESIVO_AL_FINAL_RE = re.compile(r"\b(?:mi|mis|su|sus|tu|tus|nuestr[oa]s?)\s*$")
+
+
+def _sexo_propio_en_bio(patron: "re.Pattern[str]", fragmento: str) -> bool:
+    """'Madre de 2' declara el sexo del autor; 'mi madre es mi heroína' no.
+    `es_propio` mira lo que va ANTES de la coincidencia, pero aquí la propia
+    coincidencia ('madre') es el tercero, precedido de un posesivo."""
+    m = patron.search(fragmento)
+    if not m:
+        return False
+    return es_propio(fragmento, m.start()) and not _POSESIVO_AL_FINAL_RE.search(fragmento[: m.start()])
+
+
+def _fragmentos_bio(texto: str) -> list[tuple[str, str]]:
+    """Fragmentos de la bio (partida por `|`, `·`, `•`, saltos de línea o
+    ' - '), cada uno como `(original, normalizado)`."""
+    fragmentos: list[tuple[str, str]] = []
+    for trozo in _SEPARADOR_BIO_RE.split(texto):
+        if trozo.strip():
+            fragmentos.append((trozo.strip(), normalizar(trozo).strip()))
+    return fragmentos
+
+
+def bio_atributos(texto: str) -> dict[str, object]:
+    """Atributos de una biografía sin exigir frase-ancla. Claves posibles:
+    'religion', 'ocupacion', 'nivel_estudios', 'situacion_laboral', 'sexo',
+    'universidad', 'edad' (str -> valor canónico o int), 'empresa',
+    'ubicacion' y 'estudios' (listas de candidatos normalizados, para
+    resolverlos con las mismas tablas INE que las publicaciones)."""
+    encontrados: dict[str, object] = {}
+    universidades = _banco(*(_alias_universidad_bio(n, a) for n, a in _ALIAS_UNIVERSIDADES))
+    ubicaciones: list[str] = []
+    estudios: list[str] = []
+    mujer = hombre = False
+
+    for original, norm in _fragmentos_bio(texto):
+        for clave, banco in (
+            ("religion", _BIO_RELIGION), ("ocupacion", _BIO_OCUPACION),
+            ("situacion_laboral", _BIO_SITUACION), ("universidad", universidades),
+        ):
+            valor = primer_valor(banco, norm)
+            if valor is not None:
+                encontrados.setdefault(clave, valor)
+        if _BIO_TITULO_SUPERIOR_RE.search(norm):
+            encontrados.setdefault("nivel_estudios", "superior")
+        edad = _BIO_EDAD_RE.search(norm)
+        if edad and es_propio(norm, edad.start()) and EDAD_MIN <= int(edad.group(1)) <= EDAD_MAX:
+            prefijo = norm[max(0, edad.start() - 18) : edad.start()]
+            if not _NO_ES_EDAD_RE.search(prefijo):
+                encontrados.setdefault("edad", int(edad.group(1)))
+        mujer = mujer or _sexo_propio_en_bio(_BIO_SEXO_MUJER_RE, norm)
+        hombre = hombre or _sexo_propio_en_bio(_BIO_SEXO_HOMBRE_RE, norm)
+        empresa = _BIO_EMPRESA_RE.search(original)
+        if empresa:
+            encontrados.setdefault("empresa", empresa.group(1).strip(" .-"))
+        ubicaciones += [normalizar(m.group(1)).strip() for m in _BIO_UBICACION_RE.finditer(original)]
+        estudios += [m.group(1).strip() for m in _BIO_ESTUDIOS_RE.finditer(norm)]
+
+    if mujer != hombre:
+        encontrados["sexo"] = "mujer" if mujer else "hombre"
+    if ubicaciones:
+        encontrados["ubicacion"] = ubicaciones
+    if estudios:
+        encontrados["estudios"] = estudios
+    return encontrados

@@ -249,6 +249,7 @@ _CONDICIONES = (
     r"vih", r"fibromialgia", r"migranas?", r"insomnio", r"anorexia", r"bulimia", r"trastorno \w+", r"hipertension",
     r"colesterol alto", r"cronica", r"discapacidad",
 )
+CONDICIONES = _CONDICIONES  # reutilizado por context_patterns.py (salud de terceros)
 _ANCLA_SALUD = (
     r"\b(?:tengo|padezco|sufro(?: de)?|sufro|me diagnosticaron|me han diagnosticado|me diagnostico|"
     r"estoy en tratamiento (?:de|por|contra)|mi diagnostico es)\s+(?:un |una |el |la |de )?(?:leve |grave |cronic[oa] )?"

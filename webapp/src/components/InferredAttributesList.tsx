@@ -25,6 +25,17 @@ const KNOWN_CATEGORY_KEYS: Record<string, string> = {
   ingresos: 'ingresos',
   salud: 'salud',
   ideologia_politica: 'ideologia_politica',
+  contacto_publicado: 'contacto_publicado',
+  documento_identidad: 'documento_identidad',
+  dato_financiero: 'dato_financiero',
+  identificador_tecnico: 'identificador_tecnico',
+  cuenta_externa: 'cuenta_externa',
+  credencial: 'credencial',
+  ubicacion_detallada: 'ubicacion_detallada',
+  viaje_futuro: 'viaje_futuro',
+  tercero: 'tercero',
+  menor: 'menor',
+  relacion: 'relacion',
 };
 
 // Fallback para categorías libres devueltas por la IA (p. ej.

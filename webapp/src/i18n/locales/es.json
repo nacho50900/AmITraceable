@@ -123,6 +123,7 @@
       "estado_civil_ia_simbolica_exact_combo": "Inferido por IA a partir de contenido simbólico o indirecto (emojis, fechas, menciones recurrentes...), no de una autodeclaración explícita: fiabilidad menor que el resto de rasgos de esta lista. Al conocerse también el sexo, se usa el porcentaje EXACTO de esa combinación concreta (estado civil condicionado a sexo, tabla real del INE), no una aproximación multiplicando proporciones independientes.",
       "edad_repartida_uniformemente": "Estimado repartiendo uniformemente la proporción de INE por tramos quinquenales entre las edades de cada tramo (no hay tabla año a año descargable directamente).",
       "edad_estimada_por_tramo": "Tramo de edad estimado por IA a partir de pistas indirectas del texto (años de graduación, curso que menciona estar haciendo, referencias generacionales...), no de una autodeclaración explícita: fiabilidad menor. Se usa el tramo quinquenal de población del INE en vez de un año exacto, por ser una estimación menos precisa que una edad autodeclarada.",
+      "edad_estimada_por_fecha": "Rango de edad deducido de un año que aparece en el propio texto (año de nacimiento o de graduación). Es aritmética sobre un dato literal, pero un año de graduación no fija la edad exacta, así que el rango es más ancho que uno de nacimiento.",
       "location_no_population_data": "No hay dato de población de referencia para este municipio/provincia en la tabla actual.",
       "location_note_base": "Asume distribución de edad/sexo similar a la media nacional (aproximación).",
       "location_note_imagen": "Asume distribución de edad/sexo similar a la media nacional (aproximación). Ubicación estimada a partir de una imagen, no de texto autodeclarado: menor fiabilidad que una autodeclaración explícita.",
@@ -181,7 +182,18 @@
       "idiomas": "Idiomas",
       "ingresos": "Ingresos",
       "salud": "Salud",
-      "ideologia_politica": "Ideología política"
+      "ideologia_politica": "Ideología política",
+      "contacto_publicado": "Contacto publicado",
+      "documento_identidad": "Documento de identidad",
+      "dato_financiero": "Dato financiero",
+      "identificador_tecnico": "Identificador técnico",
+      "cuenta_externa": "Cuenta en otra plataforma",
+      "credencial": "Credencial",
+      "ubicacion_detallada": "Ubicación detallada",
+      "viaje_futuro": "Viaje o ausencia próxima",
+      "tercero": "Tercero mencionado",
+      "menor": "Menor mencionado",
+      "relacion": "Relación de pareja"
     },
     "attributeValue": {
       "sexo": {
