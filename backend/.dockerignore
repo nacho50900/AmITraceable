@@ -1,0 +1,14 @@
+# Entornos locales (uv crea .venv en backend/; con torch pesa varios GB y
+# entraria en el contexto de build en cada `docker compose build`).
+.venv
+venv
+# Datos regenerables/montados como volumen (ver docker-compose.yml)
+data
+# Caches y ruido
+**/__pycache__
+.pytest_cache
+.coverage
+coverage.xml
+.idea
+# Secretos: las variables se pasan en runtime (env_file), nunca dentro de la imagen
+.env

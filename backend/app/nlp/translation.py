@@ -121,7 +121,7 @@ def _lazy_load(direction: str) -> bool:
         logger.info(
             "ctranslate2/sentencepiece no instalados -- la traducción local "
             "de descripciones no está disponible (se devolverán los textos "
-            "originales sin traducir). Ver requirements-vision.txt y "
+            "originales sin traducir). Ver el extra `vision` de pyproject.toml y "
             "scripts/convert_translation_models.py."
         )
         return False

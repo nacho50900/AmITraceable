@@ -67,14 +67,12 @@ jobs:
           cache: 'npm'
           cache-dependency-path: webapp/package-lock.json
 
-      - uses: actions/setup-python@v6
+      - uses: astral-sh/setup-uv@v7
         if: env.RUN_BACKEND == 'true'
         with:
           python-version: "3.12"
-          cache: 'pip'
-          cache-dependency-path: |
-            backend/requirements.txt
-            backend/requirements-dev.txt
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
 
       - name: Instalar dependencias webapp
         if: env.RUN_WEBAPP == 'true'
@@ -86,13 +84,10 @@ jobs:
 
       - name: Instalar dependencias backend (Python)
         if: env.RUN_BACKEND == 'true'
-        run: pip install -r backend/requirements-dev.txt
-
-      - name: Instalar modelos de spaCy
-        if: env.RUN_BACKEND == 'true'
-        run: |
-          python -m spacy download en_core_web_sm
-          python -m spacy download es_core_news_sm
+        # Incluye el grupo `dev` (pytest...) y los modelos de spaCy, que ahora
+        # son dependencias normales del proyecto (ya no hay `spacy download`).
+        # --locked: falla si uv.lock no esta al dia con pyproject.toml.
+        run: cd backend && uv sync --locked
 
       - name: Tests backend con cobertura
         if: env.RUN_BACKEND == 'true'
@@ -101,7 +96,7 @@ jobs:
         # LOCAL) -- a diferencia del diseño anterior por HTTP a
         # Mistral/Gemini, ya no hace falta ningún secret/API key para que
         # esta suite pase en CI.
-        run: cd backend && pytest --cov=app --cov-report=xml --cov-report=term
+        run: cd backend && uv run --locked pytest --cov=app --cov-report=xml --cov-report=term
 
       - name: Analyze with SonarQube
         uses: SonarSource/sonarqube-scan-action@master

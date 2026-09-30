@@ -99,7 +99,7 @@ navegador.
 - La geolocalización por imagen (`backend/app/vision/geolocation.py`) es
   **opcional y best-effort**: si el índice FAISS no está construido, o si
   el backend no tiene instaladas sus dependencias pesadas (`torch`,
-  `faiss`, `transformers` -- ver `requirements-vision.txt` y el `ARG
+  `faiss`, `transformers` -- ver el extra `vision` de `pyproject.toml` y el `ARG
   WITH_GEOLOCATION` del `Dockerfile`), esa función del pipeline
   simplemente no aporta nada, sin romper el resto del análisis. Su
   precisión realista es a nivel de provincia, no de calle (ver benchmarks
@@ -107,7 +107,7 @@ navegador.
 - El análisis de contenido visual (`backend/app/vision/scene_analysis.py`,
   Moondream2) es igualmente **opcional y best-effort**, y depende de las
   mismas condiciones de activación que la geolocalización (mismo
-  `requirements-vision.txt`, mismo `ARG WITH_GEOLOCATION` del
+  el extra `vision` de `pyproject.toml`, mismo `ARG WITH_GEOLOCATION` del
   `Dockerfile`) aunque desde el cambio a `llama-cpp-python`/GGUF ya NO
   instala las mismas dependencias de Python que la geolocalización (antes
   sí, ambas usaban `transformers`). Es arquitectónicamente distinto: no
@@ -252,7 +252,7 @@ Antes de levantarlo, crea `backend/.env` a partir de `backend/.env.example`
 `docker-compose.yml` trae `WITH_GEOLOCATION=true` por defecto, que instala
 `torch`/`faiss`/`transformers` (para DINOv2, geolocalización) y
 `llama-cpp-python` compilado con soporte CUDA (para Moondream2, análisis
-de contenido -- ver `requirements-vision.txt` y la etapa `cuda-builder`
+de contenido -- ver el extra `vision` de `pyproject.toml` y la etapa `cuda-builder`
 del `Dockerfile`) en la imagen del backend, varios cientos de MB extra.
 Pese al nombre del flag (heredado de cuando solo existía
 geolocalización), esa misma build es la que necesita también el análisis
@@ -325,14 +325,13 @@ puntual -- en orden de probabilidad:
 
 ```bash
 cd backend
-python3 -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-python -m spacy download en_core_web_sm
-python -m spacy download es_core_news_sm
+uv sync                           # crea .venv con las dependencias, el grupo dev y los modelos de spaCy
 cp .env.example .env              # y rellenar credenciales
-uvicorn app.main:app --reload --port 3000
+uv run uvicorn app.main:app --reload --port 3000
 ```
+
+(Requiere [uv](https://docs.astral.sh/uv/getting-started/installation/); descarga
+solo el Python 3.12 que fija `backend/pyproject.toml`.)
 
 **Si quieres geolocalización por imagen o análisis de contenido visual
 (Moondream2) funcionando en este venv**, hace falta un paso más -- lo de
@@ -342,7 +341,7 @@ error, simplemente esa parte del pipeline no aporta nada, así que es
 fácil no darse cuenta de que falta este paso.
 
 ```bash
-pip install -r requirements-vision.txt
+uv sync --extra vision
 ```
 
 Con Docker esto ya viene resuelto por defecto (ver `WITH_GEOLOCATION` más
@@ -455,18 +454,19 @@ informe, sin errores. Para activarlo:
 
 ```bash
 cd backend
-pip install -r requirements-vision.txt huggingface_hub pandas tqdm
+uv sync --extra vision
 
-python scripts/geolocalization/download_osv5m_spain.py --output data/osv5m_spain --max-disk-gb 35
-python scripts/geolocalization/build_faiss_index.py --images data/osv5m_spain
+uv run python scripts/geolocalization/download_osv5m_spain.py --output data/osv5m_spain --max-disk-gb 35
+uv run python scripts/geolocalization/build_faiss_index.py --images data/osv5m_spain
 ```
 
-(`requirements-vision.txt` ya apunta al índice de PyTorch solo-CPU, más
-pequeño que el paquete de PyPI por defecto -- ver también el `ARG
-WITH_GEOLOCATION` del `Dockerfile` si vas a correr esto dentro de Docker.)
+(El extra `vision` apunta al índice de PyTorch con CUDA 12.1
+(`pytorch-cu121`, ver `[tool.uv.sources]` en `backend/pyproject.toml`) -- ver
+también el `ARG WITH_GEOLOCATION` del `Dockerfile` si vas a correr esto
+dentro de Docker.)
 
 El análisis de contenido visual (`app/vision/scene_analysis.py`,
-Moondream2) usa el mismo `requirements-vision.txt`, pero no necesita nada
+Moondream2) usa el mismo el extra `vision` de `pyproject.toml`, pero no necesita nada
 de lo anterior: no hay índice que construir ni dataset que descargar, se
 ejecuta directamente sobre cada foto.
 
@@ -500,9 +500,9 @@ Estos datos/artefactos **no se versionan** en el repositorio (ver
 
 ### Backend (Python)
 
-- `uvicorn app.main:app --reload --port 3000` — arranca el backend en desarrollo.
-- `pytest` — tests unitarios (~260 tests, 1 se salta si no tienes instalado `requirements-vision.txt` en local).
-- `pytest --cov=app --cov-report=xml --cov-report=term` — tests con cobertura (genera `coverage.xml` para Sonar).
+- `uv run uvicorn app.main:app --reload --port 3000` — arranca el backend en desarrollo.
+- `uv run pytest` — tests unitarios (~260 tests, 1 se salta si no tienes instalado el extra `vision` en local).
+- `uv run pytest --cov=app --cov-report=xml --cov-report=term` — tests con cobertura (genera `coverage.xml` para Sonar).
 
 <details>
 <summary>Graphify (grafo de conocimiento del código)</summary>

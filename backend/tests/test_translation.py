@@ -161,7 +161,7 @@ class TestGracefulDegradationWithoutConvertedModels:
 
 class TestGracefulDegradationWithoutLibraries:
     """ctranslate2/sentencepiece no instalados (backend construido sin
-    WITH_GEOLOCATION=true, ver requirements-vision.txt) -- degrada igual
+    WITH_GEOLOCATION=true, ver el extra `vision` de pyproject.toml) -- degrada igual
     que sin modelos convertidos, nunca lanza ImportError hacia arriba."""
 
     def test_returns_originals_when_import_fails(self, monkeypatch, tmp_path):

@@ -1,0 +1,5 @@
+backend/requirements.txt
+backend/requirements-dev.txt
+backend/requirements-vision.txt
+backend/requirements-igpu.txt
+backend/igpu_worker/requirements.txt

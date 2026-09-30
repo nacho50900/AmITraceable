@@ -50,7 +50,7 @@ CONSUME esa libreria con el alcance mas estrecho, no se copia su motor.
 Base de datos de sitios: se usa la que trae empaquetada la propia
 distribucion de `maigret` instalada (fichero `resources/data.json` dentro
 del paquete) -- NO se vendoriza una copia propia. Fijar la version exacta
-de `maigret` en requirements.txt (ver ese fichero) ya congela que base de
+de `maigret` en pyproject.toml (ver ese fichero) ya congela que base de
 datos se usa, igual que fijariamos la version de cualquier otra
 dependencia; actualizarla es tan simple como subir esa version.
 

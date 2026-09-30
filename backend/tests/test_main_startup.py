@@ -3,7 +3,7 @@ Tests del arranque de app/main.py que test_lifespan.py no cubre: el reparto
 de hilos de PyTorch, el log explícito de disponibilidad de GPU y la
 degradación cuando falla la precarga de Moondream2.
 
-`torch` no es dependencia de test (ver requirements-vision.txt): se
+`torch` no es dependencia de test (ver el extra `vision` de pyproject.toml): se
 sustituye por un módulo falso en `sys.modules`.
 """
 import logging

@@ -1,0 +1,12 @@
+# Sin esto, `COPY . .` del Dockerfile copia el node_modules de la maquina host
+# (en Windows: cientos de MB, binarios de otra plataforma) POR ENCIMA del que
+# acaba de instalar `npm ci` dentro de la imagen, y cualquier cambio en el
+# invalida la cache de esa capa.
+node_modules
+dist
+coverage
+lcov.info
+e2e-results.xml
+*.log
+.env
+.env.*

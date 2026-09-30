@@ -3,7 +3,7 @@ Tests de app/log/analyze_analysis_run_log.py: análisis offline de
 `analysis_run_log.jsonl` (ver app/log/analysis_run_log.py).
 
 Nada toca el `data/` real: los logs se generan en `tmp_path`. `matplotlib`
-no es dependencia del proyecto (ni de requirements-dev.txt), así que la
+no es dependencia del proyecto (ni de el grupo `dev` de pyproject.toml), así que la
 rama `--plot` se ejercita con un módulo falso en `sys.modules`.
 """
 import json
