@@ -4016,6 +4016,77 @@ a los proveedores anteriores, y si el hardware de referencia (GTX 1650,
 4GB) soporta Moondream2 y Qwen3.5-4B cargados a la vez sin degradar el
 resto del pipeline.</p>
 </div>
+<div class="paragraph">
+<p><strong>Actualización (24/9)</strong>: dos de los puntos anteriores quedaron resueltos
+por trabajo posterior. <code>qwen_gguf_repo_id</code>/<code>qwen_gguf_filename</code> (dejados
+vacíos arriba) se confirmaron como <code>unsloth/Qwen3.5-4B-GGUF</code> /
+<code>Qwen3.5-4B-Q4_K_M.gguf</code>&#8201;&#8212;&#8201;un GGUF YA cuantizado publicado por una fuente
+de confianza, así que el punto de "cuantizar un modelo BASE de ~9GB
+localmente" (mencionado en Consecuencias) no aplica: no hace falta
+cuantizar nada en este servidor, solo descargar el <code>.gguf</code> ya cuantizado
+(~2.7GB). El riesgo de contención de VRAM con Moondream2 quedó resuelto
+de raíz, no medido&#8201;&#8212;&#8201;ver ADR-50: Moondream2 desapareció del todo, ya no
+hay dos modelos compitiendo por VRAM.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_50_unificación_del_análisis_visual_moondream2_qwen3_5_4b_compartido">9.2.9. ADR-50: Unificación del análisis visual (Moondream2 → Qwen3.5-4B compartido)</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: tras ADR-49, <code>app/nlp/ai_client.py</code> ya cargaba Qwen3.5-4B
+localmente para razonamiento de texto, pero <code>app/vision/scene_analysis.py</code>
+seguía usando Moondream2 aparte para analizar el CONTENIDO de las fotos
+(personas, aficiones, matrículas, edificios emblemáticos&#8230;&#8203;)&#8201;&#8212;&#8201;dos
+modelos cargados a la vez, con el riesgo de contención de VRAM que ADR-49
+dejó sin resolver. En ese momento, <code>llama-cpp-python</code> no tenía soporte
+oficial para la parte de visión de la familia Qwen3.x, solo forks no
+oficiales (JamePeng)&#8201;&#8212;&#8201;de ahí que ADR-49 dejase Moondream2 tal cual.</p>
+</div>
+<div class="paragraph">
+<p><strong>Qué cambió desde ADR-49</strong>: <code>llama.cpp</code> incorporó soporte mainline para
+Qwen3-VL/Qwen3.5 vía su mecanismo <code>mtmd</code>, y <code>llama-cpp-python</code> añadió un
+<code>MTMDChatHandler</code> GENÉRICO&#8201;&#8212;&#8201;lee la plantilla de chat embebida en el
+propio GGUF en vez de necesitar una clase dedicada por modelo. Qwen3.5
+usa además una arquitectura multimodal "early fusion" nativa, distinta de
+la de Qwen3-VL&#8201;&#8212;&#8201;soportada igualmente por ese mecanismo genérico.
+<code>unsloth/Qwen3.5-4B-GGUF</code> (el mismo repo de ADR-49) publica también el
+proyector de visión correspondiente (<code>mmproj-BF16.gguf</code>).</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: <code>app/nlp/ai_client.py</code> pasa a cargar TAMBIÉN el proyector de
+visión (<code>chat_handler=MTMDChatHandler.from_pretrained(&#8230;&#8203;)</code>,
+<code>settings.qwen_mmproj_filename</code>) sobre el MISMO <code><em>model</code> que ya usaba
+para texto&#8201;&#8212;&#8201;un solo modelo multimodal en memoria en vez de dos.
+<code>app/vision/scene_analysis.py</code> deja de cargar ningún modelo propio:
+<code>_lazy_load()</code> pasa a ser una delegación fina en
+<code>ai_client.ensure_loaded()</code>/<code>get_model()</code>/<code>get_lock()</code>/<code>get_device()</code>/
+<code>get_model_variant()</code>. El PROMPTING y el PARSEO de respuesta
+(<code>_CAPTION_QUERY</code>/<code>_STRUCTURED_QUERY</code>, todas las <code>_parse</em>*()</code>) se dejan
+DELIBERADAMENTE intactos en esta pasada&#8201;&#8212;&#8201;son prompts de texto libre
+pensados para las limitaciones de Moondream2, y probablemente sería mejor
+unificarlos en una única llamada JSON (mismo patrón que
+<code>app/nlp/ai_client.py</code> ya usa para texto)&#8201;&#8212;&#8201;pero es un rediseño de
+prompts aparte, anotado como mejora futura, no parte de esta decisión.</p>
+</div>
+<div class="paragraph">
+<p><strong>Justificación</strong>: la VRAM es el recurso más escaso del despliegue de
+referencia (GTX 1650, 4GB)&#8201;&#8212;&#8201;Moondream2 (Q8_0, ~1.8GB) + Qwen3.5-4B de
+texto (Q4_K_M, ~2.7GB) a la vez ya rondaba el límite sin margen para KV
+cache. Un solo modelo multimodal compartido (~2.7GB en total) elimina el
+problema de raíz en vez de mitigarlo.</p>
+</div>
+<div class="paragraph">
+<p><strong>Consecuencias</strong>: () elimina el riesgo de contención de VRAM que ADR-49
+dejó sin resolver; () <code>scene_analysis.py</code> se simplifica: desaparece toda
+la cuantización local propia de Moondream2, ya no hace falta compilar
+<code>llama-quantize</code> para este modelo (pendiente revisar si el Dockerfile aún
+lo necesita para algo más, ver nota en <code>requirements-vision.txt</code>); (-)
+<strong>sin verificar en GPU real todavía</strong>: ni que <code>MTMDChatHandler</code> cargue
+este GGUF sin crash en la GTX 1650 de referencia, ni el tiempo de
+inferencia por foto frente a Moondream2&#8201;&#8212;&#8201;el interruptor de vuelta atrás
+es dejar <code>qwen_mmproj_filename</code> vacío (app/config.py), sin tocar código;
+(-) <strong>calidad de extracción sin verificar</strong>: los prompts diseñados para
+Moondream2 no se han comprobado con las respuestas de Qwen3.5-4B.</p>
+</div>
 </div>
 </div>
 <div class="sect2">
@@ -4095,28 +4166,36 @@ IBM, un origen incómodo para una herramienta centrada en privacidad);
 <strong>KartaView</strong> (descartada para volumen serio: rate limit público de solo
 100 peticiones/hora, sin mecanismo de descarga por lotes, y cobertura
 mucho más densa en el Sudeste Asiático que en España); <strong>Mapillary</strong>
-(viable en teoría, pero bbox limitado a ~1km² por consulta&#8201;&#8212;&#8201;cubrir
-España entera exige cientos de miles de peticiones de tesela, un
-proyecto de scraping en sí mismo; aparcada, no descartada); <strong>Flickr</strong>
-(implementada por completo&#8201;&#8212;&#8201;<code>scripts/geolocalization/build_flickr_index.py</code>&#8201;&#8212;&#8201;pero sin usar en producción: Flickr pasó a exigir una suscripción
-Flickr Pro de pago para poder crear una API key, algo que no era así
-cuando se diseñó el script; se mantiene el código por si en el futuro
-compensa pagar la suscripción).</p>
+(implementada y en uso EN PARALELO a Commons&#8201;&#8212;&#8201;<code>scripts/geolocalization/build_mapillary_index.py</code>&#8201;&#8212;&#8201;bbox limitado a
+~0.01° cuadrados por consulta desde que Mapillary formalizó esa
+restricción en enero de 2026, lo que exige sub-tiling sistemático de
+cada celda del grid, ~100-130 sub-consultas por celda de 10km;
+<code>--on-foot-only</code> activado por defecto, aprovechando el campo <code>on_foot</code>
+que Mapillary añadió en junio de 2026, para filtrar imagery de vehículo
+y no solo aportar volumen); <strong>Flickr</strong> (se llegó a implementar por
+completo&#8201;&#8212;&#8201;retirada del repo tras confirmar que Flickr pasó a exigir
+una suscripción Flickr Pro de pago para poder crear una API key, algo
+que no era así cuando se diseñó el script; reconstruible siguiendo el
+mismo patrón que Commons/Mapillary si en el futuro compensa pagarla).</p>
 </div>
 <div class="paragraph">
 <p><strong>Decisión</strong>: DINOv2 (extracción de embeddings) + FAISS (búsqueda de
 vecinos más cercanos) contra un índice construido combinando varias
 fuentes, todas dentro de España: OSV-5M (imagery de vehículo, base
-original) y <strong>Wikimedia Commons</strong> (fotos tomadas a pie por personas,
+original), <strong>Wikimedia Commons</strong> (fotos tomadas a pie por personas,
 vía <code>list=geosearch</code> del API de MediaWiki&#8201;&#8212;&#8201;sin API key ni coste,
-<code>scripts/geolocalization/build_commons_index.py</code>), fusionadas con
-<code>merge_faiss_indices.py</code>. La ingestión de Commons recorre un grid de
-celdas de ~10km² sobre España con un techo (no un mínimo) de fotos por
-celda, para que la distribución final siga aproximadamente la densidad
-real de fotografía disponible sin que un único punto muy fotografiado
-domine el índice&#8201;&#8212;&#8201;ver ADR-42 para el tratamiento de privacidad
-(pixelado de caras) aplicado a esta fuente, al tratarse de fotos de
-terceros identificables. La predicción se sigue agregando a nivel de
+<code>scripts/geolocalization/build_commons_index.py</code>) y <strong>Mapillary</strong>
+(imagery mayoritariamente de vehículo salvo el subconjunto filtrado por
+<code>on_foot</code>, <code>scripts/geolocalization/build_mapillary_index.py</code>,
+token gratuito), fusionadas con <code>merge_faiss_indices.py</code>. La ingestión
+de Commons y Mapillary recorre el mismo grid de celdas de ~10km² sobre
+España (<code>spain_grid.py</code>, compartido entre ambas para que la cobertura
+sea comparable) con un techo (no un mínimo) de fotos por celda, para
+que la distribución final siga aproximadamente la densidad real de
+fotografía disponible sin que un único punto muy fotografiado domine el
+índice&#8201;&#8212;&#8201;ver ADR-42 para el tratamiento de privacidad (pixelado de
+caras) aplicado a ambas fuentes, al tratarse de fotos de terceros
+identificables. La predicción se sigue agregando a nivel de
 <strong>provincia</strong> cuando es posible; si solo se puede identificar la
 comunidad autónoma (varias provincias posibles, sin forma honesta de
 elegir una) se usa ese nivel intermedio en vez de forzar una provincia
@@ -4128,20 +4207,23 @@ como residencia habitual.</p>
 <p><strong>Consecuencias</strong>: () índice manejable en recursos de un TFG (unos pocos
 GB incluso por encima del millón de vectores, frente a un dataset
 mundial); () mayor precisión relativa al competir en un espacio de
-búsqueda más pequeño; () combinar OSV-5M con Commons reduce el sesgo
-de dominio hacia imagery de vehículo, acercando el índice al tipo de
-foto que de verdad se analiza (tomada a pie); () la granularidad de
-provincia (o comunidad autónoma, cuando aplica) coincide con la que ya
-usa el módulo de k-anonimato, integrándose de forma natural en el resto
-del informe; (-) no compite en precisión con herramientas comerciales
-que sí tienen infraestructura e índices mundiales propietarios&#8201;&#8212;&#8201;limitación reconocida y documentada, no ocultada; (-) construir la
-parte de Commons del índice a escala nacional es un proceso de varios
-días (no minutos), con su propio manejo de reintentos/rate-limiting
-frente al API de Wikimedia&#8201;&#8212;&#8201;complejidad operativa nueva que OSV-5M,
-al ser un dataset ya empaquetado, no tenía; (-) Mapillary queda como
-fuente evaluada y aparcada, no implementada&#8201;&#8212;&#8201;ampliable en el futuro
-si la cobertura actual resulta insuficiente tras evaluar el índice
-combinado.</p>
+búsqueda más pequeño; () combinar OSV-5M con Commons (y con el
+subconjunto `on_foot` de Mapillary) reduce el sesgo de dominio hacia
+imagery de vehículo, acercando el índice al tipo de foto que de verdad
+se analiza (tomada a pie); () la granularidad de provincia (o
+comunidad autónoma, cuando aplica) coincide con la que ya usa el módulo
+de k-anonimato, integrándose de forma natural en el resto del informe;
+(-) no compite en precisión con herramientas comerciales que sí tienen
+infraestructura e índices mundiales propietarios&#8201;&#8212;&#8201;limitación
+reconocida y documentada, no ocultada; (-) construir la parte de
+Commons/Mapillary del índice a escala nacional es un proceso de varios
+días a semanas (no minutos), con su propio manejo de
+reintentos/rate-limiting frente a cada API&#8201;&#8212;&#8201;complejidad operativa
+nueva que OSV-5M, al ser un dataset ya empaquetado, no tenía; (-) el
+límite de bbox de Mapillary (~0.01° cuadrados, formalizado en enero de
+2026) hace que su fase de búsqueda por sí sola, para toda España, sea
+más lenta que la ingestión completa de Commons&#8201;&#8212;&#8201;coste asumido a
+cambio de fotos con mejor domain-match (<code>on_foot</code>) que las de OSV-5M.</p>
 </div>
 </div>
 <div class="sect3">
@@ -5271,6 +5353,227 @@ indirecto (mismo nivel que las <code>inferencias_blandas</code> simbólicas ya
 existentes para texto, nunca como un campo "duro" de
 <code>DemographicFindings</code>), reutilizando la misma clave/forma de JSON para
 parsear con <code>_parse_soft_inferences</code> sin duplicar lógica de validación.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_51_bancos_temáticos_de_regex_estrictos_para_las_autodeclaraciones_demográficas_demographic_patterns_py">9.5.9. ADR-51: Bancos temáticos de regex estrictos para las autodeclaraciones demográficas (<code>demographic_patterns.py</code>)</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: las regex de <code>demographic_extraction.py</code> eran patrones sueltos
+y de vocabulario reducido: sobre 68 frases realistas (ver
+<code>tests/test_demographic_patterns.py</code>) solo detectaban 10 (fallaban
+"terminé la carrera", "soy abogada", "resido en", "tengo veinticuatro
+años", "(24M)", "UNED", "soy ucraniana"&#8230;&#8203;) y a la vez dejaban pasar
+falsos positivos ("Leo mucho" como signo Leo, "anuncio comercial" como
+ocupación, "trabajo en Madrid" como empresa, "mi novio es gay" como
+orientación del autor). El coste de un falso positivo es alto porque
+<code>merge_findings</code> (<code>ai_attribute_extraction.py</code>) da PRIORIDAD a la regex: la
+IA solo rellena lo que la regex no encontró y nunca la corrige, así que el
+falso positivo llega tal cual al estimador de k-anonimato.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: nuevo <code>nlp/demographic_patterns.py</code> con los patrones de edad,
+sexo, ubicación, estudios, nivel de estudios, ocupación, universidad,
+empresa, nacionalidad, situación laboral, lengua, hogar y religión como
+bancos de tuplas <code>(valor_canónico, patrón)</code> (<code>Banco</code>, <code>primer_valor</code>), y
+<code>demographic_extraction.py</code> pasa a delegar en ellos. Se mantiene la
+prioridad de la regex sobre la IA y, por eso mismo, los bancos son
+ESTRICTOS, no permisivos:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Texto normalizado (<code>normalizar</code>: minúsculas y sin tildes) para que
+"terminé"/"termine" o "máster"/"master" se comporten igual.</p>
+</li>
+<li>
+<p>Frase-ancla en primera persona en ocupación ("soy X", "trabajo de X") y
+religión; se eliminó el respaldo de palabra suelta de ocupación.
+<code>SIGNOS_AMBIGUOS</code> (leo, libra, cáncer, acuario) exige ancla.</p>
+</li>
+<li>
+<p>Descarte de terceros con <code>es_propio(clausula, inicio)</code>: una coincidencia
+no cuenta si "mi madre", "mi jefe"&#8230;&#8203; aparece ANTES en su cláusula. Es
+posicional (no descarta la cláusula entera) para que "soy mujer casada
+con mi marido" siga siendo "mujer" y "mi madre es jubilada" no sea
+"jubilado". Se aplica también a orientación sexual.</p>
+</li>
+<li>
+<p><code>clausulas()</code> separa por " y " salvo en residencia y estudios (para no
+partir "castilla y leon") y protege los compuestos "treinta_y_cuatro".</p>
+</li>
+<li>
+<p>"No terminé la carrera" ya no cuenta como nivel superior
+(<code>_NIVEL_SUPERIOR_NEGADO_RE</code>) y "grado medio" no cuenta como grado
+universitario.</p>
+</li>
+<li>
+<p>La ubicación compara topónimos por palabra completa
+(<code>contiene_toponimo</code>: "leon" no encaja en "leones").</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Con estos bancos la misma sonda pasa de 10/68 a 68/68 y los 153 tests
+previos de <code>test_demographic_extraction.py</code> siguen pasando sin cambios.
+Cambios de comportamiento asumidos: religión y ocupación ya no se
+detectan por palabra suelta (p. ej. "Católica | Madrid" en una bio), y las
+siglas de universidad se guardan con nombre corto ("Oviedo", "Politécnica de
+Madrid"), igual que ya hacía "universidad de X".</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_52_señales_de_estilo_de_vida_por_regex_fuera_del_score_y_del_k_anonimato_lifestyle_patterns_py_text_signals_py">9.5.10. ADR-52: Señales de estilo de vida por regex, fuera del score y del k-anonimato (<code>lifestyle_patterns.py</code>, <code>text_signals.py</code>)</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: hay datos que hacen reconocible a una persona pero no tienen
+tabla INE con la que estrechar población (aficiones, equipo de fútbol,
+mascotas, vivienda, hábitos, rutina, idiomas, salud, ideología), y solo
+los cubría la IA, que no siempre está configurada.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: <code>nlp/lifestyle_patterns.py</code> (bancos por tema, mismas
+convenciones que ADR-51: texto normalizado, ancla en primera persona,
+<code>es_propio</code>) y <code>nlp/text_signals.py::infer_lifestyle_attributes()</code>, que
+agrega por publicación y devuelve <code>InferredAttribute</code>. Se llama desde
+<code>report/generator.py</code> DESPUÉS de <code>compute_score</code> (etapa
+<code>estilo_de_vida_regex</code>), así que no altera el score ni el k-anonimato: solo
+enriquece la lista de atributos inferidos que ve el usuario, sumándose a
+las inferencias blandas de la IA. Detalles con su porqué:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Una mención del tema no basta ("vi un concierto en la tele"): las
+aficiones exigen ancla de gusto (<code>_ANCLA_GUSTO</code>) o práctica directa
+(<code>PRACTICA_DIRECTA</code>); los hashtags valen solo <code>CONF_ETIQUETA</code> (0,35).</p>
+</li>
+<li>
+<p>Equipo de fútbol: gana la coincidencia más larga (<code>_equipo</code>), para que
+"socio del Real Oviedo" no caiga en el Madrid por el alias corto "real".</p>
+</li>
+<li>
+<p>La confianza sube con las repeticiones (<code>_BONUS_POR_REPETICION</code>) con tope
+de 0,9: una señal blanda repetida nunca pasa a ser un hecho.</p>
+</li>
+<li>
+<p>Salud, ideología y afiliación sindical (categorías especiales, art. 9
+RGPD) se incluyen porque el informe solo lo ve el propio usuario y su
+objetivo es mostrar lo que ya es inferible; llevan la nota <code>NOTA_ART9</code> en
+el valor y confianza <code>CONF_SENSIBLE</code>. Se desactivan quitando la
+llamada a <code>_sensibles</code> en <code>detectar_estilo_de_vida</code>.</p>
+</li>
+<li>
+<p>Categorías nuevas (<code>mascota</code>, <code>vehiculo</code>, <code>vivienda</code>, <code>habito</code>,
+<code>idiomas</code>, <code>ingresos</code>, <code>salud</code>, <code>ideologia_politica</code>) con etiqueta es/en
+en <code>InferredAttributesList.tsx</code> y <code>inferredCategory</code>; sin ella el
+fallback las mostraría sin tildes.</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_53_exposición_directa_por_regex_identificadores_publicados_ubicación_detallada_viajes_terceros_y_menores_identifier_patterns_py_context_patterns_py">9.5.11. ADR-53: Exposición directa por regex: identificadores publicados, ubicación detallada, viajes, terceros y menores (<code>identifier_patterns.py</code>, <code>context_patterns.py</code>)</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: el informe solo cubría lo INFERIBLE (campos INE, aficiones&#8230;&#8203;).
+No detectaba lo peor: datos que identifican o contactan con la persona sin
+inferir nada (email, teléfono, DNI, IBAN, credenciales, dirección), ni lo que
+facilita un daño físico (anunciar un viaje con fechas deja la casa vacía), ni
+que un post expone a un tercero (hijos con colegio o edad).</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>: dos módulos con las mismas convenciones que ADR-51 y una
+agregación común en <code>text_signals.py::infer_exposure_attributes()</code>, llamada
+desde <code>report/generator.py</code> (etapa <code>exposicion_directa_regex</code>) DESPUÉS del
+score, como ADR-52. A diferencia de las señales de estilo de vida, esta SÍ
+alimenta <code>_build_recommendations</code> (<code>_EXPOSURE_RECOMMENDATIONS</code>, una por
+categoría presente y de más a menos grave), porque un dato publicado es
+accionable (borrar, revocar, avisar al banco):</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><code>identifier_patterns.py</code>: sin frase-ancla (un DNI lo es aparezca donde
+aparezca), pero los patrones con dígito de control se VALIDAN
+(<code>validar_dni</code>, <code>validar_nie</code>, <code>validar_cif</code>, <code>validar_iban</code> mod-97,
+<code>validar_ccc</code>, <code>validar_tarjeta</code> Luhn, <code>validar_imei</code>) y lo que no valida
+se descarta: una secuencia numérica cualquiera es ruido. Categorías:
+<code>contacto_publicado</code>, <code>documento_identidad</code>, <code>dato_financiero</code>,
+<code>identificador_tecnico</code>, <code>cuenta_externa</code>, <code>credencial</code>,
+<code>ubicacion_detallada</code>.</p>
+</li>
+<li>
+<p>El valor que llega al informe va ENMASCARADO (<code>enmascarar</code>): el informe se
+descarga en JSON y se envía a la IA de análisis, y un aviso de "has
+publicado tu IBAN" no debe reproducirlo. Las credenciales no llevan valor,
+solo el tipo (<code>_valor_informe</code>). Cada <code>Patron</code> reúne etiqueta, regex,
+validador, descripción y función de enmascarado en un solo sitio.</p>
+</li>
+<li>
+<p><code>context_patterns.py</code>: ubicación por barrio o "vivo cerca de", viajes
+futuros (<code>_VERBO_VIAJE_RE</code> + <code>_FECHA_FUTURA_RE</code>, y solo si la cláusula no
+está en pasado, <code>_PASADO_RE</code>: "volvimos de Lisboa" no es un aviso),
+vivienda vacía, terceros y menores. Los nombres propios corren sobre la
+cláusula ORIGINAL (<code>dp.clausulas_con_original</code>) porque solo los distingue
+la mayúscula, y el informe solo lleva la INICIAL ("Nombra a su pareja
+(L.)"): se avisa de que se expone a un tercero sin volver a exponerlo.</p>
+</li>
+<li>
+<p>"Mi hijo Pablo" es <code>tercero</code>, no <code>menor</code>: sin edad, colegio o "bebé/niño"
+no se sabe si es menor.</p>
+</li>
+<li>
+<p><code>relacion</code> (pareja, boda, divorcio) es una inferencia blanda aparte y NO
+rellena <code>DemographicFindings.estado_civil</code>, que por diseño solo fija la IA
+simbólica (<code>source["estado_civil"] = "ia_simbolica"</code>).</p>
+</li>
+<li>
+<p>Categorías nuevas con etiqueta es/en en <code>InferredAttributesList.tsx</code>.</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_adr_54_banco_de_biografía_y_edad_deducida_de_años_demographic_patterns_bio_atributos_edad_indirecta">9.5.12. ADR-54: Banco de biografía y edad deducida de años (<code>demographic_patterns.bio_atributos</code>, <code>edad_indirecta</code>)</h4>
+<div class="paragraph">
+<p><strong>Contexto</strong>: las frase-ancla en primera persona de ADR-51 dejaban fuera las
+bios, que son fragmentos ("Católica | Madrid", "Ingeniera @ Indra", "23
+años", "Madre de 2") y hablan del autor por definición. Además, la edad solo
+se detectaba si el texto decía "tengo N años", aunque el propio texto diera un
+año de nacimiento o de graduación.</p>
+</div>
+<div class="paragraph">
+<p><strong>Decisión</strong>:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><code>bio_atributos()</code> relaja las anclas SOLO para el pseudo-post <code>type="bio"</code>
+(<code>_try_detect_bio</code> en <code>demographic_extraction.py</code>), fragmento a fragmento
+(<code>_fragmentos_bio</code>, partido por <code>|</code>, <code>·</code>, <code>•</code> o " - "), y solo rellena
+campos que las reglas normales no hayan fijado. Cuidados: "10 años de
+experiencia" no es edad (<code>_BIO_EDAD_RE</code>), los alias cortos de universidad
+("uam") exigen "@" (<code>_alias_universidad_bio</code>), y "mi madre es mi heroína"
+no declara el sexo del autor (<code>_sexo_propio_en_bio</code>, el posesivo ya no lo
+cubre <code>es_propio</code> porque la propia coincidencia es el tercero).</p>
+</li>
+<li>
+<p><code>edad_indirecta()</code>: fecha de nacimiento completa &#8594; edad EXACTA (la fecha
+de hoy es inyectable en tests, <code>extract_demographics(posts, hoy=&#8230;&#8203;)</code>); año
+de nacimiento ("nací en 1999", "soy del 99", "quinta del 95") &#8594; rango de 2
+años; hitos académicos (graduación, máster, doctorado, selectividad,
+inicio de carrera, promoción) &#8594; rango ANCHO según la edad típica del hito
+(<code>_HITOS_ACADEMICOS</code>). Varias pistas se intersectan; si se contradicen (p.
+ej. nacer en 1999 y terminar la carrera en 2010) se descartan todas.</p>
+</li>
+<li>
+<p>Cambio de diseño asumido: <code>edad_rango_min</code>/<code>edad_rango_max</code> ya no los
+rellena solo la IA. Una deducción aritmética sobre un año literal no es
+razonamiento simbólico, y el ancho del rango absorbe la incertidumbre, que
+es justo lo que motivó el diseño de rango libre (ver comentario en
+<code>DemographicFindings</code>). Se marca con <code>source["edad_rango_min"] = "texto"</code> y
+<code>k_anonymity._step_edad</code> usa una nota propia (<code>EDAD_ESTIMADA_POR_FECHA</code>,
+traducida es/en) para no decir que la estimó una IA.</p>
+</li>
+</ul>
 </div>
 </div>
 </div>
@@ -7912,7 +8215,7 @@ este proyecto:</p>
 <div id="footer">
 <div id="footer-text">
 Version 1.0<br>
-Last updated 2026-09-24 11:52:31 UTC
+Last updated 2026-09-30 11:03:45 UTC
 </div>
 </div>
 </body>
