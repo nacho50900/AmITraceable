@@ -4,7 +4,9 @@ WORKDIR /app
 
 # Install deps
 COPY package.json package-lock.json ./
-RUN npm ci --silent
+# Cache de npm de BuildKit: si cambia package-lock.json (y esta capa se
+# reconstruye), los paquetes ya descargados no se vuelven a bajar.
+RUN --mount=type=cache,target=/root/.npm npm ci --silent
 
 # Copy sources
 COPY . .

@@ -2,7 +2,7 @@
 Tests de app/nlp/ai_client.py (cliente del modelo de IA local Qwen3.5-4B).
 
 No se carga ningún modelo real ni se descarga nada: `llama_cpp` y `torch`
-no son dependencias de test (ver requirements-vision.txt), así que se
+no son dependencias de test (ver el extra `vision` de pyproject.toml), así que se
 sustituyen por módulos falsos en `sys.modules`.
 """
 import json
@@ -47,7 +47,7 @@ def fake_llama_cpp(monkeypatch):
     `llama_cpp.llama_chat_format` falso con un `MTMDChatHandler.from_pretrained`
     que registra sus propios kwargs -- necesario desde ADR-49bis, la carga
     con visión importa ese submódulo (real solo cuando `llama_cpp` está
-    de verdad instalado, ver requirements-vision.txt)."""
+    de verdad instalado, ver el extra `vision` de pyproject.toml)."""
     calls = {"from_pretrained": [], "mtmd_from_pretrained": []}
 
     class FakeChatHandler:

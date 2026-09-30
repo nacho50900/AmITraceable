@@ -46,7 +46,7 @@ services:
     # integrado en su backend WSL2; solo hace falta tener actualizado el
     # driver NVIDIA de Windows con soporte WSL2 y "GPU support" activo en
     # Docker Desktop, Settings > Resources). Sin este bloque, aunque
-    # requirements-vision.txt instale el build CUDA de torch, el contenedor
+    # el extra `vision` de pyproject.toml instale el build CUDA de torch, el contenedor
     # no ve la GPU y `torch.cuda.is_available()` da False en silencio (cae
     # a CPU sin avisar) -- ver el comentario largo en
     # app/vision/scene_analysis.py sobre el presupuesto de VRAM ajustado

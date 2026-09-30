@@ -13,20 +13,20 @@ este servicio en concreto.
 
 ```bash
 cd backend
-python3 -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
-pip install -r requirements-dev.txt   # incluye requirements.txt + deps de test
-python -m spacy download en_core_web_sm
-python -m spacy download es_core_news_sm
+uv sync                           # crea .venv: dependencias + grupo dev (tests) + modelos de spaCy
 cp .env.example .env              # y rellenar credenciales (ver abajo)
-uvicorn app.main:app --reload --port 3000
+uv run uvicorn app.main:app --reload --port 3000
 ```
+
+Requiere [uv](https://docs.astral.sh/uv/getting-started/installation/). Descarga
+solo el Python 3.12 que fija `pyproject.toml` (`requires-python`), así que no
+importa qué Python tengas instalado en el sistema.
 
 La API queda en http://localhost:3000, con documentación interactiva
 (Swagger UI) en http://localhost:3000/docs.
 
 Para que la geolocalización por imagen funcione de verdad (no solo para
-poder construir el índice), instala además `requirements-vision.txt` — ver
+poder construir el índice), instala además el extra `vision` (`uv sync --extra vision`) — ver
 el README raíz, sección de geolocalización.
 
 ### Recrear el entorno desde cero (Windows)
@@ -35,13 +35,8 @@ Si el venv se corrompe o quieres partir de cero:
 
 ```bat
 cd C:\ruta\al\proyecto\AmITraceable\backend
-rmdir /s /q venv
-python -m venv venv
-venv\Scripts\activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
-python -m spacy download en_core_web_sm
-python -m spacy download es_core_news_sm
+rmdir /s /q .venv
+uv sync
 ```
 
 ### Variables de entorno
@@ -72,7 +67,7 @@ python scripts/update_ine_reference.py --insecure --apply --yes
 `--apply` escribe los cambios en `ine_reference.py` (sin él, solo los
 compara y muestra). `--yes` no pide confirmación por teclado. `--insecure`
 desactiva la verificación SSL — hace falta en Windows si falla con
-`CERTIFICATE_VERIFY_FAILED` (prueba antes `pip install --upgrade
+`CERTIFICATE_VERIFY_FAILED` (prueba antes `uv pip install --upgrade
 certifi`, que suele arreglarlo sin necesidad de `--insecure`).
 
 Al final, este comando llama automáticamente a
@@ -183,10 +178,12 @@ disco**, solo el vector y sus metadatos (`id`, `lat`, `lon`, `region`,
 
 ```bash
 cd backend
-pip install -r requirements-vision.txt huggingface_hub pandas tqdm httpx imagehash
+uv sync --extra vision
 ```
 
-(`opencv-python-headless` e `imagehash` ya están en `requirements-vision.txt`.)
+(`opencv-python-headless` e `imagehash` ya están en el extra `vision`;
+`huggingface_hub` y `tqdm` llegan como dependencias transitivas. Ejecuta los
+scripts con `uv run python scripts/...`.)
 
 ### Calibrar antes de lanzar la ejecución completa
 
@@ -394,7 +391,7 @@ de lo que hace la herramienta — está silenciada explícitamente en
   imagen (`vision/geolocation.py`), el análisis con IA (`ai_analysis.py`)
   y la extracción de atributos con IA (`nlp/ai_attribute_extraction.py`)
   están diseñados para fallar con gracia — sin índice FAISS construido (o
-  sin sus dependencias pesadas instaladas, ver `requirements-vision.txt`),
+  sin sus dependencias pesadas instaladas, ver el extra `vision` de `pyproject.toml`),
   o sin `QWEN_GGUF_REPO_ID` configurado (ver `.env.example`), el resto del pipeline sigue funcionando
   exactamente igual, y el frontend distingue explícitamente "la función no
   está disponible" de "no se encontró nada" (nunca ambos mensajes a la vez).

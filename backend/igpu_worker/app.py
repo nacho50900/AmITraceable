@@ -5,9 +5,9 @@ Intel/AMD, vía WSL2), completamente separado del backend principal.
 Por qué existe este proceso aparte, en vez de un simple
 `import torch_directml` dentro de app/vision/geolocation.py del backend:
 torch-directml fija una versión CONCRETA de `torch` (2.4.1 en el momento
-de escribir esto, ver requirements.txt de este mismo directorio) como
+de escribir esto, ver pyproject.toml de este mismo directorio) como
 dependencia -- instalarlo en el MISMO entorno que ya tiene el build CUDA
-(`cu121`) que usa Moondream2 (ver backend/requirements-vision.txt) obliga a
+(`cu121`) que usa Moondream2 (ver backend/el extra `vision` de pyproject.toml) obliga a
 pip a reinstalar `torch` con esa otra versión/build, rompiendo el CUDA de
 Moondream2 en el proceso. Esto pasó de verdad: la desinstalación del torch
 anterior falló a medias con un OSError, dejando el entorno del backend

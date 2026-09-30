@@ -23,7 +23,7 @@ Quick commands:
     ```
 
     This uses `start-server-and-test` + `concurrently` to start `npm run dev`
-    and `uvicorn app.main:app --port 3000` (see `start:all` in
+    and `uv run uvicorn app.main:app --port 3000` (see `start:all` in
     `package.json`), wait for `http://localhost:5173`, then run Cucumber.
 
   - Or start each server yourself in separate terminals and then run:
@@ -41,14 +41,14 @@ Files of interest:
 Notes:
 - For CI, ensure Playwright browsers are installed (e.g. `npx playwright install --with-deps`).
 - The `backend` needs its Python dependencies installed
-  (`pip install -r requirements.txt` inside `backend/`, plus the spaCy models —
-  see `backend/README` section in the main `README.md`) before `start:all` can
-  launch it successfully.
+  (`uv sync` inside `backend/` — the spaCy models are regular project
+  dependencies, see `backend/README.md`) before `start:all` can launch it
+  successfully. `uv` itself must be on the `PATH`.
 - Because the login flow depends on real Reddit OAuth credentials, these E2E
   scenarios only check the consent screen, the "connect" link, the disabled
   "Coming Soon" state, and the auth guard on `/dashboard` — they don't attempt
   the full OAuth round-trip.
 - This setup runs the webapp and backend as loose dev servers
-  (`npm run dev` + bare `uvicorn`), not the Docker/nginx-proxy setup used in
+  (`npm run dev` + `uv run uvicorn`), not the Docker/nginx-proxy setup used in
   `docker-compose.yml` — it won't catch bugs that only show up in the built
   Docker images (e.g. a missing dependency in the backend image).

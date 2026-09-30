@@ -109,7 +109,7 @@ def _log_gpu_availability(concurrency: int) -> None:
             "GPU no detectada (torch.cuda.is_available()=False) -- los modelos "
             "de vision se cargaran en CPU. Si esperabas usar una GPU, revisa la "
             "reserva de GPU en docker-compose.yml, el driver NVIDIA (soporte "
-            "WSL2 si estas en Windows) y que requirements-vision.txt este "
+            "WSL2 si estas en Windows) y que el extra `vision` de pyproject.toml este "
             "instalando el build de torch con CUDA, no el SOLO-CPU."
         )
         return
@@ -229,13 +229,13 @@ async def _lifespan(app: FastAPI):
         else:
             # Mismo aviso que ya usa analyze_image_content() en tiempo de
             # peticion -- ENABLE_SCENE_ANALYSIS=true sin las dependencias
-            # instaladas (falta requirements-vision.txt completo, o
+            # instaladas (falta el extra `vision` de pyproject.toml completo, o
             # WITH_GEOLOCATION=false en el build) es una config
             # inconsistente, pero no debe tumbar el arranque: se avisa y
             # se sigue, igual que ya hace analyze_image_content() por foto.
             logger.warning(
                 "ENABLE_SCENE_ANALYSIS=true pero faltan dependencias "
-                "(torch/transformers/timm/einops, ver requirements-vision.txt) "
+                "(torch/transformers/timm/einops, ver el extra `vision` de pyproject.toml) "
                 "-- el analisis de contenido se saltara silenciosamente en cada foto."
             )
 

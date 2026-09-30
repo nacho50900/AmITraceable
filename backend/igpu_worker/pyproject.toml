@@ -1,0 +1,45 @@
+# Proyecto Python de un proceso COMPLETAMENTE APARTE del backend (imagen Docker
+# propia, entorno propio, su propio uv.lock, nunca el mismo site-packages) -- ver
+# el docstring de app.py para el porque: torch-directml fija una version
+# concreta de `torch` que es incompatible con el build CUDA (`cu121`) que usa el
+# backend. Antes se intento instalar torch-directml DENTRO del backend (ver
+# historial/ADR) y la reinstalacion de `torch` que provoco dejo el entorno del
+# backend corrupto a medias. Este proyecto NUNCA debe instalarse en la imagen
+# del backend (backend/Dockerfile) ni compartir su uv.lock.
+#
+# Sustituye a igpu_worker/requirements.txt. Genera el lock con `uv lock`.
+#
+# El pin exacto de torch (2.4.1) es el que exige torch-directml en el momento de
+# escribir esto -- torch-directml apenas recibe actualizaciones. Si `uv lock`
+# falla por un conflicto de version, mira que `torch` exige la ultima release de
+# torch-directml (`uv pip show`/PyPI) antes de tocar nada en el backend.
+[project]
+name = "amitraceable-igpu-worker"
+version = "0.1.0"
+description = "Worker DINOv2 sobre iGPU (torch-directml), proceso aparte del backend."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "torch==2.4.1",
+    "torch-directml",
+    "transformers>=4.40,<5.0",
+    "pillow>=10.0,<12.0",
+    "numpy>=1.26,<3.0",
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.32,<1.0",
+    # Necesario para que FastAPI acepte el UploadFile multipart del endpoint
+    # /embed -- sin esto, FastAPI arranca pero devuelve 422 en cada peticion.
+    "python-multipart>=0.0.9,<1.0",
+]
+
+[tool.uv]
+package = false
+# Solo se usa dentro de Docker (Linux).
+environments = ["sys_platform == 'linux'"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true

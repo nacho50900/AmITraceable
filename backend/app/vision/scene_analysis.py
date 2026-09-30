@@ -669,7 +669,7 @@ def analyze_image_content(
     if not _scene_analysis_available():
         logger.warning(
             "Análisis de contenido visual no disponible: falta llama-cpp-python "
-            "(ver requirements-vision.txt)"
+            "(ver el extra `vision` de pyproject.toml)"
         )
         return [], False, None, None, None
 

@@ -343,8 +343,8 @@ class TestGeolocationAvailable:
     """Cubre justo el bug real que hizo que, con el índice ya construido y
     montado, el backend siguiera diciendo "no disponible": la comprobación
     de ficheros pasaba, pero torch/faiss/transformers no estaban instaladas
-    en la imagen del backend (requirements-vision.txt es opcional, ver
-    Dockerfile/ARG WITH_GEOLOCATION) -- ver requirements.txt para el
+    en la imagen del backend (el extra `vision` de pyproject.toml es opcional, ver
+    Dockerfile/ARG WITH_GEOLOCATION) -- ver pyproject.toml para el
     porqué esto no es solo cosa del script de construcción del índice."""
 
     def test_false_when_index_files_missing(self, tmp_path, monkeypatch):
@@ -378,7 +378,7 @@ class TestGeolocationAvailable:
         except ImportError:
             pytest.skip(
                 "torch/faiss/transformers no instaladas en este entorno "
-                "(requirements-vision.txt es opcional, ver Dockerfile)"
+                "(el extra `vision` de pyproject.toml es opcional, ver Dockerfile)"
             )
 
         assert geolocation._geolocation_available() is True

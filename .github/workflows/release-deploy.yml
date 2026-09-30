@@ -44,21 +44,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Use Python
-        uses: actions/setup-python@v6
+      - name: Use uv
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
 
       - name: Install dependencies
-        run: pip install -r backend/requirements-dev.txt
-
-      - name: Install spaCy models
-        run: |
-          python -m spacy download en_core_web_sm
-          python -m spacy download es_core_news_sm
+        # Grupo `dev` + modelos de spaCy incluidos (son dependencias del proyecto).
+        run: cd backend && uv sync --locked
 
       - name: Run tests
-        run: cd backend && pytest --junitxml=junit.xml
+        run: cd backend && uv run --locked pytest --junitxml=junit.xml
 
       - name: Publish test report
         uses: mikepenz/action-junit-report@v6
@@ -84,16 +82,17 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
-      - name: Use Python
-        uses: actions/setup-python@v6
+      - name: Use uv
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
       - name: Install backend dependencies
-        run: pip install -r backend/requirements.txt
-      - name: Install spaCy models
-        run: |
-          python -m spacy download en_core_web_sm
-          python -m spacy download es_core_news_sm
+        # El E2E arranca el backend con `uv run uvicorn ...` (ver
+        # webapp/package.json, start:all); los modelos de spaCy ya vienen en
+        # las dependencias del proyecto.
+        run: cd backend && uv sync --locked
       - name: Install webapp dependencies
         run: |
           cd webapp
@@ -127,46 +126,84 @@ jobs:
           detailed_summary: true
           require_tests: true
 
-  docker-push-backend:
-    name: Publish backend image
+  # Construye las imagenes EN PARALELO con los tests (sin `needs`) y las sube
+  # con el tag del commit (nunca `latest`: eso solo ocurre en `publish-images`,
+  # tras pasar los tests y el E2E). Asi el tiempo de release deja de ser
+  # "tests + E2E + build" y pasa a ser "max(tests + E2E, build)".
+  #
+  # Cache de capas en el propio ghcr (tag `buildcache`, type=registry) en vez de
+  # la cache de GitHub Actions: esta tiene un limite de 10 GB por repositorio y
+  # las capas de torch/CUDA por si solas lo revientan. Con la cache caliente,
+  # una release que solo toca codigo reconstruye unicamente `COPY app` (segundos)
+  # en vez de recompilar llama-cpp-python con CUDA y volver a bajar torch.
+  build-images:
+    name: Build ${{ matrix.image }} image
     runs-on: ubuntu-latest
-    needs: e2e
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: backend
+            context: backend
+          - image: webapp
+            context: webapp
+    env:
+      IMAGE: ghcr.io/nacho50900/amitraceable-${{ matrix.image }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Publish to Registry (backend)
-        uses: elgohr/Publish-Docker-Github-Action@v5
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v4
         with:
-          name: nacho50900/amitraceable-backend
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-          registry: ghcr.io
-          workdir: backend
 
-  docker-push-webapp:
-    name: Publish webapp image
+      - name: Build and push (tag = commit SHA)
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+          # Sin build-args, igual que antes con elgohr/Publish-Docker-Github-Action:
+          # el backend se publica con WITH_GEOLOCATION=false (el valor por
+          # defecto del Dockerfile), NO con el `true` de docker-compose.yml. Sin
+          # VITE_API_URL en el webapp: usa rutas relativas (ver webapp/nginx.conf).
+
+  # Solo re-etiqueta (sin reconstruir nada, segundos) las imagenes ya construidas
+  # arriba, y solo despues de que pasen tests unitarios y E2E.
+  publish-images:
+    name: Publish images (latest + release tag)
     runs-on: ubuntu-latest
-    needs: e2e
+    needs: [e2e, build-images]
     permissions:
       contents: read
       packages: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
-      - name: Publish to Registry (webapp)
-        uses: elgohr/Publish-Docker-Github-Action@v5
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v4
         with:
-          name: nacho50900/amitraceable-webapp
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-          registry: ghcr.io
-          workdir: webapp
-          # Sin VITE_API_URL: la imagen usa rutas relativas de por sí (ver
-          # webapp/nginx.conf, que proxea /auth y /api hacia "backend" por
-          # DNS interno de Docker) -- funciona igual en local que aquí, sin
-          # necesitar DEPLOY_HOST para esto.
+
+      - name: Tag images as latest and as the release tag
+        run: |
+          for image in backend webapp; do
+            docker buildx imagetools create \
+              --tag "ghcr.io/nacho50900/amitraceable-${image}:latest" \
+              --tag "ghcr.io/nacho50900/amitraceable-${image}:${IMAGE_TAG}" \
+              "ghcr.io/nacho50900/amitraceable-${image}:${GITHUB_SHA}"
+          done

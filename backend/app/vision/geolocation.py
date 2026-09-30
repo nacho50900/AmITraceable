@@ -1077,7 +1077,7 @@ async def estimate_locations_for_posts(
         import io
     except ImportError:
         # Pillow no es una dependencia obligatoria del núcleo de la app
-        # (requirements.txt), solo se necesita para este módulo opcional de
+        # (pyproject.toml), solo se necesita para este módulo opcional de
         # geolocalización. Si no está instalada, se degrada devolviendo
         # lista vacía en vez de romper el análisis completo -- mismo
         # principio que ya se aplica a torch/faiss/transformers en
