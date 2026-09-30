@@ -1699,7 +1699,8 @@ accionable (borrar, revocar, avisar al banco):
 - El valor que llega al informe va ENMASCARADO (`enmascarar`): el informe se
   descarga en JSON y se envía a la IA de análisis, y un aviso de "has
   publicado tu IBAN" no debe reproducirlo. Las credenciales no llevan valor,
-  solo el tipo (`_SIN_VALOR`).
+  solo el tipo (`_valor_informe`). Cada `Patron` reúne etiqueta, regex,
+  validador, descripción y función de enmascarado en un solo sitio.
 - `context_patterns.py`: ubicación por barrio o "vivo cerca de", viajes
   futuros (`_VERBO_VIAJE_RE` + `_FECHA_FUTURA_RE`, y solo si la cláusula no
   está en pasado, `_PASADO_RE`: "volvimos de Lisboa" no es un aviso),

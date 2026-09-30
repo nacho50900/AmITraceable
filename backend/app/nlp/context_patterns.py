@@ -25,6 +25,14 @@ import re
 from app.nlp import demographic_patterns as dp
 from app.nlp.lifestyle_patterns import CONDICIONES, Hallazgo
 
+# Literales que se repiten en varios bancos.
+_UBICACION_DETALLADA = "ubicacion_detallada"
+_VIAJE_FUTURO = "viaje_futuro"
+_MENOR = "menor"
+_TERCERO = "tercero"
+_PAREJA = "su pareja"
+_HIJO = "su hijo/a"
+
 CONF_DIRECTA = 0.7
 CONF_INDICIO = 0.55
 
@@ -69,13 +77,13 @@ def _ubicacion(original: str, norm: str) -> list[Hallazgo]:
     for patron, plantilla in etiquetas:
         m = patron.search(norm)
         if m and dp.es_propio(norm, m.start()):
-            hallazgos.append(Hallazgo("ubicacion_detallada", plantilla.format(_titulo(m.group(1))), CONF_DIRECTA))
+            hallazgos.append(Hallazgo(_UBICACION_DETALLADA, plantilla.format(_titulo(m.group(1))), CONF_DIRECTA))
     if _UBICACION_TIEMPO_REAL_RE.search(norm):
-        hallazgos.append(Hallazgo("ubicacion_detallada", "Comparte su ubicación en tiempo real", CONF_DIRECTA))
+        hallazgos.append(Hallazgo(_UBICACION_DETALLADA, "Comparte su ubicación en tiempo real", CONF_DIRECTA))
     pin = _PIN_RE.search(original)
     if pin:
         hallazgos.append(
-            Hallazgo("ubicacion_detallada", f"Etiqueta un lugar concreto con 📍: {pin.group(1).strip()}", CONF_INDICIO)
+            Hallazgo(_UBICACION_DETALLADA, f"Etiqueta un lugar concreto con 📍: {pin.group(1).strip()}", CONF_INDICIO)
         )
     return hallazgos
 
@@ -117,12 +125,12 @@ def _viajes(norm: str) -> list[Hallazgo]:
     fecha = _FECHA_FUTURA_RE.search(norm)
     if verbo and fecha and not _PASADO_RE.search(norm) and dp.es_propio(norm, verbo.start()):
         hallazgos.append(
-            Hallazgo("viaje_futuro", f"Anuncia un viaje o ausencia próxima (fecha: {fecha.group(0)})", CONF_DIRECTA)
+            Hallazgo(_VIAJE_FUTURO, f"Anuncia un viaje o ausencia próxima (fecha: {fecha.group(0)})", CONF_DIRECTA)
         )
     if _VIVIENDA_VACIA_RE.search(norm):
-        hallazgos.append(Hallazgo("viaje_futuro", "Indica que su vivienda quedará sola o vacía", CONF_DIRECTA))
+        hallazgos.append(Hallazgo(_VIAJE_FUTURO, "Indica que su vivienda quedará sola o vacía", CONF_DIRECTA))
     if _FUERA_RE.search(norm):
-        hallazgos.append(Hallazgo("viaje_futuro", "Indica que estará fuera de casa unos días", CONF_INDICIO))
+        hallazgos.append(Hallazgo(_VIAJE_FUTURO, "Indica que estará fuera de casa unos días", CONF_INDICIO))
     return hallazgos
 
 
@@ -131,8 +139,8 @@ def _viajes(norm: str) -> list[Hallazgo]:
 # ---------------------------------------------------------------------------
 
 _RELACIONES = {
-    "hijo": "su hijo/a", "hija": "su hijo/a", "marido": "su pareja", "mujer": "su pareja", "esposa": "su pareja",
-    "esposo": "su pareja", "novio": "su pareja", "novia": "su pareja", "pareja": "su pareja",
+    "hijo": _HIJO, "hija": _HIJO, "marido": _PAREJA, "mujer": _PAREJA, "esposa": _PAREJA,
+    "esposo": _PAREJA, "novio": _PAREJA, "novia": _PAREJA, "pareja": _PAREJA,
     "madre": "su madre", "padre": "su padre", "hermano": "un hermano/a", "hermana": "un hermano/a",
     "abuelo": "un abuelo/a", "abuela": "un abuelo/a", "suegro": "un suegro/a", "suegra": "un suegro/a",
     "primo": "un primo/a", "prima": "un primo/a", "tio": "un tío/a", "tia": "un tío/a",
@@ -172,25 +180,25 @@ def _terceros_y_menores(original: str, norm: str) -> list[Hallazgo]:
         relacion = dp.normalizar(m.group(1))
         inicial = _inicial(m.group(2))
         if relacion in _MENORES:
-            hallazgos.append(Hallazgo("menor", f"Nombra a un menor de su entorno ({inicial})", CONF_DIRECTA))
+            hallazgos.append(Hallazgo(_MENOR, f"Nombra a un menor de su entorno ({inicial})", CONF_DIRECTA))
         else:
-            hallazgos.append(Hallazgo("tercero", f"Nombra a {_RELACIONES[relacion]} ({inicial})", CONF_DIRECTA))
+            hallazgos.append(Hallazgo(_TERCERO, f"Nombra a {_RELACIONES[relacion]} ({inicial})", CONF_DIRECTA))
 
     edad = _EDAD_MENOR_RE.search(norm)
     if edad and (edad.group(2) == "meses" or int(edad.group(1)) < 18):
-        hallazgos.append(Hallazgo("menor", "Indica la edad de un menor de su entorno", CONF_DIRECTA))
+        hallazgos.append(Hallazgo(_MENOR, "Indica la edad de un menor de su entorno", CONF_DIRECTA))
 
     colegio = _COLEGIO_RE.search(norm)
     if colegio:
         detalle = f": {_titulo(colegio.group(1))}" if colegio.group(1) else ""
-        hallazgos.append(Hallazgo("menor", f"Menciona el colegio o la guardería de un menor{detalle}", CONF_DIRECTA))
+        hallazgos.append(Hallazgo(_MENOR, f"Menciona el colegio o la guardería de un menor{detalle}", CONF_DIRECTA))
     if _RECOGIDA_RE.search(norm):
-        hallazgos.append(Hallazgo("menor", "Menciona la rutina de llevar o recoger a un menor del colegio", CONF_DIRECTA))
+        hallazgos.append(Hallazgo(_MENOR, "Menciona la rutina de llevar o recoger a un menor del colegio", CONF_DIRECTA))
 
     salud = _SALUD_TERCERO_RE.search(norm)
     if salud:
         hallazgos.append(
-            Hallazgo("tercero", "Menciona la salud o el fallecimiento de un familiar o allegado (dato de terceros)", CONF_INDICIO)
+            Hallazgo(_TERCERO, "Menciona la salud o el fallecimiento de un familiar o allegado (dato de terceros)", CONF_INDICIO)
         )
     return hallazgos
 
@@ -199,7 +207,7 @@ def _terceros_y_menores(original: str, norm: str) -> list[Hallazgo]:
 # Relación de pareja (inferencia blanda, no toca `estado_civil`)
 # ---------------------------------------------------------------------------
 
-_RELACION: tuple[tuple[str, "re.Pattern[str]"], ...] = tuple(
+_RELACION: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (valor, re.compile(patron))
     for valor, patron in (
         ("Menciona a su pareja actual", r"\b(?:tengo (?:un |una )?(?:novi[oa]|pareja)|mi (?:novi[oa]|pareja)\b|estoy (?:saliendo|en pareja|con mi pareja)|salgo con\b|mi chic[oa]\b)"),

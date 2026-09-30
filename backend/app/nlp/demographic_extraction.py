@@ -338,38 +338,48 @@ def extract_demographics(posts: list[SocialPost], hoy: date | None = None) -> De
     return findings
 
 
+_CAMPOS_BIO_DIRECTOS = ("religion", "nivel_estudios", "situacion_laboral", "sexo", "universidad", "edad")
+
+
+def _bio_carrera(candidatos: list[str]) -> str | None:
+    for candidato in candidatos:
+        carrera = dp.primer_valor(dp.ESTUDIOS_SINONIMOS, candidato) or next(
+            (k for k in STUDIES_DISTRIBUTION if k in candidato), None
+        )
+        if carrera in STUDIES_DISTRIBUTION:
+            return carrera
+    return None
+
+
+def _bio_ubicacion(candidatos: list[str], permalink: str, findings: DemographicFindings) -> None:
+    if findings.provincia or findings.municipio or findings.comunidad_autonoma:
+        return
+    for candidato in candidatos:
+        if _resolve_location_candidate(candidato, permalink, findings):
+            return
+
+
 def _try_detect_bio(text: str, permalink: str, findings: DemographicFindings) -> None:
     """La biografía habla del autor por definición: aquí se aceptan
     fragmentos sin frase-ancla ("Católica | Madrid", "Ingeniera @ Indra",
     "23 años", "Madre de 2"; ver `dp.bio_atributos`). Solo rellena campos que
     las reglas normales de las publicaciones no hayan fijado ya."""
     hallados = dp.bio_atributos(text)
+    empresa = hallados.get("empresa")
+    valores: dict[str, object] = {campo: hallados.get(campo) for campo in _CAMPOS_BIO_DIRECTOS}
+    valores["ocupacion"] = hallados.get("ocupacion") if hallados.get("ocupacion") in OCCUPATION_DISTRIBUTION else None
+    valores["empresa"] = empresa if isinstance(empresa, str) and dp.normalizar(empresa) not in _TOPONIMOS_NO_EMPRESA else None
+    valores["estudios"] = _bio_carrera(hallados.get("estudios", []))  # type: ignore[arg-type]
 
-    def poner(campo: str, valor: object) -> None:
+    for campo, valor in valores.items():
         if valor is not None and getattr(findings, campo) is None:
             setattr(findings, campo, valor)
             findings.evidence.setdefault(campo, []).append(permalink)
 
-    if hallados.get("ocupacion") in OCCUPATION_DISTRIBUTION:
-        poner("ocupacion", hallados["ocupacion"])
-    for campo in ("religion", "nivel_estudios", "situacion_laboral", "sexo", "universidad", "edad"):
-        poner(campo, hallados.get(campo))
-    empresa = hallados.get("empresa")
-    if isinstance(empresa, str) and dp.normalizar(empresa) not in _TOPONIMOS_NO_EMPRESA:
-        poner("empresa", empresa)
+    _bio_ubicacion(hallados.get("ubicacion", []), permalink, findings)  # type: ignore[arg-type]
 
-    for candidato in hallados.get("estudios", []):  # type: ignore[union-attr]
-        carrera = dp.primer_valor(dp.ESTUDIOS_SINONIMOS, candidato) or next(
-            (k for k in STUDIES_DISTRIBUTION if k in candidato), None
-        )
-        if carrera in STUDIES_DISTRIBUTION:
-            poner("estudios", carrera)
-            break
 
-    if findings.provincia is None and findings.municipio is None and findings.comunidad_autonoma is None:
-        for candidato in hallados.get("ubicacion", []):  # type: ignore[union-attr]
-            if _resolve_location_candidate(candidato, permalink, findings):
-                break
+_ORIGEN_TEXTO = "texto"
 
 
 def _try_detect_edad_indirecta(posts: list[SocialPost], findings: DemographicFindings, hoy: date) -> None:
@@ -391,8 +401,8 @@ def _try_detect_edad_indirecta(posts: list[SocialPost], findings: DemographicFin
     findings.edad_rango_min = resultado.minima
     findings.edad_rango_max = resultado.maxima
     findings.evidence.setdefault("edad_rango_min", []).extend(evidencias)
-    findings.source["edad_rango_min"] = "texto"
-    findings.source["edad_rango_max"] = "texto"
+    findings.source["edad_rango_min"] = _ORIGEN_TEXTO
+    findings.source["edad_rango_max"] = _ORIGEN_TEXTO
 
 
 def _mark_all_detected_as_texto(findings: DemographicFindings) -> None:

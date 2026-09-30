@@ -32,6 +32,20 @@ CONF_ETIQUETA = 0.35  # hashtag: señal débil
 CONF_HECHO = 0.7  # "tengo un perro", "vivo de alquiler"
 CONF_SENSIBLE = 0.6  # salud / ideología / sindicato (art. 9 RGPD)
 
+# Literales que se repiten en varios bancos (temas de afición, categoría y
+# provincia de varios equipos).
+_AFICION = "aficion"
+_MUSICA = "Música"
+_LECTURA = "Lectura"
+_VIDEOJUEGOS = "Videojuegos"
+_COCINA = "Cocina y gastronomía"
+_FOTOGRAFIA = "Fotografía"
+_ARTE = "Arte y manualidades"
+_BAILE = "Baile"
+_NATURALEZA = "Naturaleza y aire libre"
+_MADRID = "Madrid"
+_PERRO = "perro"
+
 NOTA_ART9 = " (dato de categoría especial, art. 9 RGPD)"
 
 
@@ -42,7 +56,7 @@ class Hallazgo:
     confianza: float
 
 
-Banco = tuple[tuple[str, "re.Pattern[str]"], ...]
+Banco = tuple[tuple[str, re.Pattern[str]], ...]
 
 
 def _banco(*entradas: tuple[str, str]) -> Banco:
@@ -62,19 +76,19 @@ _ANCLA_GUSTO = re.compile(
 _VENTANA_GUSTO = 110  # caracteres tras el ancla en los que se busca el tema
 
 TEMAS_AFICION: Banco = _banco(
-    ("Música", r"\b(?:musica|conciertos?|festivales?|cantar|karaoke|rock|rap|hip ?hop|reggaeton|jazz|flamenco|indie|metal|punk|techno|vinilos?)\b"),
+    (_MUSICA, r"\b(?:musica|conciertos?|festivales?|cantar|karaoke|rock|rap|hip ?hop|reggaeton|jazz|flamenco|indie|metal|punk|techno|vinilos?)\b"),
     ("Cine y series", r"\b(?:cine|peliculas?|series|netflix|hbo|anime|documentales|cortometrajes)\b"),
-    ("Lectura", r"\b(?:leer|lectura|libros?|novelas?|comics?|manga|poesia|literatura)\b"),
-    ("Videojuegos", r"\b(?:videojuegos|gaming|gamer|play ?station|ps[45]|xbox|nintendo|steam|fortnite|minecraft|valorant|zelda|pokemon)\b"),
+    (_LECTURA, r"\b(?:leer|lectura|libros?|novelas?|comics?|manga|poesia|literatura)\b"),
+    (_VIDEOJUEGOS, r"\b(?:videojuegos|gaming|gamer|play ?station|ps[45]|xbox|nintendo|steam|fortnite|minecraft|valorant|zelda|pokemon)\b"),
     ("Juegos de mesa y rol", r"\b(?:juegos de mesa|juegos de rol|rol|dungeons|warhammer|cartas)\b"),
     ("Viajar", r"\b(?:viajar|viajes|mochilear|escapadas|conocer mundo|conocer sitios nuevos|turismo)\b"),
-    ("Cocina y gastronomía", r"\b(?:cocinar|cocina|reposteria|hornear|recetas|gastronomia|foodie|vino|cafe de especialidad|barbacoa)\b"),
-    ("Fotografía", r"\b(?:fotografia|fotografiar|hacer fotos|sacar fotos|camaras?|analogica|revelar)\b"),
-    ("Arte y manualidades", r"\b(?:dibujar|dibujo|pintar|pintura|ilustracion|acuarela|manualidades|ceramica|escultura|graffiti|museos|exposiciones|tatuajes)\b"),
+    (_COCINA, r"\b(?:cocinar|cocina|reposteria|hornear|recetas|gastronomia|foodie|vino|cafe de especialidad|barbacoa)\b"),
+    (_FOTOGRAFIA, r"\b(?:fotografia|fotografiar|hacer fotos|sacar fotos|camaras?|analogica|revelar)\b"),
+    (_ARTE, r"\b(?:dibujar|dibujo|pintar|pintura|ilustracion|acuarela|manualidades|ceramica|escultura|graffiti|museos|exposiciones|tatuajes)\b"),
     ("Escritura", r"\b(?:escribir|escritura|relatos|poemas)\b"),
-    ("Baile", r"\b(?:bailar|baile|salsa|bachata|danza|ballet|sevillanas)\b"),
+    (_BAILE, r"\b(?:bailar|baile|salsa|bachata|danza|ballet|sevillanas)\b"),
     ("Teatro", r"\b(?:teatro|musicales|monologos|impro)\b"),
-    ("Naturaleza y aire libre", r"\b(?:naturaleza|montana|camping|acampar|huerto|jardineria|plantas|pescar|astronomia)\b"),
+    (_NATURALEZA, r"\b(?:naturaleza|montana|camping|acampar|huerto|jardineria|plantas|pescar|astronomia)\b"),
     ("Tecnología y programación", r"\b(?:tecnologia|programar|programacion|hacking|ciberseguridad|arduino|raspberry|robotica|gadgets|open source|linux|impresion 3d|drones?)\b"),
     ("Motor", r"\b(?:coches|motos|motor|formula 1|f1|motogp|tuning|rallies|mecanica|karts?)\b"),
     ("Moda y belleza", r"\b(?:moda|ropa|zapatillas|sneakers|maquillaje|skincare|belleza|peluqueria)\b"),
@@ -85,35 +99,35 @@ TEMAS_AFICION: Banco = _banco(
 
 PRACTICA_DIRECTA: Banco = _banco(
     ("Toca un instrumento", r"\b(?:toco|tocando|aprendiendo a tocar) (?:la |el |un |una )?(?:guitarra|piano|bateria|violin|bajo|saxofon|flauta|trompeta|ukelele|teclado|violonchelo|acordeon|gaita|tambor)\b"),
-    ("Música", r"\b(?:canto en (?:un|el) coro|canto en un grupo|toco en un grupo|tengo un grupo de musica|soy dj|pincho)\b"),
+    (_MUSICA, r"\b(?:canto en (?:un|el) coro|canto en un grupo|toco en un grupo|tengo un grupo de musica|soy dj|pincho)\b"),
     ("Conciertos y festivales", r"\b(?:voy a conciertos|voy a festivales|asisto a conciertos|acabo de volver del concierto)\b"),
-    ("Videojuegos", r"\b(?:juego (?:a la |a las |a los |al |a )?(?:play|ps[45]|playstation|xbox|nintendo|switch|videojuegos|consola|fortnite|minecraft|lol|valorant|fifa|call of duty|wow|zelda|pokemon)|soy gamer|hago streams?|stream(?:eo|ing) en twitch)\b"),
+    (_VIDEOJUEGOS, r"\b(?:juego (?:a la |a las |a los |al |a )?(?:play|ps[45]|playstation|xbox|nintendo|switch|videojuegos|consola|fortnite|minecraft|lol|valorant|fifa|call of duty|wow|zelda|pokemon)|soy gamer|hago streams?|stream(?:eo|ing) en twitch)\b"),
     ("Juegos de mesa y rol", r"\b(?:juego (?:al |a )?(?:rol|dungeons|warhammer|juegos de mesa)|dirijo partidas de rol)\b"),
-    ("Fotografía", r"\b(?:hago fotos|saco fotos|hago fotografia|soy fotograf[oa])\b"),
-    ("Lectura", r"\b(?:leo (?:mucho|todos los dias|cada noche|cada dia|novelas|libros|comics|manga)|estoy leyendo|acabo de leer|mi libro favorito)\b"),
-    ("Cocina y gastronomía", r"\b(?:cocino|hago reposteria|horneo|preparo recetas)\b"),
-    ("Arte y manualidades", r"\b(?:dibujo|pinto|hago ilustraciones|hago ceramica|tejo|hago punto|bordo)\b"),
-    ("Baile", r"\b(?:bailo|voy a clases de baile|hago baile)\b"),
+    (_FOTOGRAFIA, r"\b(?:hago fotos|saco fotos|hago fotografia|soy fotograf[oa])\b"),
+    (_LECTURA, r"\b(?:leo (?:mucho|todos los dias|cada noche|cada dia|novelas|libros|comics|manga)|estoy leyendo|acabo de leer|mi libro favorito)\b"),
+    (_COCINA, r"\b(?:cocino|hago reposteria|horneo|preparo recetas)\b"),
+    (_ARTE, r"\b(?:dibujo|pinto|hago ilustraciones|hago ceramica|tejo|hago punto|bordo)\b"),
+    (_BAILE, r"\b(?:bailo|voy a clases de baile|hago baile)\b"),
     ("Escritura", r"\bescribo (?:relatos|poemas|novelas|un libro|un blog)\b"),
     ("Coleccionismo", r"\bcoleccion(?:o|amos)\b"),
     ("Teatro", r"\b(?:hago teatro|hago improvisacion|soy actor|soy actriz)\b"),
-    ("Naturaleza y aire libre", r"\b(?:tengo un huerto|mi huerto|cuido mis plantas|mis plantas)\b"),
+    (_NATURALEZA, r"\b(?:tengo un huerto|mi huerto|cuido mis plantas|mis plantas)\b"),
     ("Voluntariado y activismo", r"\b(?:soy voluntari[oa]|hago voluntariado|colaboro con una ong)\b"),
 )
 
 # Hashtags (Instagram): coincidencia exacta o, para palabras de 6+ letras,
 # por subcadena ("foodielife" contiene "foodie"). Señal débil.
 TEMAS_ETIQUETA: tuple[tuple[str, frozenset[str]], ...] = (
-    ("Música", frozenset({"musica", "music", "concierto", "conciertos", "festival", "guitarra", "guitar", "rock", "indie"})),
-    ("Videojuegos", frozenset({"gamer", "gaming", "videojuegos", "playstation", "xbox", "nintendo", "twitch", "pcgaming"})),
-    ("Cocina y gastronomía", frozenset({"foodie", "receta", "recetas", "cocina", "gastronomia", "reposteria", "foodporn"})),
+    (_MUSICA, frozenset({"musica", "music", "concierto", "conciertos", "festival", "guitarra", "guitar", "rock", "indie"})),
+    (_VIDEOJUEGOS, frozenset({"gamer", "gaming", "videojuegos", "playstation", "xbox", "nintendo", "twitch", "pcgaming"})),
+    (_COCINA, frozenset({"foodie", "receta", "recetas", "cocina", "gastronomia", "reposteria", "foodporn"})),
     ("Viajar", frozenset({"travel", "viajes", "viajar", "wanderlust", "mochilero", "traveler", "viajeros"})),
-    ("Fotografía", frozenset({"fotografia", "photography", "fotografo", "streetphotography"})),
-    ("Arte y manualidades", frozenset({"arte", "dibujo", "illustration", "ilustracion", "artwork", "acuarela"})),
-    ("Lectura", frozenset({"libros", "lectura", "booktok", "bookstagram", "leer", "books"})),
-    ("Baile", frozenset({"baile", "dance", "danza", "bailar"})),
+    (_FOTOGRAFIA, frozenset({"fotografia", "photography", "fotografo", "streetphotography"})),
+    (_ARTE, frozenset({"arte", "dibujo", "illustration", "ilustracion", "artwork", "acuarela"})),
+    (_LECTURA, frozenset({"libros", "lectura", "booktok", "bookstagram", "leer", "books"})),
+    (_BAILE, frozenset({"baile", "dance", "danza", "bailar"})),
     ("Motor", frozenset({"coches", "motos", "motogp", "formula1", "tuning", "carspotting"})),
-    ("Naturaleza y aire libre", frozenset({"naturaleza", "nature", "montana", "camping", "huerto"})),
+    (_NATURALEZA, frozenset({"naturaleza", "nature", "montana", "camping", "huerto"})),
     ("Moda y belleza", frozenset({"moda", "fashion", "ootd", "maquillaje", "skincare"})),
 )
 
@@ -122,9 +136,9 @@ TEMAS_ETIQUETA: tuple[tuple[str, frozenset[str]], ...] = (
 # ---------------------------------------------------------------------------
 
 _EQUIPOS: tuple[tuple[str, str, str, str], ...] = (
-    ("Real Madrid", "Madrid", r"real madrid|madrid", r"madridista|real madrid|hala madrid"),
+    ("Real Madrid", _MADRID, r"real madrid|madrid", r"madridista|real madrid|hala madrid"),
     ("FC Barcelona", "Barcelona", r"barca|barcelona|fc barcelona", r"culer|barcelonista|visca el barca|forca barca"),
-    ("Atlético de Madrid", "Madrid", r"atletico|atleti|at madrid|atletico de madrid", r"colchonero|atleti"),
+    ("Atlético de Madrid", _MADRID, r"atletico|atleti|at madrid|atletico de madrid", r"colchonero|atleti"),
     ("Sevilla FC", "Sevilla", r"sevilla|sevilla fc", r"sevillista|sevilla fc"),
     ("Real Betis", "Sevilla", r"betis|real betis", r"betico|betica|verdiblanco|viva el betis"),
     ("Valencia CF", "Valencia", r"valencia|valencia cf", r"valencianista|valencia cf"),
@@ -139,8 +153,8 @@ _EQUIPOS: tuple[tuple[str, str, str, str], ...] = (
     ("Real Valladolid", "Valladolid", r"valladolid|real valladolid|pucela", r"real valladolid|pucelano"),
     ("Villarreal CF", "Castellón", r"villarreal", r"villarreal|groguet"),
     ("Espanyol", "Barcelona", r"espanyol|espanol", r"periquito|perico"),
-    ("Rayo Vallecano", "Madrid", r"rayo|rayo vallecano", r"rayista|rayo vallecano"),
-    ("Getafe CF", "Madrid", r"getafe", r"getafe cf"),
+    ("Rayo Vallecano", _MADRID, r"rayo|rayo vallecano", r"rayista|rayo vallecano"),
+    ("Getafe CF", _MADRID, r"getafe", r"getafe cf"),
     ("Granada CF", "Granada", r"granada|granada cf", r"granada cf"),
     ("Málaga CF", "Málaga", r"malaga|malaga cf", r"malaguista|boqueron"),
     ("Cádiz CF", "Cádiz", r"cadiz|cadiz cf", r"cadista|cadiz cf"),
@@ -154,7 +168,7 @@ _EQUIPOS: tuple[tuple[str, str, str, str], ...] = (
     ("Levante UD", "Valencia", r"levante|levante ud", r"levante ud"),
 )
 _ANCLA_EQUIPO = r"\b(?:soy|somos|hincha|fan|forofo|forofa|socio|socia|seguidor|seguidora|abonado|abonada)\s+(?:un |una )?(?:del|de la)\s+(?:club\s+)?"
-EQUIPOS: tuple[tuple[str, str, "re.Pattern[str]", "re.Pattern[str]"], ...] = tuple(
+EQUIPOS: tuple[tuple[str, str, re.Pattern[str], re.Pattern[str]], ...] = tuple(
     (
         nombre,
         provincia,
@@ -169,7 +183,7 @@ EQUIPOS: tuple[tuple[str, str, "re.Pattern[str]", "re.Pattern[str]"], ...] = tup
 # ---------------------------------------------------------------------------
 
 _ESPECIES = {
-    "perro": "perro", "perra": "perro", "cachorro": "perro", "gato": "gato", "gata": "gato", "gatito": "gato",
+    "perro": _PERRO, "perra": _PERRO, "cachorro": _PERRO, "gato": "gato", "gata": "gato", "gatito": "gato",
     "conejo": "conejo", "hamster": "hámster", "pajaro": "pájaro", "loro": "loro", "tortuga": "tortuga",
     "caballo": "caballo", "pez": "pez", "cobaya": "cobaya", "huron": "hurón", "periquito": "periquito",
 }
@@ -295,11 +309,11 @@ def _por_banco(banco: Banco, categoria: str, confianza: float, clausula: str) ->
 
 
 def _aficiones(clausula: str) -> list[Hallazgo]:
-    hallazgos = _por_banco(PRACTICA_DIRECTA, "aficion", CONF_PRACTICA, clausula)
+    hallazgos = _por_banco(PRACTICA_DIRECTA, _AFICION, CONF_PRACTICA, clausula)
     ancla = _ANCLA_GUSTO.search(clausula)
     if ancla and dp.es_propio(clausula, ancla.start()):
         cola = clausula[ancla.end() : ancla.end() + _VENTANA_GUSTO]
-        hallazgos += [Hallazgo("aficion", tema, CONF_GUSTO) for tema, patron in TEMAS_AFICION if patron.search(cola)]
+        hallazgos += [Hallazgo(_AFICION, tema, CONF_GUSTO) for tema, patron in TEMAS_AFICION if patron.search(cola)]
     return hallazgos
 
 
@@ -315,7 +329,7 @@ def _equipo(clausula: str) -> list[Hallazgo]:
     if mejor is None:
         return []
     _, nombre, provincia = mejor
-    return [Hallazgo("aficion", f"Seguidor/a del {nombre} (equipo de {provincia})", CONF_GUSTO + 0.1)]
+    return [Hallazgo(_AFICION, f"Seguidor/a del {nombre} (equipo de {provincia})", CONF_GUSTO + 0.1)]
 
 
 def _mascota(clausula: str) -> list[Hallazgo]:
@@ -365,7 +379,7 @@ def _etiquetas(etiquetas: list[str]) -> list[Hallazgo]:
     hallazgos: list[Hallazgo] = []
     for tema, claves in TEMAS_ETIQUETA:
         if any(e in claves or any(len(k) >= 6 and k in e for k in claves) for e in normalizadas):
-            hallazgos.append(Hallazgo("aficion", tema, CONF_ETIQUETA))
+            hallazgos.append(Hallazgo(_AFICION, tema, CONF_ETIQUETA))
     return hallazgos
 
 
