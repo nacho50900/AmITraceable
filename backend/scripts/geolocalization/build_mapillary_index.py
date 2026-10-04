@@ -9,9 +9,10 @@ mayoritariamente capturada desde vehículo, igual que OSV-5M -- el mismo
 domain gap frente a fotos de Instagram que motivó añadir Commons en
 primer lugar. Lo que cambia el cálculo: desde el 26 de junio de 2026,
 Mapillary expone un campo `on_foot` por imagen, así que aquí SÍ se puede
-filtrar por fotos tomadas a pie (--on-foot-only, activado por defecto) --
-sin ese filtro, esta fuente aportaría sobre todo volumen adicional de
-imagery de vehículo, no reducción de domain gap.
+filtrar por fotos tomadas a pie (--on-foot-only, DESACTIVADO por defecto:
+por defecto se aceptan fotos de cualquier origen) -- sin ese filtro, esta
+fuente aporta también volumen de imagery de vehículo, no solo reducción de
+domain gap.
 
 RESTRICCIÓN DE ESCALA (real, no un detalle menor): desde el 16 de enero
 de 2026, Mapillary formalizó que toda consulta a /images debe ser
@@ -333,10 +334,11 @@ def main() -> None:
     parser.add_argument("--phash-threshold", type=int, default=8)
     parser.add_argument("--flush-every-cells", type=int, default=25)
     parser.add_argument("--api-key", default=os.environ.get("MAPILLARY_API_KEY"))
-    parser.add_argument("--on-foot-only", action=argparse.BooleanOptionalAction, default=True,
+    parser.add_argument("--on-foot-only", action=argparse.BooleanOptionalAction, default=False,
                          help="Filtra solo fotos tomadas a pie (campo on_foot de Mapillary, desde jun-2026). "
-                              "Por defecto activado -- sin esto, esta fuente aporta sobre todo imagery de "
-                              "vehículo, el mismo domain gap que ya cubre OSV-5M.")
+                              "Por defecto desactivado: se aceptan también fotos no on_foot. Sin el filtro, "
+                              "esta fuente aporta sobre todo imagery de vehículo, el mismo domain gap que "
+                              "ya cubre OSV-5M.")
     parser.add_argument("--near", type=str, default=None)
     parser.add_argument("--max-cells", type=int, default=None)
     parser.add_argument("--sample-cells", type=int, default=None)
