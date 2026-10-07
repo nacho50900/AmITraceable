@@ -97,7 +97,8 @@ class TestEdadIndirecta:
     )
     def test_fecha_completa_da_edad_exacta(self, texto, exacta):
         r = dp.edad_indirecta([texto], HOY)
-        assert r is not None and r.exacta == exacta
+        assert r is not None
+        assert r.exacta == exacta
 
     @pytest.mark.parametrize(
         "texto,rango",
@@ -114,7 +115,9 @@ class TestEdadIndirecta:
     )
     def test_anio_da_rango(self, texto, rango):
         r = dp.edad_indirecta([texto], HOY)
-        assert r is not None and r.exacta is None and (r.minima, r.maxima) == rango
+        assert r is not None
+        assert r.exacta is None
+        assert (r.minima, r.maxima) == rango
 
     @pytest.mark.parametrize(
         "texto",
@@ -148,22 +151,27 @@ class TestEdadIndirecta:
 
     def test_via_extract_demographics_exacta(self):
         f = extract_demographics([_post("Nací el 3 de mayo de 1999", permalink="p1")], hoy=HOY)
-        assert f.edad == 27 and f.evidence["edad"] == ["p1"] and f.source["edad"] == "texto"
+        assert f.edad == 27
+        assert f.evidence["edad"] == ["p1"]
+        assert f.source["edad"] == "texto"
 
     def test_via_extract_demographics_rango_con_origen_texto(self):
         f = extract_demographics([_post("Soy del 99", permalink="p1")], hoy=HOY)
         assert (f.edad_rango_min, f.edad_rango_max) == (26, 27)
         assert f.edad is None
-        assert f.source["edad_rango_min"] == "texto" and f.evidence["edad_rango_min"] == ["p1"]
+        assert f.source["edad_rango_min"] == "texto"
+        assert f.evidence["edad_rango_min"] == ["p1"]
 
     def test_edad_literal_tiene_prioridad(self):
         f = extract_demographics([_post("Tengo 40 años y nací en 1999")], hoy=HOY)
-        assert f.edad == 40 and f.edad_rango_min is None
+        assert f.edad == 40
+        assert f.edad_rango_min is None
 
     def test_k_anonimato_usa_la_nota_de_texto(self):
         from app.scoring.k_anonymity import estimate_population_narrowing
 
         f = extract_demographics([_post("Soy del 99")], hoy=HOY)
         paso = next(s for s in estimate_population_narrowing(f) if s.category == "edad")
-        assert paso.note_code == "edad_estimada_por_fecha" and paso.source == "texto"
+        assert paso.note_code == "edad_estimada_por_fecha"
+        assert paso.source == "texto"
         assert paso.value_raw == "26-27"

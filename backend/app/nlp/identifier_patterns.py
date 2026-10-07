@@ -132,7 +132,7 @@ def validar_ip(texto: str) -> bool:
 
 def validar_coordenadas(texto: str) -> bool:
     try:
-        lat, lon = (float(x) for x in re.split(r"\s*,\s*", texto.strip()))
+        lat, lon = (float(x) for x in texto.split(","))
     except ValueError:
         return False
     return abs(lat) <= 90 and abs(lon) <= 180
@@ -164,7 +164,7 @@ def _mascara_email(valor: str) -> str:
 
 
 def _mascara_coordenadas(valor: str) -> str:
-    lat, lon = (float(x) for x in re.split(r"\s*,\s*", valor.strip()))
+    lat, lon = (float(x) for x in valor.split(","))
     return f"{lat:.2f}, {lon:.2f}"
 
 

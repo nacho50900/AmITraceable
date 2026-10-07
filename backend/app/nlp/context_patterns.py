@@ -162,7 +162,7 @@ _COLEGIO_RE = re.compile(
     r"(?:al|en el|en la|a la|en)\s+(?:colegio|cole|guarderia|escuela infantil|instituto|ceip|ies)\b(?:\s+(" + _PALABRAS + r"))?"
 )
 _RECOGIDA_RE = re.compile(
-    r"\b(?:recojo|llevo|dejo)\s+(?:a\s+)?(?:mi\s+|mis\s+)?(?:hij[oa]s?|nin[oa]s?|peques?)\s+(?:del|al|en el)\s+(?:cole|colegio|guarderia|escuela)\b"
+    r"\b(?:recojo|llevo|dejo)\s+(?:a\s+)?(?:mis?\s+)?(?:(?:hij|nin)[oa]s?|peques?)\s+(?:del|al|en el)\s+(?:cole(?:gio)?|guarderia|escuela)\b"
 )
 _SALUD_TERCERO_RE = re.compile(
     r"\bmi\s+(madre|padre|hermano|hermana|abuelo|abuela|pareja|novio|novia|marido|mujer|hijo|hija|amigo|amiga)\s+"

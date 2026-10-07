@@ -185,10 +185,10 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
 
-    api.authStatus(platform).then((status) => {
+    void api.authStatus(platform).then((status) => {
       if (cancelled) return;
       if (!status.authenticated) {
-        navigate('/');
+        void navigate('/');
         return;
       }
 
@@ -311,7 +311,7 @@ const Dashboard: React.FC = () => {
       // Ya están en su idioma original -- se restauran sin llamar al
       // backend, no hace falta "traducir" inglés a inglés.
       setReport((prev) => {
-        if (!prev || prev.username !== report.username) return prev;
+        if (prev?.username !== report.username) return prev;
         const points = prev.image_location_points.map((p, idx) => ({
           ...p,
           visual_description_general: originals[idx] ?? p.visual_description_general,
@@ -331,7 +331,7 @@ const Dashboard: React.FC = () => {
       .then(({ translations }) => {
         if (cancelled) return;
         setReport((prev) => {
-          if (!prev || prev.username !== report.username) return prev;
+          if (prev?.username !== report.username) return prev;
           const points = [...prev.image_location_points];
           toTranslate.forEach((entry, i) => {
             points[entry.idx] = { ...points[entry.idx], visual_description_general: translations[i] };
@@ -373,7 +373,7 @@ const Dashboard: React.FC = () => {
     try {
       await api.logout(platform);
     } finally {
-      navigate('/', { replace: true });
+      void navigate('/', { replace: true });
     }
   };
 
@@ -396,7 +396,7 @@ const Dashboard: React.FC = () => {
     try {
       await api.logout(platform);
     } finally {
-      navigate('/', { replace: true });
+      void navigate('/', { replace: true });
     }
   };
 

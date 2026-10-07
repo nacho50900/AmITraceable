@@ -172,7 +172,7 @@ _NO_ES_EDAD_RE = re.compile(
 )
 # Convención de Reddit: "(24M)", "[29F]", "yo 29F". Se comprueba sobre el
 # texto ORIGINAL porque la mayúscula distingue "24M" de "24 m" (metros).
-_EDAD_SEXO_REDDIT_RE = re.compile(r"[(\[]\s*(\d{2})\s*([MF])\s*[)\]]|\b(?:[Yy]o|[Ss]oy|I am|I'm|Im)\s+(\d{2})\s?([MF])\b")
+_EDAD_SEXO_REDDIT_RE = re.compile(r"[(\[]\s*(\d{2})\s*([MF])\s*[)\]]|\b(?:[Yy]o|[Ss]oy|I(?: a|')?m)\s+(\d{2})\s?([MF])\b")
 
 EDAD_MIN, EDAD_MAX = 12, 100
 
@@ -740,7 +740,7 @@ _ANCLA_CREENCIA = (
     r"\b(?:soy|somos|me considero|me declaro|profeso|practico|mi religion es|de religion|soy practicante)\s+"
     r"(?:(?:muy|bastante|profundamente|100 ?%|un|una|el|la)\s+)*"
 )
-# Todo exige frase-ancla en primera persona: 'colegio católico' o 'Cristiano
+# Cada patrón exige frase-ancla en primera persona: 'colegio católico' o 'Cristiano
 # Ronaldo' no declaran la religión del autor.
 _CREENCIAS = (
     ("judaismo", r"judi[oa]|judaismo|de religion judia"),
@@ -983,7 +983,7 @@ _BIO_TITULO_SUPERIOR_RE = re.compile(
 
 _BIO_EDAD_RE = re.compile(r"(?<![\w+/])(\d{2})\s*(?:anos|yo|y/o)\b(?!\s+(?:de|en|con)\s+\w)")
 _BIO_UBICACION_RE = re.compile(r"📍\s*([^\n|·•,]{2,40})")
-_BIO_EMPRESA_RE = re.compile(r"(?:@\s+|\bat\s+|\bAt\s+)((?:[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ&\-]*)(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ&\-]*){0,2})")
+_BIO_EMPRESA_RE = re.compile(r"(?:@\s+|\bat\s+|\bAt\s+)([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ&\-]*(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ&\-]*){0,2})")
 _BIO_ESTUDIOS_RE = re.compile(r"(?<!\w)(?:grado|carrera|licenciatura|master|doctorado|degree)\s+(?:en|de|in)\s+([a-z ]{3,60})")
 _BIO_SITUACION: Banco = _banco(
     ("estudiante", r"(?<!\w)(?:estudiante|universitari[oa])(?!\w)"),

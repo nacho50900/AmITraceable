@@ -106,12 +106,12 @@ const Landing: React.FC = () => {
 
     // Comprobamos ambas plataformas; si cualquiera ya está autenticada,
     // saltamos directamente al dashboard de esa plataforma.
-    Promise.all([api.authStatus('reddit'), api.authStatus('instagram')])
+    void Promise.all([api.authStatus('reddit'), api.authStatus('instagram')])
       .then(([redditStatus, instagramStatus]) => {
         if (redditStatus.authenticated) {
-          navigate('/dashboard?platform=reddit');
+          void navigate('/dashboard?platform=reddit');
         } else if (instagramStatus.authenticated) {
-          navigate('/dashboard?platform=instagram');
+          void navigate('/dashboard?platform=instagram');
         }
       })
       .finally(() => setChecking(false));

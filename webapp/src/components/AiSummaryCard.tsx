@@ -41,7 +41,7 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
   // Se dispara solo, sin que el usuario tenga que pulsar nada -- el
   // informe ya generado se envía en cuanto está disponible.
   useEffect(() => {
-    runAnalysis();
+    void runAnalysis();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report]);
 
