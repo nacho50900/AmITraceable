@@ -145,7 +145,8 @@ scripts/
     ├── build_mapillary_index.py   # ingestión de Mapillary (en paralelo a Commons, en uso -- ver sección propia)
     ├── mapillary_grid.py           # sub-tiling por celda para respetar el límite de bbox de Mapillary
     ├── shard_store.py              # persistencia por shards + lock + compilación, compartido Commons/Mapillary
-    └── merge_faiss_indices.py     # fusiona varios índices (p.ej. OSV-5M + Commons + Mapillary) en uno solo
+    ├── merge_faiss_indices.py     # fusiona varios índices (p.ej. OSV-5M + Commons + Mapillary) en uno solo
+    └── plot_index_coverage.py     # mapa HTML de cobertura del índice por municipio (para la documentación)
 
 tests/                         # pytest, ~153 tests, ~95% cobertura
 monitoring/                    # config de Prometheus/Grafana
@@ -325,6 +326,32 @@ resumible con Ctrl+C, `--compile` para el índice usable, fusión con
 `merge_faiss_indices.py`) -- de hecho comparten el mismo módulo de
 persistencia (`shard_store.py`), así que cualquier fix futuro ahí
 beneficia a las dos fuentes a la vez.
+
+### Mapa de cobertura del índice por municipio
+
+`plot_index_coverage.py` genera un HTML con un mapa de España en el que cada
+municipio se colorea según cuántas imágenes del índice caen en él (escala
+logarítmica; gris = sin imágenes). Sirve para ver dónde el geolocalizador tiene
+poca cobertura (sesgo geográfico del índice); está pensado para la
+documentación, no para la app. Solo lee `lat`/`lon` de `index_meta.csv`, no el
+índice FAISS.
+
+Usa `geopandas` y `folium`, que no están en `pyproject.toml` y actualizan
+`numpy` a 2.x (incompatible con spaCy/thinc), así que conviene un venv aparte:
+
+```bash
+cd scripts/geolocalization
+python -m venv .venv-mapa
+.venv-mapa\Scripts\activate          # Linux/macOS: source .venv-mapa/bin/activate
+pip install pandas geopandas folium
+python plot_index_coverage.py        # escribe coverage_map.html
+```
+
+Opciones: `--meta` (otro `index_meta.csv`, p.ej. el de `data/spain_combined`),
+`--metric densidad` (imágenes por 100 km² en lugar de totales) y `--output`.
+Los límites municipales (es-atlas, código INE) se descargan una vez a
+`data/boundaries/`; el HTML necesita internet para cargar Leaflet y el mapa
+base de Esri.
 
 ### Por qué no Flickr
 
