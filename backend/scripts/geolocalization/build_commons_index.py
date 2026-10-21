@@ -433,7 +433,10 @@ def main() -> None:
     parser.add_argument("--compile", action="store_true",
                          help="No procesa celdas: combina el fichero antiguo (si existe) + todos los shards de --output en un "
                               "único embeddings.npy/index.faiss/index_meta.csv, listo para merge_faiss_indices.py o para la app. "
-                              "Lánzalo cuando quieras usar el índice, no hace falta esperar a terminar todas las celdas.")
+                              "Lánzalo cuando quieras usar el índice, no hace falta esperar a terminar todas las celdas. "
+                              "Al terminar borra los shards incorporados (ver --keep-shards).")
+    parser.add_argument("--keep-shards", action="store_true",
+                         help="Con --compile: no borra los shards tras compilar.")
     args = parser.parse_args()
 
     if args.near and args.sample_cells:
@@ -443,7 +446,7 @@ def main() -> None:
     output_dir = Path(args.output)
 
     if args.compile:
-        shard_store.compile_shards(output_dir)
+        shard_store.compile_shards(output_dir, keep_shards=args.keep_shards)
         return
 
     lock_path = shard_store.acquire_lock(output_dir)

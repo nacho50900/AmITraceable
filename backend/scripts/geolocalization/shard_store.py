@@ -19,7 +19,8 @@ pieza):
   --output.
 - --compile combina todo (shards + un posible fichero "antiguo" de
   antes de este diseño) en el embeddings.npy/index.faiss/index_meta.csv
-  de siempre, para que lo consuma merge_faiss_indices.py o la app.
+  de siempre, para que lo consuma merge_faiss_indices.py o la app. Los
+  shards incorporados se borran al terminar (--keep-shards para evitarlo).
 """
 import os
 import sys
@@ -179,7 +180,7 @@ def persist_progress(output_dir: Path, completed: set, cell_stats: list) -> None
     os.replace(stats_tmp, output_dir / "_cell_stats.csv")
 
 
-def compile_shards(output_dir: Path) -> None:
+def compile_shards(output_dir: Path, keep_shards: bool = False) -> None:
     """Combina el fichero antiguo (si existe) + todos los shards en un
     único embeddings.npy/index_meta.csv/index.faiss en la raíz de
     --output -- el formato que espera merge_faiss_indices.py y que usa
@@ -188,6 +189,12 @@ def compile_shards(output_dir: Path) -> None:
     lanzas tú cuando quieras (--compile), no algo que tenga que sobrevivir
     sin fallos durante toda la ingestión, así que puedes cerrar otros
     programas antes de lanzarla si hace falta.
+
+    Tras compilar, borra los shards que ha incorporado (la raíz ya los
+    contiene; dejarlos haría que un segundo --compile los duplicara), salvo
+    que `keep_shards` sea True o la comprobación de lo escrito falle. Solo
+    borra los shards que ha leído: si la ingestión sigue en marcha, sus
+    shards nuevos no se tocan.
     """
     shards_dir = output_dir / SHARDS_SUBDIR
     legacy_meta_path = output_dir / "index_meta.csv"
@@ -238,7 +245,30 @@ def compile_shards(output_dir: Path) -> None:
     os.replace(meta_tmp, output_dir / "index_meta.csv")
 
     print(f"Compilado: {len(combined_df)} fotos en {output_dir}/embeddings.npy + index.faiss + index_meta.csv")
-    print(f"(los shards en {shards_dir} NO se han borrado -- bórralos a mano si ya no los necesitas.)")
+
+    if keep_shards:
+        print(f"(--keep-shards: los shards en {shards_dir} NO se han borrado.)")
+        return
+    if not shards:
+        return
+
+    # Releer lo escrito en disco antes de borrar nada: los shards son la única
+    # copia por separado de esas fotos.
+    n = len(combined_df)
+    n_emb = np.load(output_dir / "embeddings.npy", mmap_mode="r").shape[0]
+    n_csv = len(pd.read_csv(output_dir / "index_meta.csv", usecols=["id"]))
+    if not (n_emb == n_csv == index.ntotal == n):
+        print(f"AVISO: lo escrito no cuadra (CSV {n_csv}, vectores {n_emb}, índice {index.ntotal}, esperado {n}) "
+              f"-- los shards NO se borran. Revisa {output_dir}.")
+        return
+    for npy_path, meta_path, _idx in shards:
+        npy_path.unlink(missing_ok=True)
+        meta_path.unlink(missing_ok=True)
+    try:
+        shards_dir.rmdir()  # solo si quedó vacía (p.ej. si no hay otros ficheros dentro)
+    except OSError:
+        pass
+    print(f"Borrados {len(shards)} shards ya incorporados al índice compilado (usa --keep-shards para conservarlos).")
 
 
 def acquire_lock(output_dir: Path) -> Path:

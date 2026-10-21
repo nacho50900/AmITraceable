@@ -72,7 +72,7 @@ load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 sys.path.insert(0, str(Path(__file__).parent))
 from build_faiss_index import MODEL_NAME, embed_image, load_model  # noqa: E402
-from spain_grid import GridCell, generate_spain_grid  # noqa: E402
+from spain_grid import GridCell, SpainLand, filter_cells_to_spain, generate_spain_grid  # noqa: E402
 from image_ingest_common import blur_faces, ensure_yunet_model, is_near_duplicate, nearest_province, sort_cells_by_proximity  # noqa: E402
 from mapillary_grid import generate_sub_tiles  # noqa: E402
 import shard_store  # noqa: E402
@@ -98,44 +98,84 @@ _MAX_PIXELS = 50_000_000  # ver build_commons_index.py -- descarta escaneos/pano
 _MAPILLARY_LICENSE = "CC BY-SA 4.0"
 
 
-def _mapillary_request(client: httpx.Client, url: str, params: dict | None, api_key: str, max_retries: int = 4) -> dict:
+class _MapillaryTooMuchData(RuntimeError):
+    """La API responde 'reduce the amount of data' (HTTP 500 determinista):
+    reintentar la misma consulta no sirve, hay que pedir menos."""
+
+
+def _mapillary_request(client: httpx.Client, url: str, params: dict | None, api_key: str, max_retries: int = 6) -> dict:
     headers = {"User-Agent": _USER_AGENT, "Authorization": f"OAuth {api_key}"}
+    last_status, last_detail = None, ""
     for attempt in range(max_retries):
         try:
             response = client.get(url, params=params, headers=headers, timeout=30)
-            if response.status_code == 429 or response.status_code >= 500:
-                retry_after = response.headers.get("Retry-After")
-                wait_s = float(retry_after) if retry_after else (2 ** attempt)
-                time.sleep(wait_s)
-                continue
-            response.raise_for_status()
+        except httpx.HTTPError as e:
+            last_status, last_detail = "error_de_red", repr(e)[:200]
+            time.sleep(min(2 ** attempt, 30))
+            continue
+
+        if response.status_code == 200:
             return response.json()
-        except httpx.HTTPError:
-            if attempt == max_retries - 1:
-                raise
-            time.sleep(2 ** attempt)
-    raise RuntimeError("Mapillary API: agotados los reintentos (posible rate limit sostenido)")
+
+        last_status, last_detail = response.status_code, response.text[:300].replace("\n", " ")
+        if "reduce the amount of data" in response.text.lower():
+            raise _MapillaryTooMuchData(f"HTTP {response.status_code}: {last_detail}")
+        if response.status_code == 429 or response.status_code >= 500:
+            try:
+                wait_s = float(response.headers.get("Retry-After", ""))
+            except ValueError:
+                wait_s = min(2 ** (attempt + 1), 60)
+            time.sleep(wait_s)
+            continue
+        # Otro 4xx (token inválido, bbox rechazada...): no tiene sentido reintentar.
+        raise RuntimeError(f"Mapillary API: HTTP {response.status_code}: {last_detail}")
+    raise RuntimeError(f"Mapillary API: agotados los reintentos (último estado: {last_status}: {last_detail})")
 
 
-def _search_tile(client: httpx.Client, bbox: tuple[float, float, float, float], api_key: str) -> list[dict]:
+def _search_tile(
+    client: httpx.Client,
+    bbox: tuple[float, float, float, float],
+    api_key: str,
+    limit: int = 100,
+    depth: int = 0,
+) -> list[dict]:
     """Devuelve TODOS los resultados de una sub-tesela, siguiendo la
     paginación por cursor si hiciera falta (paging.next ya viene como URL
-    completa en la respuesta del Graph API, no hace falta reconstruirla)."""
+    completa en la respuesta del Graph API, no hace falta reconstruirla).
+
+    Si la API dice 'reduce the amount of data' (zonas densas), se baja el
+    `limit` y, si aun así falla, se divide la bbox en 4 cuadrantes."""
     min_lon, min_lat, max_lon, max_lat = bbox
     params = {
         "access_token": api_key,
         "fields": _FIELDS,
         "bbox": f"{min_lon},{min_lat},{max_lon},{max_lat}",
-        "limit": 100,
+        "limit": limit,
     }
-    results = []
+    results: list[dict] = []
     url, current_params = _MAPILLARY_API_URL, params
-    while url:
-        data = _mapillary_request(client, url, current_params, api_key)
-        results.extend(data.get("data", []))
-        url = data.get("paging", {}).get("next")
-        current_params = None  # 'next' ya trae todos los parámetros embebidos en la URL
-    return results
+    try:
+        while url:
+            data = _mapillary_request(client, url, current_params, api_key)
+            results.extend(data.get("data", []))
+            url = data.get("paging", {}).get("next")
+            current_params = None  # 'next' ya trae todos los parámetros embebidos en la URL
+        return results
+    except _MapillaryTooMuchData:
+        if limit > 25:
+            return _search_tile(client, bbox, api_key, limit=25, depth=depth)
+        if depth >= 2:
+            raise
+        mid_lon, mid_lat = (min_lon + max_lon) / 2, (min_lat + max_lat) / 2
+        quadrants = [
+            (min_lon, min_lat, mid_lon, mid_lat), (mid_lon, min_lat, max_lon, mid_lat),
+            (min_lon, mid_lat, mid_lon, max_lat), (mid_lon, mid_lat, max_lon, max_lat),
+        ]
+        merged: dict[str, dict] = {}
+        for q in quadrants:
+            for photo in _search_tile(client, q, api_key, limit=25, depth=depth + 1):
+                merged[photo["id"]] = photo
+        return list(merged.values())
 
 
 def _download_bytes(client: httpx.Client, url: str, max_retries: int = 5) -> tuple[bytes | None, str | None]:
@@ -217,6 +257,7 @@ def _process_cell(
     cap: int,
     phash_threshold: int,
     on_foot_only: bool,
+    land: SpainLand | None = None,
 ) -> tuple[list[np.ndarray], list[dict], dict]:
     accepted_hashes: list[imagehash.ImageHash] = []
     embeddings: list[np.ndarray] = []
@@ -224,6 +265,7 @@ def _process_cell(
     reject_reasons = {
         "sin_geometria": 0, "no_on_foot": 0, "demasiado_pequena": 0,
         "demasiado_grande": 0, "fallo_descarga": 0, "casi_duplicada": 0,
+        "fuera_de_espana": 0,
     }
     download_error_counter: dict[str, int] = {}
     n_seen = 0
@@ -233,6 +275,8 @@ def _process_cell(
     # (solo metadatos, sin descargar nada todavía).
     candidates_pool: list[dict] = []
     for bbox in generate_sub_tiles(cell):
+        if land is not None and not land.intersects_bbox(*bbox):
+            continue  # sub-tesela en mar o fuera de España: ni se consulta
         try:
             results = _search_tile(client, bbox, api_key)
         except Exception as e:
@@ -245,8 +289,12 @@ def _process_cell(
             if on_foot_only and not photo.get("on_foot"):
                 reject_reasons["no_on_foot"] += 1
                 continue
-            if _extract_lat_lon(photo) is None:
+            lat_lon = _extract_lat_lon(photo)
+            if lat_lon is None:
                 reject_reasons["sin_geometria"] += 1
+                continue
+            if land is not None and not land.contains_point(*lat_lon):
+                reject_reasons["fuera_de_espana"] += 1
                 continue
             candidates_pool.append(photo)
         time.sleep(0.1)  # cortesía entre sub-teselas
@@ -339,11 +387,17 @@ def main() -> None:
                               "Por defecto desactivado: se aceptan también fotos no on_foot. Sin el filtro, "
                               "esta fuente aporta sobre todo imagery de vehículo, el mismo domain gap que "
                               "ya cubre OSV-5M.")
+    parser.add_argument("--spain-only", action=argparse.BooleanOptionalAction, default=True,
+                         help="Solo celdas, sub-teselas y fotos dentro de territorio español (límites municipales "
+                              "es-atlas, ~1 km de margen). Por defecto activado; el grid base incluye Portugal, "
+                              "Francia y Marruecos.")
     parser.add_argument("--near", type=str, default=None)
     parser.add_argument("--max-cells", type=int, default=None)
     parser.add_argument("--sample-cells", type=int, default=None)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--compile", action="store_true")
+    parser.add_argument("--compile", action="store_true",
+                        help="Combina el fichero antiguo + shards en el índice final y borra los shards incorporados.")
+    parser.add_argument("--keep-shards", action="store_true", help="Con --compile: no borra los shards tras compilar.")
     args = parser.parse_args()
 
     if args.near and args.sample_cells:
@@ -353,7 +407,7 @@ def main() -> None:
     output_dir = Path(args.output)
 
     if args.compile:
-        shard_store.compile_shards(output_dir)
+        shard_store.compile_shards(output_dir, keep_shards=args.keep_shards)
         return
 
     if not args.api_key:
@@ -382,6 +436,11 @@ def _run(args: argparse.Namespace, output_dir: Path) -> None:
     next_shard_index = shard_store.next_shard_index(output_dir / shard_store.SHARDS_SUBDIR)
 
     all_cells = generate_spain_grid(cell_km=args.cell_km)
+    land = SpainLand() if args.spain_only else None
+    if land is not None:
+        n_before = len(all_cells)
+        all_cells = filter_cells_to_spain(all_cells, land)
+        print(f"--spain-only: {n_before} -> {len(all_cells)} celdas tras descartar las que no tocan España.")
     pending_cells = [c for c in all_cells if c.id not in completed]
 
     if args.near:
@@ -403,7 +462,7 @@ def _run(args: argparse.Namespace, output_dir: Path) -> None:
     cells_since_flush = 0
     cells_run_this_execution = 0
     run_start = time.monotonic()
-    global_reject_totals = {"sin_geometria": 0, "no_on_foot": 0, "demasiado_pequena": 0, "demasiado_grande": 0, "fallo_descarga": 0, "casi_duplicada": 0}
+    global_reject_totals = {"sin_geometria": 0, "no_on_foot": 0, "demasiado_pequena": 0, "demasiado_grande": 0, "fallo_descarga": 0, "casi_duplicada": 0, "fuera_de_espana": 0}
     global_download_errors: dict[str, int] = {}
     n_duplicates_skipped = 0
 
@@ -421,7 +480,7 @@ def _run(args: argparse.Namespace, output_dir: Path) -> None:
             cell_embeddings, cell_meta, diag = _process_cell(
                 cell, client, detector, processor, model, device, args.api_key,
                 cap=args.cap_per_cell, phash_threshold=args.phash_threshold,
-                on_foot_only=args.on_foot_only,
+                on_foot_only=args.on_foot_only, land=land,
             )
             new_embeddings, new_meta = [], []
             for emb, meta in zip(cell_embeddings, cell_meta):
@@ -444,7 +503,7 @@ def _run(args: argparse.Namespace, output_dir: Path) -> None:
                 "n_pool": diag["n_pool"], "sin_geometria": diag["sin_geometria"],
                 "no_on_foot": diag["no_on_foot"], "demasiado_pequena": diag["demasiado_pequena"],
                 "demasiado_grande": diag["demasiado_grande"], "fallo_descarga": diag["fallo_descarga"],
-                "casi_duplicada": diag["casi_duplicada"], "fallo_sin_recuperar": diag["had_unrecovered_error"],
+                "casi_duplicada": diag["casi_duplicada"], "fuera_de_espana": diag["fuera_de_espana"], "fallo_sin_recuperar": diag["had_unrecovered_error"],
             })
             for k in global_reject_totals:
                 global_reject_totals[k] += diag[k]
@@ -471,7 +530,7 @@ def _run(args: argparse.Namespace, output_dir: Path) -> None:
     if elapsed_s > 0 and cells_run_this_execution > 0:
         s_per_cell = elapsed_s / cells_run_this_execution
         photos_per_hour = n_photos_run / (elapsed_s / 3600)
-        remaining_cells = len(all_cells) - len(completed)
+        remaining_cells = sum(1 for c in all_cells if c.id not in completed)
         eta_hours = (remaining_cells * s_per_cell) / 3600
         photos_per_cell_avg = n_photos_run / cells_run_this_execution
         print(f"\nEsta ejecución: {cells_run_this_execution} celdas, {n_photos_run} fotos, {elapsed_s/60:.1f} min "
