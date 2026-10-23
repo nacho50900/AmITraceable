@@ -30,22 +30,38 @@ class _FakeModel:
     """Sustituye a Moondream2 (vía `llama-cpp-python`) lo justo para
     `analyze_image_content`: debe soportar
     `.create_chat_completion(messages=..., max_tokens=..., temperature=...)`,
-    distinguiendo la respuesta según cuál de las dos preguntas
-    (_CAPTION_QUERY vs _STRUCTURED_QUERY) venga en `messages` -- igual que
-    hace el modelo real, que responde cosas distintas a cada una. No
+    distinguiendo la respuesta según cuál de las preguntas
+    (_COMBINED_QUERY, o _CAPTION_QUERY en el respaldo) venga en `messages`
+    -- igual que hace el modelo real, que responde cosas distintas a cada
+    una. No
     valida el formato exacto del `content` de tipo `image_url` -- eso lo
     cubre `test_image_is_resized_before_encoding` por separado, mirando el
     tamaño de la imagen decodificada del data URI."""
 
-    def __init__(self, structured_answer: str, caption_answer: str = "una escena sin detalles relevantes"):
+    def __init__(
+        self,
+        structured_answer: str,
+        caption_answer: str = "una escena sin detalles relevantes",
+        combined_answer: str | None = None,
+    ):
         self._structured_answer = structured_answer
         self._caption_answer = caption_answer
+        self._combined_answer = combined_answer
+        self.questions: list[str] = []  # preguntas recibidas, en orden
 
     def reset(self):
         pass  # no-op: los tests no dependen de que la caché KV se limpie de verdad
 
     def create_chat_completion(self, messages, max_tokens=None, temperature=None):
         question = messages[0]["content"][1]["text"]
+        self.questions.append(question)
+        if question == scene_analysis._COMBINED_QUERY:
+            # Pregunta de UNA sola llamada (el camino normal). Si el test no
+            # da una respuesta combinada explícita, se construye como la
+            # daría el modelo: las líneas estructuradas + DESCRIPCION.
+            if self._combined_answer is not None:
+                return _chat_completion_response(self._combined_answer)
+            return _chat_completion_response(f"{self._structured_answer}\nDESCRIPCION: {self._caption_answer}")
         if question == scene_analysis._CAPTION_QUERY:
             return _chat_completion_response(self._caption_answer)
         if question == scene_analysis._STRUCTURED_QUERY:
@@ -67,12 +83,17 @@ def reset_module_globals(monkeypatch):
     monkeypatch.setattr(scene_analysis, "_model", None)
 
 
-def _install_fake_model(monkeypatch, structured_answer: str, caption_answer: str = "una escena sin detalles relevantes"):
+def _install_fake_model(
+    monkeypatch,
+    structured_answer: str,
+    caption_answer: str = "una escena sin detalles relevantes",
+    combined_answer: str | None = None,
+):
     monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
     monkeypatch.setattr(
         scene_analysis,
         "_lazy_load",
-        lambda: setattr(scene_analysis, "_model", _FakeModel(structured_answer, caption_answer)),
+        lambda: setattr(scene_analysis, "_model", _FakeModel(structured_answer, caption_answer, combined_answer)),
     )
 
 
@@ -440,15 +461,11 @@ class TestAnalyzeImageContent:
 
         assert descripcion_general is None
 
-    def test_two_chat_completion_calls_with_the_two_expected_questions(self, monkeypatch):
-        """A diferencia del backend `transformers` de antes (ver
-        historial en scene_analysis.py), `llama-cpp-python` no expone un
-        equivalente directo a "codificar la imagen una vez y reutilizarla
-        para dos preguntas" -- cada `create_chat_completion()` manda la
-        imagen otra vez. Este test YA NO comprueba esa optimización (ya no
-        existe tal cual); comprueba lo que sí debe seguir siendo cierto:
-        exactamente dos llamadas, una por cada pregunta esperada, cada una
-        con una imagen adjunta."""
+    def test_single_chat_completion_call_with_the_combined_question(self, monkeypatch):
+        """UNA sola llamada por foto, con la imagen adjunta: `llama-cpp-python`
+        no reutiliza el embedding de la imagen entre llamadas, así que cada
+        llamada de más cuesta una codificación completa (varios segundos en
+        una GTX 1650). Ver `_COMBINED_QUERY`."""
         calls: list[str] = []
 
         class _CountingModel:
@@ -457,20 +474,16 @@ class TestAnalyzeImageContent:
 
             def create_chat_completion(self, messages, max_tokens=None, temperature=None):
                 content = messages[0]["content"]
-                assert content[0]["type"] == "image_url"  # la imagen va SIEMPRE, en las dos llamadas
-                question = content[1]["text"]
-                calls.append(question)
-                if question == scene_analysis._CAPTION_QUERY:
-                    return _chat_completion_response("una escena cualquiera")
-                return _chat_completion_response("PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no")
+                assert content[0]["type"] == "image_url"  # la imagen va SIEMPRE
+                calls.append(content[1]["text"])
+                return _chat_completion_response("PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no\nDESCRIPCION: A quiet scene")
 
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
         monkeypatch.setattr(scene_analysis, "_lazy_load", lambda: setattr(scene_analysis, "_model", _CountingModel()))
 
         scene_analysis.analyze_image_content(_fake_image())
 
-        assert len(calls) == 2
-        assert set(calls) == {scene_analysis._CAPTION_QUERY, scene_analysis._STRUCTURED_QUERY}
+        assert calls == [scene_analysis._COMBINED_QUERY]
 
     def test_reset_called_before_each_chat_completion(self, monkeypatch):
         """Regresión directa de un crash real en producción (12/9, GTX
@@ -480,7 +493,8 @@ class TestAnalyzeImageContent:
         corrompiendo el estado hasta tirar abajo el proceso entero con
         SIGSEGV (exit 139) -- no un fallo limpio de una sola foto. Se
         comprueba contando reset() y create_chat_completion() en el orden
-        exacto: reset, llamada, reset, llamada."""
+        exacto: reset, llamada (y reset + llamada de nuevo si hubiera que
+        recurrir al respaldo de la frase, ver `TestSingleCallPerPhoto`)."""
         events: list[str] = []
 
         class _OrderCheckingModel:
@@ -489,10 +503,7 @@ class TestAnalyzeImageContent:
 
             def create_chat_completion(self, messages, max_tokens=None, temperature=None):
                 events.append("call")
-                question = messages[0]["content"][1]["text"]
-                if question == scene_analysis._CAPTION_QUERY:
-                    return _chat_completion_response("una escena cualquiera")
-                return _chat_completion_response("PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no")
+                return _chat_completion_response("PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no\nDESCRIPCION: A quiet scene")
 
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
         monkeypatch.setattr(
@@ -501,7 +512,7 @@ class TestAnalyzeImageContent:
 
         scene_analysis.analyze_image_content(_fake_image())
 
-        assert events == ["reset", "call", "reset", "call"]
+        assert events == ["reset", "call"]
 
     def test_image_is_resized_before_encoding(self, monkeypatch):
         """Optimización real (medida en producción, GTX 1650, con el
@@ -529,10 +540,7 @@ class TestAnalyzeImageContent:
                 _, b64_data = data_uri.split(",", 1)
                 decoded = PILImage.open(io.BytesIO(base64.b64decode(b64_data)))
                 received_sizes.append(decoded.size)
-                question = content[1]["text"]
-                if question == scene_analysis._CAPTION_QUERY:
-                    return _chat_completion_response("una escena cualquiera")
-                return _chat_completion_response("PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no")
+                return _chat_completion_response("PERSONAS: ninguna\nAFICION: ninguno\nPAREJA: no\nDESCRIPCION: A quiet scene")
 
         monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
         monkeypatch.setattr(
@@ -547,7 +555,7 @@ class TestAnalyzeImageContent:
 
         scene_analysis.analyze_image_content(imagen_grande)
 
-        assert len(received_sizes) == 2  # una por cada create_chat_completion() (ver test de arriba)
+        assert len(received_sizes) == 1  # una sola llamada por foto (ver test de arriba)
         for width, height in received_sizes:
             assert max(width, height) <= scene_analysis._CAPTION_MAX_DIMENSION
         # La imagen original (compartida con DINOv2 en geolocation.py, ver
@@ -564,7 +572,7 @@ class TestAnalyzeImageContent:
         aquí que los límites siguen existiendo y siguen siendo bajos, para
         que un cambio futuro no los elimine sin darse cuenta."""
         assert scene_analysis._CAPTION_SETTINGS["max_tokens"] < 200
-        assert scene_analysis._STRUCTURED_SETTINGS["max_tokens"] < 200
+        assert scene_analysis._COMBINED_SETTINGS["max_tokens"] < 200
 
     # test_query_settings_include_variant_key ELIMINADO -- comprobaba un
     # bug real pero específico de `encode_image()` en el backend
@@ -572,9 +580,119 @@ class TestAnalyzeImageContent:
     # historial en scene_analysis.py), que ya no se usa en absoluto: el
     # backend actual (`llama-cpp-python`) recibe `max_tokens`/
     # `temperature` como kwargs directos, nunca un dict `settings`. La
-    # clave "variant" se queda en _CAPTION_SETTINGS/_STRUCTURED_SETTINGS
+    # clave "variant" se queda en _CAPTION_SETTINGS/_COMBINED_SETTINGS
     # por si acaso (ver comentario ahí), pero ya no hay ningún
     # comportamiento real que este test protegiera.
+
+
+class TestSingleCallPerPhoto:
+    """UNA llamada de visión por foto (seis líneas + DESCRIPCION) en vez de
+    dos: la imagen se codifica una sola vez. Si falta la línea DESCRIPCION,
+    respaldo a la llamada de frase de siempre."""
+
+    _COMBINED = (
+        "PERSONAS: varias\nAFICION: ninguno\nPAREJA: no\nTEXTO_VISIBLE: ninguno\n"
+        "MATRICULA: ninguna\nEDIFICIO_EMBLEMATICO: ninguno\n"
+        "DESCRIPCION: Four friends eat pizza together on a sunny terrace."
+    )
+
+    def test_makes_exactly_one_call_with_the_combined_question(self, monkeypatch):
+        _install_fake_model(monkeypatch, "no se usa", combined_answer=self._COMBINED)
+
+        _, _, _, descripcion_general, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert scene_analysis._model.questions == [scene_analysis._COMBINED_QUERY]
+        assert descripcion_general == "Four friends eat pizza together on a sunny terrace"  # sin el punto final
+        assert codes.personas == "varias"
+
+    def test_still_parses_the_structured_fields(self, monkeypatch):
+        answer = (
+            "PERSONAS: dos\nAFICION: ninguno\nPAREJA: si\nTEXTO_VISIBLE: ninguno\n"
+            "MATRICULA: ninguna\nEDIFICIO_EMBLEMATICO: ninguno\n"
+            "DESCRIPCION: Two people kiss on a bridge at sunset."
+        )
+        _install_fake_model(monkeypatch, "no se usa", combined_answer=answer)
+
+        _, indicio_pareja, descripcion_cruda, descripcion_general, _ = scene_analysis.analyze_image_content(
+            _fake_image()
+        )
+
+        assert indicio_pareja is True
+        assert descripcion_general == "Two people kiss on a bridge at sunset"
+        assert "DESCRIPCION" not in (descripcion_cruda or "")  # la frase no se cuela en el resumen de señales
+
+    def test_falls_back_to_the_caption_call_if_descripcion_line_is_missing(self, monkeypatch):
+        sin_descripcion = "PERSONAS: una\nAFICION: ninguno\nPAREJA: no"
+        _install_fake_model(
+            monkeypatch,
+            "no se usa",
+            caption_answer="A man reads on a bench.",
+            combined_answer=sin_descripcion,
+        )
+
+        _, _, _, descripcion_general, codes = scene_analysis.analyze_image_content(_fake_image())
+
+        assert scene_analysis._model.questions == [scene_analysis._COMBINED_QUERY, scene_analysis._CAPTION_QUERY]
+        assert descripcion_general == "A man reads on a bench"  # respaldo: la frase de siempre
+        assert codes.personas == "una"  # y las señales estructuradas se conservan de la primera llamada
+
+    def test_fallback_is_not_used_when_descripcion_is_present(self, monkeypatch):
+        _install_fake_model(monkeypatch, "no se usa", combined_answer=self._COMBINED)
+
+        scene_analysis.analyze_image_content(_fake_image())
+
+        assert scene_analysis._CAPTION_QUERY not in scene_analysis._model.questions
+
+    def test_resets_the_kv_cache_before_every_call_including_the_fallback(self, monkeypatch):
+        """Mismo bug de SIGSEGV de siempre (ver `analyze_image_content`):
+        `reset()` antes de CADA create_chat_completion, también en el respaldo."""
+        events = []
+
+        class _OrderedModel(_FakeModel):
+            def reset(self):
+                events.append("reset")
+
+            def create_chat_completion(self, messages, max_tokens=None, temperature=None):
+                events.append("call")
+                return super().create_chat_completion(messages, max_tokens, temperature)
+
+        monkeypatch.setattr(scene_analysis, "_scene_analysis_available", lambda: True)
+        monkeypatch.setattr(
+            scene_analysis,
+            "_lazy_load",
+            lambda: setattr(scene_analysis, "_model", _OrderedModel("x", "A caption.", "PERSONAS: una\nPAREJA: no")),
+        )
+
+        scene_analysis.analyze_image_content(_fake_image())
+
+        # combinada (sin DESCRIPCION) + respaldo de frase = dos llamadas, cada una precedida de reset()
+        assert events == ["reset", "call", "reset", "call"]
+
+
+class TestCombinedQuery:
+    def test_is_derived_from_the_structured_query(self):
+        assert scene_analysis._COMBINED_QUERY != scene_analysis._STRUCTURED_QUERY
+        for field in ("PERSONAS", "AFICION", "PAREJA", "TEXTO_VISIBLE", "MATRICULA", "EDIFICIO_EMBLEMATICO"):
+            assert field in scene_analysis._COMBINED_QUERY
+
+    def test_asks_for_the_description_in_english_as_the_last_line(self):
+        query = scene_analysis._COMBINED_QUERY
+        assert "DESCRIPCION" in query
+        assert "INGLÉS" in query
+        assert "séptima y última línea" in query
+
+    def test_description_line_has_no_example_value_to_copy(self):
+        """La primera versión combinada (con Moondream2) devolvía la frase de
+        ejemplo literal: la línea DESCRIPCION no debe llevar ningún valor
+        de muestra."""
+        query = scene_analysis._COMBINED_QUERY
+        example_block = query.split("\n\n")[0]
+        assert "DESCRIPCION:" not in example_block
+
+    def test_forbids_physical_traits_in_the_description(self):
+        query = scene_analysis._COMBINED_QUERY.lower()
+        for word in ("raza", "etnia", "tono de piel", "edad"):
+            assert word in query
 
 
 class TestVisualDescriptionCodes:

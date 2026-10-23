@@ -305,7 +305,7 @@ _STRUCTURED_QUERY = (
     # de texto repetido en vez de líneas cortas. La solución: separar un
     # EJEMPLO literal de líneas (que el modelo solo tiene que "copiar la
     # forma de") de la explicación de qué valores son válidos, en párrafos
-    # aparte -- y capar la generación con _STRUCTURED_SETTINGS más abajo
+    # aparte -- y capar la generación con _COMBINED_SETTINGS más abajo
     # como red de seguridad adicional. A diferencia de _CAPTION_QUERY
     # (texto libre), aquí SÍ funciona dar un ejemplo literal porque las
     # cuatro respuestas son opciones fijas (o casi -- ver TEXTO_VISIBLE) --
@@ -430,7 +430,8 @@ _STRUCTURED_QUERY = (
 # real reduce aún más el riesgo de que una respuesta confusa se alargue
 # de más, además de acelerar cada llamada individualmente.
 #
-# _STRUCTURED_SETTINGS con más margen (45, antes 30) desde que se añadió
+# El límite de la llamada estructurada (antes `_STRUCTURED_SETTINGS`, hoy
+# parte de `_COMBINED_SETTINGS`) tuvo más margen (45, antes 30) desde que se añadió
 # TEXTO_VISIBLE -- ahora son CUATRO líneas en vez de tres, y ya no hace
 # falta apurar el límite para evitar texto sobrante feo en pantalla: la
 # descripción que se MUESTRA (`descripcion_cruda`, más abajo en
@@ -453,11 +454,46 @@ _STRUCTURED_QUERY = (
 # fiable para mantener el formato de opciones fijas). max_tokens=55 en la
 # estructurada (más que el caption): tiene CINCO líneas que generar
 # (incluida MATRICULA), no cuatro.
-# _STRUCTURED_SETTINGS con más margen (65, antes 55 con cinco líneas):
+# Después más margen todavía (65, antes 55 con cinco líneas):
 # EDIFICIO_EMBLEMATICO puede llevar nombres algo más largos que el resto
 # de campos (p. ej. "Basílica de la Sagrada Familia").
 _CAPTION_SETTINGS = {"max_tokens": 45, "temperature": 0.2, "variant": None}
-_STRUCTURED_SETTINGS = {"max_tokens": 65, "temperature": 0.1, "variant": None}
+
+# Pregunta de UNA sola llamada por foto: el prompt estructurado de siempre
+# + una séptima línea DESCRIPCION con la frase en inglés. Se construye a
+# partir de `_STRUCTURED_QUERY` (no se duplica su texto) cambiando solo lo
+# que habla de "seis líneas".
+#
+# La línea DESCRIPCION NO tiene valor de ejemplo a propósito, y va la
+# última: la primera versión combinada de este campo (con Moondream2, ver
+# la nota de `_CAPTION_QUERY`) devolvía literalmente la frase de ejemplo en
+# vez de describir la imagen. Sin plantilla que copiar, y tras haber
+# rellenado ya las otras seis líneas, el modelo escribe la frase de la
+# imagen real.
+_COMBINED_REPLACEMENTS = (
+    (
+        "responde EXACTAMENTE en este formato de seis líneas, sin nada más, ",
+        "responde EXACTAMENTE en este formato de seis líneas, seguidas de una "
+        "séptima línea DESCRIPCION (se explica más abajo), sin nada más, ",
+    ),
+    (
+        "Responde ahora solo las seis líneas, con los valores reales para esta imagen concreta.",
+        "DESCRIPCION va SIEMPRE en la séptima y última línea, después de las seis anteriores, "
+        "con este formato: DESCRIPCION: seguido de UNA sola frase corta (8-15 palabras) ESCRITA "
+        "EN INGLÉS sobre lo que ocurre en ESTA imagen concreta -- la actividad, el lugar y el "
+        "ambiente --, específica de la escena real y no genérica. En la frase NO menciones el "
+        "aspecto físico, la raza, la etnia, el tono de piel ni la edad de ninguna persona -- solo "
+        "la actividad y el contexto.\n\n"
+        "Responde ahora solo esas siete líneas, con los valores reales para esta imagen concreta.",
+    ),
+)
+_COMBINED_QUERY = _STRUCTURED_QUERY
+for _old, _new in _COMBINED_REPLACEMENTS:
+    assert _old in _COMBINED_QUERY, f"_STRUCTURED_QUERY cambió: ya no contiene {_old!r}"
+    _COMBINED_QUERY = _COMBINED_QUERY.replace(_old, _new, 1)
+# max_tokens=125: las seis líneas estructuradas (~65 tokens, ver el
+# historial de arriba) + la frase de 8-15 palabras (~25-30 tokens) + margen.
+_COMBINED_SETTINGS = {"max_tokens": 125, "temperature": 0.1, "variant": None}
 
 # Redimensionado específico para Moondream2, aparte del que ya aplica
 # geolocation.py para DINOv2 (_MAX_QUEUED_IMAGE_DIMENSION=1024, que ese
@@ -611,17 +647,17 @@ def analyze_image_content(
     paralelo sobre el MISMO objeto para DINOv2, que sí necesita la
     resolución mayor (`_MAX_QUEUED_IMAGE_DIMENSION` en geolocation.py).
 
-    Internamente hace DOS llamadas a `_model.create_chat_completion()` --
-    una con `_CAPTION_QUERY` (texto libre, sin plantilla que copiar) y
-    otra con `_STRUCTURED_QUERY` (PERSONAS/AFICION/PAREJA/TEXTO_VISIBLE/
-    MATRICULA, formato fijo) -- en vez de una sola combinada, porque
-    mezclar un campo de texto libre con campos de opciones fijas en el
-    mismo prompt hacía que Moondream2 copiara literalmente el ejemplo de
-    texto libre en vez de describir la imagen real (ver nota en
-    `_CAPTION_QUERY`). Desde el cambio a `llama-cpp-python` (ver
-    historial junto a `_GGUF_REPO_ID`) ya NO hay un equivalente directo a
-    "codificar la imagen una vez y reutilizarla" -- cada llamada manda la
-    imagen (como data URI base64) otra vez.
+    Internamente hace UNA llamada a `_model.create_chat_completion()` con
+    `_COMBINED_QUERY` (las seis líneas estructuradas + una séptima línea
+    DESCRIPCION, sin valor de ejemplo que copiar), y solo si el modelo no
+    escribe la línea DESCRIPCION hace una segunda con `_CAPTION_QUERY`
+    (texto libre) como respaldo. Antes eran SIEMPRE dos llamadas separadas,
+    porque con Moondream2 mezclar el texto libre con campos de opciones
+    fijas hacía que copiara el ejemplo literal en vez de describir la
+    imagen (ver nota en `_CAPTION_QUERY`); `llama-cpp-python` no reutiliza
+    el embedding de la imagen entre llamadas (ver historial junto a
+    `_GGUF_REPO_ID`), así que cada llamada de más cuesta una codificación
+    completa, varios segundos en una GTX 1650.
 
     `descripcion_cruda` (ver `_build_clean_summary`) se RECONSTRUYE a
     partir de los valores YA PARSEADOS de `structured` -- ya NO es el
@@ -747,20 +783,32 @@ def analyze_image_content(
             # se ha conseguido con este backend -- es el coste de tener
             # esto funcionando sin crashear, no una optimización
             # pendiente de aprovechar.
+            # UNA llamada: las seis líneas estructuradas + DESCRIPCION (ver
+            # `_COMBINED_QUERY`). La imagen se codifica una sola vez por
+            # foto -- esa codificación es lo más caro en una GTX 1650
+            # (varios segundos por llamada), así que esto recorta casi a la
+            # mitad el coste por foto frente a las dos llamadas separadas
+            # (frase + seis líneas) que se hacían antes.
             _model.reset()
-            caption_response = _model.create_chat_completion(
-                messages=[{"role": "user", "content": [image_content, {"type": "text", "text": _CAPTION_QUERY}]}],
-                max_tokens=_CAPTION_SETTINGS["max_tokens"],
-                temperature=_CAPTION_SETTINGS["temperature"],
+            combined_response = _model.create_chat_completion(
+                messages=[{"role": "user", "content": [image_content, {"type": "text", "text": _COMBINED_QUERY}]}],
+                max_tokens=_COMBINED_SETTINGS["max_tokens"],
+                temperature=_COMBINED_SETTINGS["temperature"],
             )
-            _model.reset()
-            structured_response = _model.create_chat_completion(
-                messages=[{"role": "user", "content": [image_content, {"type": "text", "text": _STRUCTURED_QUERY}]}],
-                max_tokens=_STRUCTURED_SETTINGS["max_tokens"],
-                temperature=_STRUCTURED_SETTINGS["temperature"],
-            )
-        caption = caption_response["choices"][0]["message"]["content"].strip().rstrip(".")
-        structured = structured_response["choices"][0]["message"]["content"].strip()
+            structured = combined_response["choices"][0]["message"]["content"].strip()
+            caption = _parse_descripcion(structured)
+            if caption is None:
+                # RESPALDO: el modelo no escribió la línea DESCRIPCION
+                # (formato roto, línea vacía...). Se pide la frase aparte,
+                # como se hacía siempre; solo esa foto paga la segunda
+                # codificación, y `structured` ya está resuelto.
+                _model.reset()
+                caption_response = _model.create_chat_completion(
+                    messages=[{"role": "user", "content": [image_content, {"type": "text", "text": _CAPTION_QUERY}]}],
+                    max_tokens=_CAPTION_SETTINGS["max_tokens"],
+                    temperature=_CAPTION_SETTINGS["temperature"],
+                )
+                caption = caption_response["choices"][0]["message"]["content"].strip().rstrip(".")
 
         # Log OPCIONAL de comparación entre variantes (ver
         # app/log/visual_description_log.py sobre el diseño y por qué
@@ -1123,7 +1171,7 @@ def _build_clean_summary(
     (1) El modelo, tras responder bien, a veces sigue generando y empieza
     a copiar fragmentos de la propia explicación del prompt (visto en
     producción: "PERSONAS solo puede val..." apareciendo tras las cuatro
-    líneas correctas, cortado por `_STRUCTURED_SETTINGS['max_tokens']`).
+    líneas correctas, cortado por `_COMBINED_SETTINGS['max_tokens']`).
     Reconstruir desde los valores ya parseados descarta esa cola
     automáticamente, sin depender de acertar el `max_tokens` exacto cada
     vez -- cada valor se extrajo con `.search()`, que coge la PRIMERA
