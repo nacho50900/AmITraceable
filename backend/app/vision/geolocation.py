@@ -119,6 +119,11 @@ _igpu_worker_failed = False
 # modelo dentro del worker (ver `_load_model` en igpu_worker/app.py);
 # las siguientes son mucho más rápidas.
 _IGPU_WORKER_TIMEOUT = httpx.Timeout(5.0, read=30.0)
+# Timeout de la llamada a /warmup del worker: SOLO la carga en frío del
+# modelo en la iGPU (más una inferencia de prueba). Se separa a propósito del
+# anterior: aquel es para inferencia ya en caliente, y la carga en frío no
+# debe contar contra él (ver `_warm_up_igpu_worker`).
+_IGPU_WORKER_WARMUP_TIMEOUT = httpx.Timeout(5.0, read=300.0)
 
 # Mensajes de progreso de las dos pistas paralelas (DINOv2/geolocalización
 # y Moondream2/análisis de escena, ver `track` en las llamadas a
@@ -479,6 +484,34 @@ def _select_igpu_worker_device_index(cuda_available: bool) -> int | None:
     return None
 
 
+def _warm_up_igpu_worker(device_index: int) -> bool:
+    """Pide al worker que cargue DINOv2 en la iGPU y haga una inferencia de
+    prueba (POST /warmup), esperando lo que haga falta dentro de
+    `_IGPU_WORKER_WARMUP_TIMEOUT`. Devuelve True si el worker quedó listo.
+
+    Existe para que el timeout corto de `_embed_via_igpu_worker` (30s, para
+    inferencia en caliente) NO cubra la carga en frío del modelo: sin esto, la
+    primera foto podía agotarlo aunque el worker acabara respondiendo 200
+    poco después, y `estimate_location_from_image` degradaba DINOv2 a la GPU
+    dedicada -- compartiendo VRAM con Qwen -- de forma permanente.
+
+    Cualquier fallo (worker caído, error al cargar, operador sin soporte en
+    DirectML, timeout) devuelve False: el llamador (`_lazy_load`) trata eso
+    igual que "no hay iGPU utilizable" y se queda con el comportamiento de
+    siempre desde el arranque, en vez de descubrir el problema en la primera
+    foto."""
+    try:
+        resp = httpx.post(
+            f"{settings.igpu_worker_url}/warmup",
+            params={"device_index": device_index},
+            timeout=_IGPU_WORKER_WARMUP_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return True
+    except Exception:
+        return False
+
+
 def _embed_via_igpu_worker(image, device_index: int) -> np.ndarray | None:
     """Pide el embedding DINOv2 (normalizado L2) de `image` al proceso
     worker aislado (ver backend/igpu_worker/app.py) en vez de calcularlo
@@ -521,6 +554,18 @@ def _lazy_load():
 
     _device = _select_dinov2_device()
     _igpu_worker_device_index = _select_igpu_worker_device_index(_device == "cuda")
+    # Calienta el worker AHORA (carga en frío + inferencia de prueba, con su
+    # propio timeout holgado) para que el timeout corto de /embed solo cubra
+    # inferencia en caliente. Si no queda listo, se descarta el worker ya en
+    # el arranque -- mismo efecto que si `_select_igpu_worker_device_index`
+    # no lo hubiera encontrado.
+    if _igpu_worker_device_index is not None and not _warm_up_igpu_worker(_igpu_worker_device_index):
+        logger.warning(
+            "El worker de iGPU (%s) no pudo cargar/calentar DINOv2 -- DINOv2 "
+            "se procesara localmente en la GPU dedicada junto a Qwen.",
+            settings.igpu_worker_url,
+        )
+        _igpu_worker_device_index = None
     # El modelo local se carga SIEMPRE, aunque se vaya a usar el worker de
     # iGPU -- es el fallback si el worker falla (ver
     # `estimate_location_from_image`), y así ese fallback es inmediato

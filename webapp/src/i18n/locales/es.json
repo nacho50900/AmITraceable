@@ -460,7 +460,9 @@
     "relatedAccounts": {
       "title": "Cuentas relacionadas encontradas",
       "subtitle": "Se comprobó si tu nombre de usuario existe en otros {{total}} sitios (comprobación de existencia únicamente, nunca se accede al contenido de esas cuentas).",
-      "noMatches": "No se encontró ninguna cuenta con este mismo nombre de usuario en los sitios comprobados."
+      "noMatches": "No se encontró ninguna cuenta con este mismo nombre de usuario en los sitios comprobados.",
+      "found_one": "Se encontró {{count}} cuenta con este mismo nombre de usuario.",
+      "found_other": "Se encontraron {{count}} cuentas con este mismo nombre de usuario."
     },
     "populationPictogram": {
       "compactAriaLabel": "Aproximadamente {{percent}} de la población: 1 de cada {{ratio}} personas",

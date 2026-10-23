@@ -26,15 +26,20 @@ const RelatedAccountsList: React.FC<RelatedAccountsListProps> = ({ relatedAccoun
       {relatedAccounts.matches.length === 0 ? (
         <p className="note">{t('components.relatedAccounts.noMatches')}</p>
       ) : (
-        <ul className="related-accounts-list">
-          {relatedAccounts.matches.map((match) => (
-            <li key={match.site}>
-              <a href={match.url} target="_blank" rel="noreferrer">
-                {match.site}
-              </a>
-            </li>
-          ))}
-        </ul>
+        <>
+          <p className="note related-accounts-count">
+            <strong>{t('components.relatedAccounts.found', { count: relatedAccounts.matches.length })}</strong>
+          </p>
+          <ul className="related-accounts-list">
+            {relatedAccounts.matches.map((match) => (
+              <li key={match.site}>
+                <a href={match.url} target="_blank" rel="noreferrer">
+                  {match.site}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );

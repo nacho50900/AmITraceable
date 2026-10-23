@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -240,3 +241,50 @@ class TestPromptContent:
         await analyze_report_with_ai(_make_report(), lang="fr")
 
         assert "inglés" not in calls[0][0].lower()
+
+
+class TestReportJsonForAi:
+    """`_report_json_for_ai` -- el prompt del análisis final NO debe llevar la
+    lista completa de coincidencias de Maigret (cientos de sitios dejaban sin
+    contexto al modelo local y el análisis final no llegaba a generarse)."""
+
+    @staticmethod
+    def _report_with_matches(n: int):
+        from app.models.schemas import UsernameCorrelationSummary, UsernameSiteMatch
+
+        matches = [
+            UsernameSiteMatch(site=f"forum.site{i}.com", url=f"https://forum.site{i}.com/u/nick", exists=True)
+            for i in range(n)
+        ]
+        return _make_report(related_accounts=UsernameCorrelationSummary(total_sites_checked=5185, matches=matches))
+
+    def test_related_accounts_are_summarised_not_listed(self):
+        payload = json.loads(ai_analysis._report_json_for_ai(self._report_with_matches(300)))
+
+        related = payload["related_accounts"]
+        assert related["total_sites_checked"] == 5185
+        assert related["accounts_found"] == 300  # el recuento real se conserva
+        assert len(related["sites_sample"]) == ai_analysis._AI_MAX_RELATED_ACCOUNTS_SAMPLE
+        assert "matches" not in related
+
+    def test_urls_of_matches_are_not_sent(self):
+        text = ai_analysis._report_json_for_ai(self._report_with_matches(5))
+
+        assert "https://forum.site0.com/u/nick" not in text
+
+    def test_prompt_size_barely_grows_with_the_number_of_matches(self):
+        small = len(ai_analysis._report_json_for_ai(self._report_with_matches(5)))
+        huge = len(ai_analysis._report_json_for_ai(self._report_with_matches(2000)))
+
+        assert huge - small < 1000
+
+    def test_json_is_compact(self):
+        text = ai_analysis._report_json_for_ai(_make_report())
+
+        assert "\n" not in text
+
+    def test_report_without_related_accounts_is_unchanged(self):
+        payload = json.loads(ai_analysis._report_json_for_ai(_make_report()))
+
+        assert payload["related_accounts"] is None
+        assert payload["username"] == "test_user"

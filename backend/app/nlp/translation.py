@@ -170,7 +170,16 @@ def translate_texts_local(texts: list[str], lang: str) -> list[str]:
     target_tok = _target_tokenizers[direction]
 
     try:
-        tokenized = [source_tok.encode(text, out_type=str) for text in texts]
+        # MarianMT/OPUS-MT espera la entrada TERMINADA en el token de fin de
+        # secuencia "</s>" (el tokenizer de HuggingFace lo añade solo con
+        # `encode()`; `sentencepiece` a secas NO). Sin él, el modelo no sabe
+        # dónde acaba la frase y no emite su propio fin de secuencia: sigue
+        # generando hasta el tope de longitud, y las salvaguardas de más
+        # abajo (`repetition_penalty`, `no_repeat_ngram_size`), al prohibir
+        # repetir, lo empujan a inventar sílabas ("cece cece", "nenie
+        # nieve") en vez de parar. Esas salvaguardas tapaban el síntoma sin
+        # curar la causa; se mantienen como segunda red de seguridad.
+        tokenized = [[*source_tok.encode(text, out_type=str), "</s>"] for text in texts]
         # CORREGIDO tras verlo fallar en producción: `beam_size=1` (voraz,
         # sin búsqueda en haz) no es solo "algo peor de calidad" como
         # asumí al principio -- sin ninguna salvaguarda puede quedarse

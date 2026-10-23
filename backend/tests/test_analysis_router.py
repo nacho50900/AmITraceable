@@ -554,6 +554,95 @@ class TestUsernameCorrelationIntegration:
         assert order == ["username_correlation:started", "fingerprint:done"]
 
 
+class TestPhotosWaitForUsernameCorrelation:
+    """Con `settings.username_correlation_before_photos` (True por defecto)
+    el análisis de fotos NO arranca hasta que termina la comprobación de
+    cuentas de Maigret -- correr ambos a la vez saturó RAM/DNS/GPU en el
+    equipo de desarrollo (ver `_geolocate_after` en analysis_router.py)."""
+
+    @staticmethod
+    def _instagram_profile():
+        posts = [
+            SocialPost(
+                id="p1", platform="instagram", type="image", group="viajes", tags=["viajes"],
+                text="Foto de viaje", created_utc=datetime(2025, 1, 1, tzinfo=timezone.utc),
+                score=1, permalink="https://ig/1", media_urls=["https://cdn.fake/1.jpg"],
+            )
+        ]
+        return SocialProfile(platform="instagram", username="fake_user", posts=posts)
+
+    @staticmethod
+    def _fake_geo(order):
+        async def _fake_estimate(posts, avatar_url=None, progress_callback=None):
+            order.append("geo:started")
+            return geolocation.GeolocationOutcome(index_available=True, results=[])
+
+        return _fake_estimate
+
+    @pytest.mark.asyncio
+    async def test_photos_start_only_after_correlation_finishes(self, monkeypatch, patch_spacy_model):
+        import asyncio
+
+        order = []
+
+        async def _fake_check(username, progress_callback=None):
+            order.append("correlation:started")
+            await asyncio.sleep(0.05)  # cede el control: las fotos tendrían tiempo de arrancar si no esperaran
+            order.append("correlation:finished")
+            return []
+
+        monkeypatch.setattr(username_correlation, "check_username_across_sites", _fake_check)
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", self._fake_geo(order))
+        monkeypatch.setattr(settings, "enable_username_correlation", True)
+        monkeypatch.setattr(settings, "username_correlation_before_photos", True)
+
+        await analysis_router._build_report(self._instagram_profile())
+
+        assert order == ["correlation:started", "correlation:finished", "geo:started"]
+
+    @pytest.mark.asyncio
+    async def test_photos_run_in_parallel_when_the_switch_is_off(self, monkeypatch, patch_spacy_model):
+        import asyncio
+
+        order = []
+
+        async def _fake_check(username, progress_callback=None):
+            order.append("correlation:started")
+            await asyncio.sleep(0.05)
+            order.append("correlation:finished")
+            return []
+
+        monkeypatch.setattr(username_correlation, "check_username_across_sites", _fake_check)
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", self._fake_geo(order))
+        monkeypatch.setattr(settings, "enable_username_correlation", True)
+        monkeypatch.setattr(settings, "username_correlation_before_photos", False)
+
+        await analysis_router._build_report(self._instagram_profile())
+
+        assert order.index("geo:started") < order.index("correlation:finished")
+
+    @pytest.mark.asyncio
+    async def test_photos_still_run_if_correlation_fails(self, monkeypatch, patch_spacy_model):
+        """Un fallo de la comprobación de cuentas no debe dejar las fotos
+        sin analizar: `_geolocate_after` espera sin relanzar su excepción."""
+        order = []
+
+        async def _failing_check(username, progress_callback=None):
+            raise RuntimeError("maigret fallo")
+
+        monkeypatch.setattr(username_correlation, "check_username_across_sites", _failing_check)
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", self._fake_geo(order))
+        monkeypatch.setattr(settings, "enable_username_correlation", True)
+        monkeypatch.setattr(settings, "username_correlation_before_photos", True)
+
+        try:
+            await analysis_router._build_report(self._instagram_profile())
+        except RuntimeError:
+            pass  # el fallo de la correlación se propaga al recogerla en generate_report (comportamiento previo)
+
+        assert order == ["geo:started"]
+
+
 class TestRecalculateEndpoint:
     """POST /api/analyze/recalculate -- rasgos fisicos manuales
     (color de ojos/pelo/piel) que no pueden inferirse automaticamente

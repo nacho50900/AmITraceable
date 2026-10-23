@@ -5,6 +5,7 @@ y accionables a partir del score y los atributos inferidos.
 from datetime import datetime, timezone
 
 import asyncio
+import re
 import unicodedata
 
 from app.config import settings
@@ -491,6 +492,83 @@ async def _apply_image_geolocation(
     return image_location_points, geo_outcome.index_available, visual_inferences
 
 
+# Categorías LIBRES (texto que devuelve la IA, sin lista cerrada) que
+# significan "información sobre la relación de pareja de la persona".
+# Se normaliza a minúsculas y se busca por subcadena, no por igualdad:
+# la IA devuelve "relacion_sentimental", "relacion", "pareja",
+# "situacion_sentimental"...
+_RELATIONSHIP_CATEGORY_HINTS = ("relacion", "pareja", "sentimental", "estado_civil")
+
+# Valores de `estado_civil` que ya expresan una relación de pareja.
+_COUPLE_ESTADO_CIVIL_VALUES = ("con_pareja", "casado")
+
+# Valor que indica relación de pareja actual (positivo)...
+_PARTNER_POSITIVE_RE = re.compile(
+    r"\b(pareja|novi[oa]|relaci[oó]n|casad[oa]|marido|esposa|esposo|prometid[oa]|aniversario)\b",
+    re.IGNORECASE,
+)
+# ...salvo que esté negado o indique lo contrario. Si hay CUALQUIER indicio
+# de negación o de soltería, no se promueve nada: ante la duda, el dato se
+# queda como inferencia blanda (visible en el informe, sin entrar en el
+# cálculo) en vez de contar a alguien como "con pareja" por error.
+_PARTNER_NEGATIVE_RE = re.compile(
+    r"\b(sin\s+pareja|no\s+(?:tiene|parece|hay|se)|soltero|soltera|separad[oa]|divorciad[oa]|"
+    r"viud[oa]|ex[-\s]?(?:pareja|novi[oa])|ruptura|busca(?:ndo)?\s+pareja)\b",
+    re.IGNORECASE,
+)
+
+
+def _promote_relationship_inference(
+    demographic_findings: DemographicFindings, inferred_attributes: list[InferredAttribute]
+) -> list[InferredAttribute]:
+    """La relación de pareja SÍ tiene tabla del INE (estado civil), así que
+    debe vivir SOLO en el cálculo de población ("con correlación
+    estadística"), nunca también en "Atributos inferidos sin correlación
+    estadística". Esta función garantiza las dos cosas:
+
+    1. Si la IA infirió una relación de pareja como inferencia BLANDA libre
+       (p. ej. categoria="relacion_sentimental", valor="Posible relación de
+       pareja: fecha con emojis de corazón") pero `estado_civil` sigue
+       siendo None, se promueve a `estado_civil="con_pareja"` con
+       `source="ia_simbolica"` (nunca "ia" a secas), y la inferencia con
+       más confianza aporta la evidencia.
+    2. Se RETIRAN de la lista TODAS las inferencias blandas de relación
+       positivas, no solo la promovida: pueden venir varias (texto + fotos,
+       o el `estado_civil` ya venía relleno por el texto o por un indicio
+       visual de pareja) y dejar cualquiera duplicaba el dato en las dos
+       secciones del informe.
+
+    Reglas conservadoras:
+      - Solo se promueve "con_pareja" (nunca "casado": no se puede
+        distinguir de forma fiable de este texto libre).
+      - Cualquier negación o indicio de soltería/separación en el valor
+        (ver `_PARTNER_NEGATIVE_RE`) impide tanto la promoción como la
+        retirada: ante la duda, el dato se queda visible.
+      - Si `estado_civil` ya vale algo que NO es de pareja ("soltero",
+        "divorciado"...), una inferencia blanda positiva la contradice: ni
+        se promueve ni se retira, para no esconder el conflicto.
+    """
+    positives = [
+        attribute
+        for attribute in inferred_attributes
+        if any(hint in attribute.category.lower() for hint in _RELATIONSHIP_CATEGORY_HINTS)
+        and _PARTNER_POSITIVE_RE.search(attribute.value)
+        and not _PARTNER_NEGATIVE_RE.search(attribute.value)
+    ]
+    if not positives:
+        return inferred_attributes
+
+    if demographic_findings.estado_civil is None:
+        chosen = max(positives, key=lambda attribute: attribute.confidence)
+        demographic_findings.estado_civil = "con_pareja"
+        demographic_findings.source["estado_civil"] = "ia_simbolica"
+        demographic_findings.evidence["estado_civil"] = list(chosen.evidence)
+    elif demographic_findings.estado_civil not in _COUPLE_ESTADO_CIVIL_VALUES:
+        return inferred_attributes
+
+    return [attribute for attribute in inferred_attributes if attribute not in positives]
+
+
 async def generate_report(
     platform: str,
     username: str,
@@ -575,6 +653,10 @@ async def generate_report(
     # app/vision/scene_analysis.py para el prompt y el límite ético sobre
     # no identificar a otras personas que aparezcan en las fotos.
     inferred_attributes = [*inferred_attributes, *visual_inferences]
+
+    # Una relación de pareja inferida como inferencia blanda libre SÍ tiene
+    # tabla del INE (estado civil): se mueve al cálculo de población.
+    inferred_attributes = _promote_relationship_inference(demographic_findings, inferred_attributes)
 
     await emit_progress(progress_callback, stages.GENERATING_REPORT)
 

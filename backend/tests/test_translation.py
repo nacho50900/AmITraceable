@@ -59,7 +59,13 @@ class _FakeTranslator:
         self.device = device
 
     def translate_batch(self, tokenized, **kwargs):
-        return [_FakeTranslationResult([tokens]) for tokens in tokenized]
+        # Un traductor real consume el "</s>" de la entrada y no lo repite en
+        # la salida: se imita quitándolo, para que el resto de tests siga
+        # viendo el texto "traducido" sin la marca de fin de secuencia.
+        return [
+            _FakeTranslationResult([[tok for tok in tokens if tok != "</s>"]])
+            for tokens in tokenized
+        ]
 
 
 class _FakeSentencePieceProcessor:
@@ -209,6 +215,32 @@ class TestTranslateTextsLocalHappyPath:
         assert received_kwargs["beam_size"] >= 2  # nunca voraz sin red de seguridad
         assert received_kwargs["repetition_penalty"] > 1
         assert received_kwargs["no_repeat_ngram_size"] > 0
+
+    def test_source_sequences_end_with_eos_token(self, monkeypatch, tmp_path):
+        """Regresión: MarianMT necesita "</s>" al final de la entrada. Sin él
+        el modelo no sabía dónde acababa la frase y generaba basura (sílabas
+        inventadas, descripciones larguísimas sin sentido)."""
+        _make_fake_model_dir(tmp_path, "en-es")
+        monkeypatch.setattr(translation, "_MODELS_DIR", tmp_path)
+        received = {}
+
+        class _RecordingTranslator(_FakeTranslator):
+            def translate_batch(self, tokenized, **kwargs):
+                received["tokenized"] = tokenized
+                return super().translate_batch(tokenized, **kwargs)
+
+        monkeypatch.setitem(sys.modules, "ctranslate2", SimpleNamespace(Translator=_RecordingTranslator))
+        monkeypatch.setitem(
+            sys.modules,
+            "sentencepiece",
+            SimpleNamespace(SentencePieceProcessor=_FakeSentencePieceProcessor),
+        )
+
+        result = translation.translate_texts_local(["a guitar", "a cat"], lang="es")
+
+        assert all(seq[-1] == "</s>" for seq in received["tokenized"])
+        assert len(received["tokenized"]) == 2
+        assert result == ["A GUITAR", "A CAT"]  # y el "</s>" no se cuela en la salida
 
     def test_absurdly_long_repetitive_output_falls_back_to_original(self, monkeypatch, tmp_path):
         """Reproduce el bug real tal cual se vio en producción: el modelo

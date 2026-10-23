@@ -244,6 +244,16 @@ class Settings(BaseSettings):
     # `enable_scene_analysis` justo arriba.
     enable_username_correlation: bool = False
 
+    # Si es True (por defecto) y `enable_username_correlation` también lo
+    # está, el análisis de fotos (DINOv2 + Qwen) NO arranca hasta que
+    # termina la comprobación de cuentas de Maigret, en vez de correr a la
+    # vez. Evita saturar RAM/red/GPU a la vez en equipos justos (ver
+    # `_geolocate_after` en app/analysis_router.py). Ponerlo a False
+    # devuelve el comportamiento paralelo anterior: más rápido en total,
+    # pero con mucho más pico de recursos. Sin efecto si la correlación
+    # de cuentas está desactivada.
+    username_correlation_before_photos: bool = True
+
     # Tiempo máximo (segundos) que se deja a Moondream2 analizar UNA foto
     # antes de rendirse y seguir sin descripción para esa foto concreta
     # (ver `_maybe_analyze_content` en app/vision/geolocation.py). El valor

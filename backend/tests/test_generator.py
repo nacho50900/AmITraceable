@@ -1021,8 +1021,8 @@ class TestSoftInferencesReachTheReport:
             findings = DemographicFindings()
             findings.soft_inferences = [
                 InferredAttribute(
-                    category="relacion_sentimental",
-                    value="Posible relación de pareja (fecha con emojis de corazón en la bio)",
+                    category="aficion",
+                    value="Posible aficion por la fotografia (emojis de camara en la bio)",
                     confidence=0.6,
                     evidence=["bio"],
                 )
@@ -1039,10 +1039,10 @@ class TestSoftInferencesReachTheReport:
 
         categories = [a.category for a in report.inferred_attributes]
         assert "ubicacion" in categories  # lo de regex se conserva
-        assert "relacion_sentimental" in categories  # y se añade lo de la IA
-        soft = next(a for a in report.inferred_attributes if a.category == "relacion_sentimental")
+        assert "aficion" in categories  # y se añade lo de la IA
+        soft = next(a for a in report.inferred_attributes if a.category == "aficion")
         assert soft.confidence == 0.6
-        assert "pareja" in soft.value.lower()
+        assert "fotografia" in soft.value.lower()
 
     @pytest.mark.asyncio
     async def test_without_ai_analysis_enabled_no_soft_inferences_are_added(self, monkeypatch):
@@ -1087,6 +1087,46 @@ class TestSoftInferencesReachTheReport:
         # Y también cuenta para el número combinado de "personas que
         # comparten tus rasgos" (ver k_anonymity.py::final_remaining_population).
         assert report.remaining_population_all_traits == relacion_steps[0].remaining_population
+
+
+class TestSoftPartnerInferenceReachesPopulationNarrowing:
+    """Caso real: la IA deduce pareja de una bio tipo '18/05/20🧡👸✨' como
+    inferencia BLANDA libre y no rellena `estado_civil`. Antes quedaba en
+    "Atributos inferidos sin correlación estadística", pese a que SÍ hay
+    tabla del INE de estado civil: ahora entra en el cálculo de población."""
+
+    @pytest.mark.asyncio
+    async def test_soft_partner_inference_feeds_population_narrowing(self, monkeypatch):
+        from app.config import settings
+        from app.nlp.demographic_extraction import DemographicFindings
+
+        monkeypatch.setattr(settings, "enable_ai_analysis", True)
+
+        async def _fake_ai_extraction(posts, username, full_name=None, bio=None):
+            findings = DemographicFindings()
+            findings.soft_inferences = [
+                InferredAttribute(
+                    category="relacion_sentimental",
+                    value="Posible relación de pareja (fecha con emojis de corazón en la bio)",
+                    confidence=0.6,
+                    evidence=["bio"],
+                )
+            ]
+            return findings
+
+        monkeypatch.setattr(generator, "extract_demographics_with_ai", _fake_ai_extraction)
+
+        report = await generate_report(
+            "instagram", "user", [_post(platform="instagram")], _fingerprint(), [], _score(),
+            bio="18/05/20🧡👸✨",
+        )
+
+        steps = [s for s in report.population_narrowing if s.category == "estado_civil"]
+        assert len(steps) == 1
+        assert steps[0].remaining_population is not None
+        assert steps[0].source == "ia_simbolica"
+        # Y ya no aparece duplicada como "inferida sin correlación estadística".
+        assert not any(a.category == "relacion_sentimental" for a in report.inferred_attributes)
 
 
 class TestVisualAnalysisReachesTheReport:
@@ -1187,3 +1227,94 @@ class TestVisualAnalysisReachesTheReport:
         step = next(s for s in report.population_narrowing if s.category == "estado_civil")
         assert step.attribute_label == "Soltero/a (sin pareja actualmente)"
         assert step.source == "ia_simbolica"
+
+
+class TestPromoteRelationshipInference:
+    """Una relación de pareja inferida por la IA como inferencia BLANDA libre
+    debe entrar en el cálculo de población (estado civil, INE) en vez de
+    quedarse en "Atributos inferidos sin correlación estadística"."""
+
+    @staticmethod
+    def _attr(category: str, value: str, confidence: float = 0.6):
+        return InferredAttribute(category=category, value=value, confidence=confidence, evidence=["https://ig/p/1"])
+
+    @staticmethod
+    def _findings(**overrides):
+        from app.nlp.demographic_extraction import DemographicFindings
+
+        return DemographicFindings(**overrides)
+
+    def test_promotes_partner_to_estado_civil_and_removes_it_from_soft_list(self):
+        findings = self._findings()
+        pareja = self._attr("relacion_sentimental", "Probablemente tiene pareja (fecha con corazones)")
+        otra = self._attr("aficion", "senderismo")
+
+        remaining = generator._promote_relationship_inference(findings, [pareja, otra])
+
+        assert findings.estado_civil == "con_pareja"
+        assert findings.source["estado_civil"] == "ia_simbolica"  # nunca "ia" a secas
+        assert findings.evidence["estado_civil"] == ["https://ig/p/1"]
+        assert remaining == [otra]
+
+    def test_does_not_override_an_existing_estado_civil_but_drops_the_duplicate(self):
+        findings = self._findings(estado_civil="casado")
+        pareja = self._attr("relacion", "tiene pareja")
+
+        remaining = generator._promote_relationship_inference(findings, [pareja])
+
+        assert findings.estado_civil == "casado"  # no se pisa
+        assert remaining == []  # y el duplicado sin correlación desaparece
+
+    def test_estado_civil_already_set_from_a_photo_removes_the_soft_duplicate(self):
+        """Caso real: `estado_civil="con_pareja"` ya viene de un indicio
+        visual (beso, abrazo...) y la IA además deja una inferencia blanda de
+        relación: salía en las DOS secciones del informe."""
+        findings = self._findings(estado_civil="con_pareja", source={"estado_civil": "imagen"})
+        soft = self._attr("relacion", "Posible relación de pareja detectada en una foto")
+
+        remaining = generator._promote_relationship_inference(findings, [soft])
+
+        assert findings.source["estado_civil"] == "imagen"  # fuente original intacta
+        assert remaining == []
+
+    def test_all_positive_relationship_attributes_are_removed_not_just_the_chosen_one(self):
+        findings = self._findings()
+        a = self._attr("relacion_sentimental", "tiene pareja", confidence=0.9)
+        b = self._attr("relacion", "posible pareja en foto", confidence=0.3)
+        otra = self._attr("aficion", "senderismo")
+
+        remaining = generator._promote_relationship_inference(findings, [a, b, otra])
+
+        assert findings.estado_civil == "con_pareja"
+        assert remaining == [otra]
+
+    def test_conflicting_estado_civil_keeps_the_soft_inference_visible(self):
+        findings = self._findings(estado_civil="soltero")
+        soft = self._attr("relacion", "tiene pareja")
+
+        remaining = generator._promote_relationship_inference(findings, [soft])
+
+        assert findings.estado_civil == "soltero"
+        assert remaining == [soft]
+
+    @pytest.mark.parametrize(
+        "value",
+        ["No tiene pareja", "Soltero", "sin pareja aparente", "Recién separada de su pareja", "Busca pareja"],
+    )
+    def test_negated_or_single_values_are_not_promoted(self, value):
+        findings = self._findings()
+        attr = self._attr("relacion_sentimental", value)
+
+        remaining = generator._promote_relationship_inference(findings, [attr])
+
+        assert findings.estado_civil is None
+        assert remaining == [attr]
+
+    def test_non_relationship_categories_are_ignored(self):
+        findings = self._findings()
+        attr = self._attr("aficion", "viajar con su pareja")
+
+        remaining = generator._promote_relationship_inference(findings, [attr])
+
+        assert findings.estado_civil is None
+        assert remaining == [attr]

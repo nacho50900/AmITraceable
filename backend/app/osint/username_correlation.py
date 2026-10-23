@@ -85,7 +85,12 @@ from app.progress import ProgressCallback, emit_progress
 logger = logging.getLogger(__name__)
 
 DEFAULT_SITE_TIMEOUT_SECONDS = 10
-DEFAULT_MAX_CONNECTIONS = 40
+# Antes 40: en la práctica (Docker Desktop + WSL2) el DNS interno se
+# saturaba y la mayoría de sitios acababan en "Timeout while contacting DNS
+# servers" -- más conexiones simultáneas no daban más resultados, solo más
+# timeouts y más presión de RAM. 20 es un punto de partida prudente; subirlo
+# solo si el barrido no muestra timeouts de DNS masivos.
+DEFAULT_MAX_CONNECTIONS = 20
 
 # Cada cuanto se sondea el contador de sitios ya comprobados para emitir un
 # evento de progreso -- ver docstring del modulo. No tiene sentido bajar

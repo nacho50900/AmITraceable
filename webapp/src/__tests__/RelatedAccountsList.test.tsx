@@ -37,6 +37,21 @@ describe('RelatedAccountsList', () => {
     );
   });
 
+  test('muestra cuántas cuentas se encontraron (singular y plural)', () => {
+    const { unmount } = render(<RelatedAccountsList relatedAccounts={makeSummary()} />);
+    expect(screen.getByText(/Se encontraron 2 cuentas/)).toBeInTheDocument();
+    unmount();
+
+    render(
+      <RelatedAccountsList
+        relatedAccounts={makeSummary({
+          matches: [{ site: 'GitHub', url: 'https://github.com/comandante', exists: true }],
+        })}
+      />,
+    );
+    expect(screen.getByText(/Se encontró 1 cuenta/)).toBeInTheDocument();
+  });
+
   test('sin coincidencias: no muestra lista, muestra el mensaje de "sin resultados"', () => {
     render(<RelatedAccountsList relatedAccounts={makeSummary({ matches: [] })} />);
 

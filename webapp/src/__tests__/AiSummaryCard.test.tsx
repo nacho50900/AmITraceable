@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { AiSummaryUnavailableError, api } from '../api';
@@ -30,6 +30,48 @@ describe('AiSummaryCard', () => {
     expect(screen.getByText('Analizando el informe con IA...')).toBeInTheDocument();
     expect(api.aiSummary).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: 'Analizar con IA' })).not.toBeInTheDocument();
+  });
+
+  test('un informe NUEVO objeto pero del mismo análisis (p. ej. tras traducir descripciones) NO relanza la IA', async () => {
+    vi.mocked(api.aiSummary).mockImplementation(() => new Promise(() => {}));
+    const report = makeExposureReport();
+    const { rerender } = render(<AiSummaryCard report={report} />);
+
+    // Mismo análisis (mismo generated_at), objeto distinto: lo que hace el
+    // Dashboard al terminar la traducción de las descripciones.
+    rerender(<AiSummaryCard report={{ ...report }} />);
+    rerender(<AiSummaryCard report={{ ...report, image_location_points: [] }} />);
+
+    expect(api.aiSummary).toHaveBeenCalledTimes(1);
+  });
+
+  test('un informe de OTRO análisis (generated_at distinto, p. ej. recálculo) sí relanza la IA', async () => {
+    vi.mocked(api.aiSummary).mockImplementation(() => new Promise(() => {}));
+    const report = makeExposureReport();
+    const { rerender } = render(<AiSummaryCard report={report} />);
+
+    rerender(<AiSummaryCard report={{ ...report, generated_at: '2099-01-01T00:00:00Z' }} />);
+
+    expect(api.aiSummary).toHaveBeenCalledTimes(2);
+  });
+
+  test('una respuesta obsoleta (de una petición anterior) no pisa a la más reciente', async () => {
+    let resolveFirst: (v: { verdict: string; conclusions: string[] }) => void = () => {};
+    vi.mocked(api.aiSummary)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce({ verdict: 'Veredicto NUEVO', conclusions: [] });
+    const report = makeExposureReport();
+    const { rerender } = render(<AiSummaryCard report={report} />);
+
+    rerender(<AiSummaryCard report={{ ...report, generated_at: '2099-01-01T00:00:00Z' }} />);
+    await waitFor(() => expect(screen.getByText('Veredicto NUEVO')).toBeInTheDocument());
+
+    await act(async () => {
+      resolveFirst({ verdict: 'Veredicto VIEJO', conclusions: [] });
+    });
+
+    expect(screen.getByText('Veredicto NUEVO')).toBeInTheDocument();
+    expect(screen.queryByText('Veredicto VIEJO')).not.toBeInTheDocument();
   });
 
   test('éxito: muestra el veredicto general y la lista de conclusiones', async () => {

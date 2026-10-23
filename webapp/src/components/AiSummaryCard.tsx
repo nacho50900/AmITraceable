@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AiSummaryUnavailableError, api } from '../api';
 import type { ExposureReport } from '../types';
@@ -10,16 +10,26 @@ interface AiSummaryCardProps {
 type Status = 'loading' | 'success' | 'empty' | 'unavailable' | 'error';
 
 const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [status, setStatus] = useState<Status>('loading');
   const [verdict, setVerdict] = useState<string>('');
   const [conclusions, setConclusions] = useState<string[]>([]);
   const [message, setMessage] = useState<string>('');
 
+  // Identificador de la última petición lanzada: una respuesta que llega
+  // cuando ya se lanzó otra más reciente se ignora (ver `runAnalysis`).
+  const latestRequestRef = useRef(0);
+  // Siempre el informe más reciente, para que `runAnalysis` no dependa de
+  // la identidad del objeto (ver el comentario del `useEffect` de abajo).
+  const reportRef = useRef(report);
+  reportRef.current = report;
+
   const runAnalysis = async () => {
+    const requestId = ++latestRequestRef.current;
     setStatus('loading');
     try {
-      const result = await api.aiSummary(report);
+      const result = await api.aiSummary(reportRef.current);
+      if (requestId !== latestRequestRef.current) return;
       if (!result.verdict && result.conclusions.length === 0) {
         setStatus('empty');
       } else {
@@ -28,6 +38,7 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
         setStatus('success');
       }
     } catch (err) {
+      if (requestId !== latestRequestRef.current) return;
       if (err instanceof AiSummaryUnavailableError) {
         setMessage(err.message);
         setStatus('unavailable');
@@ -40,10 +51,22 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
 
   // Se dispara solo, sin que el usuario tenga que pulsar nada -- el
   // informe ya generado se envía en cuanto está disponible.
+  //
+  // La dependencia es una CLAVE de contenido, no el objeto `report`: el
+  // Dashboard recrea ese objeto cada vez que termina la traducción de las
+  // descripciones de las fotos (ver `setReport` en pages/Dashboard.tsx), y
+  // con `[report]` eso lanzaba una SEGUNDA petición mientras la primera
+  // seguía ocupando el modelo local. La segunda esperaba como máximo 25s al
+  // lock del modelo (ver `_AI_SUMMARY_LOCK_TIMEOUT_SECONDS` en
+  // backend/app/ai_analysis.py), fallaba con "modelo ocupado" y pisaba el
+  // estado de la tarjeta. `generated_at` cambia en cada informe NUEVO (un
+  // análisis o un recálculo), no con la traducción; el idioma se incluye
+  // porque el veredicto se genera directamente en el idioma de la interfaz.
+  const analysisKey = `${report.platform}|${report.username}|${report.generated_at}|${i18n.language?.split('-')[0] ?? 'es'}`;
   useEffect(() => {
     void runAnalysis();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report]);
+  }, [analysisKey]);
 
   return (
     <section className="card ai-summary-card">

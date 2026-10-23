@@ -101,6 +101,43 @@ def devices():
     }
 
 
+@app.post("/warmup")
+def warmup(device_index: int):
+    """Carga el modelo en el dispositivo indicado Y hace una inferencia de
+    prueba, para que la carga en frío (descarga/lectura de pesos, copia a
+    la iGPU, compilación de kernels de DirectML en la primera pasada) ocurra
+    AQUÍ y no dentro de la primera petición a /embed.
+
+    Motivo: el backend usa un timeout de lectura corto (30s) para /embed,
+    pensado para inferencia ya en caliente. Sin este endpoint, ese mismo
+    timeout cubría también la carga en frío: el worker acababa respondiendo
+    200 después de que el backend ya hubiera desistido, y el backend degradaba
+    DINOv2 a la GPU dedicada de forma permanente. El backend llama a este
+    endpoint UNA vez al precargar el modelo (ver `_warm_up_igpu_worker` en
+    app/vision/geolocation.py), con su propio timeout, mucho más holgado.
+
+    Es síncrono (`def`, no `async def`): FastAPI lo ejecuta en su pool de
+    hilos y no bloquea el event loop del worker mientras tarda.
+
+    Devuelve 500 si el modelo no carga o si la inferencia de prueba falla
+    (típicamente un operador de DINOv2 sin soporte en DirectML): así el
+    backend lo sabe ya en el arranque y no en la primera foto."""
+    try:
+        model, processor, device = _load_model(device_index)
+        dummy = Image.new("RGB", (224, 224))
+        with torch.no_grad():
+            inputs = processor(images=dummy, return_tensors="pt").to(device)
+            model(**inputs)
+    except Exception:
+        logger.exception(
+            "Fallo al calentar DINOv2 en el dispositivo DirectML %d", device_index
+        )
+        raise HTTPException(
+            status_code=500, detail="No se pudo calentar el modelo en ese dispositivo"
+        )
+    return {"status": "ready"}
+
+
 @app.post("/embed")
 async def embed(device_index: int, file: UploadFile = File(...)):
     """Calcula el embedding DINOv2 (normalizado L2) de una imagen, en el

@@ -460,7 +460,9 @@
     "relatedAccounts": {
       "title": "Related accounts found",
       "subtitle": "Your username was checked against {{total}} other sites (existence check only -- the content of those accounts is never accessed).",
-      "noMatches": "No account with this same username was found on the sites checked."
+      "noMatches": "No account with this same username was found on the sites checked.",
+      "found_one": "Found {{count}} account with this same username.",
+      "found_other": "Found {{count}} accounts with this same username."
     },
     "populationPictogram": {
       "compactAriaLabel": "Approximately {{percent}} of the population: 1 in every {{ratio}} people",

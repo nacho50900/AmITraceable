@@ -1521,6 +1521,103 @@ class TestSelectIgpuWorkerDeviceIndex:
         assert geolocation._select_igpu_worker_device_index(cuda_available=True) is None
 
 
+class TestWarmUpIgpuWorker:
+    """`_warm_up_igpu_worker` llama a POST /warmup del worker: la carga en
+    frío del modelo ocurre ahí, con su propio timeout holgado, para que el
+    timeout corto de /embed solo cubra inferencia en caliente."""
+
+    def test_returns_true_when_worker_is_ready(self, respx_mock):
+        route = respx_mock.post(f"{geolocation.settings.igpu_worker_url}/warmup").mock(
+            return_value=httpx.Response(200, json={"status": "ready"})
+        )
+
+        assert geolocation._warm_up_igpu_worker(1) is True
+        assert route.calls.last.request.url.params["device_index"] == "1"
+
+    def test_returns_false_when_worker_fails_to_load(self, respx_mock):
+        respx_mock.post(f"{geolocation.settings.igpu_worker_url}/warmup").mock(
+            return_value=httpx.Response(500)
+        )
+
+        assert geolocation._warm_up_igpu_worker(1) is False
+
+    def test_returns_false_when_worker_unreachable(self, respx_mock):
+        respx_mock.post(f"{geolocation.settings.igpu_worker_url}/warmup").mock(
+            side_effect=httpx.ConnectError("no network")
+        )
+
+        assert geolocation._warm_up_igpu_worker(1) is False
+
+    def test_returns_false_on_timeout(self, respx_mock):
+        respx_mock.post(f"{geolocation.settings.igpu_worker_url}/warmup").mock(
+            side_effect=httpx.ReadTimeout("demasiado lento")
+        )
+
+        assert geolocation._warm_up_igpu_worker(1) is False
+
+    def test_warmup_timeout_is_much_longer_than_the_inference_timeout(self):
+        """Regresión directa: la carga en frío NO debe contar contra el
+        timeout de inferencia en caliente (30s)."""
+        assert geolocation._IGPU_WORKER_WARMUP_TIMEOUT.read > geolocation._IGPU_WORKER_TIMEOUT.read
+
+
+class TestLazyLoadWarmsUpIgpuWorker:
+    """`_lazy_load` calienta el worker al precargar y lo descarta en el
+    arranque (no en la primera foto) si no queda listo."""
+
+    @staticmethod
+    def _stub_heavy_loading(monkeypatch, tmp_path):
+        (tmp_path / "index.faiss").write_bytes(b"x")
+        (tmp_path / "index_meta.csv").write_text("id,lat,lon\n1,40.0,-3.0\n", encoding="utf-8")
+        monkeypatch.setattr(geolocation, "_INDEX_DIR", tmp_path)
+
+        fake_model = SimpleNamespace()
+        fake_model.to = lambda device: fake_model
+        fake_model.eval = lambda: fake_model
+        fake_transformers = SimpleNamespace(
+            AutoImageProcessor=SimpleNamespace(from_pretrained=lambda name: object()),
+            AutoModel=SimpleNamespace(from_pretrained=lambda name: fake_model),
+        )
+        monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+        monkeypatch.setitem(sys.modules, "faiss", SimpleNamespace(read_index=lambda path: object()))
+        monkeypatch.setattr(geolocation, "_select_dinov2_device", lambda: "cuda")
+
+    def test_keeps_worker_when_warmup_succeeds(self, monkeypatch, tmp_path):
+        self._stub_heavy_loading(monkeypatch, tmp_path)
+        monkeypatch.setattr(geolocation, "_select_igpu_worker_device_index", lambda cuda: 1)
+        warmed = []
+        monkeypatch.setattr(geolocation, "_warm_up_igpu_worker", lambda idx: warmed.append(idx) or True)
+
+        geolocation._lazy_load()
+
+        assert warmed == [1]
+        assert geolocation._igpu_worker_device_index == 1
+
+    def test_drops_worker_at_startup_when_warmup_fails(self, monkeypatch, tmp_path):
+        self._stub_heavy_loading(monkeypatch, tmp_path)
+        monkeypatch.setattr(geolocation, "_select_igpu_worker_device_index", lambda cuda: 1)
+        monkeypatch.setattr(geolocation, "_warm_up_igpu_worker", lambda idx: False)
+
+        geolocation._lazy_load()
+
+        assert geolocation._igpu_worker_device_index is None
+        # El modelo local sigue cargado: es el que se usa a partir de ahora.
+        assert geolocation._model is not None
+
+    def test_does_not_warm_up_when_no_worker_was_selected(self, monkeypatch, tmp_path):
+        self._stub_heavy_loading(monkeypatch, tmp_path)
+        monkeypatch.setattr(geolocation, "_select_igpu_worker_device_index", lambda cuda: None)
+
+        def _should_not_be_called(idx):
+            raise AssertionError("no hay worker seleccionado: no debe calentarse")
+
+        monkeypatch.setattr(geolocation, "_warm_up_igpu_worker", _should_not_be_called)
+
+        geolocation._lazy_load()
+
+        assert geolocation._igpu_worker_device_index is None
+
+
 class TestEstimateLocationFromImageIgpuWorkerFallback:
     """estimate_location_from_image despacha al worker de iGPU
     (_igpu_worker_device_index no None) ANTES de tocar el modelo local --

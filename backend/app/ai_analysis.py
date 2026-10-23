@@ -54,9 +54,14 @@ Decisiones de diseño (para la memoria):
    señal (barata, determinista, sin depender de que la IA esté disponible
    ese día) ni se duplica con las conclusiones de la IA.
 """
+import json
+import logging
+
 from app.config import settings
 from app.models.schemas import ExposureReport
 from app.nlp.ai_client import AIHTTPError, AIRequestError, call_ai_json
+
+logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
     "Eres un asistente que ayuda a personas no técnicas a entender su nivel de "
@@ -189,8 +194,16 @@ async def _call_ai_chat(system_prompt: str, user_prompt: str, max_tokens: int) -
             lock_timeout=_AI_SUMMARY_LOCK_TIMEOUT_SECONDS,
         )
     except AIRequestError as exc:
+        # Se registra el motivo EN EL SERVIDOR: el endpoint solo lo devuelve
+        # como 503 al navegador, y sin esta línea los logs no decían por qué
+        # el análisis final no se había generado (lock ocupado, fallo del
+        # modelo...).
+        logger.warning("Análisis final con IA no disponible (petición al modelo falló): %s", exc)
         raise AiAnalysisUnavailable(f"No se pudo ejecutar el modelo de IA local: {exc}") from exc
     except AIHTTPError as exc:
+        logger.warning(
+            "Análisis final con IA no disponible (salida del modelo no interpretable): %s", exc.body
+        )
         # A diferencia del diseño anterior (Mistral/Gemini por HTTP), un
         # modelo local nunca devuelve un status_code real -- AIHTTPError
         # solo se lanza ahora cuando el modelo SÍ respondió pero su salida
@@ -199,6 +212,44 @@ async def _call_ai_chat(system_prompt: str, user_prompt: str, max_tokens: int) -
         # inválida) ya no existen: no hay proveedor de terceros ni API key
         # que pueda fallar de esas formas.
         raise AiAnalysisUnavailable(f"Respuesta inesperada del modelo de IA local: {exc.body}") from exc
+
+
+# Cuántos nombres de sitio de `related_accounts.matches` se le pasan a la IA
+# como muestra (ver `_report_json_for_ai`).
+_AI_MAX_RELATED_ACCOUNTS_SAMPLE = 20
+
+
+def _report_json_for_ai(report: ExposureReport) -> str:
+    """JSON del informe para el prompt del análisis final, CONTENIDO.
+
+    Dos cambios respecto a `report.model_dump_json(indent=2)`, que se usaba
+    antes y dejaba el análisis final sin generar:
+
+    1. `related_accounts.matches` (comprobación de cuentas por username, ver
+       app/osint/username_correlation.py) se resume en recuento + una muestra
+       de nombres de sitio, sin URLs. Con el mismo username en cientos de
+       sitios (muchísimos foros Discourse devuelven "existe" para casi
+       cualquier nombre), esa lista, a 3 campos por sitio y varias líneas
+       cada uno por la indentación, ocupaba por sí sola decenas de miles de
+       tokens: la ventana de contexto del modelo local (ver
+       `QWEN_N_CTX`) se desbordaba y no llegaba a generar respuesta. La IA no
+       necesita cada URL para valorar la exposición: le basta cuántas
+       cuentas hay y en qué tipo de sitios.
+    2. JSON compacto (sin indentación): mismo contenido, bastantes menos
+       tokens.
+    """
+    data = report.model_dump(mode="json")
+
+    related = data.get("related_accounts")
+    if related is not None:
+        matches = related.get("matches") or []
+        data["related_accounts"] = {
+            "total_sites_checked": related.get("total_sites_checked"),
+            "accounts_found": len(matches),
+            "sites_sample": [match.get("site") for match in matches[:_AI_MAX_RELATED_ACCOUNTS_SAMPLE]],
+        }
+
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
 
 
 async def analyze_report_with_ai(report: ExposureReport, lang: str = "es") -> dict:
@@ -211,7 +262,7 @@ async def analyze_report_with_ai(report: ExposureReport, lang: str = "es") -> di
     # Se manda el informe ya generado (agregados/conclusiones propias de la
     # herramienta, incluido `recommendations`) -- minimización de datos, no
     # se reenvían los posts originales.
-    report_json = report.model_dump_json(indent=2)
+    report_json = _report_json_for_ai(report)
 
     system_prompt = _SYSTEM_PROMPT + _LANGUAGE_INSTRUCTIONS.get(lang, "")
     user_prompt = (

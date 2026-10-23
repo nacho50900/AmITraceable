@@ -67,6 +67,35 @@ _PLATFORM_CLIENT_FACTORIES: dict[str, Callable[[Request], object]] = {
 }
 
 
+async def _geolocate_after(prerequisite: asyncio.Task, posts, avatar_url=None, progress_callback=None):
+    """Espera a que `prerequisite` (la comprobación de cuentas por username
+    de Maigret) TERMINE -- bien, con error o cancelada -- y solo entonces
+    lanza el análisis de fotos.
+
+    Motivo: correr ambos a la vez saturaba la máquina anfitriona. Maigret
+    abre decenas de conexiones simultáneas (y el DNS de Docker/WSL2 se
+    ahoga: timeouts masivos que además dejan el barrido sin resultados
+    fiables) mientras Qwen + DINOv2 ocupan GPU, VRAM y RAM; en el equipo
+    de desarrollo (16GB, WSL2 con 13GB) esa suma coincidió con un bugcheck
+    MEMORY_MANAGEMENT de Windows (causa exacta no confirmada). Maigret es casi puro I/O de red y las
+    fotos son puro cómputo, así que no ganan nada importante compitiendo.
+
+    `asyncio.wait()` (no `await prerequisite`) a propósito: espera sin
+    relanzar la excepción de la tarea -- un fallo de la comprobación de
+    cuentas ya se gestiona donde se recoge su resultado
+    (generate_report) y no debe impedir analizar las fotos.
+
+    El import de `estimate_locations_for_posts` es perezoso y por módulo
+    (igual que en `_build_report`) para que los tests puedan sustituirlo
+    con monkeypatch."""
+    await asyncio.wait([prerequisite])
+    from app.vision import geolocation
+
+    return await geolocation.estimate_locations_for_posts(
+        posts, avatar_url=avatar_url, progress_callback=progress_callback
+    )
+
+
 async def _build_report(
     profile: SocialProfile,
     progress_callback: ProgressCallback | None = None,
@@ -92,41 +121,19 @@ async def _build_report(
             detail="No se encontró actividad pública suficiente para analizar",
         )
 
-    # El análisis de fotos (geolocalización vía DINOv2+FAISS) es, con
-    # diferencia, lo que más tarda de todo el pipeline -- se compara cada
-    # foto una a una contra el índice. Se lanza como tarea en segundo plano
-    # AQUÍ, lo antes posible, para que corra en PARALELO con el resto del
-    # análisis (fingerprint, atributos, autodeclaraciones con IA) en vez de
-    # esperar a que todo eso termine para empezar con las fotos de una en
-    # una. El resultado se recoge más adelante, dentro de generate_report,
-    # justo cuando hace falta (ver el parámetro `geolocation_task`).
+    # Comprobación de cuentas por username (ver ADR-44/ADR-48,
+    # app/osint/username_correlation.py): ~5000 peticiones HTTP, del orden
+    # de minutos. Detrás de `settings.enable_username_correlation` (False
+    # por defecto, ver app/config.py) -- ni siquiera se importa el módulo
+    # si está desactivado, mismo criterio que `enable_scene_analysis`. Se
+    # lanza YA, en paralelo con el resto del pipeline (fingerprint,
+    # atributos...), y se recoge más adelante en generate_report
+    # (parámetro `username_correlation_task`).
     #
-    # Se crea ANTES de activar `run_with_timer()` a propósito -- ver el
-    # docstring de app/analysis_timing.py sobre por qué esta tarea nunca
-    # debe compartir el timer del pipeline principal (su tiempo se mide
-    # aparte, por foto, en app/log/performance_log.py).
-    geolocation_task: asyncio.Task | None = None
-    if profile.platform == "instagram":
-        from app.vision.geolocation import estimate_locations_for_posts
-
-        geolocation_task = asyncio.create_task(
-            estimate_locations_for_posts(
-                profile.posts, avatar_url=profile.avatar_url, progress_callback=progress_callback
-            )
-        )
-
-    # Igual criterio que geolocation_task arriba, pero SIN depender de la
-    # plataforma (funciona sobre cualquier profile.username) ni de fotos:
-    # comprobar el username en ~5000 sitios (ver ADR-44/ADR-48,
-    # app/osint/username_correlation.py) tarda del orden de minutos, así
-    # que se lanza YA, en paralelo con el resto del pipeline, en vez de
-    # esperar a que todo lo demás termine para empezar. Se recoge más
-    # adelante dentro de generate_report (parámetro
-    # `username_correlation_task`), igual que geolocation_task.
-    #
-    # Detrás de `settings.enable_username_correlation` (False por
-    # defecto, ver app/config.py) -- ni siquiera se importa el módulo si
-    # está desactivado, mismo criterio que `enable_scene_analysis`.
+    # Se crea ANTES que la tarea de fotos de más abajo a propósito: si
+    # `settings.username_correlation_before_photos` está activo (por
+    # defecto), las fotos esperan a que ésta termine -- ver el comentario
+    # de `_geolocate_after` sobre por qué no corren a la vez.
     username_correlation_task: asyncio.Task | None = None
     if settings.enable_username_correlation:
         from app.osint.username_correlation import check_username_across_sites
@@ -134,6 +141,37 @@ async def _build_report(
         username_correlation_task = asyncio.create_task(
             check_username_across_sites(profile.username, progress_callback=progress_callback)
         )
+
+    # El análisis de fotos (geolocalización vía DINOv2+FAISS y contenido
+    # con Qwen) es, con diferencia, lo que más tarda de todo el pipeline.
+    # Se lanza como tarea en segundo plano AQUÍ, lo antes posible, para que
+    # corra en PARALELO con el resto del análisis (fingerprint, atributos,
+    # autodeclaraciones con IA). El resultado se recoge más adelante,
+    # dentro de generate_report (parámetro `geolocation_task`).
+    #
+    # Se crea ANTES de activar `run_with_timer()` a propósito -- ver el
+    # docstring de app/analysis_timing.py sobre por qué esta tarea nunca
+    # debe compartir el timer del pipeline principal (su tiempo se mide
+    # aparte, por foto, en app/log/performance_log.py).
+    geolocation_task: asyncio.Task | None = None
+    if profile.platform == "instagram":
+        if username_correlation_task is not None and settings.username_correlation_before_photos:
+            geolocation_task = asyncio.create_task(
+                _geolocate_after(
+                    username_correlation_task,
+                    profile.posts,
+                    avatar_url=profile.avatar_url,
+                    progress_callback=progress_callback,
+                )
+            )
+        else:
+            from app.vision.geolocation import estimate_locations_for_posts
+
+            geolocation_task = asyncio.create_task(
+                estimate_locations_for_posts(
+                    profile.posts, avatar_url=profile.avatar_url, progress_callback=progress_callback
+                )
+            )
 
     # `asyncio.create_task` solo PROGRAMA las tareas de arriba -- no les
     # cede el control de verdad. El resto de este bloque (build_fingerprint,
