@@ -498,13 +498,66 @@ body {
   text-align: center;
 }
 
-/* Botón "Saltar el resto del análisis" ya pulsado: se queda atenuado y sin
-   el efecto de elevación del hover mientras el backend termina lo que falta. */
+/* Botón "Saltar el resto del análisis": mismo tamaño que "Cancelar análisis"
+   (el .btn-primary de portada es bastante más grande), pero con el color de
+   acento para distinguirlo. Ya pulsado, se queda atenuado y sin el efecto de
+   elevación del hover mientras el backend termina lo que falta. */
+.progress-actions .btn-primary {
+  padding: 8px 16px;
+  font-size: 13px;
+}
+
 .progress-actions .btn-primary:disabled {
   opacity: 0.6;
   cursor: default;
   transform: none;
   box-shadow: none;
+}
+
+/* Frase bajo los botones tras saltar el análisis. */
+.progress-skip-note {
+  margin: 14px auto 0;
+  max-width: 520px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+/* Tres puntos que van apareciendo y saltando mientras algo carga
+   (components/LoadingDots.tsx). Cada punto arranca con un retraso distinto
+   para que la animación recorra los tres en cadena. */
+.loading-dots > span {
+  display: inline-block;
+  animation: loading-dot-bounce 1.2s ease-in-out infinite;
+}
+
+.loading-dots > span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loading-dots > span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes loading-dot-bounce {
+  0%,
+  60%,
+  100% {
+    opacity: 0.2;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-0.35em);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-dots > span {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 .btn-primary:hover {

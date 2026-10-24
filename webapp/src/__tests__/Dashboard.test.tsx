@@ -387,8 +387,33 @@ describe('Dashboard', () => {
       expect(screen.getByText('Cuentas relacionadas comprobadas (120/5000)')).toBeInTheDocument();
     });
     expect(screen.getByRole('button', { name: 'Saltando el resto del análisis...' })).toBeDisabled();
+    // Frase bajo los botones (sin los puntos animados, que son decorativos).
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Resto del análisis cancelado. Analizando toda la información obtenida hasta el momento, el resultado estará listo en 1 o 2 minutos',
+    );
     // El stream NO se cierra: la IA y el informe final siguen llegando por el mismo SSE.
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  test('"Saltar" va a la derecha de "Cancelar análisis" y la frase de aviso solo aparece tras pulsarlo', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    vi.mocked(api.skipAnalysis).mockResolvedValue({ skipped: true });
+    mockStream([{ done: false, stage: 'reading_posts' }]);
+    const { container } = renderDashboard();
+
+    const skipButton = await screen.findByRole('button', { name: 'Saltar el resto del análisis' });
+    const cancelButton = screen.getByRole('button', { name: 'Cancelar análisis' });
+    const buttons = Array.from(container.querySelectorAll('.progress-actions button'));
+    expect(buttons.indexOf(cancelButton)).toBeLessThan(buttons.indexOf(skipButton));
+    expect(container.querySelector('.progress-skip-note')).toBeNull();
+
+    await user.click(skipButton);
+
+    await waitFor(() => {
+      expect(container.querySelector('.progress-skip-note')).not.toBeNull();
+    });
+    expect(container.querySelector('.progress-skip-note .loading-dots')).not.toBeNull();
   });
 
   test('tras saltar, los eventos tardíos de las pistas largas se ignoran', async () => {
@@ -436,6 +461,7 @@ describe('Dashboard', () => {
       expect(screen.getByRole('button', { name: 'Saltar el resto del análisis' })).toBeEnabled();
     });
     expect(screen.getByText('Analizando fotos (3/10)...')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).toBeNull(); // la frase de "análisis cancelado" se retira
   });
 
   test('botón "Volver al inicio" tras un error hace logout y navega a "/"', async () => {

@@ -87,6 +87,7 @@
     "cancelAnalysis": "Cancelar análisis",
     "skipAnalysis": "Saltar el resto del análisis",
     "skippingAnalysis": "Saltando el resto del análisis...",
+    "skippedNotice": "Resto del análisis cancelado. Analizando toda la información obtenida hasta el momento, el resultado estará listo en 1 o 2 minutos",
     "backToStart": "Volver al inicio",
     "avatarAlt": "Foto de perfil de {{username}}",
     "title": "Informe de exposición de {{prefix}}{{username}}",
@@ -396,7 +397,7 @@
     },
     "aiSummary": {
       "title": "Recomendaciones y Conclusiones",
-      "loading": "Analizando el informe con IA...",
+      "loading": "Generando recomendaciones y conclusiones",
       "empty": "La IA ha revisado tu informe y no ha encontrado ninguna conclusión que merezca la pena destacar más allá de lo que ya ves en el resto del dashboard.",
       "errorPrefix": "No se ha podido completar el análisis con IA ({{message}}).",
       "retry": "Reintentar",

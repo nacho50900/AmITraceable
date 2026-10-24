@@ -87,6 +87,7 @@
     "cancelAnalysis": "Cancel analysis",
     "skipAnalysis": "Skip the rest of the analysis",
     "skippingAnalysis": "Skipping the rest of the analysis...",
+    "skippedNotice": "Rest of the analysis cancelled. Analyzing all the information gathered so far, the result will be ready in 1 or 2 minutes",
     "backToStart": "Back to start",
     "avatarAlt": "Profile picture of {{username}}",
     "title": "Exposure report for {{prefix}}{{username}}",
@@ -396,7 +397,7 @@
     },
     "aiSummary": {
       "title": "Recommendations and Conclusions",
-      "loading": "Analyzing the report with AI...",
+      "loading": "Generating recommendations and conclusions",
       "empty": "The AI reviewed your report and didn't find anything worth highlighting beyond what you already see in the rest of the dashboard.",
       "errorPrefix": "The AI analysis couldn't be completed ({{message}}).",
       "retry": "Retry",

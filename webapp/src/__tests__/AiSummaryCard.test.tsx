@@ -27,7 +27,10 @@ describe('AiSummaryCard', () => {
     render(<AiSummaryCard report={makeExposureReport()} />);
 
     expect(screen.getByText('Recomendaciones y Conclusiones')).toBeInTheDocument();
-    expect(screen.getByText('Analizando el informe con IA...')).toBeInTheDocument();
+    expect(screen.getByText('Generando recomendaciones y conclusiones')).toBeInTheDocument();
+    // Los tres puntos animados acompañan al texto pero son decorativos (aria-hidden).
+    expect(document.querySelectorAll('.loading-dots > span')).toHaveLength(3);
+    expect(document.querySelector('.loading-dots')).toHaveAttribute('aria-hidden', 'true');
     expect(api.aiSummary).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: 'Analizar con IA' })).not.toBeInTheDocument();
   });

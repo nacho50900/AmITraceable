@@ -1,3 +1,4 @@
+import LoadingDots from '../components/LoadingDots';
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -520,13 +521,19 @@ const Dashboard: React.FC = () => {
             </ul>
           </div>
           <div className="progress-actions">
-            <button className="btn-primary" type="button" onClick={handleSkipAnalysis} disabled={skipping}>
-              {skipping ? t('dashboard.skippingAnalysis') : t('dashboard.skipAnalysis')}
-            </button>{' '}
             <button className="btn-secondary" type="button" onClick={handleCancelAnalysis}>
               {t('dashboard.cancelAnalysis')}
+            </button>{' '}
+            <button className="btn-primary" type="button" onClick={handleSkipAnalysis} disabled={skipping}>
+              {skipping ? t('dashboard.skippingAnalysis') : t('dashboard.skipAnalysis')}
             </button>
           </div>
+          {skipping && (
+            <p className="progress-skip-note" role="status">
+              {t('dashboard.skippedNotice')}
+              <LoadingDots />
+            </p>
+          )}
         </div>
       </div>
     );

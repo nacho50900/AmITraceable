@@ -1,3 +1,4 @@
+import LoadingDots from './LoadingDots';
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AiSummaryUnavailableError, api } from '../api';
@@ -72,7 +73,12 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
     <section className="card ai-summary-card">
       <h2>{t('components.aiSummary.title')}</h2>
 
-      {status === 'loading' && <p className="note">{t('components.aiSummary.loading')}</p>}
+      {status === 'loading' && (
+        <p className="note" role="status">
+          {t('components.aiSummary.loading')}
+          <LoadingDots />
+        </p>
+      )}
 
       {status === 'success' && (
         <>
