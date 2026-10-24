@@ -498,6 +498,15 @@ body {
   text-align: center;
 }
 
+/* Botón "Saltar el resto del análisis" ya pulsado: se queda atenuado y sin
+   el efecto de elevación del hover mientras el backend termina lo que falta. */
+.progress-actions .btn-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
+}
+
 .btn-primary:hover {
   transform: translateY(-1px);
   box-shadow: 0 8px 24px rgba(91, 108, 240, 0.35);

@@ -44,6 +44,7 @@ from app.config import settings
 from app.models.schemas import InferredAttribute
 from app.log.performance_log import PhotoAnalysisRunMetrics, PhotoAnalysisTiming, log_photo_analysis_run
 from app.progress import emit_progress
+from app.skip_control import cancel_pending, wait_or_skip
 from app.vision import scene_analysis
 from app.vision.collage_detection import detect_collage
 from app.vision.landmark_resolution import resolve_landmark_coordinates
@@ -1037,7 +1038,7 @@ def _collect_photo_result(
 
 
 async def estimate_locations_for_posts(
-    posts: list, avatar_url: str | None = None, progress_callback=None
+    posts: list, avatar_url: str | None = None, progress_callback=None, skip=None
 ) -> GeolocationOutcome:
     """
     Orquestación de alto nivel: para CADA foto de CADA SocialPost de tipo
@@ -1088,6 +1089,13 @@ async def estimate_locations_for_posts(
     procesar (`track` distingue cuál de las dos es) -- para que el
     endpoint de streaming pueda mostrar dos líneas de progreso
     independientes y verdaderamente en tiempo real, una por modelo.
+
+    `skip` (ver app/skip_control.py) es opcional -- si se activa antes de
+    terminar, se cancelan las fotos que aún no han acabado y se devuelve el
+    resultado PARCIAL con las que sí terminaron (nunca un error). Una foto
+    cuyo modelo ya estaba ejecutándose en un hilo no se interrumpe a mitad
+    de inferencia: simplemente se descarta su resultado. Sin `skip`, el
+    comportamiento es exactamente el de antes.
     """
     import httpx
 
@@ -1205,7 +1213,14 @@ async def estimate_locations_for_posts(
         ]
 
         for i, (permalink, _media_url, photo_index, post_total) in enumerate(photo_units, start=1):
-            photo_result = await photo_tasks[i - 1]
+            photo_task = photo_tasks[i - 1]
+            if not await wait_or_skip(photo_task, skip):
+                # Se pidió saltar el resto: se cancela todo lo pendiente y
+                # se sigue recogiendo solo lo que ya había terminado.
+                await cancel_pending(photo_tasks)
+            if photo_task.cancelled():
+                continue
+            photo_result = photo_task.result()
             photo_link = _photo_link(permalink, photo_index, post_total)
             _collect_photo_result(
                 permalink,

@@ -107,6 +107,14 @@ export const api = {
       source.close();
     };
   },
+  // "Saltar el resto del análisis" (POST /api/analyze/{platform}/skip): le
+  // pide al backend que pare YA las pistas largas (comprobación de cuentas
+  // y análisis de fotos) y devuelva lo que lleven hasta ese momento -- el
+  // stream SSE ya abierto sigue su curso (IA sobre lo obtenido, informe
+  // final), no hace falta abrir ninguna conexión nueva. `skipped: false`
+  // significa que no había análisis en curso (ya terminó): no es un error.
+  skipAnalysis: (platform: Platform): Promise<{ skipped: boolean }> =>
+    request<{ skipped: boolean }>(`/api/analyze/${platform}/skip`, { method: 'POST' }),
   // Endpoint aislado del pipeline principal: manda el informe YA generado
   // (que el frontend ya tiene en memoria) para que un modelo de IA LOCAL
   // (Qwen3.5-4B, ver backend/app/nlp/ai_client.py -- nunca sale del

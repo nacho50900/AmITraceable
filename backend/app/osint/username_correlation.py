@@ -81,6 +81,7 @@ from maigret.result import MaigretCheckStatus
 from maigret.sites import MaigretDatabase
 
 from app.progress import ProgressCallback, emit_progress
+from app.skip_control import SkipControl, cancel_pending, wait_or_skip
 
 logger = logging.getLogger(__name__)
 
@@ -160,12 +161,30 @@ class _CountingQueryNotify:
 
     def __init__(self) -> None:
         self.checked = 0
+        # Resultados ya conocidos, sitio a sitio, a medida que Maigret los
+        # va notificando -- solo se usan si se pide saltar el resto del
+        # barrido (ver `skip` en check_username_across_sites): `maigret()`
+        # devuelve su dict completo solo AL FINAL, así que sin esto un
+        # barrido cancelado a medias perdería todo lo ya comprobado.
+        self.partial_results: list[UsernameSiteResult] = []
 
     def start(self, *args, **kwargs) -> None:
         pass  # Nada que inicializar: `checked` ya arranca en 0 en __init__.
 
-    def update(self, *args, **kwargs) -> None:
+    def update(self, result=None, *args, **kwargs) -> None:
         self.checked += 1
+        # Duck-typed a propósito (getattr) -- `result` es un
+        # MaigretCheckResult en la ejecución real, pero los tests (y
+        # cualquier llamada sin argumentos) pueden no pasar ninguno.
+        status = getattr(result, "status", None)
+        if status in _STATUS_TO_EXISTS:
+            self.partial_results.append(
+                UsernameSiteResult(
+                    site=getattr(result, "site_name", "") or "",
+                    url=getattr(result, "site_url_user", "") or "",
+                    exists=_STATUS_TO_EXISTS[status],
+                )
+            )
 
     def finish(self, *args, **kwargs) -> None:
         pass  # El resultado se lee de lo que devuelve maigret(), no de aquí.
@@ -235,12 +254,30 @@ def _raw_results_to_site_results(raw_results: dict) -> list[UsernameSiteResult]:
     return results
 
 
+async def _run_maigret_or_skip(maigret_coro, skip: SkipControl | None) -> dict | None:
+    """Ejecuta el barrido de Maigret y, si `skip` se activa antes de que
+    termine, lo cancela y devuelve None (quien llama usa entonces
+    `notifier.partial_results`). Sin `skip`, es un `await` normal -- mismo
+    comportamiento de siempre. Extraído de `check_username_across_sites`
+    por complejidad cognitiva, igual que `_poll_progress`."""
+    maigret_task = asyncio.ensure_future(maigret_coro)
+    try:
+        if not await wait_or_skip(maigret_task, skip):
+            return None
+        return maigret_task.result()
+    finally:
+        # Cubre tanto el salto como una cancelación real de quien nos
+        # llama: el barrido nunca debe quedarse corriendo en segundo plano.
+        await cancel_pending([maigret_task])
+
+
 async def check_username_across_sites(
     username: str,
     sites: dict | None = None,
     max_connections: int = DEFAULT_MAX_CONNECTIONS,
     site_timeout_seconds: int = DEFAULT_SITE_TIMEOUT_SECONDS,
     progress_callback: ProgressCallback | None = None,
+    skip: SkipControl | None = None,
 ) -> list[UsernameSiteResult]:
     """Comprueba `username` contra `sites` (dict nombre -> MaigretSite; por
     defecto, la base de datos completa de Maigret tras excluir tor/i2p/dns,
@@ -275,6 +312,11 @@ async def check_username_across_sites(
     `max_connections` alto -- mismo aviso que en la version anterior de
     este modulo, ver docstring de app/osint_router.py.
 
+    `skip` (ver app/skip_control.py) es opcional -- si se activa antes de
+    que termine el barrido, se cancela y se devuelven SOLO los sitios que
+    ya se habían comprobado hasta ese momento (resultado parcial, nunca un
+    error). Sin él, el comportamiento es exactamente el de antes.
+
     Username vacio o solo espacios -> lista vacia, sin llamar a Maigret ni
     al `progress_callback`."""
     username = username.strip()
@@ -291,20 +333,27 @@ async def check_username_across_sites(
         progress_task = asyncio.create_task(_poll_progress(notifier, total_sites, progress_callback))
 
     try:
-        raw_results = await _maigret_check(
-            username=username,
-            site_dict=site_dict,
-            logger=logger,
-            query_notify=notifier,
-            timeout=site_timeout_seconds,
-            is_parsing_enabled=False,
-            is_enrich_enabled=False,
-            max_connections=max_connections,
-            no_progressbar=True,
+        raw_results = await _run_maigret_or_skip(
+            _maigret_check(
+                username=username,
+                site_dict=site_dict,
+                logger=logger,
+                query_notify=notifier,
+                timeout=site_timeout_seconds,
+                is_parsing_enabled=False,
+                is_enrich_enabled=False,
+                max_connections=max_connections,
+                no_progressbar=True,
+            ),
+            skip,
         )
     finally:
         if progress_task is not None:
             await _cancel_and_await(progress_task)
+
+    if raw_results is None:
+        # Se saltó el resto del barrido: solo lo comprobado hasta ahora.
+        return notifier.partial_results
 
     if report_progress:
         # Evento final con el total exacto -- por si el ultimo tramo de

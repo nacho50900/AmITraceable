@@ -36,6 +36,7 @@ from app.progress import ProgressCallback, emit_progress
 from app.reddit_client import RedditClient
 from app.report.generator import generate_report
 from app.scoring.privacy_score import compute_score
+from app.skip_control import SkipControl, register_run, request_skip_for, unregister_run
 from app.scoring.k_anonymity import _apply_proportion, final_remaining_population, PopulationNarrowingStep
 from app.data.ine_reference import EYE_COLOR_DISTRIBUTION, HAIR_COLOR_DISTRIBUTION, SKIN_TONE_DISTRIBUTION, TOTAL_POPULATION_ES
 from app import stages
@@ -67,7 +68,17 @@ _PLATFORM_CLIENT_FACTORIES: dict[str, Callable[[Request], object]] = {
 }
 
 
-async def _geolocate_after(prerequisite: asyncio.Task, posts, avatar_url=None, progress_callback=None):
+def _skip_kwargs(skip: SkipControl | None) -> dict:
+    """`{"skip": skip}` solo si hay un SkipControl real -- sin él (endpoint
+    clásico `POST /analyze/{platform}`, tests) las funciones de las pistas
+    largas se llaman exactamente igual que antes de existir el botón de
+    saltar, sin ningún argumento nuevo."""
+    return {} if skip is None else {"skip": skip}
+
+
+async def _geolocate_after(
+    prerequisite: asyncio.Task, posts, avatar_url=None, progress_callback=None, skip: SkipControl | None = None
+):
     """Espera a que `prerequisite` (la comprobación de cuentas por username
     de Maigret) TERMINE -- bien, con error o cancelada -- y solo entonces
     lanza el análisis de fotos.
@@ -92,7 +103,7 @@ async def _geolocate_after(prerequisite: asyncio.Task, posts, avatar_url=None, p
     from app.vision import geolocation
 
     return await geolocation.estimate_locations_for_posts(
-        posts, avatar_url=avatar_url, progress_callback=progress_callback
+        posts, avatar_url=avatar_url, progress_callback=progress_callback, **_skip_kwargs(skip)
     )
 
 
@@ -100,6 +111,7 @@ async def _build_report(
     profile: SocialProfile,
     progress_callback: ProgressCallback | None = None,
     fetch_seconds: float | None = None,
+    skip: SkipControl | None = None,
 ) -> ExposureReport:
     """Ejecuta el pipeline común (fingerprint -> inferencia -> scoring ->
     informe) sobre un perfil ya normalizado, sea cual sea su origen.
@@ -108,6 +120,13 @@ async def _build_report(
     omite (usado por `POST /api/analyze/{platform}`, incluidos los tests
     existentes); solo lo usa el endpoint de streaming de progreso en vivo,
     más abajo.
+
+    `skip` (ver app/skip_control.py), si se da, permite al usuario saltar el
+    resto de las dos pistas LARGAS en segundo plano (comprobación de
+    cuentas y análisis de fotos): al activarse, ambas devuelven lo que
+    lleven hasta ese momento y el pipeline sigue con normalidad -- la IA
+    (autodeclaraciones, inferencias) y el informe se generan igualmente
+    sobre ese resultado parcial. Sin él, comportamiento idéntico al de antes.
 
     `fetch_seconds`, si se da, es el tiempo que tardó `fetch_profile()` en
     el llamador (ver `analyze`/`analyze_stream` más abajo) -- se registra
@@ -139,7 +158,9 @@ async def _build_report(
         from app.osint.username_correlation import check_username_across_sites
 
         username_correlation_task = asyncio.create_task(
-            check_username_across_sites(profile.username, progress_callback=progress_callback)
+            check_username_across_sites(
+                profile.username, progress_callback=progress_callback, **_skip_kwargs(skip)
+            )
         )
 
     # El análisis de fotos (geolocalización vía DINOv2+FAISS y contenido
@@ -162,6 +183,7 @@ async def _build_report(
                     profile.posts,
                     avatar_url=profile.avatar_url,
                     progress_callback=progress_callback,
+                    skip=skip,
                 )
             )
         else:
@@ -169,7 +191,10 @@ async def _build_report(
 
             geolocation_task = asyncio.create_task(
                 estimate_locations_for_posts(
-                    profile.posts, avatar_url=profile.avatar_url, progress_callback=progress_callback
+                    profile.posts,
+                    avatar_url=profile.avatar_url,
+                    progress_callback=progress_callback,
+                    **_skip_kwargs(skip),
                 )
             )
 
@@ -441,6 +466,37 @@ async def recalculate_report(request: Annotated[RecalculateRequest, Body(...)]):
     return report
 
 
+_SESSION_TOKEN_KEYS = {"reddit": "reddit_access_token", "instagram": "instagram_access_token"}
+
+
+def _run_key(platform: str, request: Request) -> str:
+    """Clave del análisis en curso de ESTE usuario y plataforma (ver
+    app/skip_control.py). El token de acceso ya está en la sesión firmada
+    (la factory del cliente lo exige antes de llegar aquí), así que no
+    hace falta ningún identificador nuevo; solo vive en memoria."""
+    return f"{platform}:{request.session.get(_SESSION_TOKEN_KEYS[platform])}"
+
+
+@router.post(
+    "/analyze/{platform}/skip",
+    responses={
+        401: {"description": "No autenticado con la plataforma solicitada."},
+        404: {"description": "Plataforma no soportada."},
+    },
+)
+async def skip_analysis(platform: str, request: Request):
+    """Pide saltar el resto del análisis en curso (comprobación de cuentas y
+    fotos pendientes): ambas pistas devuelven lo que lleven y el stream SSE
+    sigue su curso -- IA sobre lo obtenido, informe final. Devuelve
+    `{"skipped": true}` si había un análisis en curso para este usuario y
+    `{"skipped": false}` si no (ya terminó, o nunca empezó): no es un error."""
+    factory = _PLATFORM_CLIENT_FACTORIES.get(platform)
+    if factory is None:
+        raise HTTPException(status_code=404, detail=f"Plataforma no soportada: {platform}")
+    factory(request)  # valida la sesión (401) igual que el resto de rutas
+    return {"skipped": request_skip_for(_run_key(platform, request))}
+
+
 @router.post(
     "/analyze/{platform}",
     response_model=ExposureReport,
@@ -508,6 +564,12 @@ async def analyze_stream(platform: str, request: Request):
     client = factory(request)
 
     queue: asyncio.Queue = asyncio.Queue()
+    # Interruptor de "saltar el resto del análisis": se registra bajo una
+    # clave de plataforma+sesión para que `POST /analyze/{platform}/skip`
+    # (otra petición HTTP) lo encuentre. Se da de baja al terminar.
+    skip = SkipControl()
+    run_key = _run_key(platform, request)
+    register_run(run_key, skip)
 
     async def on_progress(stage: str, counts: dict) -> None:
         await queue.put({"done": False, "stage": stage, **counts})
@@ -518,7 +580,9 @@ async def analyze_stream(platform: str, request: Request):
             fetch_start = time.monotonic()
             profile = await client.fetch_profile(progress_callback=on_progress)
             fetch_seconds = time.monotonic() - fetch_start
-            report = await _build_report(profile, progress_callback=on_progress, fetch_seconds=fetch_seconds)
+            report = await _build_report(
+                profile, progress_callback=on_progress, fetch_seconds=fetch_seconds, skip=skip
+            )
             await queue.put({"done": True, "report": json.loads(report.model_dump_json())})
         except HTTPException as exc:
             await queue.put({"done": True, "error": exc.detail})
@@ -540,6 +604,7 @@ async def analyze_stream(platform: str, request: Request):
             # plano sin que nadie vaya a leer el resultado.
             if not pipeline_task.done():
                 pipeline_task.cancel()
+            unregister_run(run_key, skip)
 
     return StreamingResponse(
         event_generator(),

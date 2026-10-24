@@ -85,6 +85,8 @@
     },
     "errorPrefix": "Couldn't generate the report: {{error}}",
     "cancelAnalysis": "Cancel analysis",
+    "skipAnalysis": "Skip the rest of the analysis",
+    "skippingAnalysis": "Skipping the rest of the analysis...",
     "backToStart": "Back to start",
     "avatarAlt": "Profile picture of {{username}}",
     "title": "Exposure report for {{prefix}}{{username}}",

@@ -3392,3 +3392,46 @@ completa no se materializó de forma neta en la GPU de referencia de este
 proyecto (Turing, sin tensor cores), y ese es en sí mismo un resultado
 válido y documentable: no todo intento de optimización tiene que dar
 mejora medible para ser una decisión de arquitectura correcta.
+
+==== ADR-55: «Saltar el resto del análisis»: `SkipControl` y `POST /api/analyze/{platform}/skip`, sin tocar el stream SSE
+
+*Contexto*: las dos pistas largas del pipeline (comprobación de cuentas por
+username con Maigret, ~5000 sitios, y análisis de fotos) pueden tardar
+minutos, y hasta ahora la única salida era esperar o cancelar TODO y perder
+el informe. ADR-11 asumía que el cliente nunca necesita enviar nada al
+servidor durante el análisis; el botón de saltar rompe esa asunción en un
+único punto.
+
+*Decisión*:
+
+- `SkipControl` (`app/skip_control.py`, un `asyncio.Event` de un solo uso)
+  se crea en `analyze_stream`, se pasa como `skip=None` opcional a
+  `_build_report`, `check_username_across_sites` y
+  `estimate_locations_for_posts` (mismo patrón que `progress_callback`:
+  `_skip_kwargs()` solo lo reenvía si existe, así que
+  `POST /api/analyze/{platform}` y los tests previos no cambian).
+- El aviso va por una petición aparte, `POST /api/analyze/{platform}/skip`,
+  porque `EventSource` es solo GET. Se localiza el análisis con un registro
+  en memoria `_active_runs` con clave `plataforma:token_de_sesión`
+  (`_run_key`); responde `{"skipped": true|false}` y `false` no es error
+  (el análisis ya terminó). `unregister_run` solo borra la entrada si sigue
+  siendo la suya, por si el `EventSource` reconectó y arrancó otro análisis.
+- Al saltar, cada pista devuelve un resultado PARCIAL, nunca un error:
+  Maigret acumula cada sitio comprobado en `_CountingQueryNotify.partial_results`
+  (su `maigret()` solo devuelve el dict al final) y se cancela el barrido;
+  `estimate_locations_for_posts` cancela las fotos pendientes
+  (`wait_or_skip` / `cancel_pending`) y conserva las ya terminadas. Una foto
+  cuyo modelo ya corría en un hilo no se interrumpe: se descarta su
+  resultado.
+- NO se salta el resto del pipeline: la extracción de autodeclaraciones con
+  IA, las inferencias sobre lo obtenido (incluidas las de las fotos
+  analizadas hasta ese momento) y la generación del informe siguen igual
+  sobre el resultado parcial, y el informe llega por el mismo stream.
+- Frontend: botón «Saltar el resto del análisis» en la pantalla de carga
+  (`Dashboard.tsx`, estado `skipping`): pinta las pistas largas como
+  terminadas con su contador parcial («Fotos analizadas (3/10)»), ignora sus
+  eventos tardíos y, si falla el aviso, restaura la pantalla para reintentar.
+- Límite asumido: `related_accounts.total_sites_checked` refleja solo los
+  sitios comprobados antes de saltar, y «sin cuentas encontradas» no
+  significa «sin cuentas»: el informe no marca todavía que el barrido fuera
+  incompleto.

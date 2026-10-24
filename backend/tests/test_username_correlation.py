@@ -349,3 +349,67 @@ class TestCountingQueryNotify:
         assert method() is None
         assert method("algo", clave="valor") is None
         assert notifier.checked == 0  # ninguno de estos toca el contador
+
+
+class TestSkipPartialResults:
+    @pytest.mark.asyncio
+    async def test_skip_cancels_the_sweep_and_returns_only_sites_already_checked(self, monkeypatch):
+        from app.skip_control import SkipControl
+
+        cancelled = {}
+        skip = SkipControl()
+
+        async def _fake_check(**kwargs):
+            notify = kwargs["query_notify"]
+            # Maigret notifica CADA sitio nada más comprobarlo, con su MaigretCheckResult.
+            notify.update(
+                MaigretCheckResult(
+                    username="comandante",
+                    site_name="GitHub",
+                    site_url_user="https://github.com/comandante",
+                    status=MaigretCheckStatus.CLAIMED,
+                ),
+                False,
+            )
+            notify.update(
+                MaigretCheckResult(
+                    username="comandante", site_name="GitLab", site_url_user="https://gitlab.com/x",
+                    status=MaigretCheckStatus.AVAILABLE,
+                ),
+                False,
+            )
+            notify.update(  # ILLEGAL: el username no aplica a este sitio -> se omite
+                MaigretCheckResult(
+                    username="comandante", site_name="Raro", site_url_user="", status=MaigretCheckStatus.ILLEGAL
+                ),
+                False,
+            )
+            skip.request_skip()
+            try:
+                await asyncio.sleep(60)  # el resto del barrido, que nunca llega a terminar
+            except asyncio.CancelledError:
+                cancelled["yes"] = True
+                raise
+
+        monkeypatch.setattr("app.osint.username_correlation._maigret_check", _fake_check)
+
+        results = await check_username_across_sites("comandante", skip=skip)
+
+        assert cancelled.get("yes") is True  # el barrido real se cancela, no queda en segundo plano
+        assert results == [
+            UsernameSiteResult(site="GitHub", url="https://github.com/comandante", exists=True),
+            UsernameSiteResult(site="GitLab", url="https://gitlab.com/x", exists=False),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_skip_not_requested_returns_the_full_maigret_result_as_before(self, monkeypatch):
+        from app.skip_control import SkipControl
+
+        async def _fake_check(**kwargs):
+            return {"GitHub": _fake_site_result(MaigretCheckStatus.CLAIMED, url_user="https://github.com/c")}
+
+        monkeypatch.setattr("app.osint.username_correlation._maigret_check", _fake_check)
+
+        results = await check_username_across_sites("comandante", skip=SkipControl())
+
+        assert [r.site for r in results] == ["GitHub"]

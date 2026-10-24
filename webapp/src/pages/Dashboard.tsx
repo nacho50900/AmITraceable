@@ -8,7 +8,6 @@ import DownloadReportButton from '../components/DownloadReportButton';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import LocationMap from '../components/LocationMap';
 import PopulationNarrowingTable from '../components/PopulationNarrowingTable';
-import { DashboardSkeleton } from '../components/Skeleton';
 import InferredAttributesList from '../components/InferredAttributesList';
 import RelatedAccountsList from '../components/RelatedAccountsList';
 import ScoreBar from '../components/ScoreBar';
@@ -146,6 +145,14 @@ const Dashboard: React.FC = () => {
   // así que la línea correspondiente ni se pinta (ver JSX más abajo).
   const [accountsCounts, setAccountsCounts] = useState<Record<string, unknown> | null>(null);
   const [accountsDone, setAccountsDone] = useState(false);
+  // "Saltar el resto del análisis": el usuario ya pidió parar las pistas
+  // largas (cuentas, fotos). Mientras es true, esas líneas se pintan como
+  // terminadas (con el contador parcial que llevaran) y se ignoran sus
+  // eventos tardíos -- el backend las cancela, pero un evento ya en vuelo
+  // podría llegar igualmente. La fase general en curso (IA sobre lo
+  // obtenido, informe) NO se toca: sigue su curso hasta el informe final.
+  const [skipping, setSkipping] = useState(false);
+  const skippingRef = useRef(false);
   const navigate = useNavigate();
   const stopStreamRef = useRef<(() => void) | null>(null);
   // Ref auxiliar para poder leer la fase "actual" dentro del callback del
@@ -201,6 +208,10 @@ const Dashboard: React.FC = () => {
           delete counts.stage;
           delete counts.track;
           const { stage } = event;
+
+          if (skippingRef.current && event.track) {
+            return; // pista larga ya saltada: se ignora cualquier evento tardío
+          }
 
           if (event.track === 'fotos') {
             setPhotosCounts(counts);
@@ -400,11 +411,65 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const handleSkipAnalysis = async () => {
+    skippingRef.current = true;
+    setSkipping(true);
+    try {
+      await api.skipAnalysis(platform);
+    } catch (err) {
+      // No se pudo avisar al backend: sigue analizando, así que se
+      // restaura la pantalla tal cual estaba para poder reintentar.
+      console.error(err);
+      skippingRef.current = false;
+      setSkipping(false);
+    }
+  };
+
   const platformLabel = platform === 'instagram' ? 'Instagram' : 'Reddit';
   const usernamePrefix = platform === 'instagram' ? '@' : 'u/';
   const groupingLabel =
     platform === 'instagram' ? t('dashboard.groupingLabelInstagram') : t('dashboard.groupingLabelReddit');
   const groupingPrefix = platform === 'instagram' ? '#' : 'r/';
+
+  const trackLines = [
+    geoCounts && {
+      key: 'geo-track',
+      done: geoDone || skipping,
+      label: formatPhotosLabel(
+        geoCounts,
+        geoDone || skipping,
+        t('dashboard.photos.geolocatingVerb'),
+        t('dashboard.photos.geolocatedDone'),
+      ),
+    },
+    photosCounts && {
+      key: 'photos-track',
+      done: photosDone || skipping,
+      label: formatPhotosLabel(
+        photosCounts,
+        photosDone || skipping,
+        t('dashboard.photos.analyzingVerb'),
+        t('dashboard.photos.analyzedDone'),
+      ),
+    },
+    accountsCounts && {
+      key: 'accounts-track',
+      done: accountsDone || skipping,
+      label: formatAccountsLabel(
+        accountsCounts,
+        accountsDone || skipping,
+        t('dashboard.accounts.checkingVerb'),
+        t('dashboard.accounts.checkedDone'),
+      ),
+    },
+  ].filter((l): l is { key: string; done: boolean; label: string } => !!l);
+
+  const renderTrackLine = (line: { key: string; done: boolean; label: string }) => (
+    <li key={line.key} className={line.done ? 'progress-done' : 'progress-current'}>
+      <StatusIcon done={line.done} />
+      {line.label}
+    </li>
+  );
 
   if (loading) {
     return (
@@ -438,54 +503,31 @@ const Dashboard: React.FC = () => {
                   desplazamientos tras marcarse como terminada) y casi
                   nunca en la de fotos (Moondream2 termina tarde, cuando
                   completedStages ya casi no crece más). */}
+              {/* Orden: primero TODO lo ya terminado (fases generales
+                  completadas + pistas paralelas ya al 100%), después lo
+                  que sigue en curso (spinners) -- así los círculos que
+                  giran quedan siempre debajo de los ✓ verdes. Las `key`
+                  se mantienen estables al cambiar de grupo (ver nota
+                  sobre reciclado de nodos de React más arriba). */}
+              {trackLines.filter((l) => l.done).map(renderTrackLine)}
               {currentStage && (
                 <li key="current-stage" className="progress-current">
                   <span className="spinner spinner-sm" aria-hidden="true" />
                   {t(`dashboard.stages.${currentStage}`, { defaultValue: currentStage })}
                 </li>
               )}
-              {geoCounts && (
-                <li key="geo-track" className={geoDone ? 'progress-done' : 'progress-current'}>
-                  <StatusIcon done={geoDone} />
-                  {formatPhotosLabel(
-                    geoCounts,
-                    geoDone,
-                    t('dashboard.photos.geolocatingVerb'),
-                    t('dashboard.photos.geolocatedDone'),
-                  )}
-                </li>
-              )}
-              {photosCounts && (
-                <li key="photos-track" className={photosDone ? 'progress-done' : 'progress-current'}>
-                  <StatusIcon done={photosDone} />
-                  {formatPhotosLabel(
-                    photosCounts,
-                    photosDone,
-                    t('dashboard.photos.analyzingVerb'),
-                    t('dashboard.photos.analyzedDone'),
-                  )}
-                </li>
-              )}
-              {accountsCounts && (
-                <li key="accounts-track" className={accountsDone ? 'progress-done' : 'progress-current'}>
-                  <StatusIcon done={accountsDone} />
-                  {formatAccountsLabel(
-                    accountsCounts,
-                    accountsDone,
-                    t('dashboard.accounts.checkingVerb'),
-                    t('dashboard.accounts.checkedDone'),
-                  )}
-                </li>
-              )}
+              {trackLines.filter((l) => !l.done).map(renderTrackLine)}
             </ul>
           </div>
           <div className="progress-actions">
+            <button className="btn-primary" type="button" onClick={handleSkipAnalysis} disabled={skipping}>
+              {skipping ? t('dashboard.skippingAnalysis') : t('dashboard.skipAnalysis')}
+            </button>{' '}
             <button className="btn-secondary" type="button" onClick={handleCancelAnalysis}>
               {t('dashboard.cancelAnalysis')}
             </button>
           </div>
         </div>
-        <DashboardSkeleton />
       </div>
     );
   }

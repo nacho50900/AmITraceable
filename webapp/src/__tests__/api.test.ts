@@ -133,6 +133,19 @@ describe('api', () => {
     expect(options.method).toBe('POST');
   });
 
+  test('skipAnalysis hace POST a /api/analyze/{platform}/skip con la sesión', async () => {
+    const fetchMock = mockFetchOnce(200, { skipped: true });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await api.skipAnalysis('instagram');
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toContain('/api/analyze/instagram/skip');
+    expect(options.method).toBe('POST');
+    expect(options.credentials).toBe('include');
+    expect(result).toEqual({ skipped: true });
+  });
+
   test('analyze hace POST a /api/analyze/{platform}', async () => {
     const fetchMock = mockFetchOnce(200, makeExposureReport());
     vi.stubGlobal('fetch', fetchMock);

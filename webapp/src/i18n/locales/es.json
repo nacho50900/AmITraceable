@@ -85,6 +85,8 @@
     },
     "errorPrefix": "No se pudo generar el informe: {{error}}",
     "cancelAnalysis": "Cancelar análisis",
+    "skipAnalysis": "Saltar el resto del análisis",
+    "skippingAnalysis": "Saltando el resto del análisis...",
     "backToStart": "Volver al inicio",
     "avatarAlt": "Foto de perfil de {{username}}",
     "title": "Informe de exposición de {{prefix}}{{username}}",

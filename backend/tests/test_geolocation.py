@@ -1711,3 +1711,64 @@ class TestEstimateLocationFromImageIgpuWorkerFallback:
 
         assert geolocation.estimate_location_from_image(_FakeImage(), k=1) is None
         assert geolocation._igpu_worker_failed is True
+
+
+class TestEstimateLocationsForPostsSkip:
+    @pytest.mark.asyncio
+    async def test_skip_returns_partial_results_and_cancels_unfinished_photos(self, monkeypatch):
+        from app.skip_control import SkipControl
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [
+            Post(
+                type="carousel_album",
+                media_urls=["https://cdn.fake/a.jpg", "https://cdn.fake/b.jpg", "https://cdn.fake/c.jpg"],
+                permalink="https://ig/carousel",
+            )
+        ]
+        skip = SkipControl()
+        cancelled = []
+
+        async def _fake_process_photo(client, dl_sem, dino_sem, scene_sem, media_url, *rest):
+            if media_url.endswith("a.jpg"):
+                return (
+                    None,
+                    geolocation.ImageLocationEstimate(
+                        province="Madrid", confidence=0.7, k_neighbors=15, mean_similarity=0.6
+                    ),
+                    [], False, None, None, None,
+                )
+            try:
+                await asyncio.sleep(60)  # las fotos lentas (Moondream2...) que no llegan a acabar
+            except asyncio.CancelledError:
+                cancelled.append(media_url)
+                raise
+
+        monkeypatch.setattr(geolocation, "_process_photo", _fake_process_photo)
+        asyncio.get_running_loop().call_later(0.05, skip.request_skip)
+
+        outcome = await asyncio.wait_for(geolocation.estimate_locations_for_posts(posts, skip=skip), timeout=10)
+
+        assert [permalink for permalink, _ in outcome.results] == ["https://ig/carousel"]  # solo la foto "a"
+        assert sorted(cancelled) == ["https://cdn.fake/b.jpg", "https://cdn.fake/c.jpg"]
+
+    @pytest.mark.asyncio
+    async def test_skip_already_requested_before_starting_returns_an_empty_outcome(self, monkeypatch):
+        from app.skip_control import SkipControl
+
+        monkeypatch.setattr(geolocation, "_geolocation_available", lambda: True)
+        Post = namedtuple("Post", ["type", "media_urls", "permalink"])
+        posts = [Post(type="image", media_urls=["https://cdn.fake/a.jpg"], permalink="https://ig/1")]
+
+        async def _never_finishes(*args, **kwargs):
+            await asyncio.sleep(60)
+
+        monkeypatch.setattr(geolocation, "_process_photo", _never_finishes)
+        skip = SkipControl()
+        skip.request_skip()
+
+        outcome = await asyncio.wait_for(geolocation.estimate_locations_for_posts(posts, skip=skip), timeout=10)
+
+        assert outcome.results == []
+        assert outcome.index_available is True

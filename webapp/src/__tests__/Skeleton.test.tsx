@@ -72,7 +72,7 @@ describe('Skeleton', () => {
     expect(container.querySelector('.landing')).toHaveAttribute('aria-busy', 'true');
   });
 
-  test('Dashboard muestra el skeleton del informe mientras el análisis está en curso', () => {
+  test('Dashboard NO muestra el skeleton del informe mientras el análisis está en curso', () => {
     vi.mocked(api.authStatus).mockImplementation(() => new Promise(() => {})); // nunca resuelve
 
     const { container } = render(
@@ -81,7 +81,7 @@ describe('Skeleton', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByTestId('dashboard-skeleton')).toBeInTheDocument();
+    expect(screen.queryByTestId('dashboard-skeleton')).toBeNull();
     expect(container.querySelector('.page')).toHaveAttribute('aria-busy', 'true');
   });
 });

@@ -33,6 +33,7 @@ vi.mock('../api', async () => {
       authStatus: vi.fn(),
       analyzeStream: vi.fn(),
       logout: vi.fn(),
+      skipAnalysis: vi.fn(),
       loginUrl: (platform: string) => `http://localhost:3000/auth/${platform}/login`,
       // AiSummaryCard se dispara solo en cuanto hay informe; en estos tests
       // no nos interesa su comportamiento, así que se deja "colgado" sin
@@ -91,6 +92,7 @@ describe('Dashboard', () => {
     vi.mocked(api.authStatus).mockReset();
     vi.mocked(api.analyzeStream).mockReset();
     vi.mocked(api.logout).mockReset();
+    vi.mocked(api.skipAnalysis).mockReset();
     vi.mocked(api.recalculateReport).mockReset();
     mockNavigate.mockReset();
     void i18n.changeLanguage('es'); // por si un test anterior lo dejó en 'en'
@@ -191,6 +193,29 @@ describe('Dashboard', () => {
     await waitFor(() => {
       expect(screen.getByText('Fotos geolocalizadas (3/3)')).toBeInTheDocument();
     });
+  });
+
+  test('los círculos en curso quedan siempre debajo de las líneas ya completadas (✓)', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    mockStream([
+      { done: false, stage: 'reading_posts' },
+      { done: false, stage: 'extracting_demographics' },
+      // geolocalización termina (✓) mientras la fase general sigue en curso
+      { done: false, stage: 'x', photos_analyzed: 3, total_photos: 3, track: 'geolocalizacion' },
+      // fotos sigue en curso (spinner)
+      { done: false, stage: 'x', photos_analyzed: 1, total_photos: 3, track: 'fotos' },
+    ]);
+    const { container } = renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Fotos geolocalizadas (3/3)')).toBeInTheDocument();
+    });
+
+    const items = Array.from(container.querySelectorAll('.progress-list li'));
+    const lastDone = items.map((li) => li.classList.contains('progress-done')).lastIndexOf(true);
+    const firstCurrent = items.findIndex((li) => li.classList.contains('progress-current'));
+    expect(lastDone).toBeGreaterThanOrEqual(0);
+    expect(firstCurrent).toBeGreaterThan(lastDone);
   });
 
   test('geolocalización (DINOv2) y análisis de contenido (Moondream2) se muestran como DOS líneas independientes, sin mezclarse', async () => {
@@ -338,6 +363,79 @@ describe('Dashboard', () => {
       expect(api.logout).toHaveBeenCalledWith('reddit');
       expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
     });
+  });
+
+  test('botón "Saltar el resto del análisis": avisa al backend, se desactiva y pinta las pistas largas como terminadas con su contador parcial', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    vi.mocked(api.skipAnalysis).mockResolvedValue({ skipped: true });
+    mockStream([
+      { done: false, stage: 'reading_posts' },
+      { done: false, stage: 'x', photos_analyzed: 3, total_photos: 10, track: 'fotos' },
+      { done: false, stage: 'x', accounts_checked: 120, total_accounts: 5000, track: 'correlacion_cuentas' },
+    ]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Analizando fotos (3/10)...')).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: 'Saltar el resto del análisis' }));
+
+    await waitFor(() => {
+      expect(api.skipAnalysis).toHaveBeenCalledWith('reddit');
+      expect(screen.getByText('Fotos analizadas (3/10)')).toBeInTheDocument();
+      expect(screen.getByText('Cuentas relacionadas comprobadas (120/5000)')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Saltando el resto del análisis...' })).toBeDisabled();
+    // El stream NO se cierra: la IA y el informe final siguen llegando por el mismo SSE.
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  test('tras saltar, los eventos tardíos de las pistas largas se ignoran', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    vi.mocked(api.skipAnalysis).mockResolvedValue({ skipped: true });
+    let emit: (event: AnalysisProgressEvent) => void = () => {};
+    vi.mocked(api.analyzeStream).mockImplementation((_platform, onEvent) => {
+      emit = onEvent;
+      onEvent({ done: false, stage: 'x', photos_analyzed: 3, total_photos: 10, track: 'fotos' });
+      return vi.fn();
+    });
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Analizando fotos (3/10)...')).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: 'Saltar el resto del análisis' }));
+    await waitFor(() => {
+      expect(screen.getByText('Fotos analizadas (3/10)')).toBeInTheDocument();
+    });
+
+    act(() => {
+      emit({ done: false, stage: 'x', photos_analyzed: 4, total_photos: 10, track: 'fotos' });
+    });
+
+    expect(screen.getByText('Fotos analizadas (3/10)')).toBeInTheDocument();
+    expect(screen.queryByText('Fotos analizadas (4/10)')).toBeNull();
+  });
+
+  test('si falla el aviso al backend, el botón se reactiva y las pistas siguen en curso', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    vi.mocked(api.skipAnalysis).mockRejectedValue(new Error('sin red'));
+    mockStream([{ done: false, stage: 'x', photos_analyzed: 3, total_photos: 10, track: 'fotos' }]);
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Analizando fotos (3/10)...')).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: 'Saltar el resto del análisis' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Saltar el resto del análisis' })).toBeEnabled();
+    });
+    expect(screen.getByText('Analizando fotos (3/10)...')).toBeInTheDocument();
   });
 
   test('botón "Volver al inicio" tras un error hace logout y navega a "/"', async () => {
