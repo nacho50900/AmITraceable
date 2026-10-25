@@ -97,7 +97,10 @@
     "scoreLabels": {
       "geolocationRisk": "Riesgo de geolocalización",
       "inferableDataRisk": "Datos personales inferibles",
-      "deanonymizationEase": "Facilidad de deanonimización"
+      "deanonymizationEase": "Facilidad de deanonimización",
+      "geolocationRiskTooltip": "Cuánto de seguro se puede deducir dónde vives o te mueves. Toma la confianza más alta entre las ubicaciones que se pueden inferir de lo que publicas: 0 si no se detecta ninguna y 100 si hay una muy clara.",
+      "inferableDataRiskTooltip": "Cuántos datos personales distintos (ubicación, ocupación, rutina...) se pueden inferir de lo que publicas y con qué confianza. Suma la confianza de todos ellos: con unos 6 de confianza media-alta la puntuación llega al máximo.",
+      "deanonymizationEaseTooltip": "Qué fácil sería reconocerte por tu forma de escribir y de comportarte. Combina cuánto contenido hay que analizar (40 %), lo distintivo de tu vocabulario (30 %) y lo marcada que es tu hora habitual de publicar (30 %). Con pocas publicaciones, las dos últimas pesan menos."
     },
     "whatCanBeInferred": "Qué se puede inferir sobre ti",
     "estimatedLocations": "Ubicaciones estimadas a partir de tus fotos",
@@ -388,6 +391,9 @@
       "medium": "Medio",
       "high": "Alto",
       "veryHigh": "Muy alto"
+    },
+    "infoTip": {
+      "moreInfoAbout": "Más información sobre {{label}}"
     },
     "downloadButton": {
       "label": "Descargar informe completo (JSON)"

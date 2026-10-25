@@ -395,6 +395,25 @@ describe('Dashboard', () => {
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
+  test('los iconos de información de las tres puntuaciones muestran su descripción real, no la clave de traducción', async () => {
+    vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+    vi.mocked(api.analyzeStream).mockImplementation((_platform, onEvent) => {
+      onEvent({ done: true, report: makeExposureReport() });
+      return vi.fn();
+    });
+    renderDashboard();
+
+    const tooltips = await screen.findAllByRole('tooltip');
+
+    expect(tooltips).toHaveLength(3);
+    expect(tooltips[0]).toHaveTextContent(/dónde vives o te mueves/);
+    expect(tooltips[1]).toHaveTextContent(/datos personales distintos/);
+    expect(tooltips[2]).toHaveTextContent(/reconocerte por tu forma de escribir/);
+    for (const tooltip of tooltips) {
+      expect(tooltip.textContent).not.toMatch(/dashboard\.scoreLabels/);
+    }
+  });
+
   test('"Saltar" va a la derecha de "Cancelar análisis" y la frase de aviso solo aparece tras pulsarlo', async () => {
     const user = userEvent.setup();
     vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });

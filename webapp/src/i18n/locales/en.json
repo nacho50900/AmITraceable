@@ -97,7 +97,10 @@
     "scoreLabels": {
       "geolocationRisk": "Geolocation risk",
       "inferableDataRisk": "Inferable personal data",
-      "deanonymizationEase": "Ease of de-anonymization"
+      "deanonymizationEase": "Ease of de-anonymization",
+      "geolocationRiskTooltip": "How confidently it can be deduced where you live or move around. It takes the highest confidence among the locations that can be inferred from what you post: 0 if none is detected and 100 if there is a very clear one.",
+      "inferableDataRiskTooltip": "How many different personal details (location, occupation, routine...) can be inferred from what you post, and with what confidence. It adds up the confidence of all of them: with about 6 of medium-high confidence the score reaches its maximum.",
+      "deanonymizationEaseTooltip": "How easy it would be to recognize you by the way you write and behave. It combines how much content there is to analyze (40%), how distinctive your vocabulary is (30%) and how pronounced your usual posting hour is (30%). With few posts, the last two weigh less."
     },
     "whatCanBeInferred": "What can be inferred about you",
     "estimatedLocations": "Locations estimated from your photos",
@@ -388,6 +391,9 @@
       "medium": "Medium",
       "high": "High",
       "veryHigh": "Very high"
+    },
+    "infoTip": {
+      "moreInfoAbout": "More information about {{label}}"
     },
     "downloadButton": {
       "label": "Download full report (JSON)"

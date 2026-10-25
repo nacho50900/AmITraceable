@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import InfoTip from './InfoTip';
 
 interface ScoreBarProps {
   readonly label: string;
@@ -29,11 +30,7 @@ const ScoreBar: React.FC<ScoreBarProps> = ({ label, value, tooltip }) => {
       <div className="score-row-header">
         <span>
           {label}
-          {tooltip && (
-            <span className="score-row-tooltip" title={tooltip} aria-label={tooltip}>
-              {' '}ⓘ
-            </span>
-          )}
+          {tooltip && <InfoTip text={tooltip} label={t('components.infoTip.moreInfoAbout', { label })} />}
         </span>
         <span style={{ color: risk.color, fontWeight: 600 }}>
           {risk.text} ({value.toFixed(1)})

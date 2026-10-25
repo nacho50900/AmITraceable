@@ -22,15 +22,16 @@ describe('ScoreBar', () => {
     expect(fill.style.width).toBe('100%');
   });
 
-  test('sin tooltip no se muestra ningún icono ⓘ', () => {
+  test('sin tooltip no se muestra ningún icono de información', () => {
     render(<ScoreBar label="Riesgo de prueba" value={10} />);
-    expect(screen.queryByTitle(/./)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   });
 
-  test('con tooltip se muestra un icono ⓘ con el texto en title', () => {
+  test('con tooltip se muestra un botón de información con la descripción asociada', () => {
     render(<ScoreBar label="Riesgo de prueba" value={10} tooltip="Explicación de prueba" />);
-    const icon = screen.getByTitle('Explicación de prueba');
-    expect(icon).toBeInTheDocument();
-    expect(icon).toHaveTextContent('ⓘ');
+    const button = screen.getByRole('button', { name: 'Más información sobre Riesgo de prueba' });
+    expect(button).toHaveAccessibleDescription('Explicación de prueba');
+    expect(button.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
   });
 });
