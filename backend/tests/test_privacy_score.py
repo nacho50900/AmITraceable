@@ -12,7 +12,13 @@ ninguna de las dos cosas debería tratarse como una señal fiable de
 from datetime import datetime, timezone
 
 from app.models.schemas import SocialPost, WritingFingerprint
-from app.scoring.privacy_score import _score_deanonymization_ease
+from app.models.schemas import ImageLocationPoint, InferredAttribute, PopulationEstimate
+from app.scoring.privacy_score import (
+    _score_deanonymization_ease,
+    _score_geolocation,
+    _score_inferable_data,
+    compute_exposure_score,
+)
 
 
 def _post(i: int, hour: int, text: str = "Un comentario cualquiera sobre el día a día.") -> SocialPost:
@@ -100,4 +106,174 @@ def test_sample_confidence_saturates_at_min_posts_for_reliable_style():
     # La diferencia entre ambos debe explicarse SOLO por volume_factor
     # (20/200=0.1 vs 100/200=0.5 -> 0.4*(0.5-0.1)*100 = 16 puntos), no por
     # un salto adicional en concentration/distinctiveness (ya saturados).
-    assert abs((score_100 - score_20) - 16.0) < 0.5
+    # El estilo por sí solo aporta como mucho la mitad del score (ADR-56,
+    # `_STYLE_MAX_CONTRIBUTION`), de ahí 16 * 0.5 = 8 puntos.
+    assert abs((score_100 - score_20) - 16.0 * 0.5) < 0.5
+
+
+# --- Geolocalización: fotos coherentes en una zona -------------------------
+
+
+def _photo(province: str, confidence: float, **kwargs) -> ImageLocationPoint:
+    return ImageLocationPoint(
+        permalink=f"https://ig/{province}/{confidence}", province=province, confidence=confidence,
+        lat=40.0, lon=-3.0, **kwargs,
+    )
+
+
+def _attr(category: str, value: str = "x", confidence: float = 0.8) -> InferredAttribute:
+    return InferredAttribute(category=category, value=value, confidence=confidence, evidence=[])
+
+
+def test_geolocation_without_any_signal_is_zero():
+    assert _score_geolocation([]) == 0.0
+
+
+def test_one_photo_scores_less_than_many_photos_in_the_same_zone():
+    one = _score_geolocation([], [_photo("Madrid", 0.8)])
+    many = _score_geolocation([], [_photo("Madrid", 0.8) for _ in range(5)])
+
+    assert 0 < one < many < 100
+
+
+def test_same_photos_score_higher_with_more_confidence():
+    low = _score_geolocation([], [_photo("Madrid", 0.3) for _ in range(3)])
+    high = _score_geolocation([], [_photo("Madrid", 0.9) for _ in range(3)])
+
+    assert high > low
+
+
+def test_photos_spread_over_provinces_score_lower_than_the_same_photos_in_one_zone():
+    together = _score_geolocation([], [_photo("Madrid", 0.8) for _ in range(4)])
+    spread = _score_geolocation([], [_photo(p, 0.8) for p in ("Madrid", "Leon", "Soria", "Cadiz")])
+
+    assert spread < together
+
+
+def test_unrepresentative_and_profile_photos_do_not_count():
+    points = [
+        _photo("Madrid", 0.9, representative=False),
+        _photo("Madrid", 0.9, is_profile_picture=True),
+    ]
+
+    assert _score_geolocation([], points) == 0.0
+
+
+def test_text_location_and_photos_reinforce_each_other_without_exceeding_100():
+    text_only = _score_geolocation([_attr("ubicacion", confidence=0.6)])
+    photos_only = _score_geolocation([], [_photo("Madrid", 0.8) for _ in range(2)])
+    both = _score_geolocation([_attr("ubicacion", confidence=0.6)], [_photo("Madrid", 0.8) for _ in range(2)])
+
+    assert both > max(text_only, photos_only)
+    assert both <= 100.0
+
+
+def test_self_declared_location_counts_more_the_finer_its_level():
+    def step(level: str) -> PopulationEstimate:
+        return PopulationEstimate(
+            attribute_label="x", category="ubicacion", remaining_population=1000, risk_level="alto",
+            evidence=[], confidence=0.9, location_level=level,
+        )
+
+    municipality = _score_geolocation([], population_narrowing=[step("municipio")])
+    region = _score_geolocation([], population_narrowing=[step("comunidad_autonoma")])
+
+    assert municipality > region > 0
+
+
+def test_detailed_location_published_counts_as_location_signal():
+    assert _score_geolocation([_attr("ubicacion_detallada", confidence=0.9)]) == 90.0
+
+
+# --- Datos personales inferibles -------------------------------------------
+
+
+def test_inferable_data_grows_with_the_number_of_attributes():
+    few = _score_inferable_data([_attr("ocupacion", "a")])
+    many = _score_inferable_data([_attr("ocupacion", "a"), _attr("empresa", "b"), _attr("universidad", "c")])
+
+    assert 0 < few < many
+
+
+def test_identifying_categories_weigh_more_than_soft_signals():
+    identifying = _score_inferable_data([_attr("ocupacion", confidence=1.0)])
+    soft = _score_inferable_data([_attr("aficion", confidence=1.0)])
+
+    assert identifying > soft
+
+
+def test_same_attribute_detected_twice_counts_once():
+    once = _score_inferable_data([_attr("ocupacion", "medico", 0.7)])
+    twice = _score_inferable_data([_attr("ocupacion", "medico", 0.7), _attr("ocupacion", "medico", 0.5)])
+
+    assert once == twice
+
+
+def test_inferable_data_saturates_at_100():
+    attrs = [_attr("ocupacion", str(i), 1.0) for i in range(30)]
+
+    assert _score_inferable_data(attrs) == 100.0
+
+
+def test_three_manual_physical_traits_raise_the_score():
+    base = [_attr("ocupacion", "a", 0.8), _attr("aficion", "b", 0.5)]
+    manual = [_attr("color_ojos", "azules", 1.0), _attr("color_pelo", "rubio", 1.0), _attr("color_piel", "clara", 1.0)]
+
+    assert _score_inferable_data(base + manual) > _score_inferable_data(base)
+
+
+# --- Facilidad de deanonimización: señales de identidad ---------------------
+
+
+def test_deanonymization_rises_when_few_people_match_the_traits():
+    posts = [_post(i, hour=10) for i in range(30)]
+    fp = _fingerprint(0.45, {10: 0.5, 11: 0.5})
+
+    unknown = _score_deanonymization_ease(posts, fp)
+    common = _score_deanonymization_ease(posts, fp, remaining_population=5_000_000)
+    rare = _score_deanonymization_ease(posts, fp, remaining_population=50)
+    unique = _score_deanonymization_ease(posts, fp, remaining_population=1)
+
+    assert unknown < common < rare < unique == 100.0
+
+
+def test_published_identifiers_and_related_accounts_raise_deanonymization():
+    posts = [_post(i, hour=10) for i in range(30)]
+    fp = _fingerprint(0.45, {10: 0.5, 11: 0.5})
+
+    base = _score_deanonymization_ease(posts, fp)
+    with_identifier = _score_deanonymization_ease(posts, fp, n_identifiers=1)
+    with_accounts = _score_deanonymization_ease(posts, fp, related_accounts_found=2)
+
+    assert with_identifier > base
+    assert with_accounts > base
+    assert _score_deanonymization_ease(posts, fp, n_identifiers=2) > with_identifier
+
+
+def test_style_alone_never_reaches_more_than_half_the_scale():
+    posts = [_post(i, hour=10) for i in range(300)]
+    fp = _fingerprint(0.45, {10: 1.0})
+
+    assert _score_deanonymization_ease(posts, fp) <= 50.0
+
+
+# --- Score completo ---------------------------------------------------------
+
+
+def test_complete_score_uses_every_signal_and_stays_bounded():
+    posts = [_post(i, hour=10) for i in range(40)]
+    fp = _fingerprint(0.45, {10: 0.5, 11: 0.5})
+
+    provisional = compute_exposure_score(n_posts=len(posts), fingerprint=fp, inferred_attributes=[])
+    complete = compute_exposure_score(
+        n_posts=len(posts),
+        fingerprint=fp,
+        inferred_attributes=[_attr("ocupacion", "a"), _attr("contacto_publicado", "x@y.es", 0.9)],
+        image_location_points=[_photo("Madrid", 0.8) for _ in range(4)],
+        remaining_population=200,
+        related_accounts_found=1,
+    )
+
+    assert complete.overall_score > provisional.overall_score
+    for value in (complete.geolocation_risk, complete.inferable_data_risk, complete.deanonymization_ease, complete.overall_score):
+        assert 0.0 <= value <= 100.0

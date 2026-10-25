@@ -35,7 +35,7 @@ from app.nlp.fingerprint import build_fingerprint
 from app.progress import ProgressCallback, emit_progress
 from app.reddit_client import RedditClient
 from app.report.generator import generate_report
-from app.scoring.privacy_score import compute_score
+from app.scoring.privacy_score import compute_score, compute_score_from_report
 from app.skip_control import SkipControl, register_run, request_skip_for, unregister_run
 from app.scoring.k_anonymity import _apply_proportion, final_remaining_population, PopulationNarrowingStep
 from app.data.ine_reference import EYE_COLOR_DISTRIBUTION, HAIR_COLOR_DISTRIBUTION, SKIN_TONE_DISTRIBUTION, TOTAL_POPULATION_ES
@@ -383,7 +383,7 @@ async def recalculate_report(request: Annotated[RecalculateRequest, Body(...)]):
     """
     Recalcula el informe de exposición añadiendo los rasgos físicos manuales proporcionados.
     Actualiza `population_narrowing` multiplicando las proporciones en cadena y
-    recalcula el `inferable_data_risk` dentro del score de privacidad.
+    recalcula el score de privacidad completo con la misma fórmula del pipeline.
 
     NOTA: esta ruta estática DEBE registrarse antes que `/analyze/{platform}`
     (justo debajo) -- FastAPI/Starlette resuelve las rutas en el orden en que
@@ -410,21 +410,7 @@ async def recalculate_report(request: Annotated[RecalculateRequest, Body(...)]):
         ))
     report.inferred_attributes.extend(new_inferred)
 
-    # 2. Recalcular score (sólo inferable_data_risk se ve afectado)
-    weighted = sum(a.confidence for a in report.inferred_attributes)
-    inferable_data_risk = min((weighted / 6) * 100, 100.0)
-
-    old_score = report.privacy_score
-    overall = (
-        old_score.geolocation_risk * 0.35
-        + old_score.identity_consistency_risk * 0.0
-        + inferable_data_risk * 0.45
-        + old_score.deanonymization_ease * 0.20
-    )
-    report.privacy_score.inferable_data_risk = round(inferable_data_risk, 1)
-    report.privacy_score.overall_score = round(overall, 1)
-
-    # 3. Recalcular estrechamiento de población
+    # 2. Recalcular estrechamiento de población
     steps = report.population_narrowing
     last_remaining = final_remaining_population(steps)
     remaining = float(last_remaining) if last_remaining is not None else float(TOTAL_POPULATION_ES)
@@ -462,6 +448,12 @@ async def recalculate_report(request: Annotated[RecalculateRequest, Body(...)]):
         report.remaining_population_all_traits / TOTAL_POPULATION_ES
         if report.remaining_population_all_traits is not None else None
     )
+
+    # 4. Recalcular el score con la MISMA fórmula que el pipeline (ADR-56), ya
+    # con los rasgos añadidos y la población estrechada: antes solo se
+    # recalculaba inferable_data_risk con otra fórmula, y las tres barras
+    # podían dar números incoherentes con los del análisis inicial.
+    report.privacy_score = compute_score_from_report(report)
 
     return report
 

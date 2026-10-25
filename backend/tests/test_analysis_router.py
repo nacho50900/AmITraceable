@@ -678,6 +678,28 @@ class TestRecalculateEndpoint:
 
         assert body["remaining_population_all_traits"] == step["remaining_population"]
 
+    def test_recalculation_recomputes_the_whole_score_with_the_pipeline_formula(self):
+        """ADR-56: el recálculo usa `compute_score_from_report`, la misma
+        fórmula del pipeline, y no una propia solo para inferable_data_risk."""
+        from app.models.schemas import ExposureReport
+        from app.scoring.privacy_score import compute_score_from_report
+
+        report = _make_report()
+
+        resp = client.post(
+            "/api/analyze/recalculate",
+            json={
+                "report": report.model_dump(mode="json"),
+                "manual_attributes": [{"category": "color_ojos", "value": "azul"}],
+            },
+        )
+
+        body = resp.json()
+        recalculated = ExposureReport.model_validate(body)
+        assert recalculated.privacy_score == compute_score_from_report(recalculated)
+        # Con la población ya estrechada por el rasgo manual, la deanonimización sube.
+        assert body["privacy_score"]["deanonymization_ease"] > report.privacy_score.deanonymization_ease
+
     def test_multiple_manual_attributes_narrow_population_in_chain(self):
         report = _make_report()
 

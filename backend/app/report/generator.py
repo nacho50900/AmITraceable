@@ -39,6 +39,7 @@ from app.nlp.travel_detection import detect_travel_permalinks
 from app.progress import ProgressCallback, emit_progress, run_with_heartbeat
 from app.analysis_timing import timed_stage
 from app import stages
+from app.scoring.privacy_score import compute_exposure_score
 from app.scoring.k_anonymity import estimate_population_narrowing, final_remaining_population
 
 # Umbrales para aceptar una estimación de RESIDENCIA HABITUAL a partir de
@@ -575,6 +576,8 @@ async def generate_report(
     posts: list[SocialPost],
     fingerprint: WritingFingerprint,
     inferred_attributes: list[InferredAttribute],
+    # Score PROVISIONAL del principio del pipeline (solo texto): se sustituye
+    # por el definitivo al final de esta función (ver ADR-56).
     score: PrivacyScore,
     progress_callback: ProgressCallback | None = None,
     bio: str | None = None,
@@ -683,9 +686,6 @@ async def generate_report(
 
         remaining_all_traits = final_remaining_population(narrowing_steps)
 
-    async with timed_stage("recomendaciones"):
-        recommendations = _build_recommendations(fingerprint, inferred_attributes, score)
-
     # Igual comentario que "espera_geolocalizacion_fotos" más arriba: mide
     # sobre todo la ESPERA a que termine la tarea lanzada al principio del
     # pipeline (ver analysis_router._build_report) -- si ya terminó para
@@ -705,6 +705,25 @@ async def generate_report(
                     if r.exists is True
                 ],
             )
+
+    # Score DEFINITIVO (ver ADR-56): se calcula aquí, con todo lo reunido, y no
+    # al principio del pipeline como el provisional `score` recibido (que solo
+    # veía los tres atributos de hashtags/comunidades). Va después de esperar
+    # las cuentas relacionadas porque son una de sus señales, y antes de las
+    # recomendaciones porque estas dependen de los umbrales del score.
+    async with timed_stage("scoring_definitivo"):
+        score = compute_exposure_score(
+            n_posts=len(posts),
+            fingerprint=fingerprint,
+            inferred_attributes=inferred_attributes,
+            image_location_points=image_location_points,
+            population_narrowing=population_narrowing,
+            remaining_population=remaining_all_traits,
+            related_accounts_found=len(related_accounts.matches) if related_accounts else 0,
+        )
+
+    async with timed_stage("recomendaciones"):
+        recommendations = _build_recommendations(fingerprint, inferred_attributes, score)
 
     return ExposureReport(
         platform=platform,

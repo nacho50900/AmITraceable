@@ -408,7 +408,7 @@ describe('Dashboard', () => {
     expect(tooltips).toHaveLength(3);
     expect(tooltips[0]).toHaveTextContent(/dónde vives o te mueves/);
     expect(tooltips[1]).toHaveTextContent(/datos personales distintos/);
-    expect(tooltips[2]).toHaveTextContent(/reconocerte por tu forma de escribir/);
+    expect(tooltips[2]).toHaveTextContent(/Qué fácil sería reconocerte/);
     for (const tooltip of tooltips) {
       expect(tooltip.textContent).not.toMatch(/dashboard\.scoreLabels/);
     }

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 import pytest
@@ -917,6 +918,66 @@ class TestGenerateReportProgress:
 
         assert calls == 1  # solo la llamada de la propia tarea, generate_report no repite la suya
         assert len(report.image_location_points) == 1
+
+
+class TestDefinitiveScore:
+    """ADR-56: el score se recalcula al final de generate_report, con todo lo
+    que el análisis reunió después del score provisional del principio."""
+
+    @pytest.mark.asyncio
+    async def test_photos_in_one_zone_raise_the_geolocation_risk_of_the_provisional_score(self, monkeypatch):
+        async def _fake_estimate(*args, **kwargs):
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[
+                    (f"https://x/{i}", geolocation.ImageLocationEstimate(
+                        province="madrid", confidence=0.9, k_neighbors=15, mean_similarity=0.5,
+                    ))
+                    for i in range(4)
+                ],
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+        provisional = _score(geolocation_risk=0.0)
+
+        report = await generate_report(
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://img/1"])],
+            _fingerprint(), [], provisional,
+            geolocation_task=asyncio.create_task(_fake_estimate()),
+        )
+
+        assert len(report.image_location_points) == 4
+        assert report.privacy_score.geolocation_risk > 50  # antes las fotos no contaban: 0
+
+    @pytest.mark.asyncio
+    async def test_recommendations_use_the_definitive_score_not_the_provisional_one(self, monkeypatch):
+        """La recomendación de geolocalización depende de `geolocation_risk > 30`: si se
+        construyera con el score provisional (0), no saldría aunque las fotos delaten la zona."""
+        async def _fake_estimate(*args, **kwargs):
+            return geolocation.GeolocationOutcome(
+                index_available=True,
+                results=[
+                    (f"https://x/{i}", geolocation.ImageLocationEstimate(
+                        province="madrid", confidence=0.9, k_neighbors=15, mean_similarity=0.5,
+                    ))
+                    for i in range(4)
+                ],
+            )
+
+        monkeypatch.setattr(geolocation, "estimate_locations_for_posts", _fake_estimate)
+
+        report_with_photos = await generate_report(
+            "instagram", "user", [_post(platform="instagram", media_urls=["https://img/1"])],
+            _fingerprint(), [], _score(geolocation_risk=0.0),
+            geolocation_task=asyncio.create_task(_fake_estimate()),
+        )
+        report_without_photos = await generate_report(
+            "reddit", "user", [_post()], _fingerprint(), [], _score(geolocation_risk=0.0),
+        )
+
+        geolocation_advice = "Evita participar en comunidades o usar etiquetas muy específicas de tu ciudad/región"
+        assert any(r.startswith(geolocation_advice) for r in report_with_photos.recommendations)
+        assert not any(r.startswith(geolocation_advice) for r in report_without_photos.recommendations)
 
 
 class TestUsernameCorrelationReachesTheReport:

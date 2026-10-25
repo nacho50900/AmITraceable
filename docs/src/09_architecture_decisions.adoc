@@ -3435,3 +3435,40 @@ servidor durante el análisis; el botón de saltar rompe esa asunción en un
   sitios comprobados antes de saltar, y «sin cuentas encontradas» no
   significa «sin cuentas»: el informe no marca todavía que el barrido fuera
   incompleto.
+
+==== ADR-56: Score de privacidad definitivo al final del pipeline, con fotos, todos los atributos y señales de identidad
+
+*Contexto*: `compute_score` se ejecutaba al principio de `_build_report`, solo con los
+tres atributos que salen de hashtags y comunidades (`infer_attributes`: ubicación,
+ocupación, rutina). Todo lo detectado después (IA, estilo de vida, exposición directa,
+fotos, estrechamiento de población) se añadía «sin alterar el score». Resultado: el
+riesgo de geolocalización ignoraba las fotos, los datos inferibles ignoraban casi todo
+y `POST /analyze/recalculate` usaba otra fórmula distinta (suma de todos los atributos
+entre 6), con lo que el número cambiaba de criterio al añadir rasgos manuales.
+
+*Decisión*: una sola fórmula, `compute_exposure_score` (`app/scoring/privacy_score.py`),
+usada por `generate_report` (al final, tras esperar la correlación de cuentas y antes de
+`_build_recommendations`, que depende de sus umbrales) y por `recalculate_report`
+(`compute_score_from_report`). El `score` que recibe `generate_report` pasa a ser
+provisional y se sustituye. Los tres riesgos combinan fuentes independientes con
+«noisy-OR» (`1 - (1 - a)(1 - b)...`): cada fuente suma y el resultado no pasa de 100.
+
+- `geolocation_risk`: texto (confianza máxima de `ubicacion` / `ubicacion_detallada` y de
+  la ubicación autodeclarada del estrechamiento, ponderada por nivel: municipio 1,0,
+  provincia 0,8, comunidad 0,5) combinado con fotos: se agrupan por provincia y cuenta la
+  zona que más pesa, `1 - exp(-S / 2)` con S = suma de confianzas (una foto segura 39;
+  tres, 78; seis, 95). Se excluyen las no representativas y la foto de perfil.
+- `inferable_data_risk`: todos los atributos del informe, sin duplicar (categoría +
+  valor, con su mayor confianza), ponderados por categoría (`_CATEGORY_WEIGHTS`:
+  identifican o localizan 1,0; rutina y entorno 0,7; aficiones 0,3; resto 0,5) y por
+  confianza; satura en 8 (antes 6 con solo tres categorías).
+- `deanonymization_ease`: la fórmula de estilo anterior (volumen, vocabulario, hora
+  habitual) se limita a 0,5, y se suman población restante (`log(N / R) / log(N)`),
+  identificadores publicados (`documento_identidad`, `contacto_publicado`,
+  `dato_financiero`, `cuenta_externa`: 0,7 con uno, 0,9 con dos o más) y cuentas
+  relacionadas encontradas (0,3 cada una, máximo 0,7).
+- Los textos de los iconos ⓘ de la pantalla de análisis (`scoreLabels.*Tooltip`) describen
+  estas fórmulas.
+- Efecto asumido: los números de todos los informes cambian respecto a versiones
+  anteriores, y las constantes siguen siendo hipótesis a validar en la memoria del TFG
+  (ver «Plan de evaluación»).

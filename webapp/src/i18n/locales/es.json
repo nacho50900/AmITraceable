@@ -98,9 +98,9 @@
       "geolocationRisk": "Riesgo de geolocalización",
       "inferableDataRisk": "Datos personales inferibles",
       "deanonymizationEase": "Facilidad de deanonimización",
-      "geolocationRiskTooltip": "Cuánto de seguro se puede deducir dónde vives o te mueves. Toma la confianza más alta entre las ubicaciones que se pueden inferir de lo que publicas: 0 si no se detecta ninguna y 100 si hay una muy clara.",
-      "inferableDataRiskTooltip": "Cuántos datos personales distintos (ubicación, ocupación, rutina...) se pueden inferir de lo que publicas y con qué confianza. Suma la confianza de todos ellos: con unos 6 de confianza media-alta la puntuación llega al máximo.",
-      "deanonymizationEaseTooltip": "Qué fácil sería reconocerte por tu forma de escribir y de comportarte. Combina cuánto contenido hay que analizar (40 %), lo distintivo de tu vocabulario (30 %) y lo marcada que es tu hora habitual de publicar (30 %). Con pocas publicaciones, las dos últimas pesan menos."
+      "geolocationRiskTooltip": "Cuánto de seguro se puede deducir dónde vives o te mueves. Combina la ubicación que se deduce de tus textos (lugares que mencionas, hashtags, comunidades) con la de tus fotos: cuantas más fotos coinciden en una misma zona y con más confianza, mayor es el riesgo.",
+      "inferableDataRiskTooltip": "Cuántos datos personales distintos se pueden inferir de lo que publicas (ubicación, ocupación, rutina, identificadores, aficiones...) y con qué confianza. Pesan más los que identifican o localizan, como tu lugar de trabajo o un contacto publicado, que una afición.",
+      "deanonymizationEaseTooltip": "Qué fácil sería reconocerte. Suma señales independientes: tu estilo de escritura y actividad (con poco contenido pesa menos y por sí solo no pasa de la mitad), cuánta gente comparte los rasgos detectados, los identificadores que has publicado (correo, teléfono...) y tus cuentas que aparecen en otros sitios con el mismo usuario."
     },
     "whatCanBeInferred": "Qué se puede inferir sobre ti",
     "estimatedLocations": "Ubicaciones estimadas a partir de tus fotos",
