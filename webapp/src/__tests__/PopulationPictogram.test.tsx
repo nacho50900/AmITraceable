@@ -44,7 +44,7 @@ describe('PopulationPictogram', () => {
     expect(images).toHaveLength(2);
     expect(images[0]).toHaveAttribute('src', '/monigote_selected.png');
     expect(images[1]).toHaveAttribute('src', '/grupo.png');
-    // grupo.png es de tamaño fijo (15x15), no escala como el monigote.
+    // En modo pequeño, grupo.png se queda en 15x15 (en grande, 300px: ver más abajo).
     expect(images[1]).toHaveStyle({ width: '15px', height: '15px' });
     // El icono representa la PROPORCIÓN (1 de cada 286 españoles al azar),
     // no el total absoluto de personas -- ese total ya se muestra por
@@ -96,14 +96,14 @@ describe('PopulationPictogram', () => {
       });
     });
 
-    test('modo compacto (<1%) en grande: el monigote escala a 220px, grupo.png se mantiene fijo a 15px', () => {
+    test('modo compacto (<1%) en grande: el monigote escala a 220px y grupo.png a 300px (20 veces el tamaño pequeño)', () => {
       const { container } = render(
         <PopulationPictogram proportion={0.0035} remainingPopulation={170000} size="large" />
       );
       const images = container.querySelectorAll('img');
       expect(images).toHaveLength(2);
       expect(images[0]).toHaveStyle({ width: '220px', height: '220px' });
-      expect(images[1]).toHaveStyle({ width: '15px', height: '15px' });
+      expect(images[1]).toHaveStyle({ width: '300px', height: '300px' });
     });
 
     test('tamaño por defecto (sin size) sigue siendo el pequeño (14px)', () => {

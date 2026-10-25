@@ -55,6 +55,22 @@ _WEIGHTS = {
 # antes de que haya "suficiente contenido" en términos absolutos.
 _MIN_POSTS_FOR_RELIABLE_STYLE = 20
 
+# --- Confianza -> evidencia ---------------------------------------------------
+
+# Las "confianzas" del pipeline no son probabilidades de acierto: la de una foto
+# es el % de votos de sus vecinos más cercanos a la provincia ganadora, y la de
+# un atributo de texto crece con el nº de menciones. Por debajo de ~0,3 es
+# ruido (el mismo umbral que `_MIN_CONFIDENCE_FOR_REPRESENTATIVE` en
+# vision/geolocation.py), así que solo cuenta como evidencia lo que lo supera:
+# 0,3 -> 0, 0,5 -> 0,29, 0,8 -> 0,71, 1,0 -> 1. Sin esto, dos fotos no
+# geolocalizables con 0,47 de votos daban un riesgo "Medio" (ADR-56).
+_NOISE_CONFIDENCE_FLOOR = 0.3
+
+
+def _evidence(confidence: float) -> float:
+    return max(0.0, min((confidence - _NOISE_CONFIDENCE_FLOOR) / (1.0 - _NOISE_CONFIDENCE_FLOOR), 1.0))
+
+
 # --- Geolocalización --------------------------------------------------------
 
 # Cuánto pesa cada nivel de una ubicación autodeclarada: saber el municipio
@@ -64,15 +80,16 @@ _LOCATION_LEVEL_PRECISION = {"municipio": 1.0, "provincia": 0.8, "comunidad_auto
 # Categorías de atributo que cuentan como señal de ubicación a partir del texto.
 _TEXT_LOCATION_CATEGORIES = ("ubicacion", "ubicacion_detallada")
 
-# Escala de la señal de fotos: S = suma de las confianzas de las fotos que
-# coinciden en la zona más repetida; riesgo = 1 - exp(-S / escala). Con 2.0:
-# una foto muy segura (S=1) -> 39; tres fotos seguras (S=3) -> 78; seis -> 95.
-_PHOTO_ZONE_SCALE = 2.0
+# Escala de la señal de fotos: S = suma de la evidencia de las fotos que
+# coinciden en la zona más repetida; riesgo = 1 - exp(-S / escala). Con 4.0:
+# una foto de confianza 1,0 (S=1) -> 22; tres fotos de 0,9 (S=2,6) -> 47; seis
+# de 0,9 (S=5,1) -> 72. Una o dos fotos flojas casi no mueven la barra.
+_PHOTO_ZONE_SCALE = 4.0
 
 # --- Datos personales inferibles -------------------------------------------
 
-# Cuántos "datos de peso 1 y confianza 1" hacen falta para saturar la barra.
-_INFERABLE_SATURATION = 8.0
+# Cuántos datos "de peso 1 y evidencia 1" hacen falta para saturar la barra.
+_INFERABLE_SATURATION = 9.0
 
 # Peso de cada categoría (lo que revela sobre la persona). Las que no están
 # aquí valen `_DEFAULT_CATEGORY_WEIGHT`.
@@ -83,32 +100,37 @@ _CATEGORY_WEIGHTS: dict[str, float] = {
     "contacto_publicado": 1.0, "dato_financiero": 1.0, "cuenta_externa": 1.0,
     # Rasgos físicos añadidos a mano en el recálculo.
     "color_ojos": 0.7, "color_pelo": 0.7, "color_piel": 0.7,
-    # Revelan rutina, entorno o circunstancias personales.
-    "rutina": 0.7, "lengua_materna": 0.7, "edificio_emblematico": 0.7, "texto_visible": 0.7,
-    "vehiculo": 0.7, "vivienda": 0.7, "relacion": 0.7, "relacion_sentimental": 0.7,
-    "salud": 0.7, "ideologia": 0.7, "ingresos": 0.7, "menor": 0.7,
-    "viaje_futuro": 0.7, "identificador_tecnico": 0.7,
+    # Revelan entorno o circunstancias personales.
+    "edificio_emblematico": 0.7, "texto_visible": 0.7, "vehiculo": 0.7, "vivienda": 0.7,
+    "relacion": 0.7, "relacion_sentimental": 0.7, "salud": 0.7, "ideologia": 0.7,
+    "ingresos": 0.7, "menor": 0.7, "viaje_futuro": 0.7, "identificador_tecnico": 0.7,
+    # Casi todo el mundo las tiene (rutina por la hora de publicación, lengua
+    # por el idioma del texto): señalan poco por sí solas.
+    "rutina": 0.4, "lengua_materna": 0.4,
     # Señales blandas: hacen más reconocible, pero poco por sí solas.
-    "aficion": 0.3, "mascota": 0.3, "idiomas": 0.3, "habito": 0.3, "equipo": 0.3,
+    "aficion": 0.25, "mascota": 0.2, "idiomas": 0.2, "habito": 0.2, "equipo": 0.2,
 }
 _DEFAULT_CATEGORY_WEIGHT = 0.5
 
 # --- Facilidad de deanonimización -------------------------------------------
 
+# Exponente de la curva de unicidad de la población restante (ver `_population_uniqueness`).
+_POPULATION_CURVE_EXPONENT = 2.0
+
 # El estilo de escritura y la actividad por sí solos no identifican a nadie:
 # su aportación se limita a este máximo (0-1).
-_STYLE_MAX_CONTRIBUTION = 0.5
+_STYLE_MAX_CONTRIBUTION = 0.2
 
 # Identificadores publicados que permiten localizar a la persona directamente.
 _DIRECT_IDENTIFIER_CATEGORIES = ("documento_identidad", "contacto_publicado", "dato_financiero", "cuenta_externa")
 _MIN_IDENTIFIER_CONFIDENCE = 0.5
-_IDENTIFIER_CONTRIBUTION = {0: 0.0, 1: 0.7}  # 2 o más: _IDENTIFIER_CONTRIBUTION_MANY
-_IDENTIFIER_CONTRIBUTION_MANY = 0.9
+_IDENTIFIER_CONTRIBUTION = {0: 0.0, 1: 0.6}  # 2 o más: _IDENTIFIER_CONTRIBUTION_MANY
+_IDENTIFIER_CONTRIBUTION_MANY = 0.85
 
 # Cada cuenta propia encontrada con el mismo username en otros sitios permite
 # cruzar datos; se limita porque un username común puede dar coincidencias falsas.
-_ACCOUNT_CONTRIBUTION_EACH = 0.3
-_ACCOUNT_CONTRIBUTION_MAX = 0.7
+_ACCOUNT_CONTRIBUTION_EACH = 0.2
+_ACCOUNT_CONTRIBUTION_MAX = 0.5
 
 
 def compute_exposure_score(
@@ -213,11 +235,11 @@ def _text_location_confidence(
     """Mayor confianza de ubicación sacada del texto: atributos (hashtags,
     comunidades, ubicación detallada) y ubicación autodeclarada del
     estrechamiento de población (más fiable cuanto más fino el nivel)."""
-    best = max((a.confidence for a in attributes if a.category in _TEXT_LOCATION_CATEGORIES), default=0.0)
+    best = max((_evidence(a.confidence) for a in attributes if a.category in _TEXT_LOCATION_CATEGORIES), default=0.0)
     for step in population_narrowing:
         if step.category == "ubicacion" and step.confidence is not None:
             precision = _LOCATION_LEVEL_PRECISION.get(step.location_level or "", 0.8)
-            best = max(best, step.confidence * precision)
+            best = max(best, _evidence(step.confidence) * precision)
     return min(best, 1.0)
 
 
@@ -233,7 +255,7 @@ def _photo_location_risk(points: Iterable[ImageLocationPoint]) -> float:
     for point in points:
         if not point.representative or point.is_profile_picture:
             continue
-        per_zone[point.province] = per_zone.get(point.province, 0.0) + point.confidence
+        per_zone[point.province] = per_zone.get(point.province, 0.0) + _evidence(point.confidence)
     top = max(per_zone.values(), default=0.0)
     return 1.0 - math.exp(-top / _PHOTO_ZONE_SCALE)
 
@@ -243,7 +265,6 @@ def _score_geolocation(
     image_location_points: Iterable[ImageLocationPoint] = (),
     population_narrowing: Iterable[PopulationEstimate] = (),
 ) -> float:
-    attributes = list(attributes)
     text = _text_location_confidence(attributes, population_narrowing)
     photos = _photo_location_risk(image_location_points)
     return _noisy_or(text, photos) * 100.0
@@ -256,7 +277,9 @@ def _score_inferable_data(attributes: Iterable[InferredAttribute]) -> float:
     for a in attributes:
         key = (a.category, a.value)
         best[key] = max(best.get(key, 0.0), a.confidence)
-    weighted = sum(_CATEGORY_WEIGHTS.get(category, _DEFAULT_CATEGORY_WEIGHT) * conf for (category, _), conf in best.items())
+    weighted = sum(
+        _CATEGORY_WEIGHTS.get(category, _DEFAULT_CATEGORY_WEIGHT) * _evidence(conf) for (category, _), conf in best.items()
+    )
     return min((weighted / _INFERABLE_SATURATION) * 100, 100.0)
 
 
@@ -278,7 +301,11 @@ def _population_uniqueness(remaining_population: int | None) -> float:
         return 0.0
     if remaining_population <= 1:
         return 1.0
-    return math.log(TOTAL_POPULATION_ES / remaining_population) / math.log(TOTAL_POPULATION_ES)
+    bits_fraction = math.log(TOTAL_POPULATION_ES / remaining_population) / math.log(TOTAL_POPULATION_ES)
+    # Curva convexa: un grupo de miles de personas sigue siendo mucha gente en
+    # la que esconderse, y solo cuando quedan pocas decenas la identificación
+    # se acerca a segura (R=300.000 -> 0,085; R=50 -> 0,60; R=1 -> 1).
+    return bits_fraction**_POPULATION_CURVE_EXPONENT
 
 
 def _style_signal(n_posts: int, fingerprint: WritingFingerprint) -> float:

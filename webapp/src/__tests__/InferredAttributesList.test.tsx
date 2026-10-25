@@ -20,6 +20,34 @@ describe('InferredAttributesList', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  test('los rasgos físicos manuales (ojos, pelo, piel) NO salen en la lista: sí tienen correlación estadística', () => {
+    render(
+      <InferredAttributesList
+        attributes={[
+          makeAttribute({ category: 'color_ojos', value: 'azul', confidence: 1, evidence: [] }),
+          makeAttribute({ category: 'color_pelo', value: 'rubio', confidence: 1, evidence: [] }),
+          makeAttribute({ category: 'color_piel', value: 'clara', confidence: 1, evidence: [] }),
+          makeAttribute({ category: 'aficion', value: 'Posible afición: senderismo' }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Posible afición: senderismo')).toBeInTheDocument();
+    expect(screen.queryByText('azul')).toBeNull();
+    expect(screen.queryByText('rubio')).toBeNull();
+    expect(screen.queryByText('clara')).toBeNull();
+  });
+
+  test('si solo hay rasgos físicos manuales, la sección entera desaparece', () => {
+    const { container } = render(
+      <InferredAttributesList
+        attributes={[makeAttribute({ category: 'color_ojos', value: 'azul', confidence: 1, evidence: [] })]}
+      />,
+    );
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
   test('renderiza el título y subtítulo de la sección cuando hay atributos', () => {
     render(<InferredAttributesList attributes={[makeAttribute()]} />);
     expect(screen.getByText('Atributos inferidos sin correlación estadística')).toBeInTheDocument();

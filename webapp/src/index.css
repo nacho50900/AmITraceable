@@ -527,6 +527,18 @@ body {
 /* Tres puntos que van apareciendo y saltando mientras algo carga
    (components/LoadingDots.tsx). Cada punto arranca con un retraso distinto
    para que la animación recorra los tres en cadena. */
+.loading-dots {
+  /* Los puntos son el carácter "." escalado: a tamaño de texto normal casi no
+     se ven. line-height: 0 evita que el tamaño mayor ensanche la línea. */
+  display: inline-block;
+  margin-left: 3px;
+  font-size: 2.4em;
+  font-weight: 700;
+  line-height: 0;
+  letter-spacing: 0.05em;
+  color: var(--turquoise);
+}
+
 .loading-dots > span {
   display: inline-block;
   animation: loading-dot-bounce 1.2s ease-in-out infinite;
@@ -549,7 +561,7 @@ body {
   }
   30% {
     opacity: 1;
-    transform: translateY(-0.35em);
+    transform: translateY(-0.3em);
   }
 }
 
@@ -917,7 +929,12 @@ body {
   top: calc(100% - 4px);
   left: 0;
   z-index: 20;
-  width: min(340px, 100%);
+  /* Se adapta al texto y, si es largo, crece hasta el ancho de la fila (que
+     en escritorio es el de la tarjeta) en vez de quedarse en una columna
+     estrecha. */
+  width: max-content;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 10px 12px;
   background: #1d2330;
   border: 1px solid var(--border);
@@ -1064,8 +1081,20 @@ body {
 .pictogram-group-figure {
   /* Icono de grupo (grupo.png): representa al resto de personas de la
      proporción ("en X"), en contraste con el monigote individual
-     turquesa que representa a uno mismo. */
+     turquesa que representa a uno mismo. Su tamaño lo fija el componente
+     (PopulationPictogram.tsx); max-width evita que desborde en pantallas
+     estrechas. */
   opacity: 0.85;
+  max-width: 100%;
+}
+
+/* En la versión grande el monigote (220px) + frase + icono de grupo (150px) no
+   caben en una fila en móvil: ahí sí se permite que se parta en dos líneas. */
+@media (max-width: 640px) {
+  .pictogram-compact.pictogram-lg {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
 }
 
 .pictogram-compact-label {

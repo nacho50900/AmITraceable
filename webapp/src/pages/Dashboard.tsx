@@ -390,7 +390,11 @@ const Dashboard: React.FC = () => {
   };
 
   const handleApplyTraits = async (traits: ManualAttribute[]) => {
-    if (!report || traits.length === 0) return;
+    // Con `traits` vacío ("Limpiar", o aplicar con los tres selectores en blanco)
+    // también se llama al backend: quita los rasgos manuales anteriores y deja
+    // el informe como salió del análisis. El backend sustituye (no acumula) los
+    // rasgos manuales en cada llamada.
+    if (!report) return;
     try {
       const newReport = await api.recalculateReport({
         report,

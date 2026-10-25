@@ -863,16 +863,48 @@ describe('Dashboard', () => {
       });
     });
 
-    test('sin rasgos seleccionados, aplicar NO llama a api.recalculateReport (early return en handleApplyTraits)', async () => {
+    test('sin rasgos seleccionados, aplicar llama a api.recalculateReport con la lista vacía para limpiar los rasgos anteriores', async () => {
       const user = userEvent.setup();
       vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
-      mockStream([{ done: true, report: makeExposureReport() }]);
+      const report = makeExposureReport();
+      mockStream([{ done: true, report }]);
+      vi.mocked(api.recalculateReport).mockResolvedValue(report);
       renderDashboard();
 
       await user.click(await screen.findByRole('button', { name: /Añadir rasgos físicos evidentes/ }));
       await user.click(screen.getByRole('button', { name: 'Aplicar y recalcular' }));
 
-      expect(api.recalculateReport).not.toHaveBeenCalled();
+      await waitFor(() => {
+        expect(api.recalculateReport).toHaveBeenCalledWith({ report, manual_attributes: [] });
+      });
+    });
+
+    test('"Limpiar" también llama al backend (con la lista vacía): antes no hacía nada y los rasgos anteriores seguían multiplicando', async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.authStatus).mockResolvedValue({ authenticated: true });
+      const initialReport = makeExposureReport({ remaining_population_all_traits: 24957175 });
+      const withTraits = makeExposureReport({ remaining_population_all_traits: 4128297 });
+      mockStream([{ done: true, report: initialReport }]);
+      vi.mocked(api.recalculateReport).mockResolvedValueOnce(withTraits).mockResolvedValueOnce(initialReport);
+      renderDashboard();
+
+      await user.click(await screen.findByRole('button', { name: /Añadir rasgos físicos evidentes/ }));
+      await user.selectOptions(screen.getByLabelText('Color de ojos'), 'azul');
+      await user.click(screen.getByRole('button', { name: 'Aplicar y recalcular' }));
+      await waitFor(() => {
+        expect(screen.getByText('4.128.297')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole('button', { name: /Añadir rasgos físicos evidentes/ }));
+      await user.click(screen.getByRole('button', { name: /Limpiar/ }));
+
+      await waitFor(() => {
+        expect(api.recalculateReport).toHaveBeenLastCalledWith({ report: withTraits, manual_attributes: [] });
+      });
+      await waitFor(() => {
+        expect(screen.getAllByText('24.957.175').length).toBeGreaterThan(0);
+      });
+      expect(screen.queryByText('4.128.297')).toBeNull(); // la cifra con los rasgos ya no está
     });
 
     test('si api.recalculateReport falla con un mensaje, se muestra ese mensaje de error', async () => {

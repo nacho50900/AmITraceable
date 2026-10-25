@@ -11,9 +11,13 @@ ninguna de las dos cosas debería tratarse como una señal fiable de
 """
 from datetime import datetime, timezone
 
+import pytest
+
 from app.models.schemas import SocialPost, WritingFingerprint
 from app.models.schemas import ImageLocationPoint, InferredAttribute, PopulationEstimate
 from app.scoring.privacy_score import (
+    _STYLE_MAX_CONTRIBUTION,
+    _evidence,
     _score_deanonymization_ease,
     _score_geolocation,
     _score_inferable_data,
@@ -106,9 +110,9 @@ def test_sample_confidence_saturates_at_min_posts_for_reliable_style():
     # La diferencia entre ambos debe explicarse SOLO por volume_factor
     # (20/200=0.1 vs 100/200=0.5 -> 0.4*(0.5-0.1)*100 = 16 puntos), no por
     # un salto adicional en concentration/distinctiveness (ya saturados).
-    # El estilo por sí solo aporta como mucho la mitad del score (ADR-56,
-    # `_STYLE_MAX_CONTRIBUTION`), de ahí 16 * 0.5 = 8 puntos.
-    assert abs((score_100 - score_20) - 16.0 * 0.5) < 0.5
+    # El estilo por sí solo aporta como mucho `_STYLE_MAX_CONTRIBUTION` del
+    # score (ADR-56), de ahí 16 * 0.3 = 4,8 puntos.
+    assert abs((score_100 - score_20) - 16.0 * _STYLE_MAX_CONTRIBUTION) < 0.5
 
 
 # --- Geolocalización: fotos coherentes en una zona -------------------------
@@ -182,7 +186,7 @@ def test_self_declared_location_counts_more_the_finer_its_level():
 
 
 def test_detailed_location_published_counts_as_location_signal():
-    assert _score_geolocation([_attr("ubicacion_detallada", confidence=0.9)]) == 90.0
+    assert _score_geolocation([_attr("ubicacion_detallada", confidence=0.9)]) == pytest.approx(_evidence(0.9) * 100, abs=0.1)
 
 
 # --- Datos personales inferibles -------------------------------------------
@@ -250,11 +254,11 @@ def test_published_identifiers_and_related_accounts_raise_deanonymization():
     assert _score_deanonymization_ease(posts, fp, n_identifiers=2) > with_identifier
 
 
-def test_style_alone_never_reaches_more_than_half_the_scale():
+def test_style_alone_never_exceeds_its_maximum_contribution():
     posts = [_post(i, hour=10) for i in range(300)]
     fp = _fingerprint(0.45, {10: 1.0})
 
-    assert _score_deanonymization_ease(posts, fp) <= 50.0
+    assert _score_deanonymization_ease(posts, fp) <= _STYLE_MAX_CONTRIBUTION * 100 + 1e-9
 
 
 # --- Score completo ---------------------------------------------------------
@@ -277,3 +281,38 @@ def test_complete_score_uses_every_signal_and_stays_bounded():
     assert complete.overall_score > provisional.overall_score
     for value in (complete.geolocation_risk, complete.inferable_data_risk, complete.deanonymization_ease, complete.overall_score):
         assert 0.0 <= value <= 100.0
+
+
+# --- Calibración: lo flojo no debe puntuar como "Medio" ---------------------
+
+
+def test_confidence_at_or_below_the_noise_floor_is_no_evidence():
+    assert _evidence(0.3) == 0.0
+    assert _evidence(0.1) == 0.0
+    assert _evidence(1.0) == 1.0
+    assert 0.0 < _evidence(0.5) < _evidence(0.8) < 1.0
+
+
+def test_two_weak_photo_estimates_do_not_reach_medium():
+    """Caso real: una cuenta imposible de geolocalizar daba "Medio (37,8)" porque dos
+    fotos con ~47 % de votos de sus vecinos contaban como casi una foto segura."""
+    weak = [_photo("Madrid", 0.47), _photo("Madrid", 0.48)]
+
+    assert _score_geolocation([], weak) < 25.0  # "Bajo" en la barra
+
+
+def test_weak_text_location_does_not_reach_medium_either():
+    assert _score_geolocation([_attr("ubicacion", confidence=0.45)]) < 25.0
+
+
+def test_near_universal_attributes_barely_move_the_inferable_data_bar():
+    attrs = [_attr("rutina", "n", 0.6), _attr("lengua_materna", "es", 0.5), _attr("aficion", "m", 0.5)]
+
+    assert _score_inferable_data(attrs) < 10.0
+
+
+def test_a_published_contact_and_workplace_still_score_clearly_higher():
+    exposed = [_attr("contacto_publicado", "x@y.es", 0.9), _attr("empresa", "ACME", 0.8), _attr("ocupacion", "d", 0.8)]
+
+    assert _score_inferable_data(exposed) > 20.0
+    assert _score_inferable_data(exposed) > 3 * _score_inferable_data([_attr("aficion", "m", 0.5), _attr("rutina", "n", 0.6)])

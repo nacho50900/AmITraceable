@@ -769,7 +769,7 @@ class TestRecalculateEndpoint:
         assert step["risk_level"] == "no_estimable"
         assert step["remaining_population"] is None
 
-    def test_no_manual_attributes_returns_report_unchanged(self):
+    def test_no_manual_attributes_leaves_the_report_as_it_was_apart_from_the_recomputed_score(self):
         report = _make_report()
 
         resp = client.post(
@@ -778,7 +778,51 @@ class TestRecalculateEndpoint:
         )
 
         assert resp.status_code == 200
-        assert resp.json() == report.model_dump(mode="json")
+        body = resp.json()
+        expected = report.model_dump(mode="json")
+        body.pop("privacy_score")
+        expected.pop("privacy_score")
+        assert body == expected
+
+    def _recalculate(self, report_json: dict, traits: list[dict]) -> dict:
+        resp = client.post("/api/analyze/recalculate", json={"report": report_json, "manual_attributes": traits})
+        assert resp.status_code == 200
+        return resp.json()
+
+    def test_resending_the_recalculated_report_does_not_stack_the_same_traits_again(self):
+        original = _make_report().model_dump(mode="json")
+        traits = [{"category": "color_ojos", "value": "azul"}, {"category": "color_pelo", "value": "rubio"}]
+
+        once = self._recalculate(original, traits)
+        twice = self._recalculate(once, traits)
+        thrice = self._recalculate(twice, traits)
+
+        assert twice["remaining_population_all_traits"] == once["remaining_population_all_traits"]
+        assert thrice["remaining_population_all_traits"] == once["remaining_population_all_traits"]
+        assert len([s for s in thrice["population_narrowing"] if s["source"] == "manual"]) == 2
+        assert len([a for a in thrice["inferred_attributes"] if a["category"] == "color_ojos"]) == 1
+        assert thrice["privacy_score"] == once["privacy_score"]
+
+    def test_new_traits_replace_the_previous_manual_ones(self):
+        original = _make_report().model_dump(mode="json")
+        first = self._recalculate(original, [{"category": "color_ojos", "value": "azul"}])
+
+        second = self._recalculate(first, [{"category": "color_pelo", "value": "rubio"}])
+
+        manual_steps = [s for s in second["population_narrowing"] if s["source"] == "manual"]
+        assert [s["category"] for s in manual_steps] == ["color_pelo"]  # los ojos de antes ya no están
+        assert not any(a["category"] == "color_ojos" for a in second["inferred_attributes"])
+
+    def test_empty_traits_clear_the_previous_manual_ones_and_restore_the_original_narrowing(self):
+        original = _make_report().model_dump(mode="json")
+        with_traits = self._recalculate(original, [{"category": "color_ojos", "value": "azul"}])
+        assert with_traits["remaining_population_all_traits"] != original["remaining_population_all_traits"]
+
+        cleared = self._recalculate(with_traits, [])
+
+        assert cleared["remaining_population_all_traits"] == original["remaining_population_all_traits"]
+        assert cleared["population_narrowing"] == original["population_narrowing"]
+        assert cleared["inferred_attributes"] == original["inferred_attributes"]
 
     def test_malformed_body_returns_422(self):
         resp = client.post("/api/analyze/recalculate", json={"not": "valid"})

@@ -19,6 +19,10 @@ interface PopulationPictogramProps {
 // número absoluto de personas.
 const MAX_FIGURES = 100;
 
+// Tamaño (px) del icono de grupo (grupo.png) junto a "en X".
+const GROUP_ICON_SIZE_SMALL = 15;
+const GROUP_ICON_SIZE_LARGE = 300;
+
 /** Tamaño (px) de cada monigote en modo grande: cuantos MENOS monigotes
  * haga falta dibujar, MÁS grande se ve cada uno -- para un 50% (2
  * monigotes) deben verse genuinamente grandes, no un icono minúsculo. */
@@ -58,6 +62,7 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({
 
   if (totalFigures > MAX_FIGURES) {
     const compactSize = isLarge ? 220 : 20;
+    const groupSize = isLarge ? GROUP_ICON_SIZE_LARGE : GROUP_ICON_SIZE_SMALL;
     // El icono compacto representa la PROPORCIÓN ("en X"), no el
     // total absoluto de personas -- ese total ya se muestra por separado
     // encima, en la frase "En España hay X personas..." (ver
@@ -69,10 +74,9 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({
     // `remainingPopulation`. El monigote turquesa (uno mismo) + "en X" +
     // el icono de grupo (grupo.png, el resto de los X) van en una sola
     // fila -- ver `.pictogram-compact { flex-wrap: nowrap }` en index.css.
-    // A diferencia del monigote turquesa, grupo.png tiene tamaño FIJO
-    // (15x15px) tanto en modo compacto normal como en `size="large"`: es
-    // un icono decorativo pequeño junto a la frase, no debe escalar como
-    // el resto de la ilustración.
+    // grupo.png (el resto de los X) es 20 veces más grande en `size="large"`
+    // (300px) que en el modo compacto normal (15px): a 15px el icono de grupo
+    // de la vista destacada era casi invisible junto al monigote de 220px.
     const ratioLabel = totalFigures.toLocaleString(numberLocale);
     return (
       <div
@@ -96,7 +100,7 @@ const PopulationPictogram: React.FC<PopulationPictogramProps> = ({
           src="/grupo.png"
           alt=""
           className="pictogram-figure pictogram-group-figure"
-          style={{ width: 15, height: 15 }}
+          style={{ width: groupSize, height: groupSize }}
         />
       </div>
     );

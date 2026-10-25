@@ -378,12 +378,21 @@ async def translate_descriptions(request: Annotated[TranslateDescriptionsRequest
     return {"translations": translations}
 
 
+# Categorías que solo pueden venir de los rasgos físicos manuales (ver
+# ManualTraitsSelector en el frontend).
+_MANUAL_TRAIT_CATEGORIES = ("color_ojos", "color_pelo", "color_piel")
+
+
 @router.post("/analyze/recalculate", response_model=ExposureReport)
 async def recalculate_report(request: Annotated[RecalculateRequest, Body(...)]):
     """
     Recalcula el informe de exposición añadiendo los rasgos físicos manuales proporcionados.
     Actualiza `population_narrowing` multiplicando las proporciones en cadena y
     recalcula el score de privacidad completo con la misma fórmula del pipeline.
+
+    Es idempotente respecto a los rasgos manuales: quita los de llamadas
+    anteriores antes de aplicar los nuevos, así que reenviar el informe ya
+    recalculado no acumula nada, y `manual_attributes=[]` los elimina todos.
 
     NOTA: esta ruta estática DEBE registrarse antes que `/analyze/{platform}`
     (justo debajo) -- FastAPI/Starlette resuelve las rutas en el orden en que
@@ -396,8 +405,13 @@ async def recalculate_report(request: Annotated[RecalculateRequest, Body(...)]):
     report = request.report
     manual_attributes = request.manual_attributes
 
-    if not manual_attributes:
-        return report
+    # 0. Partir del informe SIN los rasgos manuales de recálculos anteriores. El
+    # frontend reenvía el último informe recalculado, que ya los lleva: sin
+    # esto cada "Aplicar" volvía a multiplicar encima (y "Limpiar" no limpiaba
+    # nada). Los rasgos que llegan ahora sustituyen a los anteriores, y una
+    # lista vacía deja el informe como salió del análisis.
+    report.inferred_attributes = [a for a in report.inferred_attributes if a.category not in _MANUAL_TRAIT_CATEGORIES]
+    report.population_narrowing = [step for step in report.population_narrowing if step.source != "manual"]
 
     # 1. Añadir a inferred_attributes
     new_inferred = []

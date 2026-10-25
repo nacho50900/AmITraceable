@@ -57,8 +57,16 @@ function categoryLabel(
   return fallbackCategoryLabel(category);
 }
 
-const InferredAttributesList: React.FC<InferredAttributesListProps> = ({ attributes }) => {
+// Rasgos físicos que el usuario añade a mano (ManualTraitsSelector): sí
+// tienen correlación estadística (entran en el estrechamiento de población,
+// con su proporción de Navarro-López et al., Genes 2024), así que NO van en
+// esta lista de atributos "sin correlación estadística". Siguen en
+// `report.inferred_attributes` porque cuentan para el score de datos inferibles.
+const MANUAL_TRAIT_CATEGORIES = new Set(['color_ojos', 'color_pelo', 'color_piel']);
+
+const InferredAttributesList: React.FC<InferredAttributesListProps> = ({ attributes: allAttributes }) => {
   const { t, i18n } = useTranslation();
+  const attributes = allAttributes.filter((attribute) => !MANUAL_TRAIT_CATEGORIES.has(attribute.category));
 
   if (attributes.length === 0) return null;
 

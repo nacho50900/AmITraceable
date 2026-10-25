@@ -3456,19 +3456,58 @@ provisional y se sustituye. Los tres riesgos combinan fuentes independientes con
 - `geolocation_risk`: texto (confianza máxima de `ubicacion` / `ubicacion_detallada` y de
   la ubicación autodeclarada del estrechamiento, ponderada por nivel: municipio 1,0,
   provincia 0,8, comunidad 0,5) combinado con fotos: se agrupan por provincia y cuenta la
-  zona que más pesa, `1 - exp(-S / 2)` con S = suma de confianzas (una foto segura 39;
-  tres, 78; seis, 95). Se excluyen las no representativas y la foto de perfil.
+  zona que más pesa, `1 - exp(-S / 4)` con S = suma de evidencia (ver ADR-57). Se excluyen las no representativas y la foto de perfil.
 - `inferable_data_risk`: todos los atributos del informe, sin duplicar (categoría +
   valor, con su mayor confianza), ponderados por categoría (`_CATEGORY_WEIGHTS`:
   identifican o localizan 1,0; rutina y entorno 0,7; aficiones 0,3; resto 0,5) y por
-  confianza; satura en 8 (antes 6 con solo tres categorías).
+  confianza; satura en 9 (ver ADR-57).
 - `deanonymization_ease`: la fórmula de estilo anterior (volumen, vocabulario, hora
-  habitual) se limita a 0,5, y se suman población restante (`log(N / R) / log(N)`),
+  habitual) se limita a 0,2, y se suman población restante (curva de `log(N / R) / log(N)`),
   identificadores publicados (`documento_identidad`, `contacto_publicado`,
   `dato_financiero`, `cuenta_externa`: 0,7 con uno, 0,9 con dos o más) y cuentas
-  relacionadas encontradas (0,3 cada una, máximo 0,7).
+  relacionadas encontradas (0,2 cada una, máximo 0,5).
 - Los textos de los iconos ⓘ de la pantalla de análisis (`scoreLabels.*Tooltip`) describen
   estas fórmulas.
 - Efecto asumido: los números de todos los informes cambian respecto a versiones
   anteriores, y las constantes siguen siendo hipótesis a validar en la memoria del TFG
   (ver «Plan de evaluación»).
+
+==== ADR-57: Recalibración a la baja de los tres riesgos y recálculo idempotente de rasgos manuales
+
+*Contexto*: con la fórmula del ADR-56 una cuenta imposible de geolocalizar daba «Medio
+(37,8)» en geolocalización: dos fotos con ~0,47 de confianza en la misma provincia
+sumaban casi como una foto segura. Esa «confianza» es el porcentaje de votos de los
+vecinos más cercanos (`votes / k` en `vision/geolocation.py`), no una probabilidad de
+acierto, y con pocos candidatos un 0,3-0,5 sale incluso con fotos sin ninguna pista de
+lugar. Los otros dos riesgos también quedaban inflados para una cuenta corriente. Aparte,
+`POST /analyze/recalculate` acumulaba: el frontend reenvía el último informe recalculado
+y cada «Aplicar» volvía a multiplicar los mismos rasgos sobre la población ya
+estrechada; «Limpiar» ni llamaba al backend.
+
+*Decisión*:
+
+- Confianza -> evidencia (`_evidence` en `scoring/privacy_score.py`):
+  `(confianza - 0,3) / 0,7` acotada a 0-1, mismo umbral de ruido que
+  `_MIN_CONFIDENCE_FOR_REPRESENTATIVE`. 0,3 no cuenta nada, 0,5 vale 0,29 y 1,0 vale 1.
+  La usan la geolocalización (texto y fotos) y los datos inferibles.
+- Geolocalización: escala de fotos 4,0 (antes 2,0). Una foto de confianza 1,0 da 22; tres
+  de 0,9, 47; seis, 72. Las dos fotos de 0,47 del caso real pasan de 37,5 a 11,4.
+- Datos inferibles: saturación 9 (antes 8) y pesos menores para lo que casi todos tienen
+  (`rutina` y `lengua_materna` 0,4) y para las señales blandas (aficiones 0,25; mascota,
+  idiomas, hábito y equipo 0,2).
+- Deanonimización: el estilo de escritura aporta como máximo 0,2 (antes 0,5); la
+  población restante usa una curva convexa (`bits^2`: 300.000 personas -> 0,085, 50 ->
+  0,60, 1 -> 1); un identificador publicado aporta 0,6 (dos o más, 0,85) y cada cuenta
+  relacionada 0,2 con máximo 0,5 (un username común da falsas coincidencias).
+- Efecto medido sobre tres cuentas sintéticas (geolocalización / datos / deanonimización):
+  casi sin ubicación 37,5 / 13,4 / 34,3 -> 11,4 / 4,8 / 11,5; normal 86,4 / 26,5 / 49,8 ->
+  58,1 / 14,6 / 19,1; muy expuesta (contacto publicado, empresa, seis fotos seguras)
+  99,3 / 47,8 / 98,9 -> 96,1 / 36,8 / 93,7. Bajan los tres en todos los casos; lo grave
+  sigue en «Alto» o «Muy alto». Son
+  hipótesis a validar con cuentas reales, como el resto de ponderaciones.
+- `recalculate_report` es idempotente respecto a los rasgos manuales: antes de aplicar los
+  nuevos elimina los atributos `color_ojos` / `color_pelo` / `color_piel` y los pasos de
+  población con `source == "manual"`, así que los rasgos sustituyen a los anteriores y
+  `manual_attributes=[]` deja el informe como salió del análisis. El frontend llama
+  siempre, también con la lista vacía («Limpiar» o aplicar con los tres selectores en
+  blanco).
