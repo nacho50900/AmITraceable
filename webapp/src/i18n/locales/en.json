@@ -100,7 +100,7 @@
       "deanonymizationEase": "Ease of de-anonymization",
       "geolocationRiskTooltip": "How confidently it can be deduced where you live or move around. It combines the location deduced from your texts (places you mention, hashtags, communities) with that of your photos: the more photos agree on the same area, and the more confident they are, the higher the risk.",
       "inferableDataRiskTooltip": "How many different personal details can be inferred from what you post (location, occupation, routine, identifiers, hobbies...) and with what confidence. Those that identify or locate you, like your workplace or a published contact, weigh more than a hobby.",
-      "deanonymizationEaseTooltip": "How easy it would be to recognize you. It adds up independent signals: your writing style and activity (with little content it weighs less and on its own it never goes past a fifth), how many people share the detected traits, the identifiers you have published (email, phone...) and your accounts that show up on other sites under the same username."
+      "deanonymizationEaseTooltip": "How easy it would be to recognize you. It adds up independent signals: your writing style and activity (with little content it weighs less and on its own it never goes past a fifth), how many people share the detected traits (it weighs much more if it is also known where you live), the identifiers you have published (email, phone...) and your accounts that show up on other sites under the same username."
     },
     "whatCanBeInferred": "What can be inferred about you",
     "estimatedLocations": "Locations estimated from your photos",

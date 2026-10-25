@@ -117,6 +117,14 @@ _DEFAULT_CATEGORY_WEIGHT = 0.5
 # Exponente de la curva de unicidad de la población restante (ver `_population_uniqueness`).
 _POPULATION_CURVE_EXPONENT = 2.0
 
+# Una población restante pequeña solo facilita la identificación si se puede
+# encontrar a esa gente. Sin ninguna pista de dónde vive la persona, unas
+# decenas de personas con esos rasgos están repartidas por todo el país y
+# localizarlas es casi imposible; cuanta más ubicación se deduce (texto o
+# fotos), más se acerca el estrechamiento a valer entero. Factor mínimo (sin
+# ubicación) -> 1,0 (ubicación segura): ver `_deanonymization_ease`.
+_UNANCHORED_NARROWING_FACTOR = 0.25
+
 # El estilo de escritura y la actividad por sí solos no identifican a nadie:
 # su aportación se limita a este máximo (0-1).
 _STYLE_MAX_CONTRIBUTION = 0.2
@@ -155,6 +163,7 @@ def compute_exposure_score(
         remaining_population=remaining_population,
         n_identifiers=_count_direct_identifiers(inferred_attributes),
         related_accounts_found=related_accounts_found,
+        geolocation_signal=geolocation_risk / 100.0,
     )
     identity_consistency_risk = 0.0  # ver nota de alcance en el docstring
 
@@ -349,13 +358,19 @@ def _deanonymization_ease(
     remaining_population: int | None = None,
     n_identifiers: int = 0,
     related_accounts_found: int = 0,
+    geolocation_signal: float = 0.0,
 ) -> float:
+    """`geolocation_signal` (0-1) es cuánto se sabe de dónde vive la persona
+    (el riesgo de geolocalización / 100): ancla la población restante, que sin
+    ubicación pesa solo `_UNANCHORED_NARROWING_FACTOR` de lo que pesaría."""
     if n_posts <= 0:
         return 0.0
     style = _style_signal(n_posts, fingerprint) * _STYLE_MAX_CONTRIBUTION
+    anchor = _UNANCHORED_NARROWING_FACTOR + (1.0 - _UNANCHORED_NARROWING_FACTOR) * max(0.0, min(geolocation_signal, 1.0))
+    narrowing = _population_uniqueness(remaining_population) * anchor
     identifiers = _IDENTIFIER_CONTRIBUTION.get(n_identifiers, _IDENTIFIER_CONTRIBUTION_MANY)
     accounts = min(related_accounts_found * _ACCOUNT_CONTRIBUTION_EACH, _ACCOUNT_CONTRIBUTION_MAX)
-    return _noisy_or(style, _population_uniqueness(remaining_population), identifiers, accounts) * 100.0
+    return _noisy_or(style, narrowing, identifiers, accounts) * 100.0
 
 
 def _score_deanonymization_ease(
@@ -365,6 +380,7 @@ def _score_deanonymization_ease(
     remaining_population: int | None = None,
     n_identifiers: int = 0,
     related_accounts_found: int = 0,
+    geolocation_signal: float = 0.0,
 ) -> float:
     return _deanonymization_ease(
         len(posts),
@@ -372,4 +388,5 @@ def _score_deanonymization_ease(
         remaining_population=remaining_population,
         n_identifiers=n_identifiers,
         related_accounts_found=related_accounts_found,
+        geolocation_signal=geolocation_signal,
     )

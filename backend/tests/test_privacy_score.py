@@ -232,13 +232,48 @@ def test_three_manual_physical_traits_raise_the_score():
 def test_deanonymization_rises_when_few_people_match_the_traits():
     posts = [_post(i, hour=10) for i in range(30)]
     fp = _fingerprint(0.45, {10: 0.5, 11: 0.5})
+    located = {"geolocation_signal": 1.0}  # con la ubicación segura, el estrechamiento pesa entero
 
-    unknown = _score_deanonymization_ease(posts, fp)
-    common = _score_deanonymization_ease(posts, fp, remaining_population=5_000_000)
-    rare = _score_deanonymization_ease(posts, fp, remaining_population=50)
-    unique = _score_deanonymization_ease(posts, fp, remaining_population=1)
+    unknown = _score_deanonymization_ease(posts, fp, **located)
+    common = _score_deanonymization_ease(posts, fp, remaining_population=5_000_000, **located)
+    rare = _score_deanonymization_ease(posts, fp, remaining_population=50, **located)
+    unique = _score_deanonymization_ease(posts, fp, remaining_population=1, **located)
 
     assert unknown < common < rare < unique == 100.0
+
+
+def test_rare_traits_without_any_location_do_not_reach_high():
+    """Caso real: hombre, con pareja, rubio, ojos azules y piel oscura (unas 54 personas
+    en toda España) sin ubicación ni identificadores daba "Alto (64,7)": esa gente está
+    repartida por el país y sin un ancla no se la puede encontrar."""
+    posts = [_post(i, hour=10) for i in range(30)]
+    fp = _fingerprint(0.45, {10: 0.5, 11: 0.5})
+
+    assert _score_deanonymization_ease(posts, fp, remaining_population=54) < 25.0  # "Bajo"
+
+
+def test_the_same_small_population_weighs_more_the_better_the_person_is_located():
+    posts = [_post(i, hour=10) for i in range(30)]
+    fp = _fingerprint(0.45, {10: 0.5, 11: 0.5})
+
+    unlocated = _score_deanonymization_ease(posts, fp, remaining_population=54)
+    partly = _score_deanonymization_ease(posts, fp, remaining_population=54, geolocation_signal=0.5)
+    located = _score_deanonymization_ease(posts, fp, remaining_population=54, geolocation_signal=0.9)
+
+    assert unlocated < partly < located
+
+
+def test_complete_score_anchors_the_narrowing_with_its_own_geolocation_risk():
+    posts = [_post(i, hour=10) for i in range(30)]
+    fp = _fingerprint(0.45, {10: 0.5, 11: 0.5})
+    kwargs = {"n_posts": len(posts), "fingerprint": fp, "remaining_population": 54}
+
+    without_location = compute_exposure_score(inferred_attributes=[], **kwargs)
+    with_location = compute_exposure_score(
+        inferred_attributes=[_attr("ubicacion_detallada", confidence=0.95)], **kwargs
+    )
+
+    assert with_location.deanonymization_ease > without_location.deanonymization_ease + 20
 
 
 def test_published_identifiers_and_related_accounts_raise_deanonymization():

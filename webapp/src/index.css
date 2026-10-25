@@ -1178,6 +1178,21 @@ body {
   padding: 2px 10px;
 }
 
+/* Etiqueta de riesgo (Bajo / Medio / Alto...) de cada rasgo. El color de fondo
+   lo pone el componente (RISK_COLORS en PopulationNarrowingTable.tsx); aquí
+   la forma: antes no tenía estilo y salía como un rectángulo pegado al texto.
+   Mismo formato de píldora que reduction-badge y source-badge. */
+.risk-pill {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  border-radius: 999px;
+  padding: 2px 12px;
+}
+
 .source-badge {
   display: inline-flex;
   align-items: center;
