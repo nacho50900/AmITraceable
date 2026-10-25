@@ -398,6 +398,12 @@ hay dos modelos compitiendo por VRAM.
 
 ==== ADR-50: Unificación del análisis visual (Moondream2 → Qwen3.5-4B compartido)
 
+NOTE: *Mejora anotada aquí, realizada en ADR-58* (25/10): la unificación de
+los prompts de visión en una única llamada que esta ADR dejó como mejora
+futura (ver el párrafo sobre `_CAPTION_QUERY`/`_STRUCTURED_QUERY`) se hizo
+en ADR-58, con un formato de líneas fijas en vez de JSON.
+
+
 *Contexto*: tras ADR-49, `app/nlp/ai_client.py` ya cargaba Qwen3.5-4B
 localmente para razonamiento de texto, pero `app/vision/scene_analysis.py`
 seguía usando Moondream2 aparte para analizar el CONTENIDO de las fotos
@@ -2052,6 +2058,19 @@ convirtiera en un despliegue de uso continuado.
 
 ==== ADR-21: Prompt de Moondream2 dividido en dos llamadas (caption en inglés + estructurado en español)
 
+NOTE: *Superada parcialmente por ADR-58* (25/10): la división en DOS
+llamadas ya no se hace con Qwen3.5-4B -- cada foto pasa a una sola llamada
+(seis líneas estructuradas + una séptima línea DESCRIPCION), con la llamada
+de frase de esta ADR como respaldo. El motivo es de coste, no de calidad:
+`llama-cpp-python` recodifica la imagen en cada llamada, así que la
+mitigación de esta ADR (reutilizar la imagen ya codificada con
+`encode_image()`) dejó de existir con ADR-49/ADR-50. Se conserva íntegra
+porque su análisis del fallo (placeholders y frase de ejemplo copiados
+literalmente, frase libre en español fuera del dominio del modelo) sigue
+siendo la razón de que la línea DESCRIPCION de ADR-58 no lleve ningún
+valor de ejemplo.
+
+
 
 *Contexto*: el prompt original de `scene_analysis.py` combinaba un campo
 de descripción general (DESCRIPCION) y tres campos de opciones fijas
@@ -3053,6 +3072,28 @@ solo hay dos idiomas posibles (ver su docstring).
 
 ==== ADR-32: Bucle de repetición sin fin con beam_size=1 en la traducción local (corrige parte de ADR-31)
 
+NOTE: *Causa de fondo identificada* (25/10): a `translate_texts_local()` le
+faltaba añadir el token de fin de secuencia `</s>` al final de cada entrada.
+`sentencepiece` a secas no lo añade (el tokenizer de HuggingFace, con el que
+se suelen mostrar los ejemplos de OPUS-MT/CTranslate2, sí), y sin él el
+modelo no sabe dónde acaba la frase ni emite su propio fin: sigue generando
+hasta el tope de longitud. Eso explica el bucle que esta ADR combatió con
+salvaguardas (`beam_size`, `repetition_penalty`, `no_repeat_ngram_size`,
+`max_decoding_length`) sin llegar a curarlo, y muy probablemente también
+los síntomas que aún se veían con ellas puestas: descripciones larguísimas
+con sílabas inventadas («cece cece», «nenie nieve»; al prohibir repetir se
+empujaría al modelo a inventar tokens en vez de parar) y descripciones que
+se quedaban en inglés porque la guarda de «4 veces más larga» descartaba
+la traducción. Es la explicación coherente con lo observado y con cómo se
+usa el modelo en los ejemplos oficiales; no se reprodujo el fallo por
+separado. Corregido añadiendo `"</s>"` a cada secuencia de entrada, con un
+test de regresión (`test_source_sequences_end_with_eos_token`); en la
+prueba manual del autor las descripciones dejaron de salir con sílabas
+inventadas, pero se probó junto con otros cambios de la misma tanda y no se
+aisló el efecto. Las salvaguardas de esta ADR se conservan como segunda red
+de seguridad.
+
+
 
 *Contexto*: la primera versión de `translate_texts_local()` (ADR-31)
 usaba `beam_size=1` (decodificación voraz, sin búsqueda en haz) a
@@ -3511,3 +3552,94 @@ estrechada; «Limpiar» ni llamaba al backend.
   `manual_attributes=[]` deja el informe como salió del análisis. El frontend llama
   siempre, también con la lista vacía («Limpiar» o aplicar con los tres selectores en
   blanco).
+
+==== ADR-58: Una sola llamada de visión por foto en el análisis de escena (sustituye parte de ADR-21)
+
+*Contexto*: ADR-21 separó el análisis de escena en dos llamadas a Moondream2
+(`_CAPTION_QUERY` para la frase y `_STRUCTURED_QUERY` para las líneas fijas)
+porque la línea DESCRIPCION, mezclada con campos de opciones cerradas, salía
+copiada del ejemplo o en un español roto. Daba por barata esa separación
+porque reutilizaba la imagen ya codificada (`encode_image()`). ADR-50 pasó
+el análisis visual a Qwen3.5-4B sobre `llama-cpp-python` y dejó los dos
+prompts intactos, anotando como mejora futura unificarlos. Pero con
+`llama-cpp-python` cada `create_chat_completion()` recodifica la imagen desde
+cero (hay un comentario en `analyze_image_content` sobre ello), así que cada
+foto pagaba DOS codificaciones completas.
+
+Medido por el autor en la GTX 1650 (22-25/10/2026), con las líneas
+`image slice encoded` del log del backend:
+
+- Con `mmproj-BF16.gguf` (el valor por defecto de `qwen_mmproj_filename` hasta
+  esta decisión): ~12 s
+  por codificación, casi idéntico en todas las fotos (una Turing no tiene BF16
+  nativo). Con dos codificaciones más la generación se superaba
+  `scene_analysis_timeout_seconds` (60 s) y el log registró 19 descartes por
+  timeout (fotos sin descripción).
+- Con `mmproj-F16.gguf` configurado en el `.env`: ~4,7 s por codificación, es
+  decir ~9,4 s por foto con las dos llamadas.
+- `nvidia-smi` durante el análisis: GPU al 84-100 %, 1965 MHz de un máximo de
+  2145, ~43 W, 50-51 °C, 3845 MiB de VRAM; los contadores de limitación por
+  temperatura y por potencia, a cero. La tarjeta está limitada por cómputo
+  real, sin tope térmico ni de potencia: la única forma de ir más rápido es
+  hacer menos trabajo por foto.
+
+*Alternativas consideradas*:
+
+- *Mantener las dos llamadas* (ADR-21): descartada, duplica la parte más cara
+  de cada foto.
+- *Dejar la llamada única detrás de un ajuste de entorno apagado por defecto*:
+  se implementó así primero y se retiró antes de integrar. Se prefirió un
+  único comportamiento; el riesgo de calidad que justificaba el ajuste lo
+  cubre el respaldo de abajo.
+- *Reutilizar el embedding de la imagen entre las dos llamadas*: no disponible
+  en el `llama-cpp-python` usado (ver el motivo del `reset()` en
+  `analyze_image_content`).
+- *Reducir la resolución de la imagen* (hoy ~378 px, 576 parches): no
+  implementada. Extrapolando dos puntos medidos (576 parches ≈ 3,5 s; una
+  imagen mucho más pequeña, probablemente la foto de perfil, ≈ 0,75 s), ~320 px darían ~2 s por foto, pero la misma
+  llamada lee la matrícula y el texto visible y perderían legibilidad.
+  Queda como palanca futura si hace falta ir más rápido.
+
+*Decisión*: cada foto hace UNA llamada con `_COMBINED_QUERY`, las seis líneas
+de `_STRUCTURED_QUERY` más una séptima línea `DESCRIPCION:` con la frase en
+inglés (8-15 palabras, con la misma prohibición de describir raza, etnia, edad
+o aspecto físico).
+
+- `_COMBINED_QUERY` se deriva de `_STRUCTURED_QUERY` con dos reemplazos de
+  texto (lo que habla de «seis líneas»), no se duplica su contenido; un
+  `assert` al importar el módulo falla si alguien cambia el texto original y
+  el reemplazo deja de aplicarse, en vez de generar un prompt incoherente.
+- La línea DESCRIPCION va la última y SIN valor de ejemplo: es lo que falló
+  con Moondream2 (ADR-21, el modelo devolvía la frase de ejemplo literal).
+  Con Qwen3.5-4B no se ha observado, pero se evita de entrada. Sin plantilla
+  que copiar y tras rellenar ya las otras seis líneas, el modelo escribe la
+  frase de la imagen real.
+- Respaldo: si `_parse_descripcion()` no encuentra la línea, se hace la
+  llamada de frase de ADR-21 (`_CAPTION_QUERY`) solo para esa foto. Las
+  señales estructuradas ya están resueltas de la primera llamada, así que lo
+  peor que pasa es ahorrar menos en esa foto.
+- El valor por defecto de `qwen_mmproj_filename` pasa de `mmproj-BF16.gguf` a
+  `mmproj-F16.gguf`: una Turing no tiene BF16 nativo y era el origen de los
+  ~12 s por codificación. Se puede volver a BF16 con la variable de entorno
+  `QWEN_MMPROJ_FILENAME` (p. ej. en una GPU Ampere o posterior).
+- `_model.reset()` antes de CADA llamada, también la de respaldo (mismo bug de
+  SIGSEGV que ya obligaba a hacerlo). `_COMBINED_SETTINGS` fija
+  `max_tokens=125` (seis líneas ≈ 65 tokens, frase ≈ 25-30, más margen) y
+  sustituye a `_STRUCTURED_SETTINGS`.
+
+*Consecuencias*: (+) una sola codificación por foto en el caso normal. Tras el
+cambio, el log del autor mostró 2,9-3,9 s por codificación (la mayoría ≈ 3,5 s)
+con una línea por foto, frente a ≈ 9,4 s por foto antes (≈ -63 %). Esa cifra
+mezcla la llamada única con otros ajustes de entorno de la misma sesión; el
+ahorro atribuible solo a esta decisión es la segunda codificación, algo menos
+de la mitad del coste; (+) menos fotos descartadas por el timeout de
+`scene_analysis_timeout_seconds`; (-) la calidad de la frase con la llamada
+única NO se ha medido todavía: falta comparar con las frases de las dos
+llamadas usando `LOG_VISUAL_DESCRIPTIONS` sobre las mismas fotos; (-) una foto
+que cae al respaldo paga las dos codificaciones, y si fueran muchas el ahorro
+se diluiría; (-) el prompt es más largo y un modelo de 4B atiende una tarea
+más cargada en la misma llamada; (-) el cambio de proyector hace que el primer arranque tras actualizar
+descargue otro fichero GGUF, y un `.env` que fije BF16 de forma explícita
+seguirá a ~12 s por codificación en una Turing; (-) la calidad de la visión
+con F16 frente a BF16 no se ha comparado de forma sistemática, solo se ha
+usado en las pruebas del autor, donde las descripciones salieron bien.

@@ -124,3 +124,24 @@ class TestSceneAnalysisTimeoutSeconds:
         fresh_settings = config.Settings()
 
         assert fresh_settings.scene_analysis_timeout_seconds == 90
+
+
+class TestQwenMmprojFilename:
+    """Ver el comentario de Settings.qwen_mmproj_filename y ADR-58: el
+    proyector de visión por defecto es F16, no BF16 -- la GTX 1650 de
+    referencia (Turing) no tiene BF16 nativo y codificar una imagen tardaba
+    ~12 s con BF16 frente a ~4,7 s con F16."""
+
+    def test_default_is_f16_not_bf16(self):
+        default = config.Settings.model_fields["qwen_mmproj_filename"].default
+
+        assert default == "mmproj-F16.gguf"
+        assert "BF16" not in default
+
+    def test_configurable_via_env_var(self, monkeypatch):
+        monkeypatch.setenv("QWEN_MMPROJ_FILENAME", "mmproj-BF16.gguf")
+
+        fresh_settings = config.Settings()
+
+        assert fresh_settings.qwen_mmproj_filename == "mmproj-BF16.gguf"
+

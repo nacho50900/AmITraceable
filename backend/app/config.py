@@ -169,7 +169,15 @@ class Settings(BaseSettings):
     # cargado por este módulo se queda solo de texto (comportamiento
     # anterior a ADR-50) y `app/vision/scene_analysis.py` degrada a "no
     # disponible" en vez de intentar usarlo para imágenes.
-    qwen_mmproj_filename: str = "mmproj-BF16.gguf"
+    #
+    # F16, no BF16: la GTX 1650 de referencia es una Turing (sm_75), sin
+    # soporte nativo de BF16, y con `mmproj-BF16.gguf` codificar una imagen
+    # tardaba ~12 s (casi idéntico en todas las fotos, hasta superar el
+    # timeout de `scene_analysis_timeout_seconds`); con `mmproj-F16.gguf`
+    # pasó a ~4,7 s por codificación. Ver ADR-58. Con una GPU Ampere o
+    # posterior BF16 sí es nativo y puede volver a servir: se cambia por la
+    # variable de entorno QWEN_MMPROJ_FILENAME sin tocar el código.
+    qwen_mmproj_filename: str = "mmproj-F16.gguf"
 
     @property
     def ai_key_configured(self) -> bool:
