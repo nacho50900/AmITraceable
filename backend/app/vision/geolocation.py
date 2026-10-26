@@ -1052,6 +1052,82 @@ def _collect_photo_result(
         visual_description_codes[photo_link] = description_codes
 
 
+def _build_photo_units(posts: list, avatar_url: str | None) -> list[tuple[str, str, int, int]]:
+    """Una entrada por FOTO, no por publicación: un carrusel con 5 fotos
+    aporta 5 entradas, todas con el mismo permalink DE PUBLICACIÓN (el
+    índice/total dentro del carrusel se llevan aparte, para poder construir
+    un enlace específico a cada foto -- ver `_photo_link`) -- así se
+    analizan TODAS las fotos, no solo la primera. Ver
+    InstagramClient._extract_media_urls().
+
+    Devuelve tuplas `(permalink, media_url, index, total)`. La foto de
+    perfil, si se da, se añade al final como total=1 (nunca lleva
+    ?img_index=, ver `_photo_link`) -- no es parte de ningún carrusel."""
+    photo_units: list[tuple[str, str, int, int]] = []
+    for post in posts:
+        if post.type not in ("image", "carousel_album"):
+            continue
+        media_urls = getattr(post, "media_urls", None) or []
+        post_total = len(media_urls)
+        for photo_index, url in enumerate(media_urls, start=1):
+            photo_units.append((post.permalink, url, photo_index, post_total))
+    if avatar_url:
+        photo_units.append((avatar_url, avatar_url, 1, 1))
+    return photo_units
+
+
+def _pillow_available() -> bool:
+    """Pillow no es una dependencia obligatoria del núcleo de la app
+    (pyproject.toml), solo se necesita para este módulo opcional de
+    geolocalización. Si no está instalada, el llamador degrada devolviendo
+    lista vacía en vez de romper el análisis completo -- mismo principio
+    que ya se aplica a torch/faiss/transformers en _lazy_load() más arriba."""
+    try:
+        import io  # noqa: F401
+        from PIL import Image  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _log_photo_run(total: int, actual_concurrency: int, timing: PhotoAnalysisTiming, run_start: float) -> None:
+    """Registra las métricas de rendimiento del análisis de fotos recién
+    terminado (ver log/performance_log.py)."""
+    import os
+
+    cpu_count = os.cpu_count() or 4
+    log_photo_analysis_run(
+        PhotoAnalysisRunMetrics(
+            total_photos=total,
+            cpu_count=cpu_count,
+            configured_concurrency=settings.photo_analysis_concurrency,
+            actual_concurrency=actual_concurrency,
+            # Igual que se calcula en app/main.py -- se repite aquí (en vez
+            # de leerlo de algún sitio compartido) porque es una cuenta
+            # trivial y así este módulo no depende de detalles de arranque
+            # de main.py.
+            threads_per_inference=max(1, cpu_count // max(1, settings.photo_analysis_concurrency)),
+            enable_scene_analysis=settings.enable_scene_analysis,
+            # Estado REAL de offload en ESTE análisis, no solo si el flag
+            # de config está activado -- si el worker de iGPU nunca llegó
+            # a inicializarse (_igpu_worker_device_index sigue None) o
+            # falló a mitad de análisis (_igpu_worker_failed), el resto de
+            # fotos ya se procesaron en local pese a tener
+            # ENABLE_IGPU_OFFLOAD=true, y el log de rendimiento debe
+            # reflejar eso, no la config nominal (ver el comentario de
+            # este mismo campo en log/performance_log.py).
+            igpu_offload_used=_igpu_worker_device_index is not None and not _igpu_worker_failed,
+            dinov2_local_device=get_local_device(),
+            moondream_device=scene_analysis.get_device(),
+            moondream_model_variant=scene_analysis.get_model_variant(),
+            total_wall_seconds=time.monotonic() - run_start,
+            per_photo_seconds=timing.per_photo_seconds,
+            per_photo_dinov2_seconds=timing.dinov2_seconds,
+            per_photo_scene_seconds=timing.scene_seconds,
+        )
+    )
+
+
 async def estimate_locations_for_posts(
     posts: list, avatar_url: str | None = None, progress_callback=None, skip=None
 ) -> GeolocationOutcome:
@@ -1117,41 +1193,15 @@ async def estimate_locations_for_posts(
     index_available = _geolocation_available()
 
     results: list[tuple[str, ImageLocationEstimate]] = []
-    # Una entrada por FOTO, no por publicación: un carrusel con 5 fotos
-    # aporta 5 entradas aquí, todas con el mismo permalink DE PUBLICACIÓN
-    # (el índice/total dentro del carrusel se llevan aparte, para poder
-    # construir un enlace específico a cada foto -- ver `_photo_link`) --
-    # así se analizan TODAS las fotos, no solo la primera. Ver
-    # InstagramClient._extract_media_urls().
-    photo_units: list[tuple[str, str, int, int]] = []  # (permalink, media_url, index, total)
-    for post in posts:
-        if post.type not in ("image", "carousel_album"):
-            continue
-        media_urls = getattr(post, "media_urls", None) or []
-        post_total = len(media_urls)
-        for photo_index, url in enumerate(media_urls, start=1):
-            photo_units.append((post.permalink, url, photo_index, post_total))
-    if avatar_url:
-        # La foto de perfil siempre se trata como total=1 (nunca lleva
-        # ?img_index=, ver _photo_link) -- no es parte de ningún carrusel.
-        photo_units.append((avatar_url, avatar_url, 1, 1))
+    photo_units = _build_photo_units(posts, avatar_url)
     total = len(photo_units)
 
     if total == 0 or not index_available:
         return GeolocationOutcome(index_available=index_available, results=results)
 
-    try:
-        from PIL import Image
-        import io
-    except ImportError:
-        # Pillow no es una dependencia obligatoria del núcleo de la app
-        # (pyproject.toml), solo se necesita para este módulo opcional de
-        # geolocalización. Si no está instalada, se degrada devolviendo
-        # lista vacía en vez de romper el análisis completo -- mismo
-        # principio que ya se aplica a torch/faiss/transformers en
-        # _lazy_load() más arriba. Se marca index_available=False para que
-        # el frontend lo trate igual que "módulo no operativo en este
-        # servidor", que es justo lo que es.
+    if not _pillow_available():
+        # Se marca index_available=False para que el frontend lo trate igual
+        # que "módulo no operativo en este servidor", que es justo lo que es.
         return GeolocationOutcome(index_available=False, results=results)
 
     visual_inferences: list[tuple[str, InferredAttribute]] = []
@@ -1256,38 +1306,7 @@ async def estimate_locations_for_posts(
             # deterministas independientemente del orden real de
             # finalización.
 
-    import os
-
-    log_photo_analysis_run(
-        PhotoAnalysisRunMetrics(
-            total_photos=total,
-            cpu_count=os.cpu_count() or 4,
-            configured_concurrency=settings.photo_analysis_concurrency,
-            actual_concurrency=actual_concurrency,
-            # Igual que se calcula en app/main.py -- se repite aquí (en vez
-            # de leerlo de algún sitio compartido) porque es una cuenta
-            # trivial y así este módulo no depende de detalles de arranque
-            # de main.py.
-            threads_per_inference=max(1, (os.cpu_count() or 4) // max(1, settings.photo_analysis_concurrency)),
-            enable_scene_analysis=settings.enable_scene_analysis,
-            # Estado REAL de offload en ESTE análisis, no solo si el flag
-            # de config está activado -- si el worker de iGPU nunca llegó
-            # a inicializarse (_igpu_worker_device_index sigue None) o
-            # falló a mitad de análisis (_igpu_worker_failed), el resto de
-            # fotos ya se procesaron en local pese a tener
-            # ENABLE_IGPU_OFFLOAD=true, y el log de rendimiento debe
-            # reflejar eso, no la config nominal (ver el comentario de
-            # este mismo campo en log/performance_log.py).
-            igpu_offload_used=_igpu_worker_device_index is not None and not _igpu_worker_failed,
-            dinov2_local_device=get_local_device(),
-            moondream_device=scene_analysis.get_device(),
-            moondream_model_variant=scene_analysis.get_model_variant(),
-            total_wall_seconds=time.monotonic() - run_start,
-            per_photo_seconds=timing.per_photo_seconds,
-            per_photo_dinov2_seconds=timing.dinov2_seconds,
-            per_photo_scene_seconds=timing.scene_seconds,
-        )
-    )
+    _log_photo_run(total, actual_concurrency, timing, run_start)
 
     return GeolocationOutcome(
         index_available=index_available,

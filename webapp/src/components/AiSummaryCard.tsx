@@ -74,10 +74,10 @@ const AiSummaryCard: React.FC<AiSummaryCardProps> = ({ report }) => {
       <h2>{t('components.aiSummary.title')}</h2>
 
       {status === 'loading' && (
-        <p className="note" role="status">
+        <output className="note">
           {t('components.aiSummary.loading')}
           <LoadingDots />
-        </p>
+        </output>
       )}
 
       {status === 'success' && (

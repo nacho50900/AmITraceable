@@ -470,7 +470,12 @@ body {
   border: 1px solid transparent;
   cursor: pointer;
   border-radius: 6px;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .btn-primary {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
 }
 
 .btn-secondary {
@@ -516,6 +521,7 @@ body {
 
 /* Frase bajo los botones tras saltar el análisis. */
 .progress-skip-note {
+  display: block;
   margin: 14px auto 0;
   max-width: 520px;
   color: var(--text-dim);
@@ -858,6 +864,10 @@ body {
   margin-bottom: 8px;
 }
 
+output.note {
+  display: block;
+}
+
 .note {
   font-size: 13px;
   color: var(--text-dim);
@@ -909,7 +919,12 @@ body {
   color: #7c8391;
   cursor: help;
   border-radius: 50%;
-  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .info-tip-button {
+    transition: color 0.15s ease, transform 0.15s ease;
+  }
 }
 
 .info-tip-button:hover,

@@ -1566,9 +1566,9 @@ class TestLazyLoadWarmsUpIgpuWorker:
     arranque (no en la primera foto) si no queda listo."""
 
     @staticmethod
-    def _stub_heavy_loading(monkeypatch, tmp_path):
+    def _stub_heavy_loading(monkeypatch, tmp_path, meta_csv="id,lat,lon,region\n1,40.0,-3.0,Madrid\n"):
         (tmp_path / "index.faiss").write_bytes(b"x")
-        (tmp_path / "index_meta.csv").write_text("id,lat,lon\n1,40.0,-3.0\n", encoding="utf-8")
+        (tmp_path / "index_meta.csv").write_text(meta_csv, encoding="utf-8")
         monkeypatch.setattr(geolocation, "_INDEX_DIR", tmp_path)
 
         fake_model = SimpleNamespace()
@@ -1616,6 +1616,49 @@ class TestLazyLoadWarmsUpIgpuWorker:
         geolocation._lazy_load()
 
         assert geolocation._igpu_worker_device_index is None
+
+
+class TestRegionAliases:
+    """Los nombres de `region` del índice fusionado que `_resolve_region`
+    (report/generator.py) no reconoce se normalizan al cargar; si no, esas
+    fotos se ignorarían en silencio al inferir la residencia."""
+
+    def test_lazy_load_normalizes_aliased_regions_and_leaves_the_rest_untouched(self, monkeypatch, tmp_path):
+        TestLazyLoadWarmsUpIgpuWorker._stub_heavy_loading(
+            monkeypatch,
+            tmp_path,
+            meta_csv=(
+                "id,lat,lon,region\n"
+                "1,41.98,2.82,Girona\n"
+                "2,41.61,0.62,Lleida\n"
+                "3,42.34,-7.86,Ourense\n"
+                "4,28.47,-16.25,Sta. Cruz de Tenerife\n"
+                "5,39.86,-3.00,Castille-La Mancha\n"
+                "6,37.39,-5.99,Sevilla\n"
+                "7,40.00,-3.00,\n"
+            ),
+        )
+        monkeypatch.setattr(geolocation, "_select_igpu_worker_device_index", lambda cuda: None)
+
+        geolocation._lazy_load()
+
+        regions = geolocation._index_meta["region"]
+        assert regions.iloc[:6].tolist() == [
+            "Gerona", "Lérida", "Orense", "Santa Cruz de Tenerife", "Castilla-La Mancha", "Sevilla",
+        ]
+        assert pd.isna(regions.iloc[6])  # sin región: sigue siendo NaN (luego "desconocido")
+
+    @pytest.mark.parametrize("alias_target", sorted(geolocation._REGION_ALIASES.values()))
+    def test_every_alias_target_is_resolved_by_the_report(self, alias_target):
+        from app.report.generator import _resolve_region
+
+        assert _resolve_region(alias_target) is not None
+
+    @pytest.mark.parametrize("alias_source", sorted(geolocation._REGION_ALIASES))
+    def test_every_alias_source_is_really_unresolved_so_the_alias_is_not_stale(self, alias_source):
+        from app.report.generator import _resolve_region
+
+        assert _resolve_region(alias_source) is None
 
 
 class TestEstimateLocationFromImageIgpuWorkerFallback:

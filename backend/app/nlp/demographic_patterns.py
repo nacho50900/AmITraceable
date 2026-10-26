@@ -172,7 +172,11 @@ _NO_ES_EDAD_RE = re.compile(
 )
 # Convención de Reddit: "(24M)", "[29F]", "yo 29F". Se comprueba sobre el
 # texto ORIGINAL porque la mayúscula distingue "24M" de "24 m" (metros).
-_EDAD_SEXO_REDDIT_RE = re.compile(r"[(\[]\s*(\d{2})\s*([MF])\s*[)\]]|\b(?:[Yy]o|[Ss]oy|I(?: a|')?m)\s+(\d{2})\s?([MF])\b")
+# Dos regex (antes una con alternancia) para bajar la complejidad de cada una;
+# `edad_y_sexo_reddit` se queda con la coincidencia más a la izquierda, igual
+# que hacía la alternancia original.
+_EDAD_SEXO_DELIMITADA_RE = re.compile(r"[(\[]\s*(\d{2})\s*([MF])\s*[)\]]")
+_EDAD_SEXO_FRASE_RE = re.compile(r"\b(?:[Yy]o|[Ss]oy|I(?: a|')?m)\s+(\d{2})\s?([MF])\b")
 
 EDAD_MIN, EDAD_MAX = 12, 100
 
@@ -182,11 +186,14 @@ def _edad_valida(valor: int | None) -> int | None:
 
 
 def edad_y_sexo_reddit(texto: str) -> tuple[int | None, str | None]:
-    match = _EDAD_SEXO_REDDIT_RE.search(texto)
-    if not match:
+    candidatos = [
+        m for m in (_EDAD_SEXO_DELIMITADA_RE.search(texto), _EDAD_SEXO_FRASE_RE.search(texto)) if m
+    ]
+    if not candidatos:
         return None, None
-    edad = int(match.group(1) or match.group(3))
-    letra = match.group(2) or match.group(4)
+    match = min(candidatos, key=lambda m: m.start())
+    edad = int(match.group(1))
+    letra = match.group(2)
     return _edad_valida(edad), (_HOMBRE if letra == "M" else _MUJER)
 
 

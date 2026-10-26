@@ -13,7 +13,7 @@ import InferredAttributesList from '../components/InferredAttributesList';
 import RelatedAccountsList from '../components/RelatedAccountsList';
 import ScoreBar from '../components/ScoreBar';
 import { ManualTraitsSelector } from '../components/ManualTraitsSelector';
-import type { ExposureReport, Platform, ManualAttribute } from '../types';
+import type { AnalysisProgressEvent, ExposureReport, Platform, ManualAttribute } from '../types';
 
 function readPlatform(): Platform {
   const value = new URLSearchParams(window.location.search).get('platform');
@@ -190,6 +190,64 @@ const Dashboard: React.FC = () => {
     step();
   };
 
+  // Evento de una pista paralela (fotos, geolocalización, cuentas): actualiza
+  // su propio contador y devuelve true. Devuelve false si `track` no es una
+  // pista conocida, para que el llamador lo trate como fase general.
+  const handleTrackEvent = (track: unknown, counts: Record<string, unknown>): boolean => {
+    switch (track) {
+      case 'fotos':
+        setPhotosCounts(counts);
+        setPhotosDone(isTrackDone(counts));
+        return true;
+      case 'geolocalizacion':
+        setGeoCounts(counts);
+        setGeoDone(isTrackDone(counts));
+        return true;
+      case 'correlacion_cuentas':
+        setAccountsCounts(counts);
+        setAccountsDone(isAccountsTrackDone(counts));
+        return true;
+      default:
+        return false;
+    }
+  };
+
+  // Evento de la fase general en curso del pipeline.
+  const handleGeneralStage = (stage: string) => {
+    const previousStage = currentStageRef.current;
+    currentStageRef.current = stage;
+    // Solo se marca como "completada" cuando la fase cambia de
+    // verdad -- una misma fase puede repetirse varias veces seguidas
+    // y en ese caso debe seguir mostrándose como la fase EN CURSO, no
+    // duplicarse en la lista de completadas.
+    if (previousStage && previousStage !== stage) {
+      enqueueCompleted(previousStage);
+    }
+    setCurrentStage(stage);
+  };
+
+  const handleProgressEvent = (event: Extract<AnalysisProgressEvent, { done: false }>) => {
+    if (skippingRef.current && event.track) {
+      return; // pista larga ya saltada: se ignora cualquier evento tardío
+    }
+    const counts: Record<string, unknown> = { ...event };
+    delete counts.done;
+    delete counts.stage;
+    delete counts.track;
+    if (!handleTrackEvent(event.track, counts)) {
+      handleGeneralStage(event.stage);
+    }
+  };
+
+  const handleFinalEvent = (event: Extract<AnalysisProgressEvent, { done: true }>) => {
+    if ('report' in event) {
+      setReport(event.report);
+    } else {
+      setError(event.error);
+    }
+    setLoading(false);
+  };
+
   useEffect(() => {
     let cancelled = false;
 
@@ -202,55 +260,11 @@ const Dashboard: React.FC = () => {
 
       stopStreamRef.current = api.analyzeStream(platform, (event) => {
         if (cancelled) return;
-
-        if (!event.done) {
-          const counts: Record<string, unknown> = { ...event };
-          delete counts.done;
-          delete counts.stage;
-          delete counts.track;
-          const { stage } = event;
-
-          if (skippingRef.current && event.track) {
-            return; // pista larga ya saltada: se ignora cualquier evento tardío
-          }
-
-          if (event.track === 'fotos') {
-            setPhotosCounts(counts);
-            setPhotosDone(isTrackDone(counts));
-            return;
-          }
-
-          if (event.track === 'geolocalizacion') {
-            setGeoCounts(counts);
-            setGeoDone(isTrackDone(counts));
-            return;
-          }
-
-          if (event.track === 'correlacion_cuentas') {
-            setAccountsCounts(counts);
-            setAccountsDone(isAccountsTrackDone(counts));
-            return;
-          }
-
-          const previousStage = currentStageRef.current;
-          currentStageRef.current = stage;
-          // Solo se marca como "completada" cuando la fase cambia de
-          // verdad -- una misma fase puede repetirse varias veces seguidas
-          // y en ese caso debe seguir mostrándose como la fase EN CURSO, no
-          // duplicarse en la lista de completadas.
-          if (previousStage && previousStage !== stage) {
-            enqueueCompleted(previousStage);
-          }
-          setCurrentStage(stage);
-          return;
-        }
-
-        if ('report' in event) {
-          setReport(event.report);
+        if (event.done) {
+          handleFinalEvent(event);
         } else {
-          setError(event.error);
+          handleProgressEvent(event);
         }
-        setLoading(false);
       });
     });
 
@@ -508,7 +522,7 @@ const Dashboard: React.FC = () => {
                   desplazamientos tras marcarse como terminada) y casi
                   nunca en la de fotos (Moondream2 termina tarde, cuando
                   completedStages ya casi no crece más). */}
-              {/* Orden: primero TODO lo ya terminado (fases generales
+              {/* Orden: primero lo ya terminado (fases generales
                   completadas + pistas paralelas ya al 100%), después lo
                   que sigue en curso (spinners) -- así los círculos que
                   giran quedan siempre debajo de los ✓ verdes. Las `key`
@@ -533,10 +547,10 @@ const Dashboard: React.FC = () => {
             </button>
           </div>
           {skipping && (
-            <p className="progress-skip-note" role="status">
+            <output className="progress-skip-note">
               {t('dashboard.skippedNotice')}
               <LoadingDots />
-            </p>
+            </output>
           )}
         </div>
       </div>
