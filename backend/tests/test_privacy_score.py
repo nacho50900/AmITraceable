@@ -16,7 +16,9 @@ import pytest
 from app.models.schemas import SocialPost, WritingFingerprint
 from app.models.schemas import ImageLocationPoint, InferredAttribute, PopulationEstimate
 from app.scoring.privacy_score import (
+    _ACCOUNT_CONTRIBUTION_MAX,
     _STYLE_MAX_CONTRIBUTION,
+    _accounts_contribution,
     _evidence,
     _score_deanonymization_ease,
     _score_geolocation,
@@ -287,6 +289,20 @@ def test_published_identifiers_and_related_accounts_raise_deanonymization():
     assert with_identifier > base
     assert with_accounts > base
     assert _score_deanonymization_ease(posts, fp, n_identifiers=2) > with_identifier
+
+
+def test_related_accounts_contribute_on_a_log_scale_and_saturate_at_200():
+    assert _accounts_contribution(0) == 0.0
+    assert _accounts_contribution(-3) == 0.0
+    contributions = [_accounts_contribution(n) for n in (1, 3, 10, 37, 100, 200)]
+    assert contributions == sorted(contributions)
+    # Las primeras cuentas pesan mucho más que las últimas (escala logarítmica).
+    assert _accounts_contribution(100) > 0.8 * _ACCOUNT_CONTRIBUTION_MAX
+    assert _accounts_contribution(100) < _ACCOUNT_CONTRIBUTION_MAX
+    assert _accounts_contribution(37) < 0.75 * _ACCOUNT_CONTRIBUTION_MAX
+    # Tope en 200: más cuentas no suben la aportación.
+    assert _accounts_contribution(200) == pytest.approx(_ACCOUNT_CONTRIBUTION_MAX)
+    assert _accounts_contribution(5000) == _accounts_contribution(200)
 
 
 def test_style_alone_never_exceeds_its_maximum_contribution():

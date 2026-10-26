@@ -135,9 +135,12 @@ _MIN_IDENTIFIER_CONFIDENCE = 0.5
 _IDENTIFIER_CONTRIBUTION = {0: 0.0, 1: 0.6}  # 2 o más: _IDENTIFIER_CONTRIBUTION_MANY
 _IDENTIFIER_CONTRIBUTION_MANY = 0.85
 
-# Cada cuenta propia encontrada con el mismo username en otros sitios permite
-# cruzar datos; se limita porque un username común puede dar coincidencias falsas.
-_ACCOUNT_CONTRIBUTION_EACH = 0.2
+# Las cuentas propias encontradas con el mismo username en otros sitios permiten
+# cruzar datos. Aportan en escala logarítmica: las primeras pesan mucho y cada
+# nueva menos, hasta saturar en `_ACCOUNTS_FOR_MAX_CONTRIBUTION` cuentas (con 200:
+# 1 -> 13 % del máximo, 10 -> 45 %, 37 -> 69 %, 100 -> 87 %). Se limita porque un
+# username común puede dar coincidencias falsas.
+_ACCOUNTS_FOR_MAX_CONTRIBUTION = 200
 _ACCOUNT_CONTRIBUTION_MAX = 0.5
 
 
@@ -351,6 +354,14 @@ def _style_signal(n_posts: int, fingerprint: WritingFingerprint) -> float:
     return min(volume_factor * 0.4 + distinctiveness_factor * 0.3 + concentration * 0.3, 1.0)
 
 
+def _accounts_contribution(related_accounts_found: int) -> float:
+    """Aportación (0-`_ACCOUNT_CONTRIBUTION_MAX`) de las cuentas relacionadas:
+    logarítmica en el número de cuentas y saturada en `_ACCOUNTS_FOR_MAX_CONTRIBUTION`."""
+    found = max(related_accounts_found, 0)
+    share = math.log1p(found) / math.log1p(_ACCOUNTS_FOR_MAX_CONTRIBUTION)
+    return _ACCOUNT_CONTRIBUTION_MAX * min(share, 1.0)
+
+
 def _deanonymization_ease(
     n_posts: int,
     fingerprint: WritingFingerprint,
@@ -369,7 +380,7 @@ def _deanonymization_ease(
     anchor = _UNANCHORED_NARROWING_FACTOR + (1.0 - _UNANCHORED_NARROWING_FACTOR) * max(0.0, min(geolocation_signal, 1.0))
     narrowing = _population_uniqueness(remaining_population) * anchor
     identifiers = _IDENTIFIER_CONTRIBUTION.get(n_identifiers, _IDENTIFIER_CONTRIBUTION_MANY)
-    accounts = min(related_accounts_found * _ACCOUNT_CONTRIBUTION_EACH, _ACCOUNT_CONTRIBUTION_MAX)
+    accounts = _accounts_contribution(related_accounts_found)
     return _noisy_or(style, narrowing, identifiers, accounts) * 100.0
 
 
