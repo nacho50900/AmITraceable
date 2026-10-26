@@ -259,15 +259,15 @@ que tenga que sobrevivir sin fallos durante toda la ejecución, así que
 si la máquina anda justa de memoria, cierra otros programas antes de
 lanzarlo.
 
-### Fusionar con el índice de OSV-5M
+### Fusionar las fuentes (OSV-5M, Commons y Mapillary)
 
 ```bash
-python merge_faiss_indices.py --sources ../../data/osv5m_spain ../../data/commons_spain --output ../../data/spain_combined
+python merge_faiss_indices.py --sources ../../data/osv5m_spain ../../data/commons_spain ../../data/mapillary_spain --output ../../data/spain_combined
 ```
 
-Después, apunta `_INDEX_DIR` en `app/vision/geolocation.py` a
-`data/spain_combined` (o copia/renombra el resultado encima de
-`data/osv5m_spain` si prefieres no tocar código).
+Solo lee las carpetas fuente (se conservan) y escribe en `--output`.
+`_INDEX_DIR` en `app/vision/geolocation.py` ya apunta a
+`data/spain_combined`. El índice combinado ocupa ~2,6 GB en RAM al cargarlo.
 
 ### Ampliar el índice, en paralelo, con Mapillary
 

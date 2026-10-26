@@ -1,7 +1,8 @@
 """
 Módulo 7 (nuevo): estima la provincia/ciudad más probable de una imagen
 comparándola, vía embeddings DINOv2, contra un índice FAISS construido con
-imágenes de calle geoetiquetadas de España (OSV-5M, ver scripts/).
+imágenes de calle geoetiquetadas de España (OSV-5M, Wikimedia Commons y
+Mapillary, fusionadas en data/spain_combined, ver scripts/).
 
 Decisión de diseño (para la memoria): en vez de predecir coordenadas GPS
 exactas (poco realista sin infraestructura tipo GeoSpy, ver benchmarks:
@@ -11,7 +12,7 @@ PROVINCIA, que es la granularidad que ya usa el resto del pipeline
 (scoring/k_anonymity.py). Es una estimación probabilística con nivel de
 confianza, no una respuesta exacta.
 
-Requiere que ya exista el índice generado por scripts/geolocalization/build_faiss_index.py
+Requiere que ya exista el índice fusionado por scripts/geolocalization/merge_faiss_indices.py
 (index.faiss + index_meta.csv). Si no existe, `estimate_location_from_image`
 devuelve None en vez de fallar, para que el resto del análisis pueda seguir
 funcionando sin este módulo (es opcional/best-effort, no crítico).
@@ -54,8 +55,20 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-_INDEX_DIR = Path(__file__).parent.parent.parent / "data" / "osv5m_spain"
+_INDEX_DIR = Path(__file__).parent.parent.parent / "data" / "spain_combined"
 _MODEL_NAME = "facebook/dinov2-small"
+
+# Nombres de `region` del índice que `_resolve_region` (report/generator.py) no
+# reconoce, y por tanto la foto se ignoraba en silencio al inferir residencia:
+# Commons/Mapillary usan los nombres de PROVINCE_CENTROIDS (image_ingest_common.py)
+# y OSV-5M el de Nominatim. Se normalizan al cargar para no tocar el CSV fusionado.
+_REGION_ALIASES = {
+    "Girona": "Gerona",
+    "Lleida": "Lérida",
+    "Ourense": "Orense",
+    "Sta. Cruz de Tenerife": "Santa Cruz de Tenerife",
+    "Castille-La Mancha": "Castilla-La Mancha",
+}
 
 # Umbral de "foto no representativa" (ver `_neighbor_spread_km` y su uso en
 # estimate_location_from_image): si los k vecinos más parecidos están
@@ -549,8 +562,9 @@ def _lazy_load():
     meta_path = _INDEX_DIR / "index_meta.csv"
     if not index_path.exists() or not meta_path.exists():
         raise FileNotFoundError(
-            f"No se encontró el índice en {_INDEX_DIR}. Ejecuta antes "
-            "scripts/geolocalization/download_osv5m_spain.py y scripts/geolocalization/build_faiss_index.py."
+            f"No se encontró el índice en {_INDEX_DIR}. Constrúyelo con los scripts de "
+            "scripts/geolocalization/ (build_faiss_index.py, build_commons_index.py, "
+            "build_mapillary_index.py) y fusiónalo con merge_faiss_indices.py."
         )
 
     _device = _select_dinov2_device()
@@ -575,6 +589,7 @@ def _lazy_load():
     _model = AutoModel.from_pretrained(_MODEL_NAME).to(_device).eval()
     _index = faiss.read_index(str(index_path))
     _index_meta = pd.read_csv(meta_path, dtype={"id": str})
+    _index_meta["region"] = _index_meta["region"].replace(_REGION_ALIASES)
 
 
 def _get_dinov2_embedding(image) -> np.ndarray | None:
@@ -657,9 +672,9 @@ def estimate_location_from_image(image, k: int = 15) -> ImageLocationEstimate | 
 
     neighbor_rows = _index_meta.iloc[indices]
 
-    # "region" en OSV-5M es lo más parecido a provincia/comunidad autónoma
-    # dentro de sus metadatos; ajusta esta columna si tu metadata.csv usa
-    # otro nombre tras inspeccionar la fila de ejemplo del script de descarga.
+    # "region" es provincia (Commons/Mapillary) o comunidad autónoma (OSV-5M,
+    # nombres de Nominatim): los votos se cuentan por cadena, así que ambas
+    # granularidades no se suman entre sí (afecta solo al ~6% de OSV-5M).
     provinces = neighbor_rows["region"].fillna("desconocido").tolist()
 
     vote_counts = Counter(provinces)
