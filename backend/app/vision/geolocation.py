@@ -55,7 +55,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-_INDEX_DIR = Path(__file__).parent.parent.parent / "data" / "spain_combined"
+_INDEX_DIR = Path(__file__).parent.parent.parent / "data" / "spain_combined_clean"
 _MODEL_NAME = "facebook/dinov2-small"
 
 # Nombres de `region` del índice que `_resolve_region` (report/generator.py) no

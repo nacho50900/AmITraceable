@@ -104,6 +104,7 @@ def search_neighbors(index, meta, embedding: np.ndarray, k: int):
 def print_report(neighbors: list[dict]) -> None:
     for position, n in enumerate(neighbors, start=1):
         print(f"{position:>2}. similitud {n['similarity']:.3f}  {n['source']:<9} {n['region']}  ({n['lat']:.4f}, {n['lon']:.4f})")
+        print(f"    id:     {n['id']}")
         print(f"    imagen: {n['link']}")
         print(f"    mapa:   https://www.google.com/maps?q={n['lat']:.6f},{n['lon']:.6f}")
 

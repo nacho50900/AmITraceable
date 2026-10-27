@@ -3643,3 +3643,16 @@ descargue otro fichero GGUF, y un `.env` que fije BF16 de forma explícita
 seguirá a ~12 s por codificación en una Turing; (-) la calidad de la visión
 con F16 frente a BF16 no se ha comparado de forma sistemática, solo se ha
 usado en las pruebas del autor, donde las descripciones salieron bien.
+
+==== ADR-59: Filtrado de imágenes basura del índice de geolocalización por parecido con un prototipo de embedding
+
+*Contexto*: dos fotos nocturnas con nieve cayendo salieron ubicadas en Cáceres con confianza 0,93 y 0,73 (`representative=True`, a ~130 m una de otra, en sierra y no en la ciudad). Los vecinos de FAISS eran fotos de Mapillary hechas con el parabrisas rayado: los arañazos nítidos y las estelas blancas se parecen en el embedding de DINOv2 a la nieve captada con la cámara en movimiento. La «confianza» es `votes / k` (acuerdo entre vecinos), no parecido real, y ninguna de las dos salvaguardas lo detecta: la dispersión es casi nula porque los vecinos están juntos y la confianza supera 0,30. Un medidor de nitidez no sirve para descartarlas, porque los arañazos tienen mucho contraste. Pasar cada imagen por un modelo no es viable con 1,68 M de vectores. Las imágenes basura aparecen repartidas en 63 regiones.
+
+*Decisión*:
+
+- Nuevo `scripts/geolocalization/filter_junk_images.py`. El prototipo es la media normalizada de los embeddings de unas imágenes semilla (30, cohesión 0,863), identificadas a mano con `nearest_images.py` (vecinos de una foto problemática, con enlace a Mapillary/Commons) y guardadas por `id` en `semillas.txt`. Se marca cada vector del índice cuyo coseno con el prototipo supera el umbral. Solo usa los vectores ya guardados (`embeddings.npy`, o `reconstruct_n` del `IndexFlatIP`), sin ningún modelo: segundos sobre 1,68 M.
+- Umbral 0,35. El recuento crece de forma gradual hasta ahí (274 con 0,70; 10.151 con 0,35) y se dispara por debajo (20.830 con 0,30; 55.281 con 0,25), donde ya entran imágenes que solo se parecen por azar. El script imprime la tabla de recuentos de 0,05 en 0,05 hasta el umbral dado y muestras con enlace justo por encima del umbral y claramente por encima, para decidirlo a ojo.
+- Por defecto solo simula. Con `--apply --output <carpeta nueva>` escribe `index.faiss`, `index_meta.csv` y `embeddings.npy` alineados, y se niega si `--output` es la carpeta del índice original, que no se toca. Antes de aplicar imprime el reparto de las marcadas por región (marcadas, total, % perdido y las que quedan) para detectar huecos de cobertura.
+- Resultado: 10.151 imágenes eliminadas de 1.680.699 (0,60 %). Entre las 15 regiones con más marcadas, la mayor pérdida relativa es Soria (734 de 31.081, 2,4 %); ninguna queda sin cobertura.
+- `_INDEX_DIR` en `app/vision/geolocation.py` pasa a apuntar al índice filtrado (`spain_combined_clean`). Si se vuelve a ejecutar `merge_faiss_indices.py`, la basura vuelve: el filtro va después de cada fusión y `semillas.txt` se versiona con el repositorio, porque el umbral solo tiene sentido con esas semillas.
+- No cubre el problema de fondo: una foto pobre en información de lugar sigue casando con el cúmulo más parecido que haya en el índice. Queda pendiente un suelo de `mean_similarity` en `representative`, a calibrar con fotos que sí se ubican bien.
